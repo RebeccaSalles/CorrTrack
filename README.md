@@ -56,7 +56,7 @@ CorrTrack relies on two configuration sources:
    MODES = ["nD"]
 
    DATA_LOADER = partial(load_dataset, root="datasets/asos-airports")  # falls back to correlation/asos-airports if present
-  ```
+   ```
 
   _You can create additional dataset configs for other sources. The only requirement is that `DATA_LOADER` points to a callable that takes `(country, variable, **kwargs)` and returns `(data: np.ndarray, ids: np.ndarray)`._
 
