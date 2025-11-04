@@ -1,8 +1,14 @@
 import argparse
+import ast
+import csv
 import importlib
 import importlib.util
 import os
+import shutil
 import numpy as np
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 from typing import Callable
 
@@ -126,6 +132,16 @@ def parse_args():
     parser.add_argument("--recall-by-window", dest="recall_by_window", action="store_true")
     parser.add_argument("--no-recall-by-window", dest="recall_by_window", action="store_false")
     parser.add_argument("--train-ratio", type=float, default=DEFAULT_TRAIN_RATIO)
+    parser.add_argument(
+        "--filcorr-results",
+        type=Path,
+        default=None,
+        help=(
+            "Optional directory containing FilCorr CSV outputs. When provided, "
+            "the matching files are merged via integrate_filcorr_results.py and "
+            "the resulting filcorr_run.csv is stored alongside the comparison artifacts."
+        ),
+    )
     parser.set_defaults(
         neg_corr=DEFAULT_NEG_CORR,
         corr_val=DEFAULT_CORR_VAL,
@@ -133,6 +149,102 @@ def parse_args():
         recall_by_window=DEFAULT_RECALL_BY_WINDOW,
     )
     return parser.parse_args()
+
+
+def _extract_timeseries_ids(bf_run_path: Path) -> set[str]:
+    if not bf_run_path.exists():
+        print(f"[corrtrack_compare_runs] Skipping FilCorr integration: missing {bf_run_path}")
+        return set()
+
+    with bf_run_path.open("r", newline="") as fh:
+        reader = csv.DictReader(fh)
+        if not reader.fieldnames or "artifact_path" not in reader.fieldnames:
+            print(
+                f"[corrtrack_compare_runs] Skipping FilCorr integration: "
+                f"'artifact_path' column not found in {bf_run_path}"
+            )
+            return set()
+
+        ids: set[str] = set()
+        for row in reader:
+            artifact = row.get("artifact_path")
+            if not artifact:
+                continue
+            try:
+                artifact_tuple = ast.literal_eval(artifact)
+            except (ValueError, SyntaxError):
+                continue
+            if isinstance(artifact_tuple, (list, tuple)):
+                for item in artifact_tuple[:2]:
+                    if isinstance(item, str):
+                        ids.add(item)
+        if not ids:
+            print(f"[corrtrack_compare_runs] No time-series ids were extracted from {bf_run_path}")
+        return ids
+
+
+def _filter_filcorr_files(results_dir: Path, ts_ids: set[str]) -> list[Path]:
+    if not results_dir.exists():
+        print(f"[corrtrack_compare_runs] FilCorr results directory not found: {results_dir}")
+        return []
+    if not ts_ids:
+        return []
+    matches = [
+        path
+        for path in sorted(results_dir.glob("*.csv"))
+        if any(ts_id in path.name for ts_id in ts_ids)
+    ]
+    if not matches:
+        ids_slug = ", ".join(sorted(ts_ids))
+        print(
+            f"[corrtrack_compare_runs] No FilCorr CSV files in {results_dir} matched "
+            f"the extracted ids: {ids_slug}"
+        )
+    return matches
+
+
+def _run_integrate_filcorr(
+    filtered_files: list[Path],
+    output_path: Path,
+    country: str,
+    variable: str,
+) -> None:
+    if not filtered_files:
+        return
+
+    script_path = Path(__file__).resolve().with_name("integrate_filcorr_results.py")
+    if not script_path.exists():
+        legacy_path = (
+            Path(__file__).resolve().parent.parent / "correlation" / "asos_exp" / "integrate_filcorr_results.py"
+        )
+        if legacy_path.exists():
+            script_path = legacy_path
+        else:
+            raise FileNotFoundError(f"integrate_filcorr_results.py not found near {script_path}")
+
+    with tempfile.TemporaryDirectory() as tmp_dir_str:
+        tmp_dir = Path(tmp_dir_str)
+        for src_file in filtered_files:
+            shutil.copy(src_file, tmp_dir / src_file.name)
+
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--results-dir",
+            str(tmp_dir),
+            "--output",
+            str(output_path),
+            "--country",
+            country,
+            "--variable",
+            variable,
+        ]
+        subprocess.run(cmd, check=True)
+
+    print(
+        f"[corrtrack_compare_runs] Integrated {len(filtered_files)} FilCorr CSV files "
+        f"into {output_path}"
+    )
 
 
 def main():
@@ -159,6 +271,8 @@ def main():
     if DATA_LOADER is None:
         raise RuntimeError("Dataset loader is not configured. Provide DATA_LOADER in config or --loader option.")
 
+    filcorr_results_dir = args.filcorr_results.resolve() if args.filcorr_results else None
+
     for country, var, data, ids in iter_datasets():
         for n_year in N_YEARS:
             for n_var in N_VARS:
@@ -171,6 +285,12 @@ def main():
                     alg: os.path.join(base_dir, f"corrtrack_run_{alg}.csv") for alg in MODES
                 }
                 output_csv = os.path.join(base_dir, f"corrtrack_metrics_{dataset_id}.csv")
+                if filcorr_results_dir is not None:
+                    bf_ids = _extract_timeseries_ids(Path(bf_run_csv))
+                    matched = _filter_filcorr_files(filcorr_results_dir, bf_ids)
+                    if matched:
+                        output_filcorr = Path(base_dir) / "filcorr_run.csv"
+                        _run_integrate_filcorr(matched, output_filcorr, country, var)
 
                 cc = CorrTrack_compare(
                     train_data,

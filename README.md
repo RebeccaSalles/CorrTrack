@@ -21,6 +21,7 @@ corrtrack_release/
 ├─ corrtrack_param_search.py     # Stage 2: CorrTrack hyper-param sweep
 ├─ corrtrack_run_corrtrack.py    # Stage 3: CorrTrack execution with chosen params
 ├─ corrtrack_compare_runs.py     # Stage 4: metrics + comparison reports
+├─ integrate_filcorr_results.py  # Utility to merge FilCorr CSV outputs
 ├─ run_corrtrack_experiment.py   # Orchestrates the four stages
 ├─ library_corrtrack_parallel.py # CorrTrack implementation & shared helpers
 ├─ experiment_dataset_*.py       # Dataset configuration modules
@@ -144,7 +145,7 @@ Stage-specific parameters:
 | --- | --- |
 | `corrtrack_run_bruteforce.py`, `corrtrack_run_corrtrack.py` | `--artifact-mode {iterative,final}` to control when artifacts are persisted. |
 | `corrtrack_param_search.py`, `run_corrtrack_experiment.py` | `--param-grid-config PATH` (hyper-parameter grid), `--target-recall`, `--train-ratio`. |
-| `corrtrack_compare_runs.py` | `--train-ratio` to control the train/test split used during the metrics recomputation. |
+| `corrtrack_compare_runs.py` | `--train-ratio` for the metrics split, `--filcorr-results` to collate FilCorr CSV outputs before comparison. |
 
 Any extra flags given to `run_corrtrack_experiment.py` are filtered and forwarded only to the stages that understand them.
 
@@ -233,10 +234,21 @@ Runs CorrTrack using the best parameters chosen in the previous step. Results go
 python3 corrtrack_compare_runs.py \
   --dataset-config experiment_dataset_fr_air_temperature_7_1.py \
   --loader datasets.asos_loader:load_dataset \
-  --train-ratio 0.3
+  --train-ratio 0.3 \
+  --filcorr-results correlation/asos_exp/tests/filcorr_res
 ```
 
-Combines brute-force and CorrTrack outputs, producing `corrtrack_metrics_<dataset_id>.csv` with accuracy and performance metrics.
+Combines brute-force and CorrTrack outputs, producing `corrtrack_metrics_<dataset_id>.csv` with accuracy and performance metrics. When `--filcorr-results` is provided, the step also filters FilCorr CSVs whose names include any brute-force time-series ids, merges them via `integrate_filcorr_results.py`, and emits `filcorr_run.csv` alongside the comparison artifacts for easier downstream analysis.
+
+> Want to run the integration manually? Use the bundled helper:
+>
+> ```
+> python3 integrate_filcorr_results.py \
+>   --results-dir correlation/asos_exp/tests/filcorr_res \
+>   --output correlation/asos_exp/tests/filcorr_res/filcorr_max_lag_correlated.csv \
+>   --country fr \
+>   --variable air_temperature
+> ```
 
 ---
 
