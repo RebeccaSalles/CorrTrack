@@ -61,6 +61,26 @@ CorrTrack relies on two configuration sources:
 
 Place your dataset files under `datasets/asos-airports/` using the `<country>-<variable>.csv` naming pattern (the loader caches `.npz` exports beside the CSV). If you have an existing layout under `correlation/asos-airports/`, the loader will automatically fall back to it.
 
+---
+## Requirements
+
+- **Python 3.10+** (tested with 3.12)
+- Python packages: `numpy`, `pandas`, `scipy`, `scikit-learn`
+- Install with `pip install numpy pandas scipy scikit-learn` (or via a `requirements.txt`).
+- Ensure the project directory is on `PYTHONPATH` before running commands.
+
+Suggested setup:
+
+```bash
+cd corrtrack_release
+python3 -m venv .venv
+source .venv/bin/activate
+pip install numpy pandas scipy scikit-learn
+export PYTHONPATH=$(pwd)
+```
+
+---
+
 2. **Run hyper-parameter grid (`experiment_run_param_grid.py`)**
 
    Holds the parameter combinations to test during the CorrTrack optimization stage. Only `PARAM_GRID` is expected:
