@@ -1,0 +1,14 @@
+{
+  "m": 12,
+  "n": 4000,
+  "w": 96,
+  "s": 12,
+  "threshold": 0.75,
+  "corr_sign": "both",
+  "max_lag": 48,
+  "lag_step": 12,
+  "target_z": 0.3,
+  "achieved_z": 0.3001022494887526,
+  "n_pairs": 587,
+  "attempts": 699
+}

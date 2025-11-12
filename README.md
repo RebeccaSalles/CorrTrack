@@ -251,7 +251,13 @@ Or, to exercise the synthetic demo:
 ```
 python3 run_corrtrack_experiment.py \
   --dataset-config experiment_dataset_synth_demo.py \
-  --param-grid-config experiment_run_param_grid.py
+  --param-grid-config experiment_run_param_grid.py \
+  --loader datasets.synth_loader:load_dataset \
+  --corr-threshold 0.75 \
+  --exec-mode process \
+  --train-ratio 0.4 \
+  --target-recall 0.9 \
+  --artifact-mode final
 ```
 
 ### Adding overrides
@@ -301,7 +307,17 @@ Synthetic variant:
 ```
 python3 corrtrack_run_bruteforce.py \
   --dataset-config experiment_dataset_synth_demo.py \
-  --artifact-mode final
+  --loader datasets.synth_loader:load_dataset \
+  --window-size 168 \
+  --window-step 12 \
+  --basic-window 12 \
+  --n-lags 168 \
+  --corr-threshold 0.7 \
+  --exec-mode sequential \
+  --neg-corr \
+  --extra-filter \
+  --artifact-mode final \
+  --recall-by-window
 ```
 
 ### 2. Hyper-parameter sweep
@@ -323,6 +339,17 @@ Synthetic variant:
 python3 corrtrack_param_search.py \
   --dataset-config experiment_dataset_synth_demo.py \
   --param-grid-config experiment_run_param_grid.py \
+  --loader datasets.synth_loader:load_dataset \
+  --window-size 168 \
+  --window-step 12 \
+  --basic-window 12 \
+  --n-lags 168 \
+  --corr-threshold 0.7 \
+  --exec-mode process \
+  --neg-corr \
+  --corr-val \
+  --extra-filter \
+  --recall-by-window \
   --target-recall 0.9 \
   --train-ratio 0.4
 ```
@@ -343,6 +370,17 @@ Synthetic variant:
 ```
 python3 corrtrack_run_corrtrack.py \
   --dataset-config experiment_dataset_synth_demo.py \
+  --loader datasets.synth_loader:load_dataset \
+  --window-size 168 \
+  --window-step 12 \
+  --basic-window 12 \
+  --n-lags 168 \
+  --corr-threshold 0.7 \
+  --exec-mode sequential \
+  --neg-corr \
+  --corr-val \
+  --extra-filter \
+  --recall-by-window \
   --artifact-mode final
 ```
 
@@ -363,7 +401,19 @@ Synthetic variant:
 ```
 python3 corrtrack_compare_runs.py \
   --dataset-config experiment_dataset_synth_demo.py \
-  --train-ratio 0.3
+  --loader datasets.synth_loader:load_dataset \
+  --window-size 168 \
+  --window-step 12 \
+  --basic-window 12 \
+  --n-lags 168 \
+  --corr-threshold 0.7 \
+  --exec-mode sequential \
+  --neg-corr \
+  --corr-val \
+  --extra-filter \
+  --recall-by-window \
+  --train-ratio 0.3 \
+  --filcorr-results synthetic/filcorr_outputs
 ```
 
 > Want to run the integration manually? Use the bundled helper:

@@ -1961,10 +1961,10 @@ class CorrTrack:
         startTimes = (pair[2],pair[3])
         window_size = pair[4]
         series_index = self.series_ids[ids[0]]        
-        startTime_index = startTimes[0] - self.window_index[0]
+        startTime_index = int(startTimes[0] - self.window_index[0])
         x = self.window_data[series_index,startTime_index:startTime_index+window_size].astype(np.float64, copy=False)
         series_index = self.series_ids[ids[1]]
-        startTime_index = startTimes[1] - self.window_index[0]
+        startTime_index = int(startTimes[1] - self.window_index[0])
         y = self.window_data[series_index,startTime_index:startTime_index+window_size].astype(np.float64, copy=False)
 
         pair_corr, pair_dist, stats = _fast_corr_and_dist(x, y, return_stats=True)
