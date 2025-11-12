@@ -22,6 +22,7 @@ corrtrack_release/
 ├─ corrtrack_run_corrtrack.py    # Stage 3: CorrTrack execution with chosen params
 ├─ corrtrack_compare_runs.py     # Stage 4: metrics + comparison reports
 ├─ integrate_filcorr_results.py  # Utility to merge FilCorr CSV outputs
+├─ synth_corr_gen.py             # Synthetic correlated-series generator
 ├─ run_corrtrack_experiment.py   # Orchestrates the four stages
 ├─ library_corrtrack_parallel.py # CorrTrack implementation & shared helpers
 ├─ experiment_dataset_*.py       # Dataset configuration modules
@@ -56,11 +57,65 @@ CorrTrack relies on two configuration sources:
    MODES = ["nD"]
 
    DATA_LOADER = partial(load_dataset, root="datasets/asos-airports")  # falls back to correlation/asos-airports if present
-   ```
+  ```
 
   _You can create additional dataset configs for other sources. The only requirement is that `DATA_LOADER` points to a callable that takes `(country, variable, **kwargs)` and returns `(data: np.ndarray, ids: np.ndarray)`._
 
 Place your dataset files under `datasets/asos-airports/` using the `<country>-<variable>.csv` naming pattern (the loader caches `.npz` exports beside the CSV). If you have an existing layout under `correlation/asos-airports/`, the loader will automatically fall back to it.
+
+> **Naming flexibility**  
+> Dataset configs can export either `N_VARS`/`N_YEARS` (legacy) or the synonymous `N_SERIES`/`N_OBS`. When the optional `OBS_MODE = "count"` flag is set, CorrTrack interprets the `N_OBS` entries as absolute row counts instead of calendar years, which is handy for synthetic data. Likewise, you can replace `COUNTRIES` with a simple `DATASET` list (e.g., `["synthetic"]`) and omit `VARIABLES` entirely when no secondary grouping is needed.
+
+### Synthetic datasets
+
+Need synthetic data for development? The repository now bundles `synth_corr_gen.py`, a flexible generator that emits `.npz` time-series matrices plus correlated pair metadata. You can invoke it directly:
+
+```
+python3 synth_corr_gen.py \
+  --save-dir datasets/synth_outputs \
+  --m 16 --n 8000 --z 0.25 --w 96 --s 12 \
+  --threshold 0.8 --corr-sign both --max-lag 48 --lag-step 12 \
+  --base-type ar1 --phi 0.7 --sigma 1.0 --seed 123
+```
+
+To plug synthetic data into the CorrTrack pipeline, use the loader in `datasets/synth_loader.py`. It wraps the same generator and caches the results under `datasets/synth_outputs/<country>_<variable>/`. A ready-to-run config lives at `experiment_dataset_synth_demo.py`; the core bits look like:
+
+```python
+from functools import partial
+from datasets.synth_loader import load_dataset as load_synth
+
+RESULT_FOLDER = "synthetic/experiments"
+DATASET = ["synthetic"]
+N_SERIES = [8]        # must be <= m
+N_OBS = [2000]        # number of rows to keep
+OBS_MODE = "count"    # treat N_OBS entries as absolute row counts
+MODES = ["nD"]
+
+SYNTH_PARAMS = {
+    "m": 8,
+    "n": 8760,
+    "z": 0.3,
+    "w": 96,
+    "s": 12,
+    "threshold": 0.75,
+    "corr_sign": "both",
+    "base_proc": {"type": "ar1", "phi": 0.6, "sigma": 1.0},
+    "max_lag": 48,
+    "lag_step": 12,
+    "seed": 42,
+}
+
+DATA_LOADER = partial(
+    load_synth,
+    cache_root="datasets/synth_outputs",
+    generator_params=SYNTH_PARAMS,
+    refresh=False,  # set True to regenerate on each run
+)
+```
+
+With `OBS_MODE = "count"`, CorrTrack slices the generated matrix so that `N_SERIES` controls how many series (columns 1..N) are retained while `N_OBS` limits the number of rows (always including the timestamp column at index 0). This makes it trivial to resize scenarios without regenerating the raw synthetic file.
+
+Synthetic configs don’t need `VARIABLES`; the optional `DATASET` list (defaulting to `["synthetic"]`) is only used to namespace cached artifacts. Need multiple scenarios? Add more dataset labels to that list or reintroduce `VARIABLES` for additional granularity. You can still override the loader from the CLI via `--loader datasets.synth_loader:load_dataset`.
 
 ---
 ## Requirements

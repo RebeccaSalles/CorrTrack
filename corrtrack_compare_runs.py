@@ -30,6 +30,7 @@ DEFAULT_TRAIN_RATIO = 0.3
 DEFAULT_DATASET_CONFIG = Path(__file__).with_name(
     "experiment_dataset_fr_air_temperature_7_1.py"
 )
+DEFAULT_OBS_MODE = "years"
 
 WINDOW_SIZE = DEFAULT_WINDOW_SIZE
 WINDOW_STEP = DEFAULT_WINDOW_STEP
@@ -45,6 +46,7 @@ TRAIN_RATIO = DEFAULT_TRAIN_RATIO
 RESULT_FOLDER = None
 COUNTRIES = VARIABLES = N_VARS = N_YEARS = MODES = None
 DATA_LOADER: Callable[..., tuple[np.ndarray, np.ndarray]] | None = None
+OBS_MODE = DEFAULT_OBS_MODE
 
 
 def _load_dataset_config(config_path: Path):
@@ -54,16 +56,41 @@ def _load_dataset_config(config_path: Path):
     return module
 
 
+def _get_cfg_attr(cfg, *names):
+    for name in names:
+        if hasattr(cfg, name):
+            return getattr(cfg, name)
+    raise AttributeError(f"Dataset configuration must define one of: {', '.join(names)}")
+
+
+def _as_list(value):
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return [value]
+
+
+def _dataset_slug(country: str, var: str | None) -> str:
+    if var is None or var == "" or var == country:
+        return country
+    return f"{country}_{var}"
+
+
+def _effective_variable(country: str, var: str | None) -> str:
+    return var if var not in (None, "") else country
+
+
 def _apply_dataset_config(cfg):
-    global RESULT_FOLDER, COUNTRIES, VARIABLES, N_VARS, N_YEARS, MODES, DATA_LOADER
+    global RESULT_FOLDER, COUNTRIES, VARIABLES, N_VARS, N_YEARS, MODES, DATA_LOADER, OBS_MODE
 
     RESULT_FOLDER = cfg.RESULT_FOLDER
-    COUNTRIES = cfg.COUNTRIES
-    VARIABLES = cfg.VARIABLES
-    N_VARS = cfg.N_VARS
-    N_YEARS = cfg.N_YEARS
+    COUNTRIES = _as_list(_get_cfg_attr(cfg, "COUNTRIES", "DATASET"))
+    variables_attr = getattr(cfg, "VARIABLES", None)
+    VARIABLES = _as_list(variables_attr) if variables_attr is not None else [None]
+    N_VARS = _get_cfg_attr(cfg, "N_VARS", "N_SERIES")
+    N_YEARS = _get_cfg_attr(cfg, "N_YEARS", "N_OBS")
     MODES = cfg.MODES
     DATA_LOADER = getattr(cfg, "DATA_LOADER", None)
+    OBS_MODE = getattr(cfg, "OBS_MODE", DEFAULT_OBS_MODE)
 
 
 def _load_loader(loader_spec: str) -> Callable[[str, str], tuple[np.ndarray, np.ndarray]]:
@@ -81,13 +108,26 @@ def iter_datasets():
         raise RuntimeError("Dataset configuration must define DATA_LOADER")
     for var in VARIABLES:
         for country in COUNTRIES:
-            data, ids = DATA_LOADER(country, var)
+            var_key = _effective_variable(country, var)
+            data, ids = DATA_LOADER(country, var_key)
             yield country, var, data, ids
 
 
-def prepare_data(data, ids, n_year, n_var, train_ratio):
+def _select_rows(total_rows: int, span: int) -> np.ndarray:
+    if OBS_MODE == "count":
+        limit = max(1, min(int(span), total_rows))
+        return np.arange(limit)
+
     one_year = 365 * 24
-    rows = np.r_[0, np.arange(data.shape[0] - n_year * one_year, data.shape[0])]
+    start = max(0, total_rows - int(span) * one_year)
+    rows = np.arange(start, total_rows)
+    if start > 0:
+        rows = np.r_[0, rows]
+    return rows
+
+
+def prepare_data(data, ids, n_year, n_var, train_ratio):
+    rows = _select_rows(data.shape[0], n_year)
     data_stream = np.c_[data[rows, 0], data[rows, 1 : (n_var + 1)]]
     length_data = data_stream.shape[0]
     train_end = round(train_ratio * length_data)
@@ -276,7 +316,8 @@ def main():
     for country, var, data, ids in iter_datasets():
         for n_year in N_YEARS:
             for n_var in N_VARS:
-                dataset_id = f"{country}_{var}_{n_var}_{n_year}"
+                slug = _dataset_slug(country, var)
+                dataset_id = f"{slug}_{n_var}_{n_year}"
                 train_data, test_data, ids_n_var = prepare_data(data, ids, n_year, n_var, TRAIN_RATIO)
 
                 base_dir = os.path.join("correlation", RESULT_FOLDER, dataset_id, config_folder())
