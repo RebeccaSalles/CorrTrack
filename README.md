@@ -157,6 +157,37 @@ With `OBS_MODE = "count"`, CorrTrack slices the generated matrix so that `N_SERI
 
 Synthetic configs don’t need `VARIABLES`; the optional `DATASET` list (defaulting to `["synthetic"]`) is only used to namespace cached artifacts. Need multiple scenarios? Add more dataset labels to that list or reintroduce `VARIABLES` for additional granularity. You can still override the loader from the CLI via `--loader datasets.synth_loader:load_dataset`.
 
+#### Generator flag reference
+
+`python3 synth_corr_gen.py` accepts the following key options:
+
+| Flag | Description |
+| --- | --- |
+| `--save-dir` | Folder where every output file is written. |
+| `--m` | Number of synthetic series. |
+| `--n` | Length (observations) per series. |
+| `--z` | Target fraction of correlated windows (0–1). |
+| `--w` | Window length. |
+| `--s` | Stride between window starts. |
+| `--threshold` | Minimum Pearson `r`; actual `r*` is sampled uniformly in `[threshold, 1]`. |
+| `--corr-sign` | Correlation sign to inject: `pos`, `neg`, or `both`. |
+| `--base-type` | Base process: `ar1` (stationary), `rw` (random walk), `wn` (white noise). |
+| `--phi` | AR(1) coefficient (only used when `--base-type ar1`). |
+| `--sigma` | Noise sigma for the base process. |
+| `--max-lag` | Maximum absolute lag (counted back; `time2 = time1 − lag`). |
+| `--lag-step` | Lag grid step (defaults to `--s` if omitted). |
+| `--seed` | RNG seed. |
+| `--nonoverlap` / `--allow-overlap` | Non-overlap is the default; pass `--allow-overlap` to reuse grid starts. |
+
+Outputs are auto-named using  
+`synt_[stat|nonstat]_corr<rate>_m<m>_w<w>_s<s>_sign<corr_sign>_thr<threshold>_lag<max_lag>`
+and include:
+
+- `<stem>.npz` – data matrix `(n, m+1)` where column 0 stores the 1..n index, columns 1..m store the series (`S1..Sm`).
+- `<stem>_correlated.csv` – rows of `id1,id2,time1,time2,corr`.
+- `<stem>_meta.json` – aggregate metadata (achieved `z`, attempts, etc.).
+- `<stem>_params.json` – full parameter set, including base process and seed.
+
 ---
 
 ## Global Defaults & CLI Overrides
