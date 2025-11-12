@@ -248,6 +248,14 @@ python3 run_corrtrack_experiment.py \
   --loader datasets.asos_loader:load_dataset
 ```
 
+Or, to exercise the synthetic demo:
+
+```
+python3 run_corrtrack_experiment.py \
+  --dataset-config experiment_dataset_synth_demo.py \
+  --param-grid-config experiment_run_param_grid.py
+```
+
 ### Adding overrides
 
 > **Environment note**  
@@ -290,6 +298,14 @@ python3 corrtrack_run_bruteforce.py \
 
 _Outputs_: `bf_run.csv`, incremental artifact CSVs (correlated pairs, candidates, anomalies, etc.). Set `--artifact-mode iterative` to append after each window.
 
+Synthetic variant:
+
+```
+python3 corrtrack_run_bruteforce.py \
+  --dataset-config experiment_dataset_synth_demo.py \
+  --artifact-mode final
+```
+
 ### 2. Hyper-parameter sweep
 
 ```
@@ -303,6 +319,16 @@ python3 corrtrack_param_search.py \
 
 Creates `optim/<dataset_id>/corrtrack_optim_<dataset_id>.csv` with one row per combination plus `best_params_*.json` summaries.
 
+Synthetic variant:
+
+```
+python3 corrtrack_param_search.py \
+  --dataset-config experiment_dataset_synth_demo.py \
+  --param-grid-config experiment_run_param_grid.py \
+  --target-recall 0.9 \
+  --train-ratio 0.4
+```
+
 ### 3. CorrTrack main run
 
 ```
@@ -313,6 +339,14 @@ python3 corrtrack_run_corrtrack.py \
 ```
 
 Runs CorrTrack using the best parameters chosen in the previous step. Results go to `corrtrack_run_<alg>.csv` and associated artifact CSVs.
+
+Synthetic variant:
+
+```
+python3 corrtrack_run_corrtrack.py \
+  --dataset-config experiment_dataset_synth_demo.py \
+  --artifact-mode final
+```
 
 ### 4. Comparison
 
@@ -325,6 +359,14 @@ python3 corrtrack_compare_runs.py \
 ```
 
 Combines brute-force and CorrTrack outputs, producing `corrtrack_metrics_<dataset_id>.csv` with accuracy and performance metrics. When `--filcorr-results` is provided, the step also filters FilCorr CSVs whose names include any brute-force time-series ids, merges them via `integrate_filcorr_results.py`, and emits `filcorr_run.csv` alongside the comparison artifacts for easier downstream analysis.
+
+Synthetic variant:
+
+```
+python3 corrtrack_compare_runs.py \
+  --dataset-config experiment_dataset_synth_demo.py \
+  --train-ratio 0.3
+```
 
 > Want to run the integration manually? Use the bundled helper:
 >
