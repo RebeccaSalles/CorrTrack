@@ -36,6 +36,24 @@ corrtrack_release/
 Utility modules such as `load_data_asos.py` are retained for backwards compatibility, but the new dataset loader API lives under `datasets/`.
 
 ---
+## Requirements
+
+- **Python 3.10+** (tested with 3.12)
+- Python packages: `numpy`, `pandas`, `scipy`, `scikit-learn`
+- Install with `pip install numpy pandas scipy scikit-learn` (or via a `requirements.txt`).
+- Ensure the project directory is on `PYTHONPATH` before running commands.
+
+Suggested setup:
+
+```bash
+cd corrtrack_release
+python3 -m venv .venv
+source .venv/bin/activate
+pip install numpy pandas scipy scikit-learn
+export PYTHONPATH=$(pwd)
+```
+
+---
 
 ## Configuration Overview
 
@@ -57,7 +75,7 @@ CorrTrack relies on two configuration sources:
    MODES = ["nD"]
 
    DATA_LOADER = partial(load_dataset, root="datasets/asos-airports")  # falls back to correlation/asos-airports if present
-  ```
+   ```
 
   _You can create additional dataset configs for other sources. The only requirement is that `DATA_LOADER` points to a callable that takes `(country, variable, **kwargs)` and returns `(data: np.ndarray, ids: np.ndarray)`._
 
@@ -65,6 +83,28 @@ Place your dataset files under `datasets/asos-airports/` using the `<country>-<v
 
 > **Naming flexibility**  
 > Dataset configs can export either `N_VARS`/`N_YEARS` (legacy) or the synonymous `N_SERIES`/`N_OBS`. When the optional `OBS_MODE = "count"` flag is set, CorrTrack interprets the `N_OBS` entries as absolute row counts instead of calendar years, which is handy for synthetic data. Likewise, you can replace `COUNTRIES` with a simple `DATASET` list (e.g., `["synthetic"]`) and omit `VARIABLES` entirely when no secondary grouping is needed.
+
+---
+
+2. **Run hyper-parameter grid (`experiment_run_param_grid.py`)**
+
+   Holds the parameter combinations to test during the CorrTrack optimization stage. Only `PARAM_GRID` is expected:
+
+   ```python
+   PARAM_GRID = {
+       "n_vectors": [8, 16, 32, 64],
+       "cell_size": [1.0],        # acts as the stretch multiplier
+       "freq_threshold": [0.0, 0.5, 1.0],
+       "warmup_size": [1],
+       "preprocess": [True, False],
+       "nodes": [0],
+       "seed": [2468],
+       "seed_toggle": [1357],
+       "grid_dimension": [0],
+   }
+   ```
+
+   The grid is loaded by `corrtrack_param_search.py` during the hyper-parameter sweep.
 
 ### Synthetic datasets
 
@@ -116,46 +156,6 @@ DATA_LOADER = partial(
 With `OBS_MODE = "count"`, CorrTrack slices the generated matrix so that `N_SERIES` controls how many series (columns 1..N) are retained while `N_OBS` limits the number of rows (always including the timestamp column at index 0). This makes it trivial to resize scenarios without regenerating the raw synthetic file.
 
 Synthetic configs don’t need `VARIABLES`; the optional `DATASET` list (defaulting to `["synthetic"]`) is only used to namespace cached artifacts. Need multiple scenarios? Add more dataset labels to that list or reintroduce `VARIABLES` for additional granularity. You can still override the loader from the CLI via `--loader datasets.synth_loader:load_dataset`.
-
----
-## Requirements
-
-- **Python 3.10+** (tested with 3.12)
-- Python packages: `numpy`, `pandas`, `scipy`, `scikit-learn`
-- Install with `pip install numpy pandas scipy scikit-learn` (or via a `requirements.txt`).
-- Ensure the project directory is on `PYTHONPATH` before running commands.
-
-Suggested setup:
-
-```bash
-cd corrtrack_release
-python3 -m venv .venv
-source .venv/bin/activate
-pip install numpy pandas scipy scikit-learn
-export PYTHONPATH=$(pwd)
-```
-
----
-
-2. **Run hyper-parameter grid (`experiment_run_param_grid.py`)**
-
-   Holds the parameter combinations to test during the CorrTrack optimization stage. Only `PARAM_GRID` is expected:
-
-   ```python
-   PARAM_GRID = {
-       "n_vectors": [8, 16, 32, 64],
-       "cell_size": [1.0],        # acts as the stretch multiplier
-       "freq_threshold": [0.0, 0.5, 1.0],
-       "warmup_size": [1],
-       "preprocess": [True, False],
-       "nodes": [0],
-       "seed": [2468],
-       "seed_toggle": [1357],
-       "grid_dimension": [0],
-   }
-   ```
-
-   The grid is loaded by `corrtrack_param_search.py` during the hyper-parameter sweep.
 
 ---
 
