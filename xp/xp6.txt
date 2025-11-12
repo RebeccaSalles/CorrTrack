@@ -1,0 +1,49 @@
+Experiment 2 - throughput scalability (fig 2):
+
+Data: ASOS
+	country = ["fr","br"]
+	variable = ["air_temperature","wind_direction","wind_speed","visibility","flights","delays","delay_perc","relative_humidity","apparent_temperature","pressure","dew_point"]
+
+	n_vars = [128(climatic-fr)/143(climatic-br)/109({flights,delays,delay_perc}-br)]
+	n_years = [5]
+	
+Methods: corrtrack, brute_force, filcorr
+
+Dynamic parameters:
+	window_step = [1,12,24,2*24,4*24]
+	n_lags = [7 * 24, 30 * 24, 365 * 24]
+	corr_threshold = [0.5,0.6,0.7,0.8,0.9]
+	target-recall = [0.6,0.7,0.8,0.9,0.95]
+	
+Fixed parameters:
+	window_size = 7 * 24 #1 week
+	
+	exec = "sequential"
+
+	train_ratio = 0.2
+	neg_corr = True
+	corr_val = True
+	run_optim = True
+	extra_filter = False
+	
+	plot = True
+	train_distances = False
+	basic_window = None #automatic
+	recall_by_window = True
+	verbose = False
+	testing = False
+	modes = ["nD"]
+
+Hyperparemater search:
+	param_grid = {
+		"n_vectors": [4,8,16,32,64],
+		"cell_size": [1,1.2,1.5,2,2.2,2.5,3], #strech rate
+		"freq_threshold": [0.0,0.3,0.5,0.7,1.0],
+		"warmup_size": [1], #use all training to get mean and std
+
+		"preprocess": [True,False], #differencing?
+		"nodes": [0], #automatic cores-1
+		"seed": [2468],
+		"seed_toggle": [1357],
+		"grid_dimension": [0] #automatic
+	}
