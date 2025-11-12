@@ -84,8 +84,6 @@ Place your dataset files under `datasets/asos-airports/` using the `<country>-<v
 > **Naming flexibility**  
 > Dataset configs can export either `N_VARS`/`N_YEARS` (legacy) or the synonymous `N_SERIES`/`N_OBS`. When the optional `OBS_MODE = "count"` flag is set, CorrTrack interprets the `N_OBS` entries as absolute row counts instead of calendar years, which is handy for synthetic data. Likewise, you can replace `COUNTRIES` with a simple `DATASET` list (e.g., `["synthetic"]`) and omit `VARIABLES` entirely when no secondary grouping is needed.
 
----
-
 2. **Run hyper-parameter grid (`experiment_run_param_grid.py`)**
 
    Holds the parameter combinations to test during the CorrTrack optimization stage. Only `PARAM_GRID` is expected:
