@@ -1,0 +1,8 @@
+{
+  "seed": 7,
+  "base_proc": {
+    "type": "ar1",
+    "sigma": 1.0,
+    "phi": 0.6
+  }
+}

@@ -51,6 +51,7 @@ RUN_RESULT_COLUMNS: Sequence[str] = (
     "extra_filters",
     "corr_threshold",
     "grid_max",
+    "cell_stretch",
     "cell_size",
     "n_vectors",
     "grid_dimension",
@@ -87,6 +88,7 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     "extra_filters",
     "corr_threshold",
     "grid_max",
+    "cell_stretch",
     "cell_size",
     "n_vectors",
     "grid_dimension",
@@ -146,6 +148,7 @@ COMPARISON_COLUMNS: Sequence[str] = (
     "extra_filters",
     "corr_threshold",
     "grid_max",
+    "cell_stretch",
     "cell_size",
     "n_vectors",
     "grid_dimension",
@@ -309,6 +312,7 @@ def execute_corrtrack_pass(
     record["n_lags"] = corrtrack.n_lags
     record["corr_threshold"] = corrtrack.corr_threshold
     record["grid_max"] = getattr(corrtrack, "grid_max", None)
+    record["cell_stretch"] = getattr(corrtrack, "cell_stretch", None)
     record["cell_size"] = getattr(corrtrack, "cell_size", None)
     record["n_vectors"] = getattr(corrtrack, "n_vectors", None)
     record["grid_dimension"] = getattr(corrtrack, "grid_dimension", None)
@@ -515,14 +519,26 @@ def run_and_log_corrtrack(
         or "iterative"
     )
 
+    n_vectors = _to_int(run_params.get("n_vectors"))
+    grid_dimension = _to_int(run_params.get("grid_dimension"))
+    cell_stretch = _resolve_cell_stretch(
+        run_params.get("cell_stretch"),
+        run_params.get("cell_size"),
+        base_config["corr_threshold"],
+        n_vectors,
+        grid_dimension,
+    )
+    if cell_stretch is None or cell_stretch <= 0.0:
+        cell_stretch = 1.0
+
     corrtrack = CorrTrack(
         window_size=base_config["window_size"],
         basic_window=base_config.get("basic_window"),
         window_step=base_config["window_step"],
-        n_vectors=_to_int(run_params.get("n_vectors")),
+        n_vectors=n_vectors,
         n_lags=base_config["n_lags"],
-        grid_dimension=_to_int(run_params.get("grid_dimension")),
-        cell_size=_to_float(run_params.get("cell_size")),
+        grid_dimension=grid_dimension,
+        cell_size=cell_stretch,
         warmup_data=warmup_data,
         seed=_to_int(run_params.get("seed")),
         seed_toggle=_to_int(run_params.get("seed_toggle")),
@@ -554,9 +570,9 @@ def run_and_log_corrtrack(
     record["seed"] = _to_int(run_params.get("seed"))
     record["seed_toggle"] = _to_int(run_params.get("seed_toggle"))
     record["freq_threshold"] = _to_float(run_params.get("freq_threshold"))
-    record["n_vectors"] = _to_int(run_params.get("n_vectors"))
-    record["grid_dimension"] = _to_int(run_params.get("grid_dimension"))
-    record["cell_size"] = _to_float(run_params.get("cell_size"))
+    record["n_vectors"] = n_vectors
+    record["grid_dimension"] = grid_dimension
+    record["cell_stretch"] = cell_stretch
     record["nodes"] = metadata.get("nodes", base_config.get("max_workers"))
 
     with CSVStreamWriter(output_csv, RUN_RESULT_COLUMNS) as writer:
@@ -593,6 +609,75 @@ def _normalize_exec_mode(value, default="thread"):
 
     valid = {"sequential", "thread", "process"}
     return resolved if resolved in valid else default
+
+
+def _to_int_safe(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_float_safe(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _compute_base_cell_size(corr_threshold, n_vectors):
+    if corr_threshold is None:
+        return None
+    n_vec = _to_float_safe(n_vectors)
+    if n_vec is None or n_vec <= 0.0:
+        return None
+    try:
+        return math.sqrt((1.0 - float(corr_threshold)) / 2.0) / math.sqrt(n_vec)
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
+def _compute_shrink_factor(grid_dimension, n_vectors):
+    n_vec = _to_float_safe(n_vectors)
+    if n_vec is None or n_vec <= 0.0:
+        return None
+    n_vec_sqrt = math.sqrt(n_vec)
+    if n_vec_sqrt <= 0.0:
+        return None
+    grid_dim = _to_float_safe(grid_dimension)
+    if grid_dim is None or grid_dim <= 0.0:
+        grid_dim = 1.0
+    try:
+        return math.sqrt(min(1.0, grid_dim / n_vec_sqrt))
+    except ValueError:
+        return None
+
+
+def _resolve_cell_stretch(
+    stretch_value,
+    cell_size_value,
+    corr_threshold,
+    n_vectors,
+    grid_dimension,
+    default=1.0,
+):
+    stretch = _to_float_safe(stretch_value)
+    if stretch is not None and stretch > 0.0:
+        return stretch
+
+    size = _to_float_safe(cell_size_value)
+    if size is None:
+        return default
+
+    base = _compute_base_cell_size(corr_threshold, n_vectors)
+    shrink = _compute_shrink_factor(grid_dimension, n_vectors)
+    if base is None or shrink is None or base <= 0.0 or shrink <= 0.0:
+        return default
+
+    stretch = size / (base * shrink)
+    if not math.isfinite(stretch) or stretch <= 0.0:
+        return default
+    return stretch
 
 
 def _fast_corr_and_dist(x, y, return_stats=False):
@@ -5120,7 +5205,8 @@ class CorrTrack_optimize:
         record["extra_filters"] = _coerce_to_bool(param_combo.get("extra_filters", self.extra_filter))
         record["corr_threshold"] = self.corr_threshold
         record["grid_max"] = param_combo.get("grid_max")
-        record["cell_size"] = param_combo.get("cell_size")
+        record["cell_stretch"] = param_combo.get("cell_size")
+        record["cell_size"] = None
         record["n_vectors"] = param_combo.get("n_vectors")
         record["grid_dimension"] = param_combo.get("grid_dimension")
         record["freq_threshold"] = param_combo.get("freq_threshold")
@@ -5175,16 +5261,18 @@ class CorrTrack_optimize:
             grid_dimension = int(grid_dimension) if grid_dimension is not None else None
         except (TypeError, ValueError):
             grid_dimension = None
-        cell_size = param_combo.get("cell_size")
         freq_threshold = param_combo.get("freq_threshold")
         try:
             freq_threshold = float(freq_threshold) if freq_threshold is not None else None
         except (TypeError, ValueError):
             freq_threshold = None
+        cell_stretch = param_combo.get("cell_size")
         try:
-            cell_size = float(cell_size) if cell_size is not None else None
+            cell_stretch = float(cell_stretch) if cell_stretch is not None else None
         except (TypeError, ValueError):
-            cell_size = None
+            cell_stretch = None
+        if cell_stretch is None or cell_stretch <= 0.0:
+            cell_stretch = 1.0
 
         record["nodes"] = nodes
         record["warmup_size"] = warmup_ratio
@@ -5194,7 +5282,7 @@ class CorrTrack_optimize:
         record["preprocess"] = preprocess
         record["extra_filters"] = extra_filter
         record["grid_dimension"] = grid_dimension
-        record["cell_size"] = cell_size
+        record["cell_stretch"] = cell_stretch
         record["freq_threshold"] = freq_threshold
 
         length_data = self.train_data.shape[1]
@@ -5216,7 +5304,7 @@ class CorrTrack_optimize:
                 n_vectors=n_vectors,
                 n_lags=self.n_lags,
                 grid_dimension=grid_dimension,
-                cell_size=cell_size,
+                cell_size=cell_stretch,
                 warmup_data=warmup_data,
                 seed=seed,
                 seed_toggle=seed_toggle,
@@ -5875,6 +5963,16 @@ class CorrTrack_compare:
 
         maxlag_precision, maxlag_recall, maxlag_f1, maxlag_diff_mean, maxlag_diff_std = maxlag_metrics
 
+        if record.get("cell_stretch") in (None, "", "nan"):
+            record["cell_stretch"] = _resolve_cell_stretch(
+                record.get("cell_stretch"),
+                record.get("cell_size"),
+                record.get("corr_threshold"),
+                record.get("n_vectors"),
+                record.get("grid_dimension"),
+                default=None,
+            )
+
         def as_int_str(value, default="0"):
             if value in (None, "", "nan"):
                 return default
@@ -5914,6 +6012,7 @@ class CorrTrack_compare:
             str(record.get("extra_filters")),
             fmt(record.get("corr_threshold")),
             fmt(record.get("grid_max")),
+            fmt(record.get("cell_stretch")),
             fmt(record.get("cell_size")),
             as_optional_int(record.get("n_vectors")),
             as_optional_int(record.get("grid_dimension")),
@@ -6103,11 +6202,27 @@ class CorrTrack_compare:
     def _parallel_mode_run(self,args):
         dataset_id, mode, alg, path, prefix, bst, runtime_bf, corr_flags_bf, warmup_data = args
         extra_filter_flag = _coerce_to_bool(bst.get("extra_filters"), self.extra_filter)
+        n_vectors = _to_int_safe(bst.get("n_vectors"))
+        grid_dimension = _to_int_safe(bst.get("grid_dimension"))
+        cell_stretch = _resolve_cell_stretch(
+            bst.get("cell_stretch"),
+            bst.get("cell_size"),
+            self.corr_threshold,
+            n_vectors,
+            grid_dimension,
+        )
+        if cell_stretch is None or cell_stretch <= 0.0:
+            cell_stretch = 1.0
+
+        bst["n_vectors"] = n_vectors
+        bst["grid_dimension"] = grid_dimension
+        bst["cell_stretch"] = cell_stretch
+
         runtime_parts, runtime, artifact_time, corr_flags = self._mode_run(
             mode, alg, path, prefix,
             bst["nodes"], bst["seed"], bst["seed_toggle"],
-            bst["n_vectors"], bst["grid_dimension"],
-            bst["cell_size"], bst["grid_max"],
+            n_vectors, grid_dimension,
+            cell_stretch, bst["grid_max"],
             bst["freq_threshold"], warmup_data, bst["preprocess"], extra_filter_flag
         )
         speedup = runtime_bf / runtime if runtime else float("inf")
@@ -6139,7 +6254,7 @@ class CorrTrack_compare:
         param_keys = [
             "nodes","window_size","window_step","basic_window","n_lags","warmup_size",
             "seed","seed_toggle","preprocess","extra_filters","corr_threshold",
-            "grid_max","cell_size","n_vectors","grid_dimension","freq_threshold"
+            "grid_max","cell_stretch","cell_size","n_vectors","grid_dimension","freq_threshold"
         ]
         param_values = []
         for key in param_keys:

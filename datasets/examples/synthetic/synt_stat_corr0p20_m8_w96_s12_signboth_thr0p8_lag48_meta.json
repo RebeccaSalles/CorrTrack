@@ -1,0 +1,18 @@
+{
+  "m": 8,
+  "n": 2000,
+  "w": 96,
+  "s": 12,
+  "threshold": 0.8,
+  "corr_sign": "both",
+  "max_lag": 48,
+  "lag_step": 12,
+  "target_z": 0.2,
+  "z_max_nonoverlap": 0.12578616352201258,
+  "achieved_z": 0.12421383647798742,
+  "windows_target": 254,
+  "windows_target_eff": 160,
+  "windows_used": 158,
+  "n_pairs": 79,
+  "nonoverlap": true
+}

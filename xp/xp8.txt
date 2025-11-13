@@ -12,7 +12,6 @@ Methods: corrtrack, brute_force, filcorr
 Dynamic parameters:
 	corr_threshold = [0.7,0.8,0.9]
 	exec = ["sequential","thread","process"]
-	target-recall = [0.6,0.7,0.8,0.9,0.95]
 	
 Fixed parameters:
 	window_size = 7 * 24 # 1 week
@@ -20,6 +19,7 @@ Fixed parameters:
 	n_lags = 5 * 365 * 24
 
 	train_ratio = 1
+	target-recall = 0.9
 	neg_corr = True
 	corr_val = True
 	run_optim = True
