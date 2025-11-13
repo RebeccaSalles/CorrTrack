@@ -72,7 +72,7 @@ def load_dataset(
     params.setdefault("corr_sign", "pos")
     params.setdefault("max_lag", 0)
     params.setdefault("lag_step", None)
-    params.setdefault("nonoverlap", True)
+    params.setdefault("nonoverlap", False)
     params.setdefault("seed", 7)
     params["base_proc"] = dict(params.get("base_proc") or _DEFAULT_BASE_PROC)
 

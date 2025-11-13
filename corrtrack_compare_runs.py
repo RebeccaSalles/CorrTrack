@@ -207,7 +207,7 @@ def _extract_timeseries_ids(bf_run_path: Path) -> set[str]:
 
         ids: set[str] = set()
         for row in reader:
-            artifact = row.get("artifact_path")
+            artifact = row.get("pair_min_dist") or row.get("artifact_path")
             if not artifact:
                 continue
             try:
@@ -279,7 +279,16 @@ def _run_integrate_filcorr(
             "--variable",
             variable,
         ]
-        subprocess.run(cmd, check=True)
+        env = os.environ.copy()
+        repo_dir = Path(__file__).resolve().parent
+        root_dir = repo_dir.parent
+        extra_paths = [str(repo_dir), str(root_dir)]
+        existing_py = env.get("PYTHONPATH")
+        parts = [p for p in extra_paths if p]
+        if existing_py:
+            parts.append(existing_py)
+        env["PYTHONPATH"] = os.pathsep.join(parts)
+        subprocess.run(cmd, check=True, env=env)
 
     print(
         f"[corrtrack_compare_runs] Integrated {len(filtered_files)} FilCorr CSV files "

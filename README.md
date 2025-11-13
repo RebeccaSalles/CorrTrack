@@ -175,7 +175,7 @@ Synthetic configs don’t need `VARIABLES`; the optional `DATASET` list (default
 | `--max-lag` | Maximum absolute lag (counted back; `time2 = time1 − lag`). |
 | `--lag-step` | Lag grid step (defaults to `--s` if omitted). |
 | `--seed` | RNG seed. |
-| `--nonoverlap` / `--allow-overlap` | Non-overlap is the default; pass `--allow-overlap` to reuse grid starts. |
+| `--nonoverlap` / `--allow-overlap` | Overlap is the default; add `--nonoverlap` to forbid reuse of grid starts (or re-enable with `--allow-overlap`). |
 
 Outputs are auto-named using  
 `synt_[stat|nonstat]_corr<rate>_m<m>_w<w>_s<s>_sign<corr_sign>_thr<threshold>_lag<max_lag>`
@@ -252,9 +252,8 @@ Or, to exercise the synthetic demo:
 python3 run_corrtrack_experiment.py \
   --dataset-config experiment_dataset_synth_demo.py \
   --param-grid-config experiment_run_param_grid.py \
-  --loader datasets.synth_loader:load_dataset \
   --corr-threshold 0.75 \
-  --exec-mode process \
+  --exec-mode sequential \
   --train-ratio 0.4 \
   --target-recall 0.9 \
   --artifact-mode final
@@ -274,7 +273,7 @@ python3 run_corrtrack_experiment.py \
   --param-grid-config experiment_run_param_grid.py \
   --loader datasets.asos_loader:load_dataset \
   --corr-threshold 0.75 \
-  --exec-mode process \
+  --exec-mode sequential \
   --train-ratio 0.5 \
   --target-recall 0.9 \
   --artifact-mode final
@@ -307,7 +306,6 @@ Synthetic variant:
 ```
 python3 corrtrack_run_bruteforce.py \
   --dataset-config experiment_dataset_synth_demo.py \
-  --loader datasets.synth_loader:load_dataset \
   --window-size 168 \
   --window-step 12 \
   --basic-window 12 \
@@ -339,13 +337,12 @@ Synthetic variant:
 python3 corrtrack_param_search.py \
   --dataset-config experiment_dataset_synth_demo.py \
   --param-grid-config experiment_run_param_grid.py \
-  --loader datasets.synth_loader:load_dataset \
   --window-size 168 \
   --window-step 12 \
   --basic-window 12 \
   --n-lags 168 \
   --corr-threshold 0.7 \
-  --exec-mode process \
+  --exec-mode sequential \
   --neg-corr \
   --corr-val \
   --extra-filter \
@@ -370,7 +367,6 @@ Synthetic variant:
 ```
 python3 corrtrack_run_corrtrack.py \
   --dataset-config experiment_dataset_synth_demo.py \
-  --loader datasets.synth_loader:load_dataset \
   --window-size 168 \
   --window-step 12 \
   --basic-window 12 \
@@ -391,7 +387,7 @@ python3 corrtrack_compare_runs.py \
   --dataset-config experiment_dataset_fr_air_temperature_7_1.py \
   --loader datasets.asos_loader:load_dataset \
   --train-ratio 0.3 \
-  --filcorr-results correlation/asos_exp/tests/filcorr_res
+  --filcorr-results ../correlation/asos_exp/tests/filcorr_res
 ```
 
 Combines brute-force and CorrTrack outputs, producing `corrtrack_metrics_<dataset_id>.csv` with accuracy and performance metrics. When `--filcorr-results` is provided, the step also filters FilCorr CSVs whose names include any brute-force time-series ids, merges them via `integrate_filcorr_results.py`, and emits `filcorr_run.csv` alongside the comparison artifacts for easier downstream analysis.
@@ -401,7 +397,6 @@ Synthetic variant:
 ```
 python3 corrtrack_compare_runs.py \
   --dataset-config experiment_dataset_synth_demo.py \
-  --loader datasets.synth_loader:load_dataset \
   --window-size 168 \
   --window-step 12 \
   --basic-window 12 \
@@ -412,16 +407,15 @@ python3 corrtrack_compare_runs.py \
   --corr-val \
   --extra-filter \
   --recall-by-window \
-  --train-ratio 0.3 \
-  --filcorr-results synthetic/filcorr_outputs
+  --train-ratio 0.3
 ```
 
 > Want to run the integration manually? Use the bundled helper:
 >
 > ```
 > python3 integrate_filcorr_results.py \
->   --results-dir correlation/asos_exp/tests/filcorr_res \
->   --output correlation/asos_exp/tests/filcorr_res/filcorr_max_lag_correlated.csv \
+>   --results-dir ../correlation/asos_exp/tests/filcorr_res \
+>   --output ../correlation/asos_exp/tests/filcorr_res/filcorr_max_lag_correlated.csv \
 >   --country fr \
 >   --variable air_temperature
 > ```

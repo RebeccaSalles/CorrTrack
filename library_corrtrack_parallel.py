@@ -9,7 +9,6 @@ import datetime
 import os
 import ast
 import pandas as pd
-import itertools
 from itertools import combinations, product, repeat
 from collections import defaultdict
 import math
@@ -18,6 +17,7 @@ from multiprocessing import shared_memory
 from functools import partial
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from typing import Iterable, Optional, Sequence
+import traceback
 
 try:
     from dask import delayed, compute
@@ -3118,6 +3118,22 @@ class CorrTrack:
         all_keys = pred | gt
         sorted_keys = sorted(all_keys)
 
+        if not sorted_keys:
+            return {
+                'precision': 0.0,
+                'recall': 0.0,
+                'f1_score': 0.0,
+                'aucroc': float('nan'),
+                'pr_auc': float('nan'),
+                'recall_min': int(pair_min_dist in pred),
+                'precision_pos': 0.0,
+                'recall_pos': 0.0,
+                'f1_score_pos': 0.0,
+                'precision_neg': 0.0,
+                'recall_neg': 0.0,
+                'f1_score_neg': 0.0,
+            }
+
         # Fill missing keys with zeros
         filled_predicted = {}
         filled_ground_truth = {}
@@ -3210,6 +3226,15 @@ class CorrTrack:
         # Union of normalized keys
         all_keys = set(normalized_predicted.keys()).union(normalized_ground_truth.keys())
         sorted_keys = sorted(all_keys)
+
+        if not sorted_keys:
+            return {
+                'precision': 0.0,
+                'recall': 0.0,
+                'f1_score': 0.0,
+                'aucroc': float('nan'),
+                'pr_auc': float('nan')
+            }
 
         # Infer expected length
         sample_array = next(iter(normalized_predicted.values())) if normalized_predicted else next(iter(normalized_ground_truth.values()))
@@ -3968,7 +3993,16 @@ class Sketches:
                 base_source = np.array(self.basicDots[0][s][1:,:], dtype=np.float64, copy=False)
                 base = base_source * self.diff_toggleVector
 
-            updated = np.concatenate((base, new_dots[s]), axis=0)
+            concat_parts = []
+            if base.size:
+                concat_parts.append(base)
+            if new_dots[s].size:
+                concat_parts.append(new_dots[s])
+
+            if concat_parts:
+                updated = np.concatenate(tuple(concat_parts), axis=0) if len(concat_parts) > 1 else concat_parts[0]
+            else:
+                updated = base  # both empty -> keep shape (0, n_vectors)
             self.basicDots[-1].append(updated)
             self.sketches[(self.series_ids[s], curr_start, window_size)] = updated.sum(axis=0)
 
@@ -5060,6 +5094,7 @@ class CorrTrack_optimize:
 
         except Exception as e:
             print(f"Skipped params={param_combo} due to error: {e}")
+            traceback.print_exc()
             return None
 
     def _init_optim_record(self, dataset_id, param_combo):
@@ -5251,6 +5286,7 @@ class CorrTrack_optimize:
             record["status"] = "error"
             record["error"] = str(exc)
             print(f"Skipped params={param_combo} due to error: {exc}")
+            traceback.print_exc()
 
         return record
 

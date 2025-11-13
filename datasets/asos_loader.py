@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 
@@ -8,12 +10,28 @@ _LEGACY_ROOT = "correlation/asos-airports"
 
 def load_dataset(country: str, variable: str, root: str = DEFAULT_ROOT):
     filename = f"{country}-{variable}.csv"
-    path = os.path.join(root, filename)
-    if not os.path.exists(path) and os.path.exists(os.path.join(_LEGACY_ROOT, filename)):
-        path = os.path.join(_LEGACY_ROOT, filename)
+    path = _resolve_csv_path(filename, root)
 
     data, names = _load_csv(path)
     return data, names
+
+
+def _resolve_csv_path(filename: str, root: str) -> str:
+    base_dir = Path(__file__).resolve().parents[1]
+    candidates = [
+        Path(root),
+        base_dir / root,
+        Path(_LEGACY_ROOT),
+        base_dir / _LEGACY_ROOT,
+        base_dir.parent / _LEGACY_ROOT,
+    ]
+
+    for candidate_root in candidates:
+        candidate = candidate_root / filename
+        if candidate.exists():
+            return str(candidate)
+
+    raise FileNotFoundError(f"Could not locate '{filename}' in any known ASOS data directory.")
 
 
 def _load_csv(csv_path: str):

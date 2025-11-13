@@ -13,7 +13,7 @@ if __package__ in (None, ""):
     _resolved = Path(__file__).resolve()
     candidate_roots = list(_resolved.parents[:4])
     for candidate in candidate_roots:
-        if (candidate / "correlation").exists():
+        if (candidate / "correlation" / "load_data_asos.py").exists():
             sys.path.append(str(candidate))
             break
     else:

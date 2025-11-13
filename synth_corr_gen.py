@@ -112,7 +112,7 @@ def make_corr_dataset(
     threshold: float = 0.7,
     corr_sign: str = "pos",           # "pos" | "neg" | "both"
     base_proc: Optional[Dict[str, Any]] = None,
-    nonoverlap: bool = True,
+    nonoverlap: bool = False,
     max_lag: int = 0,
     lag_step: Optional[int] = None,
     seed: Optional[int] = 7,
@@ -312,9 +312,9 @@ def _parse_args():
                    help="Base process: ar1 (stationary), rw (nonstationary), wn (white noise).")
     p.add_argument("--phi", type=float, default=0.6, help="AR(1) phi (only for base-type=ar1).")
     p.add_argument("--sigma", type=float, default=1.0, help="Noise sigma for base process.")
-    p.add_argument("--nonoverlap", action="store_true", help="Enforce non-overlap at the grid level (default: true).")
+    p.add_argument("--nonoverlap", action="store_true", help="Enforce non-overlap at the grid level.")
     p.add_argument("--allow-overlap", action="store_true",
-                   help="Allow reusing grid starts (overrides --nonoverlap).")
+                   help="Allow reusing grid starts (default behavior). Overrides --nonoverlap if both are set.")
     p.add_argument("--max-lag", type=int, default=0, help="Maximum absolute lag (default: 0).")
     p.add_argument("--lag-step", type=int, default=None, help="Lag grid step (default: s).")
     p.add_argument("--seed", type=int, default=7, help="Random seed (default: 7).")
@@ -325,12 +325,12 @@ def _parse_args():
     if args.base_type == "ar1":
         base_proc["phi"] = args.phi
 
-    # nonoverlap logic: default True unless allow_overlap set
-    nonoverlap = True
+    # nonoverlap logic: default is to allow overlap unless explicitly disabled
+    nonoverlap = False
+    if args.nonoverlap:
+        nonoverlap = True
     if args.allow_overlap:
         nonoverlap = False
-    elif args.nonoverlap:
-        nonoverlap = True
 
     return dict(
         save_dir=args.save_dir,
