@@ -27,7 +27,7 @@ corrtrack_release/
 ├─ library_corrtrack_parallel.py # CorrTrack implementation & shared helpers
 ├─ experiment_dataset_*.py       # Dataset configuration modules
 ├─ experiment_run_param_grid.py  # Hyper-parameter grid definition
-├─ load_data_asos.py             # Back-compat shim for the ASOS loader
+├─ load_data_asos.py             # Back-compat for the ASOS loader
 └─ datasets/
    ├─ __init__.py
    └─ asos_loader.py             # Example dataset loader (ASOS airports CSVs)
@@ -39,7 +39,7 @@ Utility modules such as `load_data_asos.py` are retained for backwards compatibi
 ## Requirements
 
 - **Python 3.10+** (tested with 3.12)
-- Python packages: `numpy`, `pandas`, `scipy`, `scikit-learn`
+- Python packages: `numpy` (1.x), `pandas`, `scipy`, `scikit-learn`
 - Install with `pip install numpy pandas scipy scikit-learn` (or via a `requirements.txt`).
 - Ensure the project directory is on `PYTHONPATH` before running commands.
 
@@ -103,14 +103,16 @@ Place your dataset files under `datasets/asos-airports/` using the `<country>-<v
    ```
 
    The grid is loaded by `corrtrack_param_search.py` during the hyper-parameter sweep.
+   
+---
 
-### Synthetic datasets
+## Synthetic datasets
 
 Need synthetic data for development? The repository now bundles `synth_corr_gen.py`, a flexible generator that emits `.npz` time-series matrices plus correlated pair metadata. You can invoke it directly:
 
 ```
 python3 synth_corr_gen.py \
-  --save-dir datasets/synth_outputs \
+  --save-dir datasets/synthetic \
   --m 16 --n 8000 --z 0.25 --w 96 --s 12 \
   --threshold 0.8 --corr-sign both --max-lag 48 --lag-step 12 \
   --base-type ar1 --phi 0.7 --sigma 1.0 --seed 123
@@ -145,7 +147,7 @@ SYNTH_PARAMS = {
 
 DATA_LOADER = partial(
     load_synth,
-    cache_root="datasets/synth_outputs",
+    cache_root="datasets/synthetic",
     generator_params=SYNTH_PARAMS,
     refresh=False,  # set True to regenerate on each run
 )
@@ -186,16 +188,6 @@ and include:
 - `<stem>_meta.json` – aggregate metadata (achieved `z`, attempts, etc.).
 - `<stem>_params.json` – full parameter set, including base process and seed.
 
-### Hybrid correlated-window injector
-
-The generator automatically tries to meet any requested `z` (even when it exceeds the physical non-overlap ceiling `z_max = 1 / ceil(w / s)`) by running three phases:
-
-1. **Non-overlap scheduler** – fills as many windows as possible without sample reuse.
-2. **Controlled blending** – allows overlaps but convex-combines the new template with the existing samples only when every previously injected pair still satisfies `|r| ≥ threshold`.
-3. **Latent template propagation** – if there is still a shortfall, the new template overwrites the overlapping windows while applying the exact same adjustment to every impacted pair so all correlations remain above threshold.
-
-`_meta.json` now exposes `pairs_nonoverlap`, `pairs_blended`, `pairs_latent`, and their attempt counts (`blend_attempts`, `latent_attempts`) so you can see which phase produced each window. `windows_used`, `achieved_z`, and the per-phase window counts (`windows_blended`, `windows_latent`) make it easy to confirm the generator met your requested coverage.
-
 ### Plotting correlated windows
 
 Use `plot_correlated_windows_example.py` to visualize injected windows for any subset of series. Windows whose partners are visible in the plot share a unique color across both series (with annotations); spans whose partner is outside the view are drawn in a light neutral shade to avoid confusion.
@@ -205,12 +197,12 @@ Example command (matching the dataset generated above):
 ```bash
 cd corrtrack_release
 python3 plot_correlated_windows_example.py \
-  --data-npz tmp_artifacts/synt_stat_corr0p30_m8_w96_s12_signboth_thr0p8_lag48.npz \
-  --correlated-csv tmp_artifacts/synt_stat_corr0p30_m8_w96_s12_signboth_thr0p8_lag48_correlated.csv \
+  --data-npz  datasets/synthetic/synt_stat_corr0p30_m8_w96_s12_signboth_thr0p8_lag48.npz \
+  --correlated-csv  datasets/synthetic/synt_stat_corr0p30_m8_w96_s12_signboth_thr0p8_lag48_correlated.csv \
   --series s1,s4,s5 \
   --time-min 0 --time-max 500 \
   --window-size 96 \
-  --output tmp_artifacts/correlated_windows_example_colored.png
+  --output tmp_artifacts/correlated_windows_example.png
 ```
 
 Adjust the series list and time span to highlight other segments.
