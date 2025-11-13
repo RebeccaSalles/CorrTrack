@@ -3,7 +3,7 @@ Experiment 1 - series scalability (fig 1, 3, 4):
 Data: Synthetic (length = 2000)
 	name = synt_[stationarity]_corr[rate]
 	stationarity = [stat, nonstat]
-	rate = [00,25,50,75,100]
+	rate = [00,5,10,15,20,25]
 	
 	n_series = [100,200,300,400,500,600,700,800,900,1000,1100,1200]
 	sample_length = [2000]
@@ -12,7 +12,7 @@ Methods: corrtrack, brute_force, filcorr
 
 Dynamic parameters:
 	n_lags = [0,100,250]
-	corr_threshold = [0.5,0.6,0.7,0.8,0.9]
+	corr_threshold = [0.7,0.8,0.9]
 	target-recall = [0.6,0.7,0.8,0.9,0.95]
 	corr_val = [True,False]
 	

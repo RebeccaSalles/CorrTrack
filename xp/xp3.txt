@@ -3,7 +3,7 @@ Experiment 3 - parameter sensibility (only corrtrack_param_search):
 Data: Synthetic (length = 2000)
 	name = synt_[stationarity]_corr[rate]
 	stationarity = [stat, nonstat]
-	rate = [00,25,50,75,100]
+	rate = [00,5,10,15,20,25]
 	
 	n_series = [800]
 	sample_length = [2000]
@@ -14,7 +14,7 @@ Dynamic parameters:
 	window_size = [100,200,300,400,500]
 	window_step = [1,5,10,15,20]
 	n_lags = [0,100,250]
-	corr_threshold = [0.5,0.6,0.7,0.8,0.9]
+	corr_threshold = [0.7,0.8,0.9]
 	target-recall = [0.6,0.7,0.8,0.9,0.95]
 	
 Fixed parameters:
