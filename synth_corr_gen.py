@@ -2,6 +2,7 @@ import os
 import json
 import math
 import csv
+from collections import defaultdict
 from typing import Dict, List, Tuple, Optional, Any
 import numpy as np
 
@@ -129,6 +130,364 @@ def _make_nonoverlap_slots(
     return slots
 
 
+def _collect_overlapping_record_indices(
+    series_idx: int,
+    start: int,
+    grid_records: List[Dict[int, List[int]]],
+    s: int,
+    g_step: int,
+    W_s: int,
+) -> List[int]:
+    """Return indices of existing window pairs whose slots overlap a start on a series."""
+    gi = start // s
+    indices: List[int] = []
+    bucket = grid_records[series_idx]
+    for delta in range(-g_step + 1, g_step):
+        gj = gi + delta
+        if 0 <= gj < W_s:
+            indices.extend(bucket.get(gj, ()))
+    return indices
+
+
+def _find_overlapping_records(
+    series_windows: List[List[Tuple[int, int]]],
+    series_idx: int,
+    start: int,
+    w: int,
+) -> List[int]:
+    """Return record indices whose window on series_idx overlaps [start, start + w)."""
+    overlaps: List[int] = []
+    for existing_start, rec_idx in series_windows[series_idx]:
+        if not (existing_start + w <= start or existing_start >= start + w):
+            overlaps.append(rec_idx)
+    return overlaps
+
+
+def _recompute_corr(
+    X: np.ndarray,
+    record: Tuple[int, int, int, int],
+    w: int,
+) -> float:
+    i1, start1, i2, start2 = record
+    return _pearson_raw(
+        X[i1, start1 : start1 + w],
+        X[i2, start2 : start2 + w],
+    )
+
+
+def _try_blend_pair(
+    X: np.ndarray,
+    i1: int,
+    start1: int,
+    i2: int,
+    start2: int,
+    xw: np.ndarray,
+    yw: np.ndarray,
+    threshold: float,
+    records: List[Tuple[int, int, int, int]],
+    grid_records: List[Dict[int, List[int]]],
+    s: int,
+    g_step: int,
+    W_s: int,
+    w: int,
+) -> Tuple[bool, float]:
+    """
+    Attempt to blend a new correlated window pair into X without breaking prior correlations.
+
+    Returns (success, achieved_r).
+    """
+    betas = (1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4)
+    original1 = X[i1, start1 : start1 + w].copy()
+    original2 = X[i2, start2 : start2 + w].copy()
+    original1_f = original1.astype(np.float64)
+    original2_f = original2.astype(np.float64)
+    xw_f = xw.astype(np.float64)
+    yw_f = yw.astype(np.float64)
+
+    overlap_indices = set(
+        _collect_overlapping_record_indices(i1, start1, grid_records, s, g_step, W_s)
+    )
+    overlap_indices.update(
+        _collect_overlapping_record_indices(i2, start2, grid_records, s, g_step, W_s)
+    )
+
+    for beta in betas:
+        blended1 = (1.0 - beta) * original1_f + beta * xw_f
+        blended2 = (1.0 - beta) * original2_f + beta * yw_f
+
+        X[i1, start1 : start1 + w] = blended1.astype(np.float32, copy=False)
+        X[i2, start2 : start2 + w] = blended2.astype(np.float32, copy=False)
+
+        r_new = _pearson_raw(
+            X[i1, start1 : start1 + w],
+            X[i2, start2 : start2 + w],
+        )
+        if abs(r_new) < threshold:
+            X[i1, start1 : start1 + w] = original1
+            X[i2, start2 : start2 + w] = original2
+            continue
+
+        ok = True
+        for idx in overlap_indices:
+            if idx < 0 or idx >= len(records):
+                continue
+            rec = records[idx]
+            if abs(_recompute_corr(X, rec, w)) < threshold:
+                ok = False
+                break
+
+        if ok:
+            return True, r_new
+
+        X[i1, start1 : start1 + w] = original1
+        X[i2, start2 : start2 + w] = original2
+
+    return False, 0.0
+
+
+def _blend_fill(
+    X: np.ndarray,
+    records: List[Tuple[int, int, int, int]],
+    series_windows: List[List[Tuple[int, int]]],
+    grid_records: List[Dict[int, List[int]]],
+    correlated_rows: List[Tuple[str, str, int, int, float]],
+    pair_goal: int,
+    threshold: float,
+    corr_sign: str,
+    rng: np.random.Generator,
+    s: int,
+    w: int,
+    n: int,
+    m: int,
+    W_s: int,
+    lag_values: List[int],
+    g_step: int,
+) -> Tuple[int, int]:
+    """
+    Continue injecting windows beyond the non-overlap limit by blending overlapping pairs.
+    Returns (pairs_added, attempts).
+    """
+    pairs_added = 0
+    attempts = 0
+    remaining = max(pair_goal - len(records), 0)
+    if remaining <= 0:
+        return 0, 0
+
+    max_attempts = max(8 * remaining, 2000)
+
+    while len(records) < pair_goal and attempts < max_attempts:
+        attempts += 1
+        i1 = int(rng.integers(0, m))
+        i2 = int(rng.integers(0, m))
+        if i1 == i2:
+            continue
+        gi = int(rng.integers(0, W_s))
+        start1 = gi * s
+        lag = int(rng.choice(lag_values))
+        if lag % s != 0:
+            continue
+        start2 = start1 - lag
+        if start1 < 0 or start1 + w > n or start2 < 0 or start2 + w > n:
+            continue
+
+        # Build template
+        u = rng.normal(0.0, 1.0, size=w)
+        u = u - u.mean()
+        std_u = u.std()
+        if std_u < 1e-12:
+            continue
+        u = u / std_u
+
+        max_inner_attempts = 20
+        accepted = False
+        for _ in range(max_inner_attempts):
+            r_star = threshold + rng.random() * (1.0 - threshold)
+            if r_star >= 1.0:
+                eps = np.zeros(w, dtype=np.float64)
+            else:
+                sigma2 = 1.0 / (r_star**2) - 1.0
+                sigma2 = max(sigma2, 0.0)
+                eps = rng.normal(0.0, math.sqrt(sigma2), size=w)
+            sign = _choose_sign(corr_sign, rng)
+            xw = u.astype(np.float32)
+            yw = (sign * u + eps).astype(np.float32)
+            if abs(_pearson_raw(xw, yw)) >= threshold:
+                accepted = True
+                break
+        if not accepted:
+            continue
+
+        success, r_new = _try_blend_pair(
+            X,
+            i1,
+            start1,
+            i2,
+            start2,
+            xw,
+            yw,
+            threshold,
+            records,
+            grid_records,
+            s,
+            g_step,
+            W_s,
+            w,
+        )
+        if not success:
+            continue
+
+        idx = len(records)
+        records.append((i1, start1, i2, start2))
+        series_windows[i1].append((start1, idx))
+        series_windows[i2].append((start2, idx))
+        grid_records[i1][start1 // s].append(idx)
+        grid_records[i2][start2 // s].append(idx)
+        correlated_rows.append(
+            (f"s{i1+1}", f"s{i2+1}", start1 + 1, start2 + 1, r_new)
+        )
+        pairs_added += 1
+
+    return pairs_added, attempts
+
+
+def _latent_template_fill(
+    X: np.ndarray,
+    records: List[Tuple[int, int, int, int]],
+    series_windows: List[List[Tuple[int, int]]],
+    correlated_rows: List[Tuple[str, str, int, int, float]],
+    pair_goal: int,
+    threshold: float,
+    corr_sign: str,
+    rng: np.random.Generator,
+    s: int,
+    w: int,
+    n: int,
+    m: int,
+    W_s: int,
+    lag_values: List[int],
+) -> Tuple[int, int]:
+    """
+    Final fallback: reuse common latent templates by overwriting overlapping windows while
+    propagating identical adjustments across all affected pairs.
+    Returns (pairs_added, attempts).
+    """
+    pairs_added = 0
+    attempts = 0
+    remaining = max(pair_goal - len(records), 0)
+    if remaining <= 0:
+        return 0, 0
+
+    max_attempts = max(600 * remaining, 60000)
+
+    while len(records) < pair_goal and attempts < max_attempts:
+        attempts += 1
+        i1 = int(rng.integers(0, m))
+        i2 = int(rng.integers(0, m))
+        if i1 == i2:
+            continue
+        gi = int(rng.integers(0, W_s))
+        start1 = gi * s
+        lag = int(rng.choice(lag_values))
+        start2 = start1 - lag
+        if start1 < 0 or start1 + w > n or start2 < 0 or start2 + w > n:
+            continue
+
+        # Build template
+        u = rng.normal(0.0, 1.0, size=w)
+        u = u - u.mean()
+        std_u = u.std()
+        if std_u < 1e-12:
+            continue
+        u = u / std_u
+
+        max_inner_attempts = 20
+        accepted = False
+        for _ in range(max_inner_attempts):
+            r_star = threshold + rng.random() * (1.0 - threshold)
+            if r_star >= 1.0:
+                eps = np.zeros(w, dtype=np.float64)
+            else:
+                sigma2 = 1.0 / (r_star**2) - 1.0
+                sigma2 = max(sigma2, 0.0)
+                eps = rng.normal(0.0, math.sqrt(sigma2), size=w)
+            sign = _choose_sign(corr_sign, rng)
+            xw = u.astype(np.float32)
+            yw = (sign * u + eps).astype(np.float32)
+            if abs(_pearson_raw(xw, yw)) >= threshold:
+                accepted = True
+                break
+        if not accepted:
+            continue
+
+        seg1 = X[i1, start1 : start1 + w].copy()
+        seg2 = X[i2, start2 : start2 + w].copy()
+        delta1 = xw - seg1
+        delta2 = yw - seg2
+
+        overlaps1 = _find_overlapping_records(series_windows, i1, start1, w)
+        overlaps2 = _find_overlapping_records(series_windows, i2, start2, w)
+
+        affected: Dict[int, np.ndarray] = {}
+        for rec_idx in overlaps1:
+            affected.setdefault(rec_idx, np.zeros(w, dtype=np.float32))
+            affected[rec_idx] += delta1
+        for rec_idx in overlaps2:
+            affected.setdefault(rec_idx, np.zeros(w, dtype=np.float32))
+            affected[rec_idx] += delta2
+
+        snapshots: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
+        for rec_idx in affected:
+            i_a, start_a, i_b, start_b = records[rec_idx]
+            snapshots[rec_idx] = (
+                X[i_a, start_a : start_a + w].copy(),
+                X[i_b, start_b : start_b + w].copy(),
+            )
+
+        ok = True
+        try:
+            for rec_idx, delta in affected.items():
+                i_a, start_a, i_b, start_b = records[rec_idx]
+                X[i_a, start_a : start_a + w] += delta
+                X[i_b, start_b : start_b + w] += delta
+
+            X[i1, start1 : start1 + w] = xw
+            X[i2, start2 : start2 + w] = yw
+
+            r_new = _pearson_raw(
+                X[i1, start1 : start1 + w],
+                X[i2, start2 : start2 + w],
+            )
+            if abs(r_new) < threshold:
+                ok = False
+            else:
+                for rec_idx in affected:
+                    if abs(_recompute_corr(X, records[rec_idx], w)) < threshold:
+                        ok = False
+                        break
+        finally:
+            if not ok:
+                for rec_idx, (seg_a, seg_b) in snapshots.items():
+                    i_a, start_a, i_b, start_b = records[rec_idx]
+                    X[i_a, start_a : start_a + w] = seg_a
+                    X[i_b, start_b : start_b + w] = seg_b
+                X[i1, start1 : start1 + w] = seg1
+                X[i2, start2 : start2 + w] = seg2
+
+        if not ok:
+            continue
+
+        idx = len(records)
+        records.append((i1, start1, i2, start2))
+        series_windows[i1].append((start1, idx))
+        series_windows[i2].append((start2, idx))
+        correlated_rows.append(
+            (f"s{i1+1}", f"s{i2+1}", start1 + 1, start2 + 1, r_new)
+        )
+        pairs_added += 1
+
+    return pairs_added, attempts
+
+
 def make_corr_dataset(
     save_dir: str,
     m: int,
@@ -154,10 +513,12 @@ def make_corr_dataset(
     When nonoverlap=True (default), physical non-overlap is enforced:
       no sample index belongs to more than one injected window in any series.
     In this mode, we:
-      - compute z_max (theoretical upper bound under non-overlap),
-      - clamp the effective z to min(z, z_max),
-      - systematically fill non-overlapping slots to get as close as possible
-        to this effective z, with |r| >= threshold guarantee.
+      - compute z_max (theoretical upper bound under physical non-overlap),
+      - fill as many non-overlapping slots as possible with exact templates,
+      - then blend controlled overlaps where we can keep prior correlations intact,
+      - and, if there is still shortfall, fall back to common latent templates that
+        overwrite overlapping windows while mirroring the adjustment across every
+        affected pair so |r| >= threshold continues to hold.
 
     When nonoverlap=False (allow-overlap), we fall back to a random injection
     strategy; z is best-effort and z_max is less meaningful.
@@ -180,7 +541,9 @@ def make_corr_dataset(
     # Precompute lag grid for consistency (though systematic pairing doesn't force lags)
     if max_lag <= 0:
         lag_allowed = lambda lag: True  # no restriction if max_lag <= 0
+        lag_values = [0]
     else:
+
         def lag_allowed(lag: int) -> bool:
             if abs(lag) > max_lag:
                 return False
@@ -188,20 +551,25 @@ def make_corr_dataset(
                 return False
             return True
 
+        lag_values = list(range(-max_lag, max_lag + 1, lag_step))
+
     # ------------------------------------------------------------------
     # NON-OVERLAP MODE (Option A, with z_max)
     # ------------------------------------------------------------------
     if nonoverlap:
+        g_step = math.ceil(w / s)
         z_max, max_windows_total = _compute_z_max(m, n, w, s)
-        # requested total windows in correlations (each pair uses 2)
         target_windows = int(round(z * m * W_s))
-        # clamp to physical capacity
-        target_windows_eff = min(target_windows, max_windows_total)
-        # ensure even number (pairs use 2 windows)
-        if target_windows_eff % 2 == 1:
-            target_windows_eff -= 1
-        if target_windows_eff < 2:
-            target_windows_eff = 0
+        if target_windows % 2 == 1:
+            target_windows -= 1
+        if target_windows < 2:
+            target_windows = 0
+
+        nonoverlap_window_goal = min(target_windows, max_windows_total)
+        if nonoverlap_window_goal % 2 == 1:
+            nonoverlap_window_goal -= 1
+        nonoverlap_pair_goal = nonoverlap_window_goal // 2
+        total_pair_goal = target_windows // 2
 
         # systematic non-overlapping slots; keep all and pick as many as needed
         slots = _make_nonoverlap_slots(m, n, w, s, rng)
@@ -216,7 +584,7 @@ def make_corr_dataset(
                     adjacency[idx].append(jdx)
                     adjacency[jdx].append(idx)
 
-        max_pairs_target = min(target_windows_eff // 2, len(slots) // 2)
+        max_pairs_target = min(nonoverlap_pair_goal, len(slots) // 2)
         pairs_idx: List[Tuple[Tuple[int, int], Tuple[int, int]]] = []
 
         # Deterministic-but-randomized tie-breaking to keep reproducibility per seed.
@@ -249,9 +617,14 @@ def make_corr_dataset(
             pairs_idx.append((slots[idx], slots[partner]))
 
         correlated_rows: List[Tuple[str, str, int, int, float]] = []
+        series_windows: List[List[Tuple[int, int]]] = [[] for _ in range(m)]
+        records: List[Tuple[int, int, int, int]] = []
+        grid_records: List[Dict[int, List[int]]] = [defaultdict(list) for _ in range(m)]
         used = np.zeros((m, n), dtype=np.uint8)  # physical occupancy
 
         for (i1, start1), (i2, start2) in pairs_idx:
+            if i1 == i2:
+                continue
             # Respect physical non-overlap (should already be guaranteed by construction,
             # but we double-check in case of any edge case).
             if np.any(used[i1, start1:start1 + w]) or np.any(
@@ -304,17 +677,61 @@ def make_corr_dataset(
             used[i2, start2 : start2 + w] = 1
 
             # 1-based times; ids s1..sm
-            correlated_rows.append(
-                (f"s{i1+1}", f"s{i2+1}", start1 + 1, start2 + 1, r)
+            correlated_rows.append((f"s{i1+1}", f"s{i2+1}", start1 + 1, start2 + 1, r))
+            idx = len(records)
+            records.append((i1, start1, i2, start2))
+            series_windows[i1].append((start1, idx))
+            series_windows[i2].append((start2, idx))
+            grid_records[i1][start1 // s].append(idx)
+            grid_records[i2][start2 // s].append(idx)
+
+        pairs_nonoverlap = len(records)
+        blended_pairs = 0
+        blend_attempts = 0
+        if total_pair_goal > len(records) and target_windows > 0:
+            blended_pairs, blend_attempts = _blend_fill(
+                X,
+                records,
+                series_windows,
+                grid_records,
+                correlated_rows,
+                total_pair_goal,
+                threshold,
+                corr_sign,
+                rng,
+                s,
+                w,
+                n,
+                m,
+                W_s,
+                lag_values,
+                g_step,
+            )
+        latent_pairs = 0
+        latent_attempts = 0
+        if total_pair_goal > len(records) and target_windows > 0:
+            latent_pairs, latent_attempts = _latent_template_fill(
+                X,
+                records,
+                series_windows,
+                correlated_rows,
+                total_pair_goal,
+                threshold,
+                corr_sign,
+                rng,
+                s,
+                w,
+                n,
+                m,
+                W_s,
+                lag_values,
             )
 
-        windows_used = 2 * len(correlated_rows)
+        windows_used = 2 * len(records)
         if W_s > 0 and m > 0:
             achieved_z = windows_used / (m * W_s)
         else:
             achieved_z = 0.0
-
-        achieved_z_eff = min(achieved_z, z_max)
 
         stem = _build_stem(m, n, w, s, z, corr_sign, threshold, max_lag, base_proc)
         os.makedirs(save_dir, exist_ok=True)
@@ -348,9 +765,16 @@ def make_corr_dataset(
             "z_max_nonoverlap": z_max,
             "achieved_z": achieved_z,
             "windows_target": target_windows,
-            "windows_target_eff": target_windows_eff,
+            "windows_target_eff": nonoverlap_window_goal,
             "windows_used": windows_used,
-            "n_pairs": len(correlated_rows),
+            "n_pairs": len(records),
+            "pairs_nonoverlap": pairs_nonoverlap,
+            "pairs_blended": blended_pairs,
+            "blend_attempts": blend_attempts,
+            "pairs_latent": latent_pairs,
+            "latent_attempts": latent_attempts,
+            "windows_latent": 2 * latent_pairs,
+            "windows_blended": 2 * blended_pairs,
             "nonoverlap": True,
         }
         meta_path = os.path.join(save_dir, f"{stem}_meta.json")

@@ -186,6 +186,35 @@ and include:
 - `<stem>_meta.json` – aggregate metadata (achieved `z`, attempts, etc.).
 - `<stem>_params.json` – full parameter set, including base process and seed.
 
+### Hybrid correlated-window injector
+
+The generator automatically tries to meet any requested `z` (even when it exceeds the physical non-overlap ceiling `z_max = 1 / ceil(w / s)`) by running three phases:
+
+1. **Non-overlap scheduler** – fills as many windows as possible without sample reuse.
+2. **Controlled blending** – allows overlaps but convex-combines the new template with the existing samples only when every previously injected pair still satisfies `|r| ≥ threshold`.
+3. **Latent template propagation** – if there is still a shortfall, the new template overwrites the overlapping windows while applying the exact same adjustment to every impacted pair so all correlations remain above threshold.
+
+`_meta.json` now exposes `pairs_nonoverlap`, `pairs_blended`, `pairs_latent`, and their attempt counts (`blend_attempts`, `latent_attempts`) so you can see which phase produced each window. `windows_used`, `achieved_z`, and the per-phase window counts (`windows_blended`, `windows_latent`) make it easy to confirm the generator met your requested coverage.
+
+### Plotting correlated windows
+
+Use `plot_correlated_windows_example.py` to visualize injected windows for any subset of series. Windows whose partners are visible in the plot share a unique color across both series (with annotations); spans whose partner is outside the view are drawn in a light neutral shade to avoid confusion.
+
+Example command (matching the dataset generated above):
+
+```bash
+cd corrtrack_release
+python3 plot_correlated_windows_example.py \
+  --data-npz tmp_artifacts/synt_stat_corr0p30_m8_w96_s12_signboth_thr0p8_lag48.npz \
+  --correlated-csv tmp_artifacts/synt_stat_corr0p30_m8_w96_s12_signboth_thr0p8_lag48_correlated.csv \
+  --series s1,s4,s5 \
+  --time-min 0 --time-max 500 \
+  --window-size 96 \
+  --output tmp_artifacts/correlated_windows_example_colored.png
+```
+
+Adjust the series list and time span to highlight other segments.
+
 ---
 
 ## Global Defaults & CLI Overrides

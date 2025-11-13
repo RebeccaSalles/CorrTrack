@@ -118,16 +118,30 @@ def windows_for_series(
         key = tuple(sorted((id1, id2)))
         both_selected = id1 in windows and id2 in windows
 
-        if both_selected and key not in pair_colors:
-            pair_colors[key] = next(color_cycle)
-            legend_labels[key] = f"{id1.upper()}-{id2.upper()} ({corr:+.2f})"
-
-        color = pair_colors.get(key, "#cccccc")
+        highlight_color: Optional[str] = None
+        highlight_pair = False
+        if both_selected:
+            if key not in pair_colors:
+                pair_colors[key] = next(color_cycle)
+                legend_labels[key] = f"{id1.upper()}-{id2.upper()} ({corr:+.2f})"
+            highlight_color = pair_colors[key]
+            highlight_pair = True
+        else:
+            highlight_color = "#dddddd"
 
         for sid, start, partner in ((id1, start1, id2), (id2, start2, id1)):
             if sid not in windows or not in_scope(start):
                 continue
-            windows[sid].append((start, start + window_size, partner, corr, color))
+            windows[sid].append(
+                (
+                    start,
+                    start + window_size,
+                    partner,
+                    corr,
+                    highlight_color,
+                    highlight_pair,
+                )
+            )
 
     for spans in windows.values():
         spans.sort()
@@ -160,8 +174,11 @@ def plot_windows(
         ymin, ymax = ax.get_ylim()
         span_offsets: Dict[Tuple[str, str], int] = {}
 
-        for start, end, partner, corr, color in windows[sid]:
-            ax.axvspan(start, end, color=color, alpha=0.35)
+        for start, end, partner, corr, color, highlight in windows[sid]:
+            alpha = 0.35 if highlight else 0.12
+            ax.axvspan(start, end, color=color, alpha=alpha)
+            if not highlight:
+                continue
             key = (partner, color)
             offset = span_offsets.get(key, 0)
             span_offsets[key] = offset + 1
