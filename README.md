@@ -1,3 +1,5 @@
+<img src="header.png" alt="CorrTrack" width="1100" align="center"/>
+
 # CorrTrack Experiment Pipeline
 
 This repository contains a modular pipeline for running the CorrTrack correlation engine against arbitrary datasets. The workflow is designed to let you:
