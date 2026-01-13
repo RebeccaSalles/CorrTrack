@@ -17,15 +17,18 @@ def _stem_from_params(params: Dict[str, Any]) -> str:
     if missing:
         raise ValueError(f"generator_params is missing required keys: {', '.join(missing)}")
 
+    template_len = int(params.get("template_len", params["w"]))
+    num_templates = int(params.get("num_templates", 4))
+
     return _build_stem(
         m=int(params["m"]),
         n=int(params["n"]),
         w=int(params["w"]),
-        s=int(params.get("s", 1)),
         z=float(params["z"]),
         corr_sign=str(params.get("corr_sign", "pos")),
         threshold=float(params.get("threshold", 0.7)),
-        max_lag=int(params.get("max_lag", 0)),
+        template_len=template_len,
+        num_templates=num_templates,
         base_proc=params.get("base_proc"),
     )
 
@@ -67,14 +70,15 @@ def load_dataset(
         raise ValueError("generator_params must be provided to synth_loader.load_dataset")
 
     params = dict(generator_params)
-    params.setdefault("s", 1)
     params.setdefault("threshold", 0.7)
     params.setdefault("corr_sign", "pos")
-    params.setdefault("max_lag", 0)
-    params.setdefault("lag_step", None)
-    params.setdefault("nonoverlap", False)
+    params.setdefault("template_len", params.get("w"))
+    params.setdefault("num_templates", 4)
     params.setdefault("seed", 7)
+    params.setdefault("hash_seed", None)
     params["base_proc"] = dict(params.get("base_proc") or _DEFAULT_BASE_PROC)
+    if params.get("volatility_equalizer") is not None:
+        params["volatility_equalizer"] = dict(params["volatility_equalizer"])
 
     cache_root = Path(cache_root)
     slug = country if country == variable else f"{country}_{variable}"

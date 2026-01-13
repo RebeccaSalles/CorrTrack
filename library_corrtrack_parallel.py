@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from statsmodels.tsa.stattools import adfuller
 from sklearn.metrics import roc_auc_score, average_precision_score
 import itertools
+import bisect
 import csv
 import time
 import datetime
@@ -13,20 +14,36 @@ from itertools import combinations, product, repeat
 from collections import defaultdict
 import math
 from scipy.stats import norm
-from multiprocessing import shared_memory
 from functools import partial
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Iterable, Optional, Sequence
 import traceback
 
 try:
     from dask import delayed, compute
     from dask.threaded import get as dask_threaded_get
-    from dask.multiprocessing import get as dask_multiprocessing_get
     _HAS_DASK = True
 except ImportError:  # pragma: no cover
-    delayed = compute = dask_threaded_get = dask_multiprocessing_get = None
+    delayed = compute = dask_threaded_get = None
     _HAS_DASK = False
+
+try:
+    from candidate_kernels import (
+        find_candidate_pairs as _cy_find_candidate_pairs,
+        fast_corr_and_dist as _cy_fast_corr_and_dist,
+        validate_corr_batch as _cy_validate_corr_batch,
+    )
+    _HAS_CYTHON_KERNELS = True
+except Exception:  # pragma: no cover
+    _cy_find_candidate_pairs = None
+    _cy_fast_corr_and_dist = None
+    _cy_validate_corr_batch = None
+    _HAS_CYTHON_KERNELS = False
+
+try:
+    from sketch_kernels import compute_series_dots as _cy_compute_series_dots
+except Exception:  # pragma: no cover
+    _cy_compute_series_dots = None
 
 
 RUN_RESULT_COLUMNS: Sequence[str] = (
@@ -48,6 +65,7 @@ RUN_RESULT_COLUMNS: Sequence[str] = (
     "seed",
     "seed_toggle",
     "preprocess",
+    "sketch_norm",
     "extra_filters",
     "corr_threshold",
     "grid_max",
@@ -85,6 +103,7 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     "seed",
     "seed_toggle",
     "preprocess",
+    "sketch_norm",
     "extra_filters",
     "corr_threshold",
     "grid_max",
@@ -145,6 +164,7 @@ COMPARISON_COLUMNS: Sequence[str] = (
     "seed",
     "seed_toggle",
     "preprocess",
+    "sketch_norm",
     "extra_filters",
     "corr_threshold",
     "grid_max",
@@ -265,6 +285,10 @@ class CSVStreamWriter:
 
 def _row_from_mapping(columns: Sequence[str], data: dict) -> list:
     return [data.get(column, "") for column in columns]
+
+def _run_batch_static(func, batch):
+    """Top-level batch helper to avoid bound-method pickling issues."""
+    return [func(item) for item in batch]
 
 
 def execute_corrtrack_pass(
@@ -457,6 +481,7 @@ def run_and_log_bruteforce(
     record["extra_filters"] = False
     record["seed"] = None
     record["seed_toggle"] = None
+    record["sketch_norm"] = getattr(corrtrack, "sketch_norm", None)
     record["warmup_size"] = None
     record["nodes"] = metadata.get("nodes", base_config.get("max_workers"))
     record["freq_threshold"] = getattr(corrtrack, "freq_threshold", None)
@@ -531,6 +556,10 @@ def run_and_log_corrtrack(
     if cell_stretch is None or cell_stretch <= 0.0:
         cell_stretch = 1.0
 
+    feature_kwargs = _extract_feature_overrides(run_params)
+    run_seed = _to_int(run_params.get("seed"))
+    seed_toggle = _to_int(run_params.get("seed_toggle"))
+
     corrtrack = CorrTrack(
         window_size=base_config["window_size"],
         basic_window=base_config.get("basic_window"),
@@ -540,8 +569,8 @@ def run_and_log_corrtrack(
         grid_dimension=grid_dimension,
         cell_size=cell_stretch,
         warmup_data=warmup_data,
-        seed=_to_int(run_params.get("seed")),
-        seed_toggle=_to_int(run_params.get("seed_toggle")),
+        seed=run_seed,
+        seed_toggle=seed_toggle,
         freq_threshold=_to_float(run_params.get("freq_threshold")),
         corr_threshold=base_config["corr_threshold"],
         neg_corr=base_config.get("neg_corr", False),
@@ -549,6 +578,7 @@ def run_and_log_corrtrack(
         extra_filter=extra_filter,
         exec=base_config.get("exec", "thread"),
         max_workers=base_config.get("max_workers", 0),
+        **feature_kwargs,
     )
 
     record, runtime_parts, corr_flags = execute_corrtrack_pass(
@@ -567,8 +597,9 @@ def run_and_log_corrtrack(
     record["warmup_size"] = warmup_ratio
     record["extra_filters"] = extra_filter
     record["preprocess"] = run_params.get("preprocess")
-    record["seed"] = _to_int(run_params.get("seed"))
-    record["seed_toggle"] = _to_int(run_params.get("seed_toggle"))
+    record["seed"] = run_seed
+    record["seed_toggle"] = seed_toggle
+    record["sketch_norm"] = corrtrack.sketch_norm
     record["freq_threshold"] = _to_float(run_params.get("freq_threshold"))
     record["n_vectors"] = n_vectors
     record["grid_dimension"] = grid_dimension
@@ -603,11 +634,12 @@ def _normalize_exec_mode(value, default="thread"):
     aliases = {
         "parallel": "thread",
         "threads": "thread",
-        "processes": "process",
+        "process": "thread",
+        "processes": "thread",
     }
     resolved = aliases.get(key, key)
 
-    valid = {"sequential", "thread", "process"}
+    valid = {"sequential", "thread"}
     return resolved if resolved in valid else default
 
 
@@ -625,6 +657,14 @@ def _to_float_safe(value):
         return None
 
 
+def _extract_feature_overrides(params):
+    overrides = {}
+    norm = params.get("sketch_norm")
+    if norm is not None:
+        overrides["sketch_norm"] = norm
+    return overrides
+
+
 def _compute_base_cell_size(corr_threshold, n_vectors):
     if corr_threshold is None:
         return None
@@ -634,22 +674,6 @@ def _compute_base_cell_size(corr_threshold, n_vectors):
     try:
         return math.sqrt((1.0 - float(corr_threshold)) / 2.0) / math.sqrt(n_vec)
     except (ValueError, ZeroDivisionError):
-        return None
-
-
-def _compute_shrink_factor(grid_dimension, n_vectors):
-    n_vec = _to_float_safe(n_vectors)
-    if n_vec is None or n_vec <= 0.0:
-        return None
-    n_vec_sqrt = math.sqrt(n_vec)
-    if n_vec_sqrt <= 0.0:
-        return None
-    grid_dim = _to_float_safe(grid_dimension)
-    if grid_dim is None or grid_dim <= 0.0:
-        grid_dim = 1.0
-    try:
-        return math.sqrt(min(1.0, grid_dim / n_vec_sqrt))
-    except ValueError:
         return None
 
 
@@ -670,11 +694,18 @@ def _resolve_cell_stretch(
         return default
 
     base = _compute_base_cell_size(corr_threshold, n_vectors)
-    shrink = _compute_shrink_factor(grid_dimension, n_vectors)
-    if base is None or shrink is None or base <= 0.0 or shrink <= 0.0:
+    grid_dim = _to_float_safe(grid_dimension)
+    if grid_dim is None or grid_dim <= 0.0:
+        grid_dim = 1.0
+    try:
+        grid_adjust = grid_dim ** 0.25
+    except ValueError:
+        grid_adjust = 1.0
+
+    if base is None or base <= 0.0 or grid_adjust <= 0.0:
         return default
 
-    stretch = size / (base * shrink)
+    stretch = size / (base * grid_adjust)
     if not math.isfinite(stretch) or stretch <= 0.0:
         return default
     return stretch
@@ -686,6 +717,17 @@ def _fast_corr_and_dist(x, y, return_stats=False):
     When ``return_stats`` is True, also returns (n, mean_x, mean_y, var_x, var_y),
     where var_* are the summed squared deviations (n * variance).
     """
+    if _cy_fast_corr_and_dist is not None:
+        try:
+            corr, dist, stats = _cy_fast_corr_and_dist(
+                np.asarray(x, dtype=np.float64),
+                np.asarray(y, dtype=np.float64),
+            )
+            if return_stats:
+                return corr, dist, stats
+            return corr, dist
+        except Exception:
+            pass
     x = np.asarray(x, dtype=np.float64)
     y = np.asarray(y, dtype=np.float64)
 
@@ -728,18 +770,36 @@ def _fast_corr_and_dist(x, y, return_stats=False):
     return corr, dist
 
 
+def _compute_series_dots(window_blocks, weights):
+    kernel = os.environ.get("CORRTRACK_SKETCH_KERNEL", "numpy").strip().lower()
+    if kernel == "cython" and _cy_compute_series_dots is not None:
+        try:
+            wb = np.ascontiguousarray(window_blocks, dtype=np.float64)
+            wt = np.ascontiguousarray(weights, dtype=np.float64)
+            return _cy_compute_series_dots(wb, wt)
+        except Exception:
+            pass
+    return np.einsum("sbw,bvw->sbv", window_blocks, weights, optimize=True)
+
+
 def _is_near_constant_stats(var_sum, n, std_thresh=1e-3):
     if n <= 0:
         return True
     return var_sum <= (std_thresh ** 2) * n
 
 
-def _is_structurally_spiked_stats(x, mean, var_sum, n, kurt_thresh=5.0):
+def _is_structurally_spiked_stats(x, mean, var_sum, n, kurt_thresh=5.0, mu4_sum=None):
     if n < 4 or var_sum <= 0.0:
         return False
 
-    centered = np.asarray(x, dtype=np.float64) - mean
-    mu4 = float(np.sum(centered ** 4))
+    if mu4_sum is None:
+        if x is None:
+            return False
+        centered = np.asarray(x, dtype=np.float64) - mean
+        mu4 = float(np.sum(centered ** 4))
+    else:
+        mu4 = float(mu4_sum)
+
     var = var_sum / n
     if var <= 0.0:
         return False
@@ -748,83 +808,21 @@ def _is_structurally_spiked_stats(x, mean, var_sum, n, kurt_thresh=5.0):
 
 
 def _sketch_worker(payload):
-    """Execute a sketch node update.
-
-    Thread payload: (corrtrack, node_index, node_new, ids_subset, verbose, testing[, perm])
-    Process payload: {
-        "index": int,
-        "state": dict,
-        "node_new": np.ndarray,
-        "ids_subset": list,
-        "verbose": bool,
-        "testing": bool,
-        "perm": Optional[list[int]],
-        "distribute": bool,
-    }
-    Returns thread tuple or process dict (branch handled by caller).
-    """
-
-    if isinstance(payload, dict):
-        perm = payload.get("perm")
-        if perm is not None:
-            perm = np.asarray(perm, dtype=int)
-        sketch_node = Sketches.from_state(payload["state"])
-        sketches, partitions = sketch_node.run(
-            payload["node_new"],
-            payload["ids_subset"],
-            verbose=payload.get("verbose", False),
-            testing=payload.get("testing", False),
-            perm=perm,
-            distribute=payload.get("distribute", True),
-        )
-        return {
-            "index": payload["index"],
-            "state": sketch_node.dump_state(),
-            "sketches": sketches,
-            "partitions": partitions,
-        }
-
-    if len(payload) == 6:
-        corrtrack, node_index, node_new, ids_subset, verbose, testing = payload
-        perm = None
-    else:
-        corrtrack, node_index, node_new, ids_subset, verbose, testing, perm = payload
-    if perm is not None:
-        perm = np.asarray(perm, dtype=int)
+    """Execute a sketch node update."""
+    corrtrack, node_index, node_new, ids_subset, verbose, testing = payload
     sketch_node = corrtrack.sketch_nodes[node_index]
     sketches, partitions = sketch_node.run(
         node_new,
         ids_subset,
         verbose=verbose,
         testing=testing,
-        perm=perm,
         distribute=False,
     )
     return node_index, sketch_node, sketches, partitions
 
 
 def _grid_worker(payload):
-    """Execute a grid node run.
-
-    Thread payload: (corrtrack, grid_index, n_ids, verbose, testing)
-    Process payload: {
-        "index": int,
-        "state": dict,
-        "n_ids": int,
-        "verbose": bool,
-        "testing": bool,
-    }
-    Returns thread tuple or process dict (branch handled by caller).
-    """
-    if isinstance(payload, dict):
-        grid_node = Candidates.from_state(payload["state"])
-        result = grid_node.run(payload["n_ids"], verbose=payload.get("verbose", False), testing=payload.get("testing", False))
-        return {
-            "index": payload["index"],
-            "state": grid_node.dump_state(),
-            "result": result,
-        }
-
+    """Execute a grid node run."""
     corrtrack, grid_index, n_ids, verbose, testing = payload
     grid_node = corrtrack.grid_nodes[grid_index]
     result = grid_node.run(n_ids, verbose=verbose, testing=testing)
@@ -832,35 +830,7 @@ def _grid_worker(payload):
 
 
 def _bf_worker(payload):
-    """Execute brute-force candidate generation for a shard.
-
-    Thread payload: (index, bf_node, window_step, ids, verbose, testing, ref_ids)
-    Process payload: {
-        "index": int,
-        "state": dict,
-        "window_step": np.ndarray,
-        "ids": list,
-        "verbose": bool,
-        "testing": bool,
-        "ref_ids": Optional[list],
-    }
-    Returns thread tuple or process dict (branch handled by caller).
-    """
-    if isinstance(payload, dict):
-        bf_node = Candidates_BF.from_state(payload["state"])
-        result = bf_node.run(
-            payload["window_step"],
-            payload["ids"],
-            verbose=payload.get("verbose", False),
-            testing=payload.get("testing", False),
-            ref_ids=payload.get("ref_ids"),
-        )
-        return {
-            "index": payload["index"],
-            "state": bf_node.dump_state(),
-            "result": result,
-        }
-
+    """Execute brute-force candidate generation for a shard."""
     index, bf_node, window_step, ids, verbose, testing, ref_ids = payload
     result = bf_node.run(window_step, ids, verbose=verbose, testing=testing, ref_ids=ref_ids)
     return index, bf_node, result
@@ -971,194 +941,6 @@ def _normalize_bf_key(pair):
     return (id1, id2, t1, t2, w)
 
 
-def _bf_worker_process(payload):
-    shared = payload.get("shared")
-    if shared is None:
-        return {"index": payload.get("index"), "result": {}}
-
-    shm = shared_memory.SharedMemory(name=shared["name"])
-    mask_shm = None
-    try:
-        data = np.ndarray(shared["shape"], dtype=np.dtype(shared["dtype"]), buffer=shm.buf)
-        window_index = np.asarray(payload["window_index"], dtype=int)
-        ids_list = payload["ids_list"]
-        ref_indices = payload["ref_indices"]
-        window_size = int(payload["window_size"])
-        window_step = int(payload["window_step"])
-
-        mask_spec = payload.get("mask")
-        if mask_spec and "name" in mask_spec:
-            mask_shm = shared_memory.SharedMemory(name=mask_spec["name"])
-            mask = np.ndarray(mask_spec["shape"], dtype=np.dtype(mask_spec["dtype"]), buffer=mask_shm.buf)
-            mask = mask.astype(bool, copy=False)
-        else:
-            mask = None
-
-        rows = _enumerate_candidate_rows(
-            data,
-            window_index,
-            ref_indices,
-            window_size,
-            window_step,
-            mask=mask,
-            shard_start=payload.get("shard_start"),
-            shard_end=payload.get("shard_end"),
-        )
-
-        if rows is None:
-            result = None
-        else:
-            shm_result = shared_memory.SharedMemory(create=True, size=rows.nbytes)
-            np.ndarray(rows.shape, dtype=rows.dtype, buffer=shm_result.buf)[:] = rows
-            result = {
-                "name": shm_result.name,
-                "shape": rows.shape,
-                "dtype": rows.dtype.str,
-            }
-            shm_result.close()
-
-        return {"index": payload["index"], "result": result}
-    finally:
-        shm.close()
-        if mask_shm is not None:
-            mask_shm.close()
-
-
-def _train_distance_worker(payload):
-    """Process-safe worker for training distance statistics."""
-
-    shared = payload.get("shared")
-    shm = None
-    window_data = payload.get("window_data")
-
-    try:
-        if shared is not None:
-            shm = shared_memory.SharedMemory(name=shared["name"])
-            window_data = np.ndarray(shared["shape"], dtype=np.dtype(shared["dtype"]), buffer=shm.buf)
-
-        pair, sign = payload["item"]
-        id1, id2, t1, t2, w = pair
-        base_index = payload["base_index"]
-        series_ids = payload["series_ids"]
-
-        try:
-            ix = series_ids[id1]
-            iy = series_ids[id2]
-            start1 = int(t1 - base_index)
-            start2 = int(t2 - base_index)
-            x = window_data[ix, start1:start1 + w].astype(np.float64, copy=False)
-            y = window_data[iy, start2:start2 + w].astype(np.float64, copy=False)
-        except Exception:
-            return {"counts": {"seen": 0, "skipped": 1, "constants": 0}}
-
-        pair_corr, pair_dist, stats = _fast_corr_and_dist(x, y, return_stats=True)
-        n, mean_x, mean_y, var_x, var_y = stats
-
-        if _is_near_constant_stats(var_x, n) or _is_near_constant_stats(var_y, n):
-            return {"counts": {"seen": 1, "skipped": 0, "constants": 1}}
-
-        if (
-            _is_structurally_spiked_stats(x, mean_x, var_x, n, kurt_thresh=5.0)
-            or _is_structurally_spiked_stats(y, mean_y, var_y, n, kurt_thresh=5.0)
-        ):
-            return {"counts": {"seen": 1, "skipped": 1, "constants": 0}}
-
-        preprocess = payload.get("preprocess", False)
-        warmup_means = payload.get("warmup_means") or []
-        warmup_stds = payload.get("warmup_stds") or []
-
-        def _z_norm(sample, idx):
-            arr = np.asarray(sample, dtype=np.float64)
-            if preprocess:
-                if arr.size >= 2:
-                    arr = np.clip(np.diff(arr), -3, 3)
-                else:
-                    arr = np.zeros_like(arr)
-            mean = warmup_means[idx] if idx < len(warmup_means) else None
-            std = warmup_stds[idx] if idx < len(warmup_stds) else None
-            mean = mean if mean is not None else 0.0
-            std = std if std is not None and std > 0 else 1.0
-            return (arr - mean) / std
-
-        nx = _z_norm(x, ix)
-        ny = _z_norm(y, iy)
-        norm_pair_dist = float(np.sqrt(np.sum((nx - ny) ** 2)))
-
-        dist_sk = None
-        dist_norm_sk = None
-        est = None
-        est_diff = None
-
-        sk1 = payload.get("sk1")
-        sk2 = payload.get("sk2")
-        if sk1 is not None and sk2 is not None:
-            try:
-                sk1 = np.asarray(sk1, dtype=float)
-                sk2 = np.asarray(sk2, dtype=float)
-                dist_sk = float(np.linalg.norm(sk1 - sk2))
-                n1 = np.linalg.norm(sk1)
-                n2 = np.linalg.norm(sk2)
-                if n1 > 0 and n2 > 0:
-                    dist_norm_sk = float(np.linalg.norm(sk1 / n1 - sk2 / n2))
-                    est = float(np.dot(sk1, sk2) / (n1 * n2))
-                    est_diff = float(est - pair_corr)
-            except Exception:
-                pass
-
-        corr_threshold = payload["corr_threshold"]
-        pos = pair_corr >= corr_threshold if not np.isnan(pair_corr) else False
-        neg = pair_corr <= -corr_threshold if not np.isnan(pair_corr) else False
-
-        result = {
-            "dists_pos": [], "dists_neg": [], "dists_nonc": [],
-            "dists_norm_pos": [], "dists_norm_neg": [], "dists_norm_nonc": [],
-            "dists_sk_pos": [], "dists_sk_neg": [], "dists_sk_nonc": [],
-            "dists_norm_sk_pos": [], "dists_norm_sk_neg": [], "dists_norm_sk_nonc": [],
-            "est_pos": [], "est_neg": [], "est_nonc": [],
-            "est_diffs": [],
-            "counts": {"seen": 1, "skipped": 0, "constants": 0},
-        }
-
-        if pos:
-            result["dists_pos"].append(pair_dist)
-            result["dists_norm_pos"].append(norm_pair_dist)
-        elif neg:
-            result["dists_neg"].append(pair_dist)
-            result["dists_norm_neg"].append(norm_pair_dist)
-        else:
-            result["dists_nonc"].append(pair_dist)
-            result["dists_norm_nonc"].append(norm_pair_dist)
-
-        if dist_sk is not None:
-            if pos:
-                result["dists_sk_pos"].append(dist_sk)
-            elif neg:
-                result["dists_sk_neg"].append(dist_sk)
-            else:
-                result["dists_sk_nonc"].append(dist_sk)
-
-        if dist_norm_sk is not None:
-            if pos:
-                result["dists_norm_sk_pos"].append(dist_norm_sk)
-            elif neg:
-                result["dists_norm_sk_neg"].append(dist_norm_sk)
-            else:
-                result["dists_norm_sk_nonc"].append(dist_norm_sk)
-
-        if est is not None:
-            if pos:
-                result["est_pos"].append(est)
-            elif neg:
-                result["est_neg"].append(est)
-            else:
-                result["est_nonc"].append(est)
-        if est_diff is not None:
-            result["est_diffs"].append(est_diff)
-
-        return result
-    finally:
-        if shm is not None:
-            shm.close()
 
 
 def _corr_validation_batch_worker(payload):
@@ -1167,44 +949,44 @@ def _corr_validation_batch_worker(payload):
     payload keys:
       - items: list of metadata dicts
       - corr_threshold, neg_corr, corr_val
-      - shared: optional shared-memory spec
     Returns list of tuples (pair, is_corr, corr, dist, is_constant, is_spiked)
     """
     items = payload["items"]
     corr_threshold = payload["corr_threshold"]
     neg_corr = payload["neg_corr"]
     corr_val = payload.get("corr_val", True)
-    shared = payload.get("shared")
 
     if not corr_val:
         return [
             (item["pair"], True, 1.0, 0.0, False, False)
             for item in items
         ]
-
-    shm = None
-    data = None
     results = []
 
-    try:
-        if shared:
-            shm = shared_memory.SharedMemory(name=shared["name"])
-            data = np.ndarray(shared["shape"], dtype=np.dtype(shared["dtype"]), buffer=shm.buf)
+    if _cy_validate_corr_batch is not None:
+        try:
+            x_batch = np.asarray([item["x"] for item in items], dtype=np.float64)
+            y_batch = np.asarray([item["y"] for item in items], dtype=np.float64)
+            if x_batch.ndim == 2 and y_batch.shape == x_batch.shape:
+                batch_results = _cy_validate_corr_batch(
+                    x_batch,
+                    y_batch,
+                    float(corr_threshold),
+                    bool(neg_corr),
+                )
+                for item, entry in zip(items, batch_results):
+                    is_correlated, pair_corr, pair_dist, is_const, is_spiked = entry
+                    results.append((item["pair"], is_correlated, pair_corr, pair_dist, is_const, is_spiked))
+                return results
+        except Exception:
+            results = []
 
+    try:
         for item in items:
             pair = item["pair"]
 
-            if data is not None:
-                idx1 = item["idx1"]
-                idx2 = item["idx2"]
-                start1 = item["start1"]
-                start2 = item["start2"]
-                window = item["window"]
-                x = data[idx1, start1:start1 + window]
-                y = data[idx2, start2:start2 + window]
-            else:
-                x = item["x"]
-                y = item["y"]
+            x = item["x"]
+            y = item["y"]
 
             pair_corr, pair_dist, stats = _fast_corr_and_dist(x, y, return_stats=True)
             n, mean_x, mean_y, var_x, var_y = stats
@@ -1229,8 +1011,7 @@ def _corr_validation_batch_worker(payload):
 
         return results
     finally:
-        if shm is not None:
-            shm.close()
+        pass
 #from numba import njit, prange
 
 
@@ -1245,7 +1026,7 @@ _os_parallel_guard.environ.setdefault("MKL_DEBUG_CPU_TYPE", "5")
 # ================================================================
 
 class CorrTrack:
-    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,grid_dimension,cell_size,warmup_data,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,extra_filter=False,exec="parallel",max_workers=0):
+    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,grid_dimension,cell_size,warmup_data,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,extra_filter=False,exec="parallel",max_workers=0,sketch_norm="z"):
         
         if basic_window is not None and window_size % basic_window != 0:
             raise TypeError("Window size (",window_size,") is not divisable by basic window size (",basic_window,")")
@@ -1253,16 +1034,10 @@ class CorrTrack:
             raise TypeError("Basic window size (",basic_window,") is not divisable by window step (",window_step,")")
         #if window_step > 0 and n_lags % window_step != 0:
         #    raise TypeError("Number of lags (",n_lags,") is not divisable by window step (",window_step,")")
-        if grid_dimension == 0:
-            if n_vectors is None or n_vectors <= 0:
-                raise ValueError("n_vectors must be a positive integer.")
-            grid_dimension = CorrTrack.choose_grid_dimension(n_vectors)
-        elif grid_dimension < 0:
-            raise ValueError("grid_dimension must be a non-negative integer.")
-
+        grid_dimension = 1 if grid_dimension is None or grid_dimension <= 0 else int(grid_dimension)
         if n_vectors is None or n_vectors <= 0:
             raise ValueError("n_vectors must be a positive integer.")
-        if grid_dimension == 0 or n_vectors % grid_dimension != 0:
+        if n_vectors % grid_dimension != 0:
             raise TypeError("Number of random vectors (",n_vectors,") is not divisable by the grid dimension (",grid_dimension,")")
         
         # Parameters features
@@ -1282,6 +1057,7 @@ class CorrTrack:
         self.datetime_index = None
         self.datetime_lookup = {} #TODO: save correlation logs to file
         self.preprocess = preprocess
+        self.sketch_norm = str(sketch_norm) if sketch_norm is not None else "z"
         self.extra_filter = _coerce_to_bool(extra_filter)
         # Parameters lags
         self.window_size = window_size
@@ -1303,13 +1079,12 @@ class CorrTrack:
         self.n_lagged_windows = self.n_lags//self.window_step+1
         # Parameter sketches
         self.seed = seed if seed is not None else int(np.random.SeedSequence().entropy)
-        self._perm_rng = np.random.default_rng(self.seed)
         self.seed_toggle = seed_toggle
         self.n_vectors = n_vectors
         # Parameters nodes
         self.exec = _normalize_exec_mode(exec, default="thread")
         self.n_nodes = max_workers
-        if self.exec not in ("thread", "process"):
+        if self.exec not in ("thread",):
             self.n_nodes = 1
         elif max_workers == 0:
             self.n_nodes = max(1, (os.cpu_count() or 1))
@@ -1317,10 +1092,8 @@ class CorrTrack:
         self.sketch_nodes = []
         self.grid_nodes = []
         self.brute_force_nodes = []
-        self._shared_window = None
-        self._shared_window_shape = None
-        self._shared_window_dtype = None
-        self._shared_window_size = 0
+        self._thread_pool = None
+        self._thread_pool_workers = None
         # Parameters grids
         self.grid_dimension = grid_dimension
         if self.n_vectors is not None:
@@ -1340,8 +1113,16 @@ class CorrTrack:
         self.sketch_std = np.sqrt(self.window_size/self.n_vectors)
         self.corr_threshold = corr_threshold
 
-        base = np.sqrt((1.0 - corr_threshold) / 2.0) / np.sqrt(self.n_vectors)
-        shrink = np.sqrt(np.minimum(1.0, self.grid_dimension / np.sqrt(self.n_vectors)))
+        base = _compute_base_cell_size(corr_threshold, self.n_vectors)
+        if base is None:
+            base = np.sqrt((1.0 - corr_threshold) / 2.0) / np.sqrt(self.n_vectors)
+        grid_dim = _to_float_safe(self.grid_dimension)
+        if grid_dim is None or grid_dim <= 0.0:
+            grid_dim = 1.0
+        try:
+            grid_adjust = grid_dim ** 0.25
+        except ValueError:
+            grid_adjust = 1.0
 
         stretch = cell_size if cell_size is not None else 1.0
         try:
@@ -1352,9 +1133,10 @@ class CorrTrack:
             stretch = 1.0
 
         self.cell_stretch = stretch
-        self.cell_size = base * shrink * stretch
+        self.cell_size = base * stretch * grid_adjust
         self.cell_size = min(self.cell_size, 0.5)
-        self.grid_max = self.window_size/np.sqrt(self.n_vectors) #3*self.sketch_std
+        self.grid_max = min(1.0, 3.0/np.sqrt(self.n_vectors))
+
         # Parameters thresholds
         if freq_threshold is not None:
             self.freq_threshold = freq_threshold*self.n_vectors
@@ -1403,21 +1185,29 @@ class CorrTrack:
         self.monitor_time = 0
         self.train_dist_time = 0  
 
+        self.profile_enabled = bool(int(os.environ.get("CORRTRACK_PROFILE", "0")))
+        self.profile_print_every = max(0, int(os.environ.get("CORRTRACK_PROFILE_EVERY", "0") or 0))
+        self.profile_path = os.environ.get("CORRTRACK_PROFILE_PATH", "").strip()
+        self.profile_silent = bool(int(os.environ.get("CORRTRACK_PROFILE_SILENT", "0") or 0))
+        self._profile_steps = 0
+        self._profile_stats = defaultdict(float)
+        self._profile_counts = defaultdict(int)
+
         self.min_dist = np.inf
         self.pair_min_dist = None
 
         # Filter tuning defaults
         self.sign_prefilter_scale = 1.3
         self.sign_prefilter_extra = 1
-        self.neighbor_margin = 0.1 if self.neg_corr else 0.08
+        # Neighbor search removed; keep margin for compatibility with debug tooling.
+        self.neighbor_margin = 0.0
 
         #getting warmup stats
         self._warmup()
 
         # Instantiating corrtrack objects
         for g in range(self.n_grids):
-            neighbor_margin = self.neighbor_margin if self.neg_corr else 0.06
-            self.grid_nodes.append(Candidates(
+            node = Candidates(
                 self.n_lagged_windows,
                 self.grid_dimension,
                 self.cell_size,
@@ -1430,29 +1220,23 @@ class CorrTrack:
                 self.neg_corr,
                 sign_prefilter_scale=self.sign_prefilter_scale,
                 sign_prefilter_extra=self.sign_prefilter_extra,
-                neighbor_margin=min(neighbor_margin, 0.1),
                 extra_filter=self.extra_filter,
-            ))
+                seed=(self.seed + g) if self.seed is not None else g,
+            )
+            self.grid_nodes.append(node)
 
-    def configure_filters(self, sign_scale=None, sign_extra=None, neighbor_margin=None):
+    def configure_filters(self, sign_scale=None, sign_extra=None):
         if sign_scale is not None:
             self.sign_prefilter_scale = float(sign_scale)
         if sign_extra is not None:
             self.sign_prefilter_extra = int(sign_extra)
-        if neighbor_margin is not None:
-            self.neighbor_margin = float(neighbor_margin)
 
         for node in self.grid_nodes:
             if sign_scale is not None:
                 node.sign_prefilter_scale = float(sign_scale)
             if sign_extra is not None:
                 node.sign_prefilter_extra = int(sign_extra)
-            if neighbor_margin is not None:
-                margin = float(neighbor_margin)
-                if not self.neg_corr:
-                    margin = max(0.06, margin)
-                node.neighbor_margin = min(margin, 0.1)
-    
+
     def choose_grid_dimension(K: int) -> int:
         if K is None or K <= 0:
             raise ValueError("K must be a positive integer")
@@ -1487,6 +1271,41 @@ class CorrTrack:
         for start in range(0, total, chunk_size):
             yield sequence[start:start + chunk_size]
 
+    def _profile_add(self, key: str, elapsed: float):
+        if not self.profile_enabled:
+            return
+        self._profile_stats[key] += elapsed
+        self._profile_counts[key] += 1
+
+    def _profile_tick(self):
+        if not self.profile_enabled or self.profile_print_every <= 0:
+            return
+        self._profile_steps += 1
+        if self._profile_steps % self.profile_print_every == 0:
+            self._print_profile_stats()
+
+    def _print_profile_stats(self):
+        if not self.profile_enabled:
+            return
+        lines = []
+        for key in sorted(self._profile_stats):
+            total = self._profile_stats[key]
+            count = max(1, self._profile_counts.get(key, 0))
+            avg = total / count
+            lines.append(f"{key}: total={total:.4f}s count={count} avg={avg:.6f}s")
+        if not lines:
+            return
+        message = "[CorrTrack profile] " + " | ".join(lines)
+        if self.profile_path:
+            try:
+                os.makedirs(os.path.dirname(self.profile_path) or ".", exist_ok=True)
+                with open(self.profile_path, "a", encoding="utf-8") as handle:
+                    handle.write(message + "\n")
+            except Exception:
+                pass
+        if not self.profile_silent:
+            print(message)
+
 
     @staticmethod
     def _run_batch(func, batch):
@@ -1494,12 +1313,12 @@ class CorrTrack:
         return [func(item) for item in batch]
 
 
-    def _parallel_map(self,func,iterable,mode: str = "thread",max_workers: int = None,chunksize: int = 1,preserve_order: bool = True):
+    def _parallel_map(self,func,iterable,mode: str = "thread",max_workers: int = None,chunksize: int = None,preserve_order: bool = True):
         items = list(iterable)
         if not items:
             return []
 
-        if mode not in {"thread", "process", "sequential"}:
+        if mode not in {"thread", "sequential"}:
             mode = "thread"
 
         if mode == "sequential":
@@ -1513,16 +1332,14 @@ class CorrTrack:
             return [func(x) for x in items]
 
         if chunksize is None:
-            chunksize = 0
-        try:
-            chunk_size = int(chunksize)
-        except (TypeError, ValueError):
             chunk_size = 0
+        else:
+            try:
+                chunk_size = int(chunksize)
+            except (TypeError, ValueError):
+                chunk_size = 0
 
-        if mode == "process":
-            # Avoid complicating pickling by batching in process mode.
-            chunk_size = 1
-        elif chunk_size <= 0:
+        if chunk_size <= 0:
             auto = len(items) // (max_workers * 4)
             chunk_size = 1 if auto <= 1 else min(auto, 64)
 
@@ -1531,41 +1348,61 @@ class CorrTrack:
         use_dask = _HAS_DASK and delayed is not None
 
         if not use_dask:
-            executor_cls = ThreadPoolExecutor if mode == "thread" else ProcessPoolExecutor
+            executor_cls = ThreadPoolExecutor
+            executor = None
+            managed_executor = True
+
+            def _shutdown_executor(ex):
+                if ex is not None and managed_executor:
+                    try:
+                        ex.shutdown(wait=True, cancel_futures=True)
+                    except Exception:
+                        pass
+
             try:
-                with executor_cls(max_workers=max_workers) as executor:
-                    if preserve_order:
-                        if chunk_size == 1:
-                            return list(executor.map(func, items))
+                if mode == "thread":
+                    executor = self._get_thread_pool(max_workers)
+                    managed_executor = False
+                if executor is None:
+                    executor = executor_cls(max_workers=max_workers)
 
-                        batches = list(self._chunk_sequence(items, chunk_size))
-                        results = []
-                        for batch_result in executor.map(self._run_batch, repeat(func), batches):
-                            results.extend(batch_result)
-                        return results
-
+                if preserve_order:
                     if chunk_size == 1:
-                        futures = [executor.submit(func, item) for item in items]
-                        results = []
-                        for future in as_completed(futures):
-                            results.append(future.result())
-                        return results
+                        return list(executor.map(func, items))
 
                     batches = list(self._chunk_sequence(items, chunk_size))
-                    futures = [executor.submit(self._run_batch, func, batch) for batch in batches]
+                    results = []
+                    runner = _run_batch_static
+                    for batch_result in executor.map(runner, repeat(func), batches):
+                        results.extend(batch_result)
+                    return results
+
+                if chunk_size == 1:
+                    futures = [executor.submit(func, item) for item in items]
                     results = []
                     for future in as_completed(futures):
-                        results.extend(future.result())
+                        results.append(future.result())
                     return results
+
+                batches = list(self._chunk_sequence(items, chunk_size))
+                runner = _run_batch_static
+                futures = [executor.submit(runner, func, batch) for batch in batches]
+                results = []
+                for future in as_completed(futures):
+                    results.extend(future.result())
+                return results
             except Exception as exc:
                 if getattr(self, "verbose", False):
                     print(f"[parallel_map:{mode}] Executor fallback to sequential due to: {exc}")
+                self._reset_thread_pool()
                 return [func(x) for x in items]
+            finally:
+                _shutdown_executor(executor)
 
         if max_workers is None:
             max_workers = max(1, (os.cpu_count() or 1))
 
-        scheduler_get = dask_threaded_get if mode == "thread" else dask_multiprocessing_get
+        scheduler_get = dask_threaded_get
         if scheduler_get is None:
             return [func(x) for x in items]
 
@@ -1580,45 +1417,33 @@ class CorrTrack:
             if getattr(self, "verbose", False):
                 print(f"[parallel_map:{mode}] Falling back to sequential due to: {e}")
             return [func(x) for x in items]
-        
-    def _release_shared_window(self):
-        if self._shared_window is not None:
+
+    def _get_thread_pool(self, max_workers: int):
+        """Reuse a thread pool between calls to avoid frequent spin-up."""
+        if max_workers is None or max_workers <= 0:
+            max_workers = max(1, (os.cpu_count() or 1))
+
+        pool = getattr(self, "_thread_pool", None)
+        if pool is not None and self._thread_pool_workers != max_workers:
+            self._reset_thread_pool()
+            pool = None
+
+        if pool is None:
+            pool = ThreadPoolExecutor(max_workers=max_workers)
+            self._thread_pool = pool
+            self._thread_pool_workers = max_workers
+        return pool
+
+    def _reset_thread_pool(self):
+        pool = getattr(self, "_thread_pool", None)
+        if pool is not None:
             try:
-                self._shared_window.close()
-                self._shared_window.unlink()
-            except FileNotFoundError:
+                pool.shutdown(wait=False, cancel_futures=True)
+            except Exception:
                 pass
-            except AttributeError:
-                pass
-            self._shared_window = None
-            self._shared_window_shape = None
-            self._shared_window_dtype = None
-            self._shared_window_size = 0
-
-    def _ensure_shared_window(self):
-        if self.exec != "process":
-            return None
-
-        data = np.asarray(self.window_data, dtype=float)
-        if data.size == 0:
-            return None
-
-        shape = data.shape
-        dtype = data.dtype
-        size = data.nbytes
-
-        if self._shared_window is None or size > self._shared_window_size:
-            self._release_shared_window()
-            shm = shared_memory.SharedMemory(create=True, size=size)
-            self._shared_window = shm
-            self._shared_window_size = size
-        else:
-            shm = self._shared_window
-
-        np.ndarray(shape, dtype=dtype, buffer=shm.buf)[:] = data
-        self._shared_window_shape = shape
-        self._shared_window_dtype = dtype.str
-        return shm
+        self._thread_pool = None
+        self._thread_pool_workers = None
+        
 
     def _compute_weight_threshold(self):
         if self.cell_size is None:
@@ -1777,26 +1602,61 @@ class CorrTrack:
             clipped_t = np.clip(diff_t, -3, 3)                   # 2. Linear clipping
             t = clipped_t
 
-        fallback_std = 1.0
-        z_normalized = np.empty_like(t)
+        # The previous implementation applied a z-normalization on the fly.
+        # We now keep the raw (preprocessed) values and compensate for mean
+        # shifts later when adjusting sketches.
+        # fallback_std = 1.0
+        # z_normalized = np.empty_like(t)
+        #
+        # i = series_index
+        # mean = self.warmup_means[i] if self.warmup_means[i] is not None else 0.0
+        # std = self.warmup_stds[i] if self.warmup_stds[i] is not None and self.warmup_stds[i] > 0 else fallback_std
+        # z_normalized = (t - mean) / std
 
-        i = series_index
-        mean = self.warmup_means[i] if self.warmup_means[i] is not None else 0.0
-        std = self.warmup_stds[i] if self.warmup_stds[i] is not None and self.warmup_stds[i] > 0 else fallback_std
-        z_normalized = (t - mean) / std
+        return t
 
-        return z_normalized
+    def is_structurally_spiked(
+        x=None,
+        kurt_thresh=5,
+        *,
+        mean=None,
+        var_sum=None,
+        n=None,
+        mu4_sum=None,
+    ):
+        if var_sum is not None and n is not None and mu4_sum is not None:
+            ref_mean = float(mean) if mean is not None else 0.0
+            return _is_structurally_spiked_stats(
+                None,
+                ref_mean,
+                max(var_sum, 0.0),
+                int(n),
+                kurt_thresh=kurt_thresh,
+                mu4_sum=mu4_sum,
+            )
 
-    def is_structurally_spiked(x, kurt_thresh=5):
+        if x is None:
+            return False
         x_arr = np.asarray(x, dtype=np.float64)
         n = x_arr.size
         if n < 4:
             return False
         mean = float(np.mean(x_arr))
         var_sum = float(np.dot(x_arr - mean, x_arr - mean))
-        return _is_structurally_spiked_stats(x_arr, mean, max(var_sum, 0.0), n, kurt_thresh=kurt_thresh)
+        return _is_structurally_spiked_stats(
+            x_arr,
+            mean,
+            max(var_sum, 0.0),
+            n,
+            kurt_thresh=kurt_thresh,
+        )
 
-    def is_near_constant(x, std_thresh=1e-3):
+    def is_near_constant(x=None, std_thresh=1e-3, *, var_sum=None, n=None):
+        if var_sum is not None and n is not None:
+            return _is_near_constant_stats(max(var_sum, 0.0), int(n), std_thresh=std_thresh)
+
+        if x is None:
+            return True
         x_arr = np.asarray(x, dtype=np.float64)
         n = x_arr.size
         if n == 0:
@@ -1852,8 +1712,27 @@ class CorrTrack:
         est = None
         est_diff = None
 
-        sk1 = self.sketches.get((id1, t1))
-        sk2 = self.sketches.get((id2, t2))
+        sk1 = None
+        sk2 = None
+        sketches_t1 = self.sketches.get(t1)
+        if isinstance(sketches_t1, dict):
+            sk1 = sketches_t1.get((id1, t1, w))
+            if sk1 is None:
+                sk1 = sketches_t1.get((id1, t1))
+        else:
+            sk1 = self.sketches.get((id1, t1, w))
+            if sk1 is None:
+                sk1 = self.sketches.get((id1, t1))
+
+        sketches_t2 = self.sketches.get(t2)
+        if isinstance(sketches_t2, dict):
+            sk2 = sketches_t2.get((id2, t2, w))
+            if sk2 is None:
+                sk2 = sketches_t2.get((id2, t2))
+        else:
+            sk2 = self.sketches.get((id2, t2, w))
+            if sk2 is None:
+                sk2 = self.sketches.get((id2, t2))
         if sk1 is not None and sk2 is not None:
             try:
                 sk1 = np.asarray(sk1, dtype=float)
@@ -1985,57 +1864,13 @@ class CorrTrack:
         items = list(self.candidates.items())
         worker_mode = self.exec
 
-        if worker_mode == "process":
-            base_index = int(self.window_index[0])
-            shared_spec = None
-            window_data = None
-
-            shm = self._ensure_shared_window()
-            if shm is not None:
-                shared_spec = {
-                    "name": shm.name,
-                    "shape": self._shared_window_shape,
-                    "dtype": self._shared_window_dtype,
-                }
-            else:
-                window_data = np.array(self.window_data, dtype=np.float64, copy=False)
-
-            warmup_means = list(self.warmup_means) if self.warmup_means is not None else []
-            warmup_stds = list(self.warmup_stds) if self.warmup_stds is not None else []
-            series_ids = dict(self.series_ids)
-
-            payloads = []
-            for pair, sign in items:
-                id1, id2, t1, t2, _ = pair
-                payloads.append({
-                    "item": (pair, sign),
-                    "series_ids": series_ids,
-                    "base_index": base_index,
-                    "corr_threshold": self.corr_threshold,
-                    "preprocess": self.preprocess,
-                    "warmup_means": warmup_means,
-                    "warmup_stds": warmup_stds,
-                    "sk1": self.sketches.get((id1, t1)),
-                    "sk2": self.sketches.get((id2, t2)),
-                    "shared": shared_spec,
-                    "window_data": window_data,
-                })
-
-            shard_payloads = self._parallel_map(
-                _train_distance_worker,
-                payloads,
-                mode=worker_mode,
-                max_workers=self.n_nodes,
-                preserve_order=False,
-            )
-        else:
-            shard_payloads = self._parallel_map(
-                self._train_distance_item,
-                items,
-                mode=worker_mode,
-                max_workers=self.n_nodes,
-                preserve_order=False,
-            )
+        shard_payloads = self._parallel_map(
+            self._train_distance_item,
+            items,
+            mode=worker_mode,
+            max_workers=self.n_nodes,
+            preserve_order=False,
+        )
         self._merge_train_distances(shard_payloads)
 
     def _validate_corr(self, pair, corr_val=True):
@@ -2119,7 +1954,7 @@ class CorrTrack:
         time = int(np.min(timepts + last_corr_length - (window_size - self.window_step)))
         return (pair, (time, -1))
     
-    def _get_validated_corr(self, corr_val=True):
+    def _get_validated_corr(self, corr_val=True, force_mode=None):
         self.validated = {}
         if not self.candidates:
             return
@@ -2141,7 +1976,7 @@ class CorrTrack:
             self.validated_candidates += len(pairs)
             return
 
-        worker_mode = self.exec
+        worker_mode = force_mode if force_mode else self.exec
 
         if worker_mode == "sequential":
             tested = validated = 0
@@ -2164,57 +1999,28 @@ class CorrTrack:
         ids_lookup = self.series_ids
         data = self.window_data
 
-        shared_spec = None
-        if worker_mode == "process":
-            shm = self._ensure_shared_window()
-            if shm is None:
-                worker_mode = "thread"
-            else:
-                shared_spec = {
-                    "name": shm.name,
-                    "shape": self._shared_window_shape,
-                    "dtype": self._shared_window_dtype,
-                }
-
+        t0 = time.perf_counter() if self.profile_enabled else None
         items = []
         for pair in pairs:
             id1, id2, t1, t2, window_size = pair
             start1 = int(t1 - base_index)
             start2 = int(t2 - base_index)
-
-            if shared_spec is None:
-                x = data[ids_lookup[id1], start1:start1 + window_size]
-                y = data[ids_lookup[id2], start2:start2 + window_size]
-                if x.size != window_size or y.size != window_size:
-                    continue
-                items.append({
-                    "pair": pair,
-                    "x": x.astype(np.float64, copy=False),
-                    "y": y.astype(np.float64, copy=False),
-                })
-            else:
-                idx1 = ids_lookup[id1]
-                idx2 = ids_lookup[id2]
-                if start1 < 0 or start2 < 0:
-                    continue
-                if start1 + window_size > data.shape[1] or start2 + window_size > data.shape[1]:
-                    continue
-                items.append({
-                    "pair": pair,
-                    "idx1": idx1,
-                    "idx2": idx2,
-                    "start1": start1,
-                    "start2": start2,
-                    "window": window_size,
-                })
+            x = data[ids_lookup[id1], start1:start1 + window_size]
+            y = data[ids_lookup[id2], start2:start2 + window_size]
+            if x.size != window_size or y.size != window_size:
+                continue
+            items.append({
+                "pair": pair,
+                "x": x.astype(np.float64, copy=False),
+                "y": y.astype(np.float64, copy=False),
+            })
+        if t0 is not None:
+            self._profile_add("val.build_items", time.perf_counter() - t0)
 
         if not items:
             return
 
-        if worker_mode == "thread":
-            chunk_size = 256
-        else:  # process
-            chunk_size = 2048
+        chunk_size = 256
 
         payloads = []
         for i in range(0, len(items), chunk_size):
@@ -2225,10 +2031,9 @@ class CorrTrack:
                 "neg_corr": self.neg_corr,
                 "corr_val": True,
             }
-            if shared_spec is not None:
-                payload["shared"] = shared_spec
             payloads.append(payload)
 
+        t0 = time.perf_counter() if self.profile_enabled else None
         results_batches = self._parallel_map(
             _corr_validation_batch_worker,
             payloads,
@@ -2236,9 +2041,12 @@ class CorrTrack:
             max_workers=self.n_nodes,
             preserve_order=False,
         )
+        if t0 is not None:
+            self._profile_add("val.dispatch", time.perf_counter() - t0)
 
         tested = validated = 0
         min_dist, min_pair = self.min_dist, self.pair_min_dist
+        t0 = time.perf_counter() if self.profile_enabled else None
         for batch in results_batches:
             for pair, is_correlated, corr, dist, is_constant, _ in batch:
                 tested += 1
@@ -2250,6 +2058,8 @@ class CorrTrack:
                     validated += 1
                     self.correlated[pair] = corr
                     self.validated[pair] = corr
+        if t0 is not None:
+            self._profile_add("val.merge", time.perf_counter() - t0)
 
         self.tested_candidates += tested
         self.validated_candidates += validated
@@ -2263,6 +2073,7 @@ class CorrTrack:
         """
         new_in = {}
         if len(self.validated) > 0:
+            t0 = time.perf_counter() if self.profile_enabled else None
             # sequential 'in' to preserve state coupling
             for pair, corr in self.validated.items():
                 new_pair = self._in_corr(pair)
@@ -2271,12 +2082,15 @@ class CorrTrack:
                     key = list(new_pair.keys())[0]
                     if key in self.previous_correlations:
                         del self.previous_correlations[key]
+            if t0 is not None:
+                self._profile_add("monitor.in", time.perf_counter() - t0)
 
         # parallel 'out' (independent across keys)
         if len(self.previous_correlations) > 0:
             items = list(self.previous_correlations.items())
-            worker_mode = self.exec if self.exec != "process" else "thread"
+            worker_mode = self.exec
             # compute anomaly records in parallel
+            t0 = time.perf_counter() if self.profile_enabled else None
             out_records = self._parallel_map(
                 self._out_corr,
                 items,
@@ -2284,11 +2098,16 @@ class CorrTrack:
                 max_workers=self.n_nodes,
                 preserve_order=False,
             )
+            if t0 is not None:
+                self._profile_add("monitor.out_dispatch", time.perf_counter() - t0)
             # apply on main thread
+            t0 = time.perf_counter() if self.profile_enabled else None
             for pair_key, rec in out_records:
                 if pair_key not in self.corr_anomalies:
                     self.corr_anomalies[pair_key] = []
                 self.corr_anomalies[pair_key].append(rec)
+            if t0 is not None:
+                self._profile_add("monitor.out_apply", time.perf_counter() - t0)
 
         # finalize 'previous_correlations'
         self.previous_correlations = new_in
@@ -2331,7 +2150,7 @@ class CorrTrack:
 
     def __del__(self):
         try:
-            self._release_shared_window()
+            self._reset_thread_pool()
         except Exception:
             pass
 
@@ -2806,7 +2625,7 @@ class CorrTrack:
             print("\nAnomalies:")
             self._print_anomalies()
 
-    def _get_sketches(self, new_data_step, verbose, testing):
+    def _get_sketches(self, new_data_step, verbose, testing, worker_mode=None):
         """
         Run Sketches nodes in parallel, collect their (sketches, partitions),
         then append merged partitions once per grid to the grid nodes.
@@ -2815,26 +2634,27 @@ class CorrTrack:
         new_data_step_series = new_data_step[1:, :]
 
         while len(self.sketch_nodes) < self.n_sketch_nodes:
-            self.sketch_nodes.append(
-                Sketches(
-                    self.window_size,
-                    self.basic_window,
-                    self.window_step,
-                    self.seed,
-                    self.seed_toggle,
-                    self.n_vectors,
-                    self.grid_dimension,
-                    self.grid_nodes,
-                    self._warmup_mean_map,
-                    self._warmup_std_map,
-                    self.preprocess,
+                self.sketch_nodes.append(
+                    Sketches(
+                        self.window_size,
+                        self.basic_window,
+                        self.window_step,
+                        self.seed,
+                        self.seed_toggle,
+                        self.n_vectors,
+                        self.grid_dimension,
+                        self.grid_nodes,
+                        self._warmup_mean_map,
+                        self._warmup_std_map,
+                        self.preprocess,
+                        self.neg_corr,
+                        self.sketch_norm,
+                    )
                 )
-            )
         if len(self.sketch_nodes) > self.n_sketch_nodes:
             self.sketch_nodes = self.sketch_nodes[:self.n_sketch_nodes]
 
         node_inputs_thread = []
-        node_inputs_process = []
         max_nodes = min(self.n_sketch_nodes, len(self.map_ids))
         for s in range(max_nodes):
             shard_ids = self.map_ids[s]
@@ -2849,36 +2669,14 @@ class CorrTrack:
         if not node_inputs_thread:
             return {}
 
-        total_dim = self.n_grids * self.grid_dimension
-        if total_dim <= 0:
-            total_dim = 1
-        base_perm = self._perm_rng.permutation(total_dim)
-        perm_list = base_perm.tolist()
+        worker_mode = worker_mode if worker_mode else self.exec
 
-        node_inputs_thread = [inp + (perm_list,) for inp in node_inputs_thread]
-        worker_mode = self.exec
-
-        if worker_mode == "process":
-            node_inputs_process = []
-            for inp in node_inputs_thread:
-                s = inp[1]
-                node_inputs_process.append({
-                    "index": s,
-                    "state": self.sketch_nodes[s].dump_state(),
-                    "node_new": inp[2],
-                    "ids_subset": inp[3],
-                    "verbose": inp[4],
-                    "testing": inp[5],
-                    "perm": list(perm_list),
-                    "distribute": False,
-                })
-            dispatch_items = node_inputs_process
-        else:
-            dispatch_items = node_inputs_thread
+        dispatch_items = node_inputs_thread
 
         if worker_mode == "sequential":
             results = [_sketch_worker(payload) for payload in dispatch_items]
         else:
+            t0 = time.perf_counter() if self.profile_enabled else None
             results = self._parallel_map(
                 _sketch_worker,
                 dispatch_items,
@@ -2886,67 +2684,55 @@ class CorrTrack:
                 max_workers=len(dispatch_items),
                 preserve_order=False,
             )
+            if t0 is not None:
+                self._profile_add("sketch.dispatch", time.perf_counter() - t0)
 
         # Merge sketches from all nodes
         merged_sketches = {}
         per_grid_partition = [dict() for _ in range(self.n_grids)]
-        if worker_mode == "process":
-            iter_results = results
-        else:
-            iter_results = results
+        iter_results = results
 
+        t0 = time.perf_counter() if self.profile_enabled else None
         for entry in iter_results:
-            if worker_mode == "process":
-                s = entry["index"]
-                self.sketch_nodes[s].load_state(entry["state"])
-                sks = entry["sketches"]
-                parts = entry["partitions"]
-            else:
-                s, node_obj, sks, parts = entry
-                self.sketch_nodes[s] = node_obj
+            s, node_obj, sks, parts = entry
+            self.sketch_nodes[s] = node_obj
             merged_sketches.update(sks)
             for g, partition in enumerate(parts):
                 if g >= self.n_grids:
                     break
                 per_grid_partition[g].update(partition)
+        if t0 is not None:
+            self._profile_add("sketch.merge", time.perf_counter() - t0)
 
         curr_time = self._curr_startTime()
+        t0 = time.perf_counter() if self.profile_enabled else None
         for g in range(self.n_grids):
             self.grid_nodes[g].append_partition(curr_time, per_grid_partition[g])
+        if t0 is not None:
+            self._profile_add("sketch.distribute", time.perf_counter() - t0)
 
         return merged_sketches
     
-    def _run_grids(self, verbose, testing):
+    def _run_grids(self, verbose, testing, worker_mode=None):
         """
         Run each grid node in parallel via run() and merge the local outputs
         into self.freq_pairs and self.candidates on the main thread.
         """
         n_ids = len(self.series_ids)
 
-        worker_mode = self.exec
+        worker_mode = worker_mode if worker_mode else self.exec
 
         thread_payloads = [
             (self, g, n_ids, verbose, testing)
             for g in range(self.n_grids)
         ]
 
-        if worker_mode == "process":
-            payloads = [
-                {
-                    "index": g,
-                    "state": self.grid_nodes[g].dump_state(),
-                    "n_ids": n_ids,
-                    "verbose": verbose,
-                    "testing": testing,
-                }
-                for g in range(self.n_grids)
-            ]
-        else:
-            payloads = thread_payloads
+        payloads = thread_payloads
 
         if worker_mode == "sequential":
             grid_results = [_grid_worker(payload) for payload in payloads]
         else:
+            t0 = time.perf_counter() if self.profile_enabled else None
             grid_results = self._parallel_map(
                 _grid_worker,
                 payloads,
@@ -2954,52 +2740,46 @@ class CorrTrack:
                 max_workers=self.n_nodes,
                 preserve_order=False,
             )
+            if t0 is not None:
+                self._profile_add("grid.dispatch", time.perf_counter() - t0)
 
         # Merge
         self.freq_pairs = {}
         self.uncorrelated = {}
 
-        if worker_mode == "process":
-            iterable = (
-                (
-                    entry["index"],
-                    entry["state"],
-                    entry["result"],
-                )
-                for entry in grid_results
+        iterable = (
+            (
+                g_index,
+                node_obj,
+                result,
             )
-        else:
-            iterable = (
-                (
-                    g_index,
-                    node_obj,
-                    result,
-                )
-                for g_index, node_obj, result in grid_results
-            )
+            for g_index, node_obj, result in grid_results
+        )
 
-        for g_index, state_or_obj, (loc_freq, _loc_cand, loc_unc) in iterable:
-            if worker_mode == "process":
-                self.grid_nodes[g_index].load_state(state_or_obj)
-            else:
-                self.grid_nodes[g_index] = state_or_obj
+        t0 = time.perf_counter() if self.profile_enabled else None
+        for g_index, node_obj, (loc_freq, _loc_cand, loc_unc) in iterable:
+            self.grid_nodes[g_index] = node_obj
             for k in sorted(loc_freq):
                 v = float(loc_freq[k])
                 self.freq_pairs[k] = self.freq_pairs.get(k, 0.0) + v
             for k in sorted(loc_unc):
                 self.uncorrelated[k] = loc_unc[k]
+        if t0 is not None:
+            self._profile_add("grid.merge", time.perf_counter() - t0)
 
         # Recompute candidates after frequencies from all grids are merged so
         # that threshold checks see the combined vote count (matches the
         # original sequential implementation behaviour).
         if self.freq_threshold <= 0:
-            self.candidates = {pair: 1 for pair in self.freq_pairs}
+            base_candidates = set(self.freq_pairs.keys())
         else:
-            self.candidates = {
-                pair: 1
+            base_candidates = {
+                pair
                 for pair, count in self.freq_pairs.items()
                 if count >= self.freq_threshold
             }
+
+        self.candidates = {pair: 1 for pair in base_candidates}
         
     def print_sketch_hist(self):
         flattened = [item for sublist in self.hist_sketches for item in sublist]
@@ -3425,18 +3205,18 @@ class CorrTrack:
         4) Collect sketch-distance training stats
         Notes:
         - No validation/monitoring here by design.
-        - Defaults to thread mode for portability; process mode is available
-            if you use the top-level worker (see _bf_worker_train_distances).
+        - Defaults to thread mode for portability.
         """
         self.verbose = verbose
         self.testing = testing
 
-        use_parallel = self.exec in ("thread", "process")
+        use_parallel = self.exec in ("thread",)
+        worker_mode = self.exec
 
         self._update_curr_data(new_data_step,ids)
 
         start_time = time.time()
-        sketches = self._get_sketches(self._curr_window_step(), verbose, testing)
+        sketches = self._get_sketches(self._curr_window_step(), verbose, testing, worker_mode=worker_mode)
         end_time = time.time()
         self.sketch_time += end_time - start_time
         #self._update_hist_sketches()
@@ -3448,7 +3228,7 @@ class CorrTrack:
         if not self.brute_force_nodes:
             self.brute_force_nodes.append(Candidates_BF(self.window_size,self.window_step,self.n_lags,self.corr_threshold))
         if use_parallel:
-            self.candidates = self._run_bf_parallel(self._curr_window_step(), self.ids)
+            self.candidates = self._run_bf_parallel(self._curr_window_step(), self.ids, worker_mode=worker_mode)
         else:
             # original single-thread path
             self.candidates = self.brute_force_nodes[0].run(self._curr_window_step(), self.ids, verbose, testing, ref_indices=None)
@@ -3460,7 +3240,7 @@ class CorrTrack:
         end_time = time.time()
         self.train_dist_time += end_time - start_time
     
-    def _run_bf_parallel(self, curr_window_step, ids, verbose=False, testing=False):
+    def _run_bf_parallel(self, curr_window_step, ids, verbose=False, testing=False, worker_mode=None):
         """
         Parallel wrapper for brute-force enumeration:
         - Shards the series IDs across workers.
@@ -3483,9 +3263,10 @@ class CorrTrack:
         if not node_inputs:
             return {}
 
-        worker_mode = self.exec
+        if worker_mode is None:
+            worker_mode = self.exec
 
-        thread_payloads = [
+        payloads = [
             (
                 s,
                 self.brute_force_nodes[s],
@@ -3498,126 +3279,28 @@ class CorrTrack:
             for s, curr_window_step, ref_ids in node_inputs
         ]
 
-        mask_shm = None
-        if worker_mode == "process":
-            shm = self._ensure_shared_window()
-            if shm is None:
-                worker_mode = "thread"
-                payloads = thread_payloads
-            else:
-                shared_spec = {
-                    "name": shm.name,
-                    "shape": self._shared_window_shape,
-                    "dtype": self._shared_window_dtype,
-                }
-                window_data = np.ndarray(
-                    self._shared_window_shape,
-                    dtype=np.dtype(self._shared_window_dtype),
-                    buffer=shm.buf,
-                )
-                window_size = self.window_size
-                n_series, n_cols = window_data.shape
-                window_count = n_cols - window_size + 1
-                mask_spec = None
-                if window_count > 0:
-                    csum = np.cumsum(window_data, axis=1, dtype=np.float64)
-                    csum = np.pad(csum, ((0, 0), (1, 0)), mode="constant")
-                    csum_sq = np.cumsum(window_data * window_data, axis=1, dtype=np.float64)
-                    csum_sq = np.pad(csum_sq, ((0, 0), (1, 0)), mode="constant")
-                    window_sums = csum[:, window_size:] - csum[:, :-window_size]
-                    window_sums_sq = csum_sq[:, window_size:] - csum_sq[:, :-window_size]
-                    var_sum = window_sums_sq - (window_sums * window_sums) / window_size
-                    var_sum = np.maximum(var_sum, 0.0)
-                    threshold = (1e-3 ** 2) * window_size
-                    mask = var_sum > threshold
-                    mask = mask.astype(np.bool_, copy=False)
-                    mask_shm = shared_memory.SharedMemory(create=True, size=mask.nbytes)
-                    np.ndarray(mask.shape, dtype=mask.dtype, buffer=mask_shm.buf)[:] = mask
-                    mask_spec = {
-                        "name": mask_shm.name,
-                        "shape": mask.shape,
-                        "dtype": mask.dtype.str,
-                    }
-                ids_order = list(self.ids)
-                window_index_list = self.window_index.tolist()
-                payloads = []
-                shard_count = max(1, len(node_inputs))
-                block = max(1, (n_series + shard_count - 1) // shard_count)
-                for s, curr_step, ref_ids in node_inputs:
-                    self.brute_force_nodes[s].prepare(curr_step, self.ids, ref_ids)
-                    ref_indices = sorted(self.series_ids[id_] for id_ in ref_ids if id_ in self.series_ids)
-                    start_idx = min(s * block, n_series)
-                    end_idx = min(start_idx + block, n_series)
-                    payloads.append({
-                        "index": s,
-                        "shared": shared_spec,
-                        "window_index": window_index_list,
-                        "ids_list": ids_order,
-                        "ref_indices": ref_indices,
-                        "window_size": self.window_size,
-                        "window_step": self.window_step,
-                        "mask": mask_spec,
-                        "shard_start": start_idx,
-                        "shard_end": end_idx,
-                    })
-        else:
-            payloads = thread_payloads
-
-        # Dispatch
-        worker_func = _bf_worker_process if worker_mode == "process" else _bf_worker
-
         bf_results = self._parallel_map(
-            worker_func,
+            _bf_worker,
             payloads,
             mode=worker_mode,
             max_workers=len(payloads) if payloads else None,
             preserve_order=False,
         )
 
-        # Merge
         merged = {}
-        if worker_mode == "process":
-            ids_order = list(self.ids)
-            for entry in bf_results:
-                spec = entry.get("result")
-                if not spec or "name" not in spec:
-                    continue
-                shm = shared_memory.SharedMemory(name=spec["name"])
-                try:
-                    arr = np.ndarray(spec["shape"], dtype=np.dtype(spec["dtype"]), buffer=shm.buf)
-                    for row in arr:
-                        idx1, idx2, t1, t2, w = (int(v) for v in row)
-                        id1 = ids_order[idx1]
-                        id2 = ids_order[idx2]
-                        pair = _normalize_bf_key((id1, id2, t1, t2, w))
-                        merged[pair] = 1
-                finally:
-                    shm.close()
-                    try:
-                        shm.unlink()
-                    except FileNotFoundError:
-                        pass
-            for node in self.brute_force_nodes:
-                node.ref_indices = None
-            if mask_shm is not None:
-                try:
-                    mask_shm.close()
-                    mask_shm.unlink()
-                except FileNotFoundError:
-                    pass
-        else:
-            for s, bf_node, result in bf_results:
-                if bf_node is not None:
-                    self.brute_force_nodes[s] = bf_node
-                for k in sorted(result):
-                    merged[k] = result[k]
+        for s, bf_node, result in bf_results:
+            if bf_node is not None:
+                self.brute_force_nodes[s] = bf_node
+            for k in sorted(result):
+                merged[k] = result[k]
         return merged
     
     def run_bf(self, new_data_step, ids, verbose, testing, corr_val=True):
         self.verbose = verbose
         self.testing = testing
 
-        use_parallel = self.exec in ("thread", "process")
+        use_parallel = self.exec in ("thread",)
+        worker_mode = self.exec
 
         self._update_curr_data(new_data_step, ids)
 
@@ -3626,7 +3309,13 @@ class CorrTrack:
         start_time = time.time()
         
         if use_parallel:
-            self.candidates = self._run_bf_parallel(self._curr_window_step(), self.ids, verbose=verbose, testing=testing)
+            self.candidates = self._run_bf_parallel(
+                self._curr_window_step(),
+                self.ids,
+                verbose=verbose,
+                testing=testing,
+                worker_mode=worker_mode,
+            )
         else:
             if not self.brute_force_nodes:
                 self.brute_force_nodes.append(Candidates_BF(self.window_size,self.window_step,self.n_lags,self.corr_threshold))
@@ -3637,7 +3326,7 @@ class CorrTrack:
 
         # validation
         start_time = time.time()
-        self._get_validated_corr(corr_val)
+        self._get_validated_corr(corr_val, force_mode=worker_mode)
         end_time = time.time()
         self.validation_time += end_time - start_time
 
@@ -3649,6 +3338,7 @@ class CorrTrack:
 
         if verbose:
             self._print_state()
+        self._profile_tick()
     
     def _update_hist_sketches(self):
         for s in range(self.n_nodes):
@@ -3666,23 +3356,24 @@ class CorrTrack:
         self.testing = testing
 
         self._update_curr_data(new_data_step, ids)
+        worker_mode = self.exec
 
         # 1) sketches
         start_time = time.time()
-        sketches = self._get_sketches(self._curr_window_step(), verbose, testing)
+        sketches = self._get_sketches(self._curr_window_step(), verbose, testing, worker_mode=worker_mode)
         end_time = time.time()
         self.sketch_time += end_time - start_time
         self._update_curr_sketches(sketches)
 
         # 2) candidates via grids
         start_time = time.time()
-        self._run_grids(verbose, testing)
+        self._run_grids(verbose, testing, worker_mode=worker_mode)
         end_time = time.time()
         self.candidate_time += end_time - start_time
 
         # 3) validation (parallel)
         start_time = time.time()
-        self._get_validated_corr(corr_val)
+        self._get_validated_corr(corr_val, force_mode=worker_mode)
         end_time = time.time()
         self.validation_time += end_time - start_time
 
@@ -3694,11 +3385,12 @@ class CorrTrack:
 
         if verbose:
             self._print_state()
+        self._profile_tick()
 
 
     
 class Sketches:
-    def __init__(self,window_size,basic_window,window_step,seed,seed_toggle,n_vectors,grid_dimension,grid_nodes,warmup_mean_map,warmup_std_map,preprocess):       
+    def __init__(self,window_size,basic_window,window_step,seed,seed_toggle,n_vectors,grid_dimension,grid_nodes,warmup_mean_map,warmup_std_map,preprocess,neg_corr=False,sketch_norm="z"):
         self.verbose = None
         # Parameters windows
         self.window_size = window_size
@@ -3718,8 +3410,17 @@ class Sketches:
         self.warmup_std_map = warmup_std_map or {}
         self._series_warmup_means = []
         self._series_warmup_stds = []
-        self.preprocess = preprocess     
+        self.preprocess = preprocess
+        self.sketch_norm = str(sketch_norm) if sketch_norm is not None else "z"
+        self.neg_corr = bool(neg_corr)
+        self._series_window_sums = None
+        self._series_window_means = None
+        self._raw_window_sums = None
+        self._raw_window_sums_sq = None
+        self._raw_window_sums_cu = None
+        self._raw_window_sums_qu = None
         # Parameters sketches
+        self._debug_raw_sketches = {}
         self.seed = seed
         self.seed_randomVector = seed
         self.seed_toggle = seed_toggle
@@ -3732,6 +3433,9 @@ class Sketches:
         self.incrementable_index = []
         self.previous_incrementable_index = None
         self.sketches = {}
+        self._sketch_matrix = None
+        self._orth_perm = None
+        self._orth_signs = None
         # Parameters grids
         self.grid_dimensions = grid_dimension #2D grid
         self.n_grids = int(n_vectors/self.grid_dimensions) #divides n_vectors (sketch size) for 2D grid
@@ -3739,6 +3443,7 @@ class Sketches:
         self.grid_nodes = grid_nodes
         self.is_constant = {}
         self._toggle_weights = None
+        self._random_vector_sums = None
 
     def dump_state(self):
         state = {k: v for k, v in self.__dict__.items() if k != "grid_nodes"}
@@ -3758,34 +3463,94 @@ class Sketches:
     
     def _newStream(self,new_data_step,ids):
         new_data_step_index = new_data_step[0,:]
-        new_data_step_values = new_data_step[1:,:]
+        new_data_step_values = np.asarray(new_data_step[1:,:], dtype=np.float64)
+        processed_new_data_step_values = self._preprocess_data(new_data_step_values)
+        added_count = processed_new_data_step_values.shape[1]
+
+        n_series = new_data_step_values.shape[0]
+        reset_sums = (
+            self._series_window_sums is None
+            or self._series_window_sums.shape[0] != n_series
+        )
+        reset_raw_stats = (
+            self._raw_window_sums is None
+            or self._raw_window_sums.shape[0] != n_series
+        )
+
         #Update sliding windows
         if self.window_data is None:
             self.window_data_original = new_data_step_values
-            self.window_data = self._preprocess_data(new_data_step_values)
+            self.window_data = processed_new_data_step_values
             n_diff = self.window_data.shape[1] - new_data_step_values.shape[1]
-            if n_diff < 0:                
-                self.window_data = np.append(self.window_data[:,n_diff][:, None],self.window_data,axis=1)
+            if n_diff < 0:
+                self.window_data = np.append(self.window_data[:, n_diff][:, None], self.window_data, axis=1)
             self.window_index = new_data_step_index[-self.window_data.shape[1]:]
-            self.last_origin = new_data_step_values[:,-1]
+            self.last_origin = new_data_step_values[:, -1]
+            if reset_sums:
+                self._series_window_sums = np.sum(self.window_data, axis=1, dtype=np.float64)
+                reset_sums = False
         else:
+            prev_total_cols = self.window_data.shape[1]
+            prev_curr_size = min(self.window_size, prev_total_cols)
+            window_start = prev_total_cols - prev_curr_size
+            removed_cols = self.window_step if self.window_step and prev_total_cols >= self.window_size else 0
+            prefix_excess = max(0, window_start)
+            overlap_removed = min(prev_curr_size, max(0, removed_cols - prefix_excess))
+
+            if overlap_removed > 0:
+                start = window_start
+                end = start + overlap_removed
+                if not reset_sums:
+                    dropped = self.window_data[:, start:end]
+                    self._series_window_sums -= dropped.sum(axis=1)
+                if not reset_raw_stats:
+                    dropped_raw = self.window_data_original[:, start:end]
+                    self._apply_raw_moment_delta(dropped_raw, -1.0)
+
+            prev_curr_after_removal = prev_curr_size - overlap_removed
+            remaining_start = window_start + overlap_removed
+            available_slots = max(0, self.window_size - prev_curr_after_removal)
+            extra_drop_needed = max(0, added_count - available_slots)
+            extra_drop_from_old = min(prev_curr_after_removal, extra_drop_needed)
+
+            if extra_drop_from_old > 0:
+                start = remaining_start
+                end = start + extra_drop_from_old
+                if not reset_sums:
+                    dropped = self.window_data[:, start:end]
+                    self._series_window_sums -= dropped.sum(axis=1)
+                if not reset_raw_stats:
+                    dropped_raw = self.window_data_original[:, start:end]
+                    self._apply_raw_moment_delta(dropped_raw, -1.0)
+
+            old_remaining = prev_curr_after_removal - extra_drop_from_old
+            new_curr_size = min(self.window_size, old_remaining + added_count)
+            included_new = max(0, min(added_count, new_curr_size - old_remaining))
+
+            if included_new > 0:
+                if not reset_sums:
+                    new_slice = processed_new_data_step_values[:, -included_new:]
+                    self._series_window_sums += new_slice.sum(axis=1)
+                if not reset_raw_stats:
+                    new_raw_slice = new_data_step_values[:, -included_new:]
+                    self._apply_raw_moment_delta(new_raw_slice, 1.0)
+
             if self.window_data.shape[1] >= self.window_size:
-                if self.window_data.shape[1] >= self.window_size+self.basic_window:
+                if self.window_data.shape[1] >= self.window_size + self.basic_window:
                     self.window_index = self.window_index[self.window_step:]
-                self.window_data = self.window_data[:,self.window_step:]
-                self.window_data_original = self.window_data_original[:,self.window_step:]
-            self.window_index = np.append(self.window_index,new_data_step_index)
-            self.window_data_original = np.append(self.window_data_original,new_data_step_values,axis=1)
-            processed_new_data_step_values = self._preprocess_data(new_data_step_values)
-            self.window_data = np.append(self.window_data,processed_new_data_step_values,axis=1)
-            self.last_origin = new_data_step_values[:,-1]
+                self.window_data = self.window_data[:, self.window_step:]
+                self.window_data_original = self.window_data_original[:, self.window_step:]
+
+            self.window_index = np.append(self.window_index, new_data_step_index)
+            self.window_data_original = np.append(self.window_data_original, new_data_step_values, axis=1)
+            self.window_data = np.append(self.window_data, processed_new_data_step_values, axis=1)
+            self.last_origin = new_data_step_values[:, -1]
         
         if isinstance(ids, (list, tuple)):
             series_list = list(ids)
         else:
             series_list = list(ids)
         self.series_ids = series_list
-        n_series = new_data_step_values.shape[0]
         self._series_warmup_means = []
         self._series_warmup_stds = []
         for i in range(n_series):
@@ -3797,15 +3562,23 @@ class Sketches:
                 self.warmup_std_map.get(series_id, None) if series_id is not None else None
             )
         self.window_data = self.window_data.astype(float)
-        if self.window_data.shape[1] >= self.window_size:
-            for s in range(len(self.series_ids)):
-                self.is_constant[self.series_ids[s]] = CorrTrack.is_near_constant(self.window_data_original[s,:])
-        
         self._update_curr_window_size()
+        self._update_window_mean_stats(force_recompute=reset_sums)
+        self._update_window_raw_stats(force_recompute=reset_raw_stats)
+
+        if self.curr_window_size >= self.window_size:
+            for idx, series_id in enumerate(self.series_ids):
+                stats = self._raw_stats_for_series(idx)
+                if stats is None:
+                    self.is_constant[series_id] = True
+                    continue
+                self.is_constant[series_id] = CorrTrack.is_near_constant(
+                    var_sum=stats["var_sum"],
+                    n=stats["n"],
+                )
             
     def _preprocess_data(self, data):
-        
-        t = np.asarray(data)
+        t = np.asarray(data, dtype=np.float64)
 
         if self.preprocess:
             if self.last_origin is not None:
@@ -3813,7 +3586,7 @@ class Sketches:
             elif data.shape[1] > 0:
                 # Mirror first column so differencing keeps at least one sample when warmup is missing
                 data = np.append(data[:, :1], data, axis=1)
-            t = np.asarray(data)
+            t = np.asarray(data, dtype=np.float64)
             if t.shape[1] <= 1:
                 diff_t = np.zeros((t.shape[0], 1)) if t.shape[1] else np.zeros((t.shape[0], 0))
             else:
@@ -3821,18 +3594,20 @@ class Sketches:
             clipped_t = np.clip(diff_t, -3, 3)                   # 2. Linear clipping
             t = clipped_t
 
-        fallback_std = 1.0
+        # Z-normalization happens later on the sketch vectors themselves. We keep
+        # the raw (preprocessed) values here and project them directly when
+        # building sketches.
+        # fallback_std = 1.0
+        # z_normalized = np.empty_like(t)
+        #
+        # for i in range(len(t)):
+        #     mean = self._series_warmup_means[i] if i < len(self._series_warmup_means) else None
+        #     std = self._series_warmup_stds[i] if i < len(self._series_warmup_stds) else None
+        #     mean = mean if mean is not None else 0.0
+        #     std = std if std is not None and std > 0 else fallback_std
+        #     z_normalized[i] = (t[i] - mean) / std
 
-        z_normalized = np.empty_like(t)
-
-        for i in range(len(t)):
-            mean = self._series_warmup_means[i] if i < len(self._series_warmup_means) else None
-            std = self._series_warmup_stds[i] if i < len(self._series_warmup_stds) else None
-            mean = mean if mean is not None else 0.0
-            std = std if std is not None and std > 0 else fallback_std
-            z_normalized[i] = (t[i] - mean) / std
-
-        return z_normalized
+        return np.asarray(t, dtype=np.float64)
     
     def _update_previous_startTime(self):
         if self.window_data.shape[1] >= self.window_size:
@@ -3843,7 +3618,7 @@ class Sketches:
             self.previous_startTime_index = 0
     
     def _update_curr_window_size(self):
-        self.curr_window_size = min(self.window_size,self.window_data.shape[1])
+        self.curr_window_size = min(self.window_size, self.window_data.shape[1])
         return None
         previous_startTime_index = 0
         if self.previous_startTime is not None:
@@ -3860,6 +3635,11 @@ class Sketches:
     def _curr_window(self):
         return self.window_data[:,-self.curr_window_size:]
     
+    def _curr_window_original(self):
+        if self.window_data_original is None or self.curr_window_size is None:
+            return None
+        return self.window_data_original[:, -self.curr_window_size:]
+    
     def _curr_window_times(self):
         return self.window_index[-self.curr_window_size:]
     
@@ -3869,13 +3649,163 @@ class Sketches:
     def _curr_incrementable_startTime(self): # start time of the 2nd basic window
         return self.window_index[-self.curr_window_size+self.basic_window]
 
+    def _update_window_mean_stats(self, force_recompute=False):
+        if self.window_data is None:
+            self._series_window_sums = None
+            self._series_window_means = None
+            return
+
+        n_series = self.window_data.shape[0]
+        if self.curr_window_size is None or self.curr_window_size <= 0:
+            current_window_sum = np.zeros(n_series, dtype=np.float64)
+        elif force_recompute or self._series_window_sums is None or self._series_window_sums.shape[0] != n_series:
+            current_window = self._curr_window()
+            current_window_sum = np.sum(current_window, axis=1, dtype=np.float64)
+        else:
+            current_window_sum = self._series_window_sums
+
+        self._series_window_sums = current_window_sum
+        if self.curr_window_size is None or self.curr_window_size <= 0:
+            self._series_window_means = np.zeros(n_series, dtype=np.float64)
+        else:
+            self._series_window_means = current_window_sum / float(self.curr_window_size)
+
+    def _apply_raw_moment_delta(self, slice_data, sign):
+        if (
+            slice_data is None
+            or self._raw_window_sums is None
+            or self._raw_window_sums_sq is None
+            or self._raw_window_sums_cu is None
+            or self._raw_window_sums_qu is None
+        ):
+            return
+        arr = np.asarray(slice_data, dtype=np.float64)
+        if arr.size == 0:
+            return
+        scale = float(sign)
+        self._raw_window_sums += scale * arr.sum(axis=1, dtype=np.float64)
+        self._raw_window_sums_sq += scale * np.sum(arr * arr, axis=1, dtype=np.float64)
+        self._raw_window_sums_cu += scale * np.sum(arr ** 3, axis=1, dtype=np.float64)
+        self._raw_window_sums_qu += scale * np.sum(arr ** 4, axis=1, dtype=np.float64)
+
+    def _update_window_raw_stats(self, force_recompute=False):
+        if self.window_data_original is None:
+            self._raw_window_sums = None
+            self._raw_window_sums_sq = None
+            self._raw_window_sums_cu = None
+            self._raw_window_sums_qu = None
+            return
+
+        n_series = self.window_data_original.shape[0]
+        if self.curr_window_size is None or self.curr_window_size <= 0:
+            zeros = np.zeros(n_series, dtype=np.float64)
+            self._raw_window_sums = zeros.copy()
+            self._raw_window_sums_sq = zeros.copy()
+            self._raw_window_sums_cu = zeros.copy()
+            self._raw_window_sums_qu = zeros.copy()
+            return
+
+        needs_reset = (
+            force_recompute
+            or self._raw_window_sums is None
+            or self._raw_window_sums.shape[0] != n_series
+        )
+        if needs_reset:
+            current_window = self._curr_window_original()
+            if current_window is None:
+                zeros = np.zeros(n_series, dtype=np.float64)
+                self._raw_window_sums = zeros.copy()
+                self._raw_window_sums_sq = zeros.copy()
+                self._raw_window_sums_cu = zeros.copy()
+                self._raw_window_sums_qu = zeros.copy()
+                return
+            arr = np.asarray(current_window, dtype=np.float64)
+            self._raw_window_sums = np.sum(arr, axis=1, dtype=np.float64)
+            self._raw_window_sums_sq = np.sum(arr * arr, axis=1, dtype=np.float64)
+            self._raw_window_sums_cu = np.sum(arr ** 3, axis=1, dtype=np.float64)
+            self._raw_window_sums_qu = np.sum(arr ** 4, axis=1, dtype=np.float64)
+        else:
+            # no action needed; incremental updates already applied
+            return
+
+    def _raw_stats_for_series(self, index):
+        if (
+            self._raw_window_sums is None
+            or self._raw_window_sums_sq is None
+            or self._raw_window_sums_cu is None
+            or self._raw_window_sums_qu is None
+            or self.curr_window_size is None
+            or self.curr_window_size <= 0
+        ):
+            return None
+        n = int(self.curr_window_size)
+        if n <= 0 or index >= self._raw_window_sums.shape[0]:
+            return None
+        sum1 = float(self._raw_window_sums[index])
+        sum2 = float(self._raw_window_sums_sq[index])
+        sum3 = float(self._raw_window_sums_cu[index])
+        sum4 = float(self._raw_window_sums_qu[index])
+        mean = sum1 / n if n > 0 else 0.0
+        var_sum = max(sum2 - (sum1 * sum1) / n, 0.0)
+        mu4_sum = (
+            sum4
+            - 4.0 * mean * sum3
+            + 6.0 * (mean ** 2) * sum2
+            - 4.0 * (mean ** 3) * sum1
+            + n * (mean ** 4)
+        )
+        return {
+            "n": n,
+            "mean": mean,
+            "var_sum": var_sum,
+            "mu4_sum": mu4_sum,
+        }
+
     def _refresh_toggle_weights(self):
         if self.basicRandomVector is None or self.toggleVector is None:
             self._toggle_weights = None
+            self._random_vector_sums = None
             return
         base = np.array(self.basicRandomVector, dtype=np.float64, copy=False)
         toggle = np.array(self.toggleVector, dtype=np.float64, copy=False)
         self._toggle_weights = toggle[:, :, None] * base[None, :, :]
+        self._random_vector_sums = self._toggle_weights.sum(axis=(0, 2))
+
+    def _mean_adjust_matrix(self, vectors):
+        if (
+            vectors is None
+            or vectors.size == 0
+            or self._series_window_means is None
+            or self._random_vector_sums is None
+        ):
+            return vectors
+
+        n_series = vectors.shape[0]
+        if n_series == 0 or self.curr_window_size is None or self.curr_window_size <= 0:
+            return vectors
+
+        mu = np.asarray(self._series_window_means[:n_series], dtype=np.float64)
+        random_sums = np.asarray(self._random_vector_sums, dtype=np.float64)
+        if mu.size == 0 or random_sums.size == 0:
+            return vectors
+        adjustment = mu[:, None] * random_sums[None, :]
+        return vectors - adjustment
+
+    def _mean_adjust_vector(self, vector, series_idx):
+        if (
+            vector is None
+            or self._series_window_means is None
+            or self._random_vector_sums is None
+            or self.curr_window_size is None
+            or self.curr_window_size <= 0
+            or series_idx >= len(self._series_window_means)
+        ):
+            return vector
+        mu_value = float(self._series_window_means[series_idx])
+        random_sums = np.asarray(self._random_vector_sums, dtype=np.float64)
+        if random_sums.size == 0:
+            return vector
+        return vector - mu_value * random_sums
     
     def _generate_randomVectors(self):
         base_rng = np.random.RandomState(self.seed_randomVector)
@@ -3949,23 +3879,41 @@ class Sketches:
         self.incrementable_index.append(self._curr_incrementable_startTime())
 
         if n_series == 0:
-            self.basicDots.append([])
+            self.basicDots.append(np.empty((0, self.n_basic_windows, self.n_vectors), dtype=np.float64))
             self.sketches = {}
+            self._sketch_matrix = None
             return
 
         window_blocks = current_window.reshape(n_series, self.n_basic_windows, self.basic_window)
         weights = np.array(self._toggle_weights, dtype=np.float64, copy=False)
 
-        series_dots = np.einsum('sbw,bvw->sbv', window_blocks, weights, optimize=True)
+        series_dots = _compute_series_dots(window_blocks, weights)
         sketch_vectors = series_dots.sum(axis=1)
         curr_start = self._curr_startTime()
         window_size = self.window_size
 
-        self.basicDots.append([series_dots[s].copy() for s in range(n_series)])
-        self.sketches = {
-            (self.series_ids[s], curr_start, window_size): sketch_vectors[s].copy()
-            for s in range(n_series)
-        }
+        self.basicDots.append(series_dots.copy())
+        self.sketches = {}
+        if n_series == 0:
+            self._sketch_matrix = None
+            return
+        self._ensure_orth_transform()
+        perm = self._orth_perm
+        signs = self._orth_signs
+        raw_matrix = np.array(sketch_vectors, dtype=np.float64, copy=False)
+        if perm is not None and signs is not None and raw_matrix.shape[1] == perm.shape[0]:
+            raw_matrix = raw_matrix[:, perm] * signs
+        for s in range(n_series):
+            try:
+                self._debug_raw_sketches[(self.series_ids[s], curr_start, window_size)] = np.array(
+                    raw_matrix[s], dtype=np.float64, copy=True
+                )
+            except Exception:
+                pass
+        norm_matrix = self._normalize_sketch_matrix(raw_matrix)
+        self._sketch_matrix = norm_matrix
+        for s in range(n_series):
+            self.sketches[(self.series_ids[s], curr_start, window_size)] = norm_matrix[s]
     
     def _print_incremental_intermediary_window(self):
         if(self.verbose):
@@ -3990,7 +3938,7 @@ class Sketches:
             for i in range(n_intermediary_windows):
                 #clean obsolete basic dots
                 if len(self.incrementable_index)>(i+1): #TODO: -w2
-                    incrementable_index_index = np.where(self.window_index==self.incrementable_index[(i+1)])[0][0]        
+                    incrementable_index_index = np.where(self.window_index==self.incrementable_index[(i+1)])[0][0]
                     while len(self.incrementable_index)>0 and self.incrementable_index[0] < self.window_index[incrementable_index_index]:
                         if(self.verbose):
                             print("Delete obsolete basic dots (incrementable index ",self.incrementable_index[0],")")
@@ -4002,14 +3950,37 @@ class Sketches:
                 incrementable_index_index = np.where(self.window_index==self.incrementable_index[0])[0][0]
                 new_incrementable_index = self.window_index[incrementable_index_index+self.basic_window]
                 self.incrementable_index.append(new_incrementable_index)
-                self.basicDots.append([])
                 self.sketches = {}
-                for s in range(len(self.basicDots[0])):
-                    series_dots = []
-                    series_dots = self.basicDots[0][s][1:(self.n_basic_windows+1),:]
-                    series_dots = np.multiply(series_dots,self.intermediary_diff_toggleVector)
-                    self.basicDots[-1].append(series_dots)
-                    self.sketches[(self.series_ids[s],self._curr_startTime(),self.window_size)] = np.sum(series_dots, axis=0)
+                base = np.asarray(self.basicDots[0], dtype=np.float64)
+                n_series = base.shape[0]
+                if n_series == 0:
+                    self.basicDots.append(np.empty((0, self.n_basic_windows, self.n_vectors), dtype=np.float64))
+                    self._sketch_matrix = None
+                    continue
+                curr_start = self._curr_startTime()
+                window_size = self.window_size
+                diff = np.asarray(self.intermediary_diff_toggleVector, dtype=np.float64)
+                series_dots = base[:, 1:(self.n_basic_windows+1), :] * diff
+                self.basicDots.append(series_dots)
+                raw_matrix = np.sum(series_dots, axis=1)
+
+                self._ensure_orth_transform()
+                perm = self._orth_perm
+                signs = self._orth_signs
+                if perm is not None and signs is not None and raw_matrix.shape[1] == perm.shape[0]:
+                    raw_matrix = raw_matrix[:, perm] * signs
+
+                for s in range(n_series):
+                    try:
+                        self._debug_raw_sketches[(self.series_ids[s], curr_start, window_size)] = np.array(
+                            raw_matrix[s], dtype=np.float64, copy=True
+                        )
+                    except Exception:
+                        pass
+                norm_matrix = self._normalize_sketch_matrix(raw_matrix)
+                self._sketch_matrix = norm_matrix
+                for s in range(n_series):
+                    self.sketches[(self.series_ids[s], curr_start, window_size)] = norm_matrix[s]
             del self.basicDots[0]
             del self.incrementable_index[0]                
 
@@ -4033,7 +4004,8 @@ class Sketches:
 
     def _incremental_sketches(self):
 
-        previous_n_basic_windows = len(self.basicDots[0][0])
+        base_shape = np.asarray(self.basicDots[0], dtype=np.float64).shape
+        previous_n_basic_windows = base_shape[1] if len(base_shape) > 1 else 0
         diff_n_basic_windows = self.n_basic_windows - previous_n_basic_windows               
         if diff_n_basic_windows < 0:
             self._incremental_sketches_intermediary(diff_n_basic_windows)
@@ -4055,7 +4027,7 @@ class Sketches:
                 copy=False,
             )
             new_blocks = new_basic_data.reshape(n_series, n_new_basic_windows, self.basic_window)
-            new_dots = np.einsum('sbw,bvw->sbv', new_blocks, weights_subset, optimize=True)
+            new_dots = _compute_series_dots(new_blocks, weights_subset)
         else:
             new_dots = np.zeros((n_series, 0, self.n_vectors), dtype=np.float64)
 
@@ -4065,31 +4037,46 @@ class Sketches:
         self._clean_obsolete_basicDots()
         self._print_incremental_step()
         self.incrementable_index.append(self._curr_incrementable_startTime())
-        self.basicDots.append([])
         self.sketches = {}
         same_start = self.previous_startTime == self._curr_startTime()
         curr_start = self._curr_startTime()
         window_size = self.window_size
+        raw_matrix = np.empty((n_series, self.n_vectors), dtype=np.float64)
+        if same_start and len(self.basicDots) >= 2:
+            base = np.asarray(self.basicDots[-2], dtype=np.float64)
+        else:
+            base_source = np.asarray(self.basicDots[0], dtype=np.float64)[:, 1:, :]
+            base = base_source * np.asarray(self.diff_toggleVector, dtype=np.float64)
+
+        if base.size == 0 and new_dots.size == 0:
+            updated = base.reshape(n_series, 0, self.n_vectors)
+        elif base.size == 0:
+            updated = new_dots
+        elif new_dots.size == 0:
+            updated = base
+        else:
+            updated = np.concatenate((base, new_dots), axis=1)
+        self.basicDots.append(updated)
+        raw_matrix = np.sum(updated, axis=1)
+
+        self._ensure_orth_transform()
+        perm = self._orth_perm
+        signs = self._orth_signs
+        if perm is not None and signs is not None and raw_matrix.shape[1] == perm.shape[0]:
+            raw_matrix = raw_matrix[:, perm] * signs
 
         for s in range(n_series):
-            if same_start and len(self.basicDots) >= 2:
-                base = np.array(self.basicDots[-2][s], dtype=np.float64, copy=True)
-            else:
-                base_source = np.array(self.basicDots[0][s][1:,:], dtype=np.float64, copy=False)
-                base = base_source * self.diff_toggleVector
+            try:
+                self._debug_raw_sketches[(self.series_ids[s], curr_start, window_size)] = np.array(
+                    raw_matrix[s], dtype=np.float64, copy=True
+                )
+            except Exception:
+                pass
 
-            concat_parts = []
-            if base.size:
-                concat_parts.append(base)
-            if new_dots[s].size:
-                concat_parts.append(new_dots[s])
-
-            if concat_parts:
-                updated = np.concatenate(tuple(concat_parts), axis=0) if len(concat_parts) > 1 else concat_parts[0]
-            else:
-                updated = base  # both empty -> keep shape (0, n_vectors)
-            self.basicDots[-1].append(updated)
-            self.sketches[(self.series_ids[s], curr_start, window_size)] = updated.sum(axis=0)
+        norm_matrix = self._normalize_sketch_matrix(raw_matrix)
+        self._sketch_matrix = norm_matrix
+        for s in range(n_series):
+            self.sketches[(self.series_ids[s], curr_start, window_size)] = norm_matrix[s]
 
         del self.basicDots[0]
         del self.incrementable_index[0]
@@ -4112,10 +4099,16 @@ class Sketches:
     def _print_basicDots(self,index):
         if len(self.basicDots)>0:
             bD = self.basicDots[index]
-            for s in range(len(bD)):
-                print("Serie ",s,"(split by basic windows)")
-                res = [bw for bw in bD[s]] # flatten array
-                print(" ".join(map(str, res)))
+            if isinstance(bD, np.ndarray):
+                for s in range(bD.shape[0]):
+                    print("Serie ",s,"(split by basic windows)")
+                    res = [bw for bw in bD[s]]
+                    print(" ".join(map(str, res)))
+            else:
+                for s in range(len(bD)):
+                    print("Serie ",s,"(split by basic windows)")
+                    res = [bw for bw in bD[s]] # flatten array
+                    print(" ".join(map(str, res)))
 
     def print_sketches(self):
         if len(self.sketches)>0:
@@ -4138,14 +4131,93 @@ class Sketches:
             print("\nPartitions")
             self.print_partitions()
 
+    def _z_normalize_sketch(self, v):
+        arr = np.array(v, dtype=np.float64, copy=False)
+        if arr.size == 0:
+            return arr
+        mean = float(np.mean(arr))
+        centered = arr - mean
+        std = float(np.std(centered))
+        if not np.isfinite(std) or std <= 0.0:
+            return np.zeros_like(arr)
+        return centered / std
+
+    def _mean_l2_normalize_sketch(self, v):
+        arr = np.array(v, dtype=np.float64, copy=False)
+        if arr.size == 0:
+            return arr
+        centered = arr - float(np.mean(arr))
+        norm = float(np.linalg.norm(centered))
+        if not np.isfinite(norm) or norm <= 0.0:
+            return np.zeros_like(arr)
+        return centered / norm
+
+    def _normalize_sketch(self, v):
+        mode = (self.sketch_norm or "z").lower()
+        if mode == "mean_l2":
+            return self._mean_l2_normalize_sketch(v)
+        # default to z-normalization
+        return self._z_normalize_sketch(v)
+
+    def _normalize_sketch_matrix(self, matrix):
+        arr = np.asarray(matrix, dtype=np.float64)
+        if arr.size == 0:
+            return arr
+        if arr.ndim == 1:
+            arr = arr[None, :]
+        mode = (self.sketch_norm or "z").lower()
+        mean = np.mean(arr, axis=1, keepdims=True)
+        centered = arr - mean
+        if mode == "mean_l2":
+            norms = np.linalg.norm(centered, axis=1)
+            norms = norms.reshape(-1, 1)
+            out = np.zeros_like(centered)
+            valid = np.isfinite(norms[:, 0]) & (norms[:, 0] > 0)
+            if np.any(valid):
+                out[valid] = centered[valid] / norms[valid]
+            return out
+        std = np.std(centered, axis=1)
+        std = std.reshape(-1, 1)
+        out = np.zeros_like(centered)
+        valid = np.isfinite(std[:, 0]) & (std[:, 0] > 0)
+        if np.any(valid):
+            out[valid] = centered[valid] / std[valid]
+        return out
+
     def safe_normalize(self,v):
         norm = np.linalg.norm(v)
         if norm > 0:
             return v / norm
         else:
             return np.zeros_like(v)
-    
-    def partition_sketches(self, window_size, perm=None):
+
+    def _ensure_orth_transform(self):
+        if (
+            self._orth_perm is not None
+            and self._orth_signs is not None
+            and self._orth_perm.shape[0] == self.n_vectors
+        ):
+            return
+        seed = (int(self.seed_randomVector) + 7919) % (2**32 - 1)
+        rng = np.random.RandomState(seed)
+        self._orth_perm = rng.permutation(self.n_vectors)
+        self._orth_signs = rng.choice([1, -1], size=self.n_vectors)
+
+    def _apply_orth_transform(self, vector):
+        if vector is None:
+            return vector
+        self._ensure_orth_transform()
+        perm = self._orth_perm
+        signs = self._orth_signs
+        if (
+            perm is None
+            or signs is None
+            or vector.shape[0] != perm.shape[0]
+        ):
+            return vector
+        return signs * vector[perm]
+
+    def partition_sketches(self, window_size):
         if len(self.sketches) == 0:
             return
 
@@ -4154,16 +4226,7 @@ class Sketches:
         if total_dim <= 0:
             return
 
-        if perm is None:
-            base_perm = self._perm_rng.permutation(total_dim)
-        else:
-            base_perm = np.asarray(perm, dtype=int)
-            if base_perm.size < total_dim:
-                repeats = int(np.ceil(total_dim / base_perm.size))
-                base_perm = np.tile(base_perm, repeats)[:total_dim]
-
         for k, v in self.sketches.items():
-            norm = np.linalg.norm(v) if not self.is_constant[k[0]] else 0
             if k[2] != window_size:
                 continue
 
@@ -4171,15 +4234,23 @@ class Sketches:
             if length == 0:
                 continue
 
-            idx = base_perm % length
-
+            base_indices = np.arange(length, dtype=int)
             for grid in range(self.n_grids):
                 start = grid * self.grid_dimensions
                 end = start + self.grid_dimensions
-                if end > idx.shape[0]:
+                if end > base_indices.shape[0]:
                     break
-                indices = idx[start:end]
-                self.partitions[grid][k] = (v[indices], self.is_constant[k[0]], norm)
+                indices = base_indices[start:end]
+                chunk = np.array(v[indices], dtype=np.float64, copy=True)
+                chunk_norm = float(np.linalg.norm(chunk))
+                if not np.isfinite(chunk_norm):
+                    chunk_norm = 0.0
+                is_const = bool(self.is_constant.get(k[0], False)) or chunk_norm == 0.0
+                self.partitions[grid][k] = (
+                    chunk,
+                    is_const,
+                    chunk_norm,
+                )
 
     def distribute_partitions(self):
         if len(self.partitions)>0:
@@ -4189,21 +4260,20 @@ class Sketches:
         else:
             return False
     
-    def run(self, new_data_step, ids, verbose=True, testing=False, perm=None, distribute=True):
+    def run(self, new_data_step, ids, verbose=True, testing=False, distribute=True):
         self.verbose = verbose
         self.testing = testing
 
         self._newStream(new_data_step, ids)
 
         sketches = self._get_sketches()
-        self.partition_sketches(self.window_size, perm=perm)
+        self.partition_sketches(self.window_size)
         if distribute:
             self.distribute_partitions()
 
         if(testing and sketches):
             self._print_state()
 
-        # Return copies so the caller can safely merge
         return dict(self.sketches), [dict(p) for p in self.partitions]
 
 class Candidates_BF:
@@ -4230,10 +4300,14 @@ class Candidates_BF:
     def from_state(cls, state):
         obj = cls.__new__(cls)
         obj.__dict__.update(state)
+        obj._reverse_index = defaultdict(list, getattr(obj, "_reverse_index", {}))
+        obj._recent_window_ids = set(getattr(obj, "_recent_window_ids", set()))
         return obj
 
     def load_state(self, state):
         self.__dict__.update(state)
+        self._reverse_index = defaultdict(list, getattr(self, "_reverse_index", {}))
+        self._recent_window_ids = set(getattr(self, "_recent_window_ids", set()))
     
     def _newStream(self,new_data_step,ids):
         new_data_step_index = new_data_step[0,:]
@@ -4353,33 +4427,32 @@ class Candidates_BF:
 
 class Candidates:
     def __init__(self,n_lagged_windows,grid_dimension,cell_size,grid_max,freq_threshold,corr_threshold,n_vectors,sketch_std,n_grids,neg_corr,
-                 sign_prefilter_scale=1.3,sign_prefilter_extra=1,neighbor_margin=0.08,extra_filter=False):       
+                 sign_prefilter_scale=1.3,sign_prefilter_extra=1,extra_filter=False, seed=None):
         self.verbose = None
         self.neg_corr = neg_corr
-        # Parameters grids
+        # Parameters grids (grid_dimension is fixed to 1 semantics)
         self.n_lagged_windows = n_lagged_windows
         self.curr_time = None
-        self.grid_dimensions = grid_dimension #2D grid
+        self.grid_dimensions = 1 if grid_dimension is None or grid_dimension <= 0 else int(grid_dimension)
         self.partition = []
         self.cell_size = cell_size
         self.grid_max = grid_max
-        self.grid = {}
         self.sketches = {}
-        self._unit_vectors = {}
-        self._cell_cache = {}
-        self._key_cells = {}
-        self._sign_bits = {}
-        self._updated_cells = set()
-        self.sign_prefilter_scale = float(sign_prefilter_scale)
-        self.sign_prefilter_extra = int(sign_prefilter_extra)
-        self.neighbor_margin = float(neighbor_margin)
-        self.extra_filter = _coerce_to_bool(extra_filter)
+        # BST-like storage over scalar sketch values
+        self._entries = []  # (value, window_id_key, window_id)
+        self._values = []   # parallel list of values for bisect
+        self._reverse_index = defaultdict(list)  # window_id -> list of inserted values (includes neg when needed)
+        self._recent_window_ids = set()
         # Parameters thresholds
         self.freq_threshold = freq_threshold
         self.corr_threshold = corr_threshold
+        self.sign_prefilter_scale = float(sign_prefilter_scale)
+        self.sign_prefilter_extra = int(sign_prefilter_extra)
 
         self.sketch_std = sketch_std
         self.n_vectors = n_vectors
+        seed = _to_int_safe(seed)
+        self._rng = np.random.default_rng(seed if seed is not None else 0)
 
     def dump_state(self):
         return dict(self.__dict__)
@@ -4399,196 +4472,89 @@ class Candidates:
             self.partition.append(new_partition)
         else:
             self.partition[-1].update(new_partition)
+        self._recent_window_ids = set()
 
-    def _normalize_cell_coords(self, v):
-        arr = np.asarray(v, dtype=np.float64)
-        if arr.shape[0] < self.grid_dimensions:
-            raise ValueError("sketch dimension smaller than grid dimensionality")
-        if self.neg_corr:
-            normalized = 0.5 * (arr[:self.grid_dimensions] + 1.0)
+    def _window_id_key(self, window_id):
+        sid, start_time, window_size = window_id
+        return (str(sid), int(start_time), int(window_size))
+
+    def _insert_entry(self, value, window_id):
+        key = self._window_id_key(window_id)
+        start = bisect.bisect_left(self._values, value)
+        end = bisect.bisect_right(self._values, value)
+        if start == end:
+            idx = start
         else:
-            normalized = np.abs(arr[:self.grid_dimensions])
-        return np.clip(normalized, 0.0, 1.0)
+            subkeys = [self._entries[i][1] for i in range(start, end)]
+            offset = bisect.bisect_left(subkeys, key)
+            idx = start + offset
+        self._values.insert(idx, value)
+        self._entries.insert(idx, (value, key, window_id))
 
-    def _get_cell(self, v):
-        if self.cell_size <= 0:
-            raise ValueError("cell_size must be positive")
+    def _remove_entry(self, value, window_id):
+        key = self._window_id_key(window_id)
+        idx = bisect.bisect_left(self._values, value)
+        while idx < len(self._values) and self._values[idx] == value:
+            _, entry_key, entry_id = self._entries[idx]
+            if entry_key == key and entry_id == window_id:
+                self._values.pop(idx)
+                self._entries.pop(idx)
+                return True
+            idx += 1
+        return False
 
-        coords = self._normalize_cell_coords(v)
-        eps = self.cell_size * 1e-9
-        return tuple(
-            int(np.floor((coords[i] + eps) / self.cell_size))
-            for i in range(self.grid_dimensions)
-        )
+    def _range_search_ids(self, lower, upper):
+        idx = bisect.bisect_left(self._values, lower)
+        n = len(self._values)
+        while idx < n and self._values[idx] <= upper:
+            yield self._entries[idx][2]
+            idx += 1
 
-    def normalized_sketch(self,sk,norm):
-        eps = 1e-8
-        #scale = 1.0 / (2.0 * max(norm, eps))  # from [-1,1] → [0,1]
-        #return 0.5 + sk * scale
-        # [-1, 1] domain
-        return sk / max(norm, eps)
-
-    def _compute_hamming_threshold(self):
-        if self.grid_dimensions <= 0:
-            return None
-        nv = self.n_vectors if self.n_vectors is not None else 0
-        if nv <= 0:
-            freq_ratio = 0.0
-        else:
-            freq_ratio = max(0.0, min(1.0, max(self.freq_threshold, 0.0) / float(nv)))
-        base_fraction = 0.45 - 0.10 * freq_ratio
-        fraction = base_fraction * self.sign_prefilter_scale
-        fraction = max(0.0, min(1.0, fraction))
-        threshold = int(math.ceil(fraction * self.grid_dimensions + self.sign_prefilter_extra))
-        return max(0, threshold)
-
-    @staticmethod
-    def _sign_prefilter(bits_a, bits_b, threshold):
-        if threshold is None or bits_a is None or bits_b is None:
-            return True, False
-
-        diff = int(np.count_nonzero(np.bitwise_xor(bits_a, bits_b)))
-        diff_flip = int(np.count_nonzero(np.bitwise_xor(bits_a, 1 - bits_b)))
-        best = min(diff, diff_flip)
-        passed = best <= threshold
-        strong = passed and best <= (threshold // 2)
-        return passed, strong
-
-    def _cells_for_vector(self, vector, boundary_margin):
-        cell_key = self._get_cell(vector)
-        cells = {cell_key}
-
-        if self.cell_size <= 0:
-            return cells
-
-        normalized = self._normalize_cell_coords(vector)
-        raw_margin = max(boundary_margin, 0.0)
-        radius = int(np.floor(raw_margin))
-        fractional = raw_margin - radius
-        frac_margin = fractional * self.cell_size
-
-        base_indices = list(cell_key)
-        offset_options = []
-
-        for dim in range(self.grid_dimensions):
-            idx = base_indices[dim]
-
-            if idx < 0:
-                offset_options.append({0})
-                continue
-
-            offsets = set(range(-radius, radius + 1))
-
-            if fractional > 0:
-                coord = normalized[dim]
-                t = min(coord, 1.0 - coord)
-                lower = idx * self.cell_size
-                pos_in_cell = t - lower
-                if pos_in_cell < 0.0:
-                    pos_in_cell = 0.0
-                if pos_in_cell > self.cell_size:
-                    pos_in_cell = self.cell_size
-
-                extra = radius + 1
-                if pos_in_cell < frac_margin and idx - extra >= 0:
-                    offsets.add(-extra)
-                if pos_in_cell > self.cell_size - frac_margin:
-                    offsets.add(extra)
-
-            offset_options.append(offsets)
-
-        for deltas in product(*offset_options):
-            if all(delta == 0 for delta in deltas):
-                continue
-            neighbor = tuple(idx + delta for idx, delta in zip(base_indices, deltas))
-            if any(n < 0 for n in neighbor):
-                continue
-            cells.add(neighbor)
-
-        return cells
-
-    def _input_grid(self, boundary_margin: float = 0.06):
+    def _input_tree(self):
+        if not self.partition:
+            return
         last_partition = self.partition[-1]
-        updated_cells = set()
-
-        norms = []
-        for sk, is_constant, norm in last_partition.values():
-            if not is_constant and norm is not None:
-                norms.append(max(norm, 1e-8))
-        shared_scale = float(np.median(norms)) if norms else 1.0
-
-        updated_cells = set()
-
+        self._recent_window_ids = set()
         for k, v in last_partition.items():
-            sketch,is_constant,norm = v
-            if is_constant: #if is constant
-                self._key_cells.pop(k, None)
+            if len(v) >= 3:
+                sketch, is_constant, _norm = v[:3]
+            else:
                 continue
-            scaled = sketch / shared_scale if shared_scale > 0 else sketch
-            scaled = np.clip(scaled, -1.0, 1.0)
-            sketch = scaled
-            self.partition[-1][k] = (sketch,is_constant,norm)
-            bits = (sketch >= 0.0).astype(np.uint8)
-            self._sign_bits[k] = bits
-            cells_for_key = set()
-            variants = (sketch, -sketch) if self.neg_corr else (sketch,)
-            for variant in variants:
-                cells_for_key.update(self._cells_for_vector(variant, boundary_margin))
-
-            self._key_cells[k] = tuple(sorted(cells_for_key))
-
-            for cell in self._key_cells[k]:
-                bucket = self.grid.setdefault(cell, [])
-                bucket.append(k)
-                updated_cells.add(cell)
-            self.sketches[k] = sketch
-            unit_vec = None
-            vec = sketch
-            vec_norm = np.linalg.norm(vec)
-            if vec_norm > 0:
-                unit_vec = vec / vec_norm
-            self._unit_vectors[k] = unit_vec
-        # ensure constants still clear any stale cache entry
-        for k, (_, is_constant, _) in self.partition[-1].items():
             if is_constant:
-                self._unit_vectors[k] = None
-                self._sign_bits.pop(k, None)
-        for cell in updated_cells:
-            self._cell_cache.pop(cell, None)
-
-        self._updated_cells = updated_cells
+                continue
+            vec = np.asarray(sketch, dtype=np.float64).ravel()
+            if vec.size == 0:
+                continue
+            value = float(vec[0])
+            self._insert_entry(value, k)
+            self._reverse_index[k].append(value)
+            if self.neg_corr:
+                neg_value = -value
+                self._insert_entry(neg_value, k)
+                self._reverse_index[k].append(neg_value)
+            self.sketches[k] = value
+            self._recent_window_ids.add(k)
 
     def _clean_old_sketches(self):
         if len(self.partition) > self.n_lagged_windows:
             old_partition = self.partition.pop(0)
             for k, v in old_partition.items():
-                sketch,is_constant,norm = v
-                self._unit_vectors.pop(k, None)
-                self._sign_bits.pop(k, None)
-                if is_constant: #if is constant
-                    self._key_cells.pop(k, None)
+                if len(v) >= 3:
+                    _sketch, is_constant, _norm = v[:3]
+                else:
                     continue
-                cells = self._key_cells.pop(k, None)
-                if cells is None:
-                    fallback_cells = {self._get_cell(sketch), self._get_cell(-sketch)} if self.neg_corr else {self._get_cell(sketch)}
-                    #fallback_cells = {self._get_cell(np.abs(sketch))} if self.neg_corr else {self._get_cell(sketch)}
-                    cells = tuple(fallback_cells)
-                for cell_key in cells:
-                    bucket = self.grid.get(cell_key)
-                    if bucket is None:
-                        continue
-                    if k in bucket:
-                        bucket.remove(k)
-                    self._cell_cache.pop(cell_key, None)
-                    if not bucket:
-                        del self.grid[cell_key]            
-                del self.sketches[k]
+                values = self._reverse_index.pop(k, [])
+                if is_constant:
+                    self.sketches.pop(k, None)
+                    continue
+                for val in values:
+                    self._remove_entry(val, k)
+                self.sketches.pop(k, None)
 
     def _update_grid(self, n_ids):
         if self.partition and len(self.partition[-1]) >= n_ids:
             self._clean_old_sketches()
-            margin = max(0.06, self.neighbor_margin)
-            self._input_grid(boundary_margin=margin)
+            self._input_tree()
     
     def _normalize_key(self, key):
         id1, id2, t1, t2, w = key
@@ -4606,225 +4572,36 @@ class Candidates:
             return (id2, id1, t2, t1, w)
         else:
             return (id1, id2, t1, t2, w)
-    
-    def bucket_weight(self,cell):
-        prob = 1.0
-        for c in cell:
-            left = c * self.cell_size
-            right = (c + 1) * self.cell_size
-            p = norm.cdf(right, scale=self.sketch_std) - norm.cdf(left, scale=self.sketch_std)
-            prob *= p
-
-        return float('inf') if prob == 0 else 1.0 / prob
-    
-    def _increment_candidates(self, freq_pairs, candidates):
-        grid = self.grid
-        if not self._updated_cells:
-            return
-        cells_to_scan = tuple(self._updated_cells)
-        prefilter_cos = float(max(0.06, min(0.20, 0.20 * self.corr_threshold)))
-        self.prefilter_cos = prefilter_cos
-        unit_vectors = self._unit_vectors
-        hamming_threshold = self._compute_hamming_threshold() if self.extra_filter else None
-
-        for cell in cells_to_scan:
-            series_ids = grid.get(cell)
-            if not series_ids:
-                continue
-            if len(series_ids) < 2:
-                continue
-
-            cache_entry = self._cell_cache.get(cell)
-            if cache_entry is None:
-                cache_keys = []
-                cache_vecs = []
-                cache_bits = []
-                cache_windows = []
-                cache_times = []
-                cache_series = []
-                for key in series_ids:
-                    vec = unit_vectors.get(key)
-                    if vec is None:
-                        continue
-                    cache_keys.append(key)
-                    cache_vecs.append(vec)
-                    cache_bits.append(self._sign_bits.get(key))
-                    cache_windows.append(key[2])
-                    cache_times.append(key[1])
-                    cache_series.append(key[0])
-                if not cache_keys:
-                    self._cell_cache[cell] = {"keys": (), "vecs": None}
-                    continue
-                vecs = np.stack(cache_vecs)
-                bits = None
-                if cache_bits and all(bit is not None for bit in cache_bits):
-                    bits = np.asarray(cache_bits, dtype=np.uint8)
-                cache_entry = {
-                    "keys": tuple(cache_keys),
-                    "vecs": vecs,
-                    "bits": bits,
-                    "windows": np.asarray(cache_windows, dtype=np.int64),
-                    "times": np.asarray(cache_times, dtype=np.int64),
-                    "series": np.asarray(cache_series, dtype=object),
-                    "window_groups": None,
-                }
-                self._cell_cache[cell] = cache_entry
-            else:
-                vecs = cache_entry.get("vecs")
-                if vecs is None or not cache_entry.get("keys"):
-                    continue
-                bits = cache_entry.get("bits")
-                if bits is None:
-                    cache_bits = []
-                    for key in cache_entry["keys"]:
-                        bit = self._sign_bits.get(key)
-                        if bit is None:
-                            cache_bits = None
-                            break
-                        cache_bits.append(bit)
-                    if cache_bits:
-                        bits = np.asarray(cache_bits, dtype=np.uint8)
-                        cache_entry["bits"] = bits
-
-            keys = cache_entry["keys"]
-            windows = cache_entry["windows"]
-            times = cache_entry["times"]
-            series_arr = cache_entry["series"]
-            bits = cache_entry.get("bits")
-
-            curr_mask = times == self.curr_time
-            if not np.any(curr_mask):
-                continue
-
-            window_groups = cache_entry.get("window_groups")
-            if window_groups is None:
-                grouped = {}
-                for idx, window_size in enumerate(windows):
-                    grouped.setdefault(window_size, []).append(idx)
-                window_groups = {
-                    w: np.asarray(idxs, dtype=np.int64)
-                    for w, idxs in grouped.items()
-                }
-                cache_entry["window_groups"] = window_groups
-
-            for window_size, window_idx in window_groups.items():
-                if window_idx.size < 1:
-                    continue
-
-                window_curr_mask = curr_mask[window_idx]
-                curr_idx = window_idx[window_curr_mask]
-                if curr_idx.size == 0:
-                    continue
-
-                past_idx = window_idx[~window_curr_mask]
-
-                curr_vecs = vecs[curr_idx]
-                curr_bits = bits[curr_idx] if bits is not None else None
-                curr_keys = [keys[idx] for idx in curr_idx]
-                curr_series = series_arr[curr_idx]
-                curr_times = times[curr_idx]
-
-                past_bits = None
-                if past_idx.size > 0:
-                    past_vecs = vecs[past_idx]
-                    past_bits = bits[past_idx] if bits is not None else None
-                    past_keys = [keys[idx] for idx in past_idx]
-                    past_series = series_arr[past_idx]
-                    past_times = times[past_idx]
-
-                    tile_size = 256
-                    for tile_start in range(0, past_vecs.shape[0], tile_size):
-                        tile_end = min(tile_start + tile_size, past_vecs.shape[0])
-                        past_tile = past_vecs[tile_start:tile_end]
-                        cos_matrix = curr_vecs @ past_tile.T
-
-                        for i, key_a in enumerate(curr_keys):
-                            cos_row = cos_matrix[i]
-                            for local_j, key_b in enumerate(past_keys[tile_start:tile_end]):
-                                global_j = tile_start + local_j
-                                if curr_series[i] == past_series[global_j] and curr_times[i] == past_times[global_j]:
-                                    continue
-                                pair_id = self._normalize_key((key_a[0], key_b[0], key_a[1], key_b[1], window_size))
-                                if pair_id in candidates:
-                                    continue
-                                bits_a = curr_bits[i] if curr_bits is not None else None
-                                bits_b = past_bits[global_j] if past_bits is not None else None
-                                if self.extra_filter:
-                                    cos_val = float(cos_row[local_j])
-                                    if (not self.neg_corr and cos_val < self.prefilter_cos) or (self.neg_corr and abs(cos_val) < self.prefilter_cos):
-                                        continue
-                                    if hamming_threshold is not None:
-                                        passed, _ = self._sign_prefilter(bits_a, bits_b, hamming_threshold)
-                                        if not passed:
-                                            continue
-                                freq_pairs[pair_id] = freq_pairs.get(pair_id, 0) + self.grid_dimensions
-                                if freq_pairs[pair_id] >= self.freq_threshold:
-                                    candidates[pair_id] = 1
-
-                if curr_idx.size > 1:
-                    cos_curr = curr_vecs @ curr_vecs.T
-                    for i in range(curr_idx.size):
-                        key_i = curr_keys[i]
-                        for j in range(i + 1, curr_idx.size):
-                            key_j = curr_keys[j]
-                            if curr_series[i] == curr_series[j] and curr_times[i] == curr_times[j]:
-                                continue
-                            pair_id = self._normalize_key((key_i[0], key_j[0], key_i[1], key_j[1], window_size))
-                            if pair_id in candidates:
-                                continue
-                            bits_i = curr_bits[i] if curr_bits is not None else None
-                            bits_j = curr_bits[j] if curr_bits is not None else None
-                            if self.extra_filter:
-                                cos_val = float(cos_curr[i, j])
-                                if (not self.neg_corr and cos_val < self.prefilter_cos) or (self.neg_corr and abs(cos_val) < self.prefilter_cos):
-                                    continue
-                                if hamming_threshold is not None:
-                                    passed, _ = self._sign_prefilter(bits_i, bits_j, hamming_threshold)
-                                    if not passed:
-                                        continue
-                            freq_pairs[pair_id] = freq_pairs.get(pair_id, 0) + self.grid_dimensions
-                            if freq_pairs[pair_id] >= self.freq_threshold:
-                                candidates[pair_id] = 1
-        
-        self._updated_cells.clear()
-
-                #weight = self.bucket_weight(cell)
-                
-                #if np.sqrt(sum((self.sketches[a]-self.sketches[b])**2)) > 0.25:
-                #    continue
-                
-                #cos_sim = np.dot(self.sketches[a],self.sketches[b])
-                #freq_pairs[pair_id] = freq_pairs.get(pair_id, 0) + cos_sim #1 #weight
-                #if abs(freq_pairs[pair_id]) >= self.corr_threshold-0.2:
-                #    candidates[pair_id] = 1
 
     def update_n_lagged_windows(self,n_lagged_windows):
         self.n_lagged_windows = n_lagged_windows
 
-    def _print_grid(self):
-        for cell, series_ids in self.grid.items():
-            print("Cell ",cell,": ",series_ids)
-    
-    def _print_freq_pairs(self,freq_pairs):
-        if len(freq_pairs)>0:
-            for pair,freq in freq_pairs.items():
-                print("Pair ",pair,": ",freq)
-    
-    def _print_candidates(self,candidates):
-        if len(candidates)>0:
-            for pair,isCandidate in candidates.items():
-                print("Pair ",pair,": ",isCandidate)
-
-    def _print_state(self,freq_pairs,candidates):
-        for d in range(self.grid_dimensions):
-            if len(self.grid[d])>0:
-                if(self.testing):
-                    print("\nGrid:")
-                    self._print_grid()
-                    print("\nFrequency of pairs:")
-                    self._print_freq_pairs(freq_pairs)
-                    print("\nCandidates:")
-                    self._print_candidates(candidates)
+    def _increment_candidates(self, freq_pairs, candidates):
+        if not self._recent_window_ids:
+            return
+        if self.cell_size is None:
+            return
+        tau = float(self.cell_size)
+        if tau < 0.0:
+            return
+        seen_pairs = set()
+        for window_id in self._recent_window_ids:
+            values = self._reverse_index.get(window_id, ())
+            for value in set(values):
+                lower = value - tau
+                upper = value + tau
+                for other_id in self._range_search_ids(lower, upper):
+                    if other_id == window_id:
+                        continue
+                    if window_id[0] == other_id[0] and window_id[1] == other_id[1]:
+                        continue
+                    pair_id = self._normalize_key((window_id[0], other_id[0], window_id[1], other_id[1], window_id[2]))
+                    if pair_id in seen_pairs:
+                        continue
+                    seen_pairs.add(pair_id)
+                    freq_pairs[pair_id] = freq_pairs.get(pair_id, 0.0) + 1.0
+                    if freq_pairs[pair_id] >= self.freq_threshold:
+                        candidates[pair_id] = 1
 
     def run(self, n_ids, verbose=True, testing=False):
         self.verbose = verbose
@@ -4841,13 +4618,13 @@ class Candidates:
 
         return freq_pairs, candidates, uncorrelated
 
-
 class CorrTrack_optimize:
-    def __init__(self,train_data,ids,window_size,window_step,n_lags,corr_threshold,recall_by_window,alg,neg_corr,corr_val, extra_filter=False, exec="parallel",max_workers=0):
+    def __init__(self,train_data,ids,window_size,window_step,n_lags,corr_threshold,recall_by_window,alg,neg_corr,corr_val, extra_filter=False, exec="parallel",max_workers=0, sketch_norm="z"):
 
         self.neg_corr = neg_corr
         self.corr_val = corr_val
         self.extra_filter = _coerce_to_bool(extra_filter)
+        self.sketch_norm = sketch_norm or "z"
 
         # Parameters data
         self.train_data = train_data
@@ -4868,7 +4645,8 @@ class CorrTrack_optimize:
         
         self.corrtrack_bf = CorrTrack(window_size=self.window_size,basic_window=None,window_step=window_step,n_vectors=1,n_lags=self.n_lags,
                                     grid_dimension=1,cell_size=1,warmup_data=None,seed=None,seed_toggle=None,corr_threshold=self.corr_threshold,
-                                    neg_corr=self.neg_corr,preprocess=False,extra_filter=self.extra_filter,exec=self.exec,max_workers=self.max_workers)
+                                    neg_corr=self.neg_corr,preprocess=False,extra_filter=self.extra_filter,exec=self.exec,max_workers=self.max_workers,
+                                    sketch_norm=self.sketch_norm)
         
         self.window_step = self.corrtrack_bf.window_step
         self.basic_window = self.corrtrack_bf.basic_window
@@ -4894,7 +4672,7 @@ class CorrTrack_optimize:
 
         max_workers = self.max_workers or max(1, (os.cpu_count() or 1) - 1)
         max_workers = max(1, max_workers)
-        scheduler_get = dask_multiprocessing_get
+        scheduler_get = dask_threaded_get
         if scheduler_get is None:
             for it in items:
                 yield worker_fn(it)
@@ -5144,6 +4922,8 @@ class CorrTrack_optimize:
         corr_threshold = self.corr_threshold
         param_combo["corr_threshold"] = corr_threshold
         
+        feature_kwargs = _extract_feature_overrides(param_combo)
+
         try:
             length_data = self.train_data.shape[1]
             if warmup_size is not None:
@@ -5157,11 +4937,12 @@ class CorrTrack_optimize:
 
             corrtrack = CorrTrack(window_size=window_size,basic_window=basic_window,window_step=window_step,n_vectors=n_vectors,n_lags=n_lags,
                                 grid_dimension=1,cell_size=1,warmup_data=warmup_data,seed=seed,seed_toggle=seed_toggle,
-                                freq_threshold=0,corr_threshold=corr_threshold,neg_corr=self.neg_corr,preprocess=preprocess,extra_filter=extra_filter,exec=self.exec,max_workers=self.max_workers)
+                                freq_threshold=0,corr_threshold=corr_threshold,neg_corr=self.neg_corr,preprocess=preprocess,extra_filter=extra_filter,exec=self.exec,max_workers=self.max_workers,
+                                **feature_kwargs)
 
             for start in range(0, length_data - self.window_step + 1, self.window_step):
                 chunk = self.train_data[:, start:(start + self.window_step)]
-                corrtrack.run_train_distances(chunk, self.ids, verbose=False, testing=False,policy=self.exec)
+                corrtrack.run_train_distances(chunk, self.ids, verbose=False, testing=False)
             
             #print("Distances pos_corr",corrtrack.n_vectors,min(corrtrack.corr_dist_pos),max(corrtrack.corr_dist_pos),np.mean(corrtrack.corr_dist_pos),np.std(corrtrack.corr_dist_pos))
             #print("Distances neg_corr",corrtrack.n_vectors,min(corrtrack.corr_dist_neg),max(corrtrack.corr_dist_neg),np.mean(corrtrack.corr_dist_neg),np.std(corrtrack.corr_dist_neg))
@@ -5202,6 +4983,7 @@ class CorrTrack_optimize:
         record["seed"] = param_combo.get("seed")
         record["seed_toggle"] = param_combo.get("seed_toggle")
         record["preprocess"] = param_combo.get("preprocess")
+        record["sketch_norm"] = param_combo.get("sketch_norm")
         record["extra_filters"] = _coerce_to_bool(param_combo.get("extra_filters", self.extra_filter))
         record["corr_threshold"] = self.corr_threshold
         record["grid_max"] = param_combo.get("grid_max")
@@ -5274,6 +5056,8 @@ class CorrTrack_optimize:
         if cell_stretch is None or cell_stretch <= 0.0:
             cell_stretch = 1.0
 
+        feature_kwargs = _extract_feature_overrides(param_combo)
+
         record["nodes"] = nodes
         record["warmup_size"] = warmup_ratio
         record["seed"] = seed
@@ -5315,6 +5099,7 @@ class CorrTrack_optimize:
                 extra_filter=extra_filter,
                 exec=self.exec,
                 max_workers=self.max_workers,
+                **feature_kwargs,
             )
 
             record["grid_max"] = corrtrack.grid_max
@@ -5452,11 +5237,12 @@ class CorrTrack_optimize:
         #return self.ground_truth, self.runtime_bf, CorrTrack_HyperOptim._skyline_query(metrics, ref_metrics) 
 
 class CorrTrack_compare:
-    def __init__(self,train_data,test_data,ids,window_size,window_step,basic_window,n_lags,corr_threshold,param_grid,recall_by_window,neg_corr,corr_val,algs=None, exec="parallel", max_workers=0, extra_filter=False):
+    def __init__(self,train_data,test_data,ids,window_size,window_step,basic_window,n_lags,corr_threshold,param_grid,recall_by_window,neg_corr,corr_val,algs=None, exec="parallel", max_workers=0, extra_filter=False, sketch_norm="z"):
         
         self.neg_corr = neg_corr
         self.corr_val = corr_val
         self.extra_filter = _coerce_to_bool(extra_filter)
+        self.sketch_norm = sketch_norm or "z"
 
         # Parameters data
         self.train_data = train_data
@@ -5479,7 +5265,8 @@ class CorrTrack_compare:
         self.corrtrack_bf = CorrTrack(window_size=self.window_size,basic_window=basic_window,window_step=window_step,n_vectors=1,n_lags=self.n_lags,
                                     grid_dimension=1,cell_size=1,warmup_data=None,seed=None,seed_toggle=None,
                                     corr_threshold=self.corr_threshold,neg_corr=self.neg_corr,preprocess=False,
-                                    extra_filter=self.extra_filter,exec=self.exec,max_workers=self.max_workers)
+                                    extra_filter=self.extra_filter,exec=self.exec,max_workers=self.max_workers,
+                                    sketch_norm=self.sketch_norm)
         
         self.window_step = self.corrtrack_bf.window_step
         self.basic_window = self.corrtrack_bf.basic_window
@@ -5511,7 +5298,7 @@ class CorrTrack_compare:
 
         max_workers = self.max_workers or max(1, (os.cpu_count() or 1) - 1)
         max_workers = max(1, max_workers)
-        scheduler_get = dask_multiprocessing_get
+        scheduler_get = dask_threaded_get
         if scheduler_get is None:
             for it in items:
                 yield worker_fn(it)
@@ -5615,16 +5402,17 @@ class CorrTrack_compare:
             plt.savefig(output_csv)
             plt.close()
 
-    def _mode_run(self,mode,alg,path,prefix,nodes,seed,seed_toggle,n_vectors,grid_dimension,cell_size,grid_max,freq_threshold,warmup_data,preprocess,extra_filter):
+    def _mode_run(self,mode,alg,path,prefix,nodes,seed,seed_toggle,n_vectors,grid_dimension,cell_size,grid_max,freq_threshold,warmup_data,preprocess,extra_filter,feature_overrides=None):
         length_data = self.test_data.shape[1]
         data_stream = self.test_data
         extra_filter_flag = _coerce_to_bool(extra_filter, self.extra_filter)
 
         # Instantiating corrtrack objects
+        overrides = feature_overrides or {}
         corrtrack = CorrTrack(window_size=self.window_size,basic_window=self.basic_window,window_step=self.window_step,n_vectors=n_vectors,n_lags=self.n_lags,
                             grid_dimension=grid_dimension,cell_size=cell_size,warmup_data=warmup_data,seed=seed,seed_toggle=seed_toggle,
                             freq_threshold=freq_threshold,corr_threshold=self.corr_threshold,neg_corr=self.neg_corr,preprocess=preprocess,
-                            extra_filter=extra_filter_flag,exec=self.exec,max_workers=nodes)
+                            extra_filter=extra_filter_flag,exec=self.exec,max_workers=nodes,**overrides)
         if mode == "main":
             #Running
             start_time = time.time()
@@ -6218,12 +6006,15 @@ class CorrTrack_compare:
         bst["grid_dimension"] = grid_dimension
         bst["cell_stretch"] = cell_stretch
 
+        feature_kwargs = _extract_feature_overrides(bst)
+
         runtime_parts, runtime, artifact_time, corr_flags = self._mode_run(
             mode, alg, path, prefix,
             bst["nodes"], bst["seed"], bst["seed_toggle"],
             n_vectors, grid_dimension,
             cell_stretch, bst["grid_max"],
-            bst["freq_threshold"], warmup_data, bst["preprocess"], extra_filter_flag
+            bst["freq_threshold"], warmup_data, bst["preprocess"], extra_filter_flag,
+            feature_kwargs,
         )
         speedup = runtime_bf / runtime if runtime else float("inf")
         metrics = CorrTrack.compute_metrics_bf(corr_flags, corr_flags_bf,self.recall_by_window,self.pair_min_dist_bf)
@@ -6253,8 +6044,8 @@ class CorrTrack_compare:
 
         param_keys = [
             "nodes","window_size","window_step","basic_window","n_lags","warmup_size",
-            "seed","seed_toggle","preprocess","extra_filters","corr_threshold",
-            "grid_max","cell_stretch","cell_size","n_vectors","grid_dimension","freq_threshold"
+            "seed","seed_toggle","preprocess","sketch_norm","extra_filters","corr_threshold",
+            "grid_max","cell_stretch","cell_size","n_vectors","grid_dimension","freq_threshold",
         ]
         param_values = []
         for key in param_keys:
@@ -6310,7 +6101,7 @@ class CorrTrack_compare:
 
         data_stream = self.test_data
 
-        runtime_parts, runtime_bf, artifact_time_bf, corr_flags_bf = self._mode_run("bf", None, path, "bf", 0, None, None, 1, 1, None, None, None, None, None, self.extra_filter)
+        runtime_parts, runtime_bf, artifact_time_bf, corr_flags_bf = self._mode_run("bf", None, path, "bf", 0, None, None, 1, 1, None, None, None, None, None, self.extra_filter, None)
         print("Run Brute-Force, Finished in ",runtime_bf)
 
         os.makedirs(os.path.dirname(output_csv), exist_ok=True)

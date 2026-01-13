@@ -2,12 +2,13 @@
 
 PARAM_GRID = {
     "n_vectors": [8, 16, 32, 64],
-    "cell_size": [1.0],
-    "freq_threshold": [0.0, 0.5, 1.0],
+    "cell_size": [1,2,3],
+    "freq_threshold": [0.3,0.5,0.7],
     "warmup_size": [1],
-    "preprocess": [True, False],
+    "preprocess": [False],
     "nodes": [0],
     "seed": [2468],
     "seed_toggle": [1357],
-    "grid_dimension": [0],
+    "grid_dimension": [1],
+    "sketch_norm": ["mean_l2"],
 }

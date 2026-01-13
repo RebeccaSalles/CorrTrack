@@ -23,7 +23,8 @@ DEFAULT_BASIC_WINDOW = None
 DEFAULT_N_LAGS = 7 * 24
 DEFAULT_CORR_THRESHOLD = 0.7
 
-DEFAULT_EXEC_MODE = "sequential"
+DEFAULT_PARALLEL = False
+DEFAULT_EXEC_MODE = "thread" if DEFAULT_PARALLEL else "sequential"
 DEFAULT_NEG_CORR = False
 DEFAULT_CORR_VAL = True
 DEFAULT_EXTRA_FILTER = False
@@ -31,6 +32,7 @@ DEFAULT_RECALL_BY_WINDOW = True
 DEFAULT_TARGET_RECALL = 0.95
 DEFAULT_TRAIN_RATIO = 0.3
 
+PARALLEL = DEFAULT_PARALLEL
 EXEC_MODE = DEFAULT_EXEC_MODE
 NEG_CORR = DEFAULT_NEG_CORR
 CORR_VAL = DEFAULT_CORR_VAL
@@ -186,7 +188,8 @@ def main():
     parser.add_argument("--basic-window", type=int, default=DEFAULT_BASIC_WINDOW)
     parser.add_argument("--n-lags", type=int, default=DEFAULT_N_LAGS)
     parser.add_argument("--corr-threshold", type=float, default=DEFAULT_CORR_THRESHOLD)
-    parser.add_argument("--exec-mode", type=str, default=DEFAULT_EXEC_MODE)
+    parser.add_argument("--parallel", dest="parallel", action="store_true")
+    parser.add_argument("--sequential", dest="parallel", action="store_false")
     parser.add_argument("--neg-corr", dest="neg_corr", action="store_true")
     parser.add_argument("--no-neg-corr", dest="neg_corr", action="store_false")
     parser.add_argument("--corr-val", dest="corr_val", action="store_true")
@@ -196,6 +199,7 @@ def main():
     parser.add_argument("--recall-by-window", dest="recall_by_window", action="store_true")
     parser.add_argument("--no-recall-by-window", dest="recall_by_window", action="store_false")
     parser.set_defaults(
+        parallel=DEFAULT_PARALLEL,
         neg_corr=DEFAULT_NEG_CORR,
         corr_val=DEFAULT_CORR_VAL,
         extra_filter=DEFAULT_EXTRA_FILTER,
@@ -209,7 +213,7 @@ def main():
     _apply_dataset_config(cfg_dataset)
 
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
-    global EXEC_MODE, NEG_CORR, CORR_VAL, EXTRA_FILTER, RECALL_BY_WINDOW
+    global PARALLEL, EXEC_MODE, NEG_CORR, CORR_VAL, EXTRA_FILTER, RECALL_BY_WINDOW
     global TARGET_RECALL, TRAIN_RATIO, PARAM_GRID, DATA_LOADER
 
     WINDOW_SIZE = args.window_size
@@ -217,7 +221,8 @@ def main():
     BASIC_WINDOW = args.basic_window
     N_LAGS = args.n_lags
     CORR_THRESHOLD = args.corr_threshold
-    EXEC_MODE = args.exec_mode
+    PARALLEL = args.parallel
+    EXEC_MODE = "thread" if PARALLEL else "sequential"
     NEG_CORR = args.neg_corr
     CORR_VAL = args.corr_val
     EXTRA_FILTER = args.extra_filter

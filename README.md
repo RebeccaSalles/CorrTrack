@@ -17,22 +17,25 @@ The sections below describe the repository structure, configuration model, and h
 ## Repository Layout
 
 ```
-corrtrack_release/
+corrtrack_release_sorted/
 ├─ README.md
-├─ corrtrack_run_bruteforce.py   # Stage 1: brute-force baseline
-├─ corrtrack_param_search.py     # Stage 2: CorrTrack hyper-param sweep
-├─ corrtrack_run_corrtrack.py    # Stage 3: CorrTrack execution with chosen params
-├─ corrtrack_compare_runs.py     # Stage 4: metrics + comparison reports
-├─ integrate_filcorr_results.py  # Utility to merge FilCorr CSV outputs
-├─ synth_corr_gen.py             # Synthetic correlated-series generator
-├─ run_corrtrack_experiment.py   # Orchestrates the four stages
-├─ library_corrtrack_parallel.py # CorrTrack implementation & shared helpers
-├─ experiment_dataset_*.py       # Dataset configuration modules
-├─ experiment_run_param_grid.py  # Hyper-parameter grid definition
-├─ load_data_asos.py             # Back-compat for the ASOS loader
+├─ corrtrack_run_bruteforce.py        # Stage 1: brute-force baseline
+├─ corrtrack_param_search.py          # Stage 2: CorrTrack hyper-param sweep
+├─ corrtrack_run_corrtrack.py         # Stage 3: CorrTrack execution with chosen params
+├─ corrtrack_compare_runs.py          # Stage 4: metrics + comparison reports
+├─ debug_corrtrack.py                 # Debug runner with instrumented CorrTrack passes
+├─ integrate_filcorr_results.py       # Utility to merge FilCorr CSV outputs
+├─ plot_correlated_windows_example.py # Visualize correlated synthetic windows
+├─ synth_corr_gen.py                  # Synthetic correlated-series generator
+├─ run_corrtrack_experiment.py        # Orchestrates the four stages
+├─ library_corrtrack_parallel.py      # CorrTrack implementation & shared helpers
+├─ experiment_dataset_*.py            # Dataset configuration modules
+├─ experiment_run_param_grid.py       # Hyper-parameter grid definition
+├─ load_data_asos.py                  # Back-compat for the ASOS loader
 └─ datasets/
    ├─ __init__.py
-   └─ asos_loader.py             # Example dataset loader (ASOS airports CSVs)
+   ├─ asos_loader.py                  # Example dataset loader (ASOS airports CSVs)
+   └─ synth_loader.py                 # Synthetic dataset loader + cache manager
 ```
 
 Utility modules such as `load_data_asos.py` are retained for backwards compatibility, but the new dataset loader API lives under `datasets/`.
@@ -41,18 +44,38 @@ Utility modules such as `load_data_asos.py` are retained for backwards compatibi
 ## Requirements
 
 - **Python 3.10+** (tested with 3.12)
-- Python packages: `numpy` (1.x), `pandas`, `scipy`, `scikit-learn`
-- Install with `pip install numpy pandas scipy scikit-learn` (or via a `requirements.txt`).
+- Python packages: `numpy` (1.x), `pandas`, `scipy`, `scikit-learn`, `matplotlib` (for debug/plot helpers)
+- Install with `pip install numpy pandas scipy scikit-learn matplotlib` (or via a `requirements.txt`).
 - Ensure the project directory is on `PYTHONPATH` before running commands.
 
 Suggested setup:
 
 ```bash
-cd corrtrack_release
+cd corrtrack_release_sorted
 python3 -m venv .venv
 source .venv/bin/activate
-pip install numpy pandas scipy scikit-learn
+pip install numpy pandas scipy scikit-learn matplotlib
 export PYTHONPATH=$(pwd)
+```
+
+---
+
+## Optional Cython Kernels
+
+The repository includes optional Cython kernels for candidate search and sketch dot products (`candidate_kernels.pyx`, `sketch_kernels.pyx`). When compiled, they are imported automatically; otherwise the NumPy/Python implementations are used.
+
+Build in place:
+
+```bash
+cd corrtrack_release_sorted
+python3 -m pip install cython numpy
+python3 setup_cython.py build_ext --inplace
+```
+
+To force the sketch kernel (when available), set:
+
+```
+CORRTRACK_SKETCH_KERNEL=cython
 ```
 
 ---
@@ -93,40 +116,49 @@ Place your dataset files under `datasets/asos-airports/` using the `<country>-<v
    ```python
    PARAM_GRID = {
        "n_vectors": [8, 16, 32, 64],
-       "cell_size": [1.0],        # acts as the stretch multiplier
-       "freq_threshold": [0.0, 0.5, 1.0],
-       "warmup_size": [1],
-       "preprocess": [True, False],
-       "nodes": [0],
+       "cell_size": [1, 2, 3],       # stretch multiplier over the base cell size
+       "freq_threshold": [0.3, 0.5, 0.7],
+       "warmup_size": [1.0],         # fraction of training rows used for warmup
+       "preprocess": [False],
+       "nodes": [0],                 # 0 => auto (use available cores)
        "seed": [2468],
        "seed_toggle": [1357],
-       "grid_dimension": [0],
+       "grid_dimension": [1],        # must divide n_vectors
+       "sketch_norm": ["mean_l2"],   # "z" or "mean_l2"
    }
    ```
 
    The grid is loaded by `corrtrack_param_search.py` during the hyper-parameter sweep.
+
+   Parameter notes:
+   - `cell_size` scales the base grid cell width derived from `corr_threshold` and `n_vectors`.
+   - `grid_dimension` must divide `n_vectors`; set `1` for a single grid.
+   - `sketch_norm` controls sketch normalization (`z` or `mean_l2`).
    
 ---
 
 ## Synthetic datasets
 
-Need synthetic data for development? The repository now bundles `synth_corr_gen.py`, a flexible generator that emits `.npz` time-series matrices plus correlated pair metadata. You can invoke it directly:
+Need synthetic data for development? The repository bundles `synth_corr_gen.py`, a flexible generator that injects correlated windows on top of a configurable base process (AR(1), white noise, random walk, OU, seasonal ARIMA, lagged seasonal AR, trend polynomial, integrated seasonal, or seasonal drift). It emits an `.npz` matrix plus correlated pair metadata and a JSON summary; an optional volatility equalizer can normalize local window variance before injection.
 
 ```
 python3 synth_corr_gen.py \
-  --save-dir datasets/synthetic \
-  --m 16 --n 8000 --z 0.25 --w 96 --s 12 \
-  --threshold 0.8 --corr-sign both --max-lag 48 --lag-step 12 \
-  --base-type ar1 --phi 0.7 --sigma 1.0 --seed 123
+  --save-dir datasets/synth_outputs/synthetic \
+  --m 16 --n 8000 --z 0.25 --w 96 --template-len 96 --num-templates 4 \
+  --threshold 0.8 --corr-sign both \
+  --base-proc '{"type":"ar1","phi":0.7,"sigma":1.0}' \
+  --volatility-equalizer '{"window":96,"target_std":1.0,"min_std":0.05}' \
+  --seed 123 \
+  --hash-seed 0
 ```
 
-To plug synthetic data into the CorrTrack pipeline, use the loader in `datasets/synth_loader.py`. It wraps the same generator and caches the results under `datasets/synth_outputs/<country>_<variable>/`. A ready-to-run config lives at `experiment_dataset_synth_demo.py`; the core bits look like:
+To plug synthetic data into the CorrTrack pipeline, use the loader in `datasets/synth_loader.py`. It wraps the same generator and caches the results under `datasets/synth_outputs/<dataset_id>/`. A ready-to-run config lives at `experiment_dataset_synth_demo.py`; the core bits look like:
 
 ```python
 from functools import partial
-from datasets.synth_loader import load_dataset as load_synth
+from datasets.synth_loader import load_dataset as load_synth_dataset
 
-RESULT_FOLDER = "synthetic/experiments"
+RESULT_FOLDER = "synthetic/tests"
 DATASET = ["synthetic"]
 N_SERIES = [8]        # must be <= m
 N_OBS = [2000]        # number of rows to keep
@@ -135,23 +167,24 @@ MODES = ["nD"]
 
 SYNTH_PARAMS = {
     "m": 8,
-    "n": 8760,
-    "z": 0.3,
+    "n": 2000,
+    "z": 0.5,
     "w": 96,
-    "s": 12,
+    "template_len": 96,  # defaults to w when omitted
+    "num_templates": 4,
     "threshold": 0.75,
-    "corr_sign": "both",
-    "base_proc": {"type": "ar1", "phi": 0.6, "sigma": 1.0},
-    "max_lag": 48,
-    "lag_step": 12,
-    "seed": 42,
+    "corr_sign": "pos",
+    "base_proc": {"type": "trend_poly", "phi": 0.5, "sigma": 0.7},
+    "volatility_equalizer": {"window": 96, "target_std": 1.0, "min_std": 0.05},
+    "seed": 1235,
+    "hash_seed": 0,
 }
 
 DATA_LOADER = partial(
-    load_synth,
-    cache_root="datasets/synthetic",
+    load_synth_dataset,
+    cache_root="datasets/synth_outputs",
     generator_params=SYNTH_PARAMS,
-    refresh=False,  # set True to regenerate on each run
+    refresh=True,  # set False to reuse cached outputs
 )
 ```
 
@@ -168,27 +201,24 @@ Synthetic configs don’t need `VARIABLES`; the optional `DATASET` list (default
 | `--save-dir` | Folder where every output file is written. |
 | `--m` | Number of synthetic series. |
 | `--n` | Length (observations) per series. |
-| `--z` | Target fraction of correlated windows (0–1). |
-| `--w` | Window length. |
-| `--s` | Stride between window starts. |
+| `--z` | Target fraction of total samples that belong to correlated pairs (0–1). |
+| `--w` | Evaluation window length (must be divisible by `--template-len`). |
+| `--template-len` | Length `p` of each correlated template; defaults to `--w`. |
+| `--num-templates` | How many distinct templates to sample and reuse. |
 | `--threshold` | Minimum Pearson `r`; actual `r*` is sampled uniformly in `[threshold, 1]`. |
 | `--corr-sign` | Correlation sign to inject: `pos`, `neg`, or `both`. |
-| `--base-type` | Base process: `ar1` (stationary), `rw` (random walk), `wn` (white noise). |
-| `--phi` | AR(1) coefficient (only used when `--base-type ar1`). |
-| `--sigma` | Noise sigma for the base process. |
-| `--max-lag` | Maximum absolute lag (counted back; `time2 = time1 − lag`). |
-| `--lag-step` | Lag grid step (defaults to `--s` if omitted). |
+| `--base-proc` | JSON string describing the base process (e.g., `{"type":"ar1","phi":0.6,"sigma":1.0}`). |
+| `--volatility-equalizer` | JSON string to normalize local window variance (e.g., `{"window":96,"target_std":1.0,"min_std":0.05}`). |
 | `--seed` | RNG seed. |
-| `--nonoverlap` / `--allow-overlap` | Overlap is the default; add `--nonoverlap` to forbid reuse of grid starts (or re-enable with `--allow-overlap`). |
+| `--hash-seed` | Optional `PYTHONHASHSEED` value. |
 
 Outputs are auto-named using  
-`synt_[stat|nonstat]_corr<rate>_m<m>_w<w>_s<s>_sign<corr_sign>_thr<threshold>_lag<max_lag>`
-and include:
+`synt_[stat|nonstat]_<proc>_corr<rate>_m<m>_w<w>_p<p>_g<num_templates>_sign<corr_sign>_thr<threshold>`,
+where the `stat`/`nonstat` tag is inferred from the `base_proc` type. They include:
 
 - `<stem>.npz` – data matrix `(n, m+1)` where column 0 stores the 1..n index, columns 1..m store the series (`S1..Sm`).
 - `<stem>_correlated.csv` – rows of `id1,id2,time1,time2,corr`.
 - `<stem>_meta.json` – aggregate metadata (achieved `z`, attempts, etc.).
-- `<stem>_params.json` – full parameter set, including base process and seed.
 
 ### Plotting correlated windows
 
@@ -197,10 +227,10 @@ Use `plot_correlated_windows_example.py` to visualize injected windows for any s
 Example command (matching the dataset generated above):
 
 ```bash
-cd corrtrack_release
+cd corrtrack_release_sorted
 python3 plot_correlated_windows_example.py \
-  --data-npz  datasets/synthetic/synt_stat_corr0p30_m8_w96_s12_signboth_thr0p8_lag48.npz \
-  --correlated-csv  datasets/synthetic/synt_stat_corr0p30_m8_w96_s12_signboth_thr0p8_lag48_correlated.csv \
+  --data-npz  datasets/synth_outputs/synthetic/synt_stat_ar1_corr0p25_m16_w96_p96_g4_signboth_thr0p8.npz \
+  --correlated-csv  datasets/synth_outputs/synthetic/synt_stat_ar1_corr0p25_m16_w96_p96_g4_signboth_thr0p8_correlated.csv \
   --series s1,s4,s5 \
   --time-min 0 --time-max 500 \
   --window-size 96 \
@@ -213,15 +243,17 @@ Adjust the series list and time span to highlight other segments.
 
 ## Global Defaults & CLI Overrides
 
-Each stage script defines default CorrTrack settings (window size, lag count, correlation threshold, execution mode, etc.) and exposes them as CLI options. For example:
+Each stage script defines default CorrTrack settings (window size, lag count, correlation threshold, execution policy, etc.) and exposes them as CLI options. For example:
 
 ```
 --window-size           default 7*24
 --window-step           default 12
+--basic-window          default auto (divides window-size)
 --n-lags                default 7*24
 --corr-threshold        default 0.7
---exec-mode             default "sequential"
+--parallel / --sequential (default sequential)
 --neg-corr / --no-neg-corr
+--corr-val / --no-corr-val (param search + corrtrack + compare)
 --extra-filter / --no-extra-filter
 --recall-by-window / --no-recall-by-window
 --artifact-mode         (brute-force & corrtrack runs) "iterative" | "final"
@@ -229,30 +261,38 @@ Each stage script defines default CorrTrack settings (window size, lag count, co
 --train-ratio           (hyper-param search & comparison) default 0.3
 ```
 
-Artifacts are written under `<RESULT_FOLDER>/<dataset_id>/ws…_exec<mode>/…`, so runs with different exec-mode values do not collide.
+Artifacts are written under `correlation/<RESULT_FOLDER>/<dataset_id>/ws…_exec<mode>/…`, so runs with different execution policies do not collide.
 
 ### Full parameter reference
 
-All scripts accept the following shared options:
+Stage scripts (`corrtrack_run_bruteforce.py`, `corrtrack_param_search.py`, `corrtrack_run_corrtrack.py`, `corrtrack_compare_runs.py`, `debug_corrtrack.py`) accept the following shared options:
 
 | Option | Description |
 | --- | --- |
 | `--dataset-config PATH` | Dataset configuration module (defaults to the ASOS example). |
 | `--loader module:callable` | Optional override for the dataset loader function; defaults to the `DATA_LOADER` exported by the dataset config. |
-| `--window-size`, `--window-step`, `--basic-window`, `--n-lags` | Sliding-window geometry (defaults shown above). |
+| `--window-size`, `--window-step`, `--basic-window`, `--n-lags` | Sliding-window geometry; `basic-window` must divide `window-size` (auto when omitted). |
 | `--corr-threshold` | Minimum correlation absolute value. |
-| `--exec-mode` | Execution policy (`sequential`, `thread`, `process`). |
+| `--parallel` / `--sequential` | Run in threaded parallel mode or sequential mode. |
 | `--neg-corr` / `--no-neg-corr` | Enable or disable mining negative correlations. |
 | `--extra-filter` / `--no-extra-filter` | Toggle the candidate pre-filtering stage. |
 | `--recall-by-window` / `--no-recall-by-window` | Whether recall is computed per time window or globally. |
+
+CorrTrack validation options (param search, CorrTrack run, comparison):
+
+| Option | Description |
+| --- | --- |
+| `--corr-val` / `--no-corr-val` | Enable or skip correlation validation for candidates (disabling is faster but less accurate). |
 
 Stage-specific parameters:
 
 | Script | Additional options |
 | --- | --- |
-| `corrtrack_run_bruteforce.py`, `corrtrack_run_corrtrack.py` | `--artifact-mode {iterative,final}` to control when artifacts are persisted. |
-| `corrtrack_param_search.py`, `run_corrtrack_experiment.py` | `--param-grid-config PATH` (hyper-parameter grid), `--target-recall`, `--train-ratio`. |
+| `corrtrack_run_bruteforce.py`, `corrtrack_run_corrtrack.py`, `debug_corrtrack.py` | `--artifact-mode {iterative,final}` to control when artifacts are persisted. |
+| `corrtrack_param_search.py` | `--param-grid-config PATH` (hyper-parameter grid), `--target-recall`, `--train-ratio`. |
 | `corrtrack_compare_runs.py` | `--train-ratio` for the metrics split, `--filcorr-results` to collate FilCorr CSV outputs before comparison. |
+| `run_corrtrack_experiment.py` | `--param-grid-config PATH` and `--base-dir PATH` to locate scripts. |
+| `debug_corrtrack.py` | `--param-grid-config PATH`, `--samples-per-class`, `--output-dir`, `--skip-initial-run`, `--refresh-artifacts`. |
 
 Any extra flags given to `run_corrtrack_experiment.py` are filtered and forwarded only to the stages that understand them.
 
@@ -276,7 +316,7 @@ python3 run_corrtrack_experiment.py \
   --dataset-config experiment_dataset_synth_demo.py \
   --param-grid-config experiment_run_param_grid.py \
   --corr-threshold 0.75 \
-  --exec-mode sequential \
+  --sequential \
   --train-ratio 0.4 \
   --target-recall 0.9 \
   --artifact-mode final
@@ -285,8 +325,8 @@ python3 run_corrtrack_experiment.py \
 ### Adding overrides
 
 > **Environment note**  
-> All commands assume you are inside the `corrtrack_release/` directory and that the repository root is on `PYTHONPATH`.  
-> Run `cd corrtrack_release` then `export PYTHONPATH=$(pwd)` (or prefix commands with `PYTHONPATH=$(pwd)`) before executing the examples below.
+> All commands assume you are inside the `corrtrack_release_sorted/` directory and that the repository root is on `PYTHONPATH`.  
+> Run `cd corrtrack_release_sorted` then `export PYTHONPATH=$(pwd)` (or prefix commands with `PYTHONPATH=$(pwd)`) before executing the examples below.
 
 Any extra flags you pass to the orchestrator are dispatched automatically to the relevant stages. For example:
 
@@ -296,13 +336,13 @@ python3 run_corrtrack_experiment.py \
   --param-grid-config experiment_run_param_grid.py \
   --loader datasets.asos_loader:load_dataset \
   --corr-threshold 0.75 \
-  --exec-mode sequential \
+  --sequential \
   --train-ratio 0.5 \
   --target-recall 0.9 \
   --artifact-mode final
 ```
 
-* `--corr-threshold`, `--exec-mode`, etc. are applied to every stage that understands them.
+* `--corr-threshold`, `--parallel/--sequential`, etc. are applied to every stage that understands them.
 * `--target-recall` goes only to the hyper-parameter search.
 * `--train-ratio` affects the parameter search and comparison steps.
 * `--artifact-mode` is forwarded to brute-force and CorrTrack runs, switching between incremental writes (“iterative”) and single final dumps (“final”).
@@ -334,7 +374,7 @@ python3 corrtrack_run_bruteforce.py \
   --basic-window 12 \
   --n-lags 168 \
   --corr-threshold 0.7 \
-  --exec-mode sequential \
+  --sequential \
   --neg-corr \
   --extra-filter \
   --artifact-mode final \
@@ -365,7 +405,7 @@ python3 corrtrack_param_search.py \
   --basic-window 12 \
   --n-lags 168 \
   --corr-threshold 0.7 \
-  --exec-mode sequential \
+  --sequential \
   --neg-corr \
   --corr-val \
   --extra-filter \
@@ -395,7 +435,7 @@ python3 corrtrack_run_corrtrack.py \
   --basic-window 12 \
   --n-lags 168 \
   --corr-threshold 0.7 \
-  --exec-mode sequential \
+  --sequential \
   --neg-corr \
   --corr-val \
   --extra-filter \
@@ -425,7 +465,7 @@ python3 corrtrack_compare_runs.py \
   --basic-window 12 \
   --n-lags 168 \
   --corr-threshold 0.7 \
-  --exec-mode sequential \
+  --sequential \
   --neg-corr \
   --corr-val \
   --extra-filter \
@@ -445,6 +485,40 @@ python3 corrtrack_compare_runs.py \
 
 ---
 
+## Debugging & Profiling
+
+### debug_corrtrack.py
+
+`debug_corrtrack.py` runs (or reuses) the full pipeline, samples FN/TP/TN window pairs, and replays CorrTrack with instrumentation (raw/normalized windows, sketch vectors, bucket hits, collision stats). Outputs land under `tmp_artifacts/corrtrack_debug/<dataset_id>/<alg>/`.
+
+```
+python3 debug_corrtrack.py \
+  --dataset-config experiment_dataset_synth_demo.py \
+  --param-grid-config experiment_run_param_grid.py \
+  --samples-per-class 3 \
+  --output-dir tmp_artifacts/corrtrack_debug \
+  --refresh-artifacts
+```
+
+Use `--skip-initial-run` to reuse existing artifacts without rerunning the pipeline.
+
+### CORRTRACK_PROFILE
+
+Set environment variables to enable lightweight timing stats inside CorrTrack (sketch dispatch/merge, grid dispatch/merge, validation, monitoring). Example:
+
+```
+CORRTRACK_PROFILE=1 \
+CORRTRACK_PROFILE_EVERY=25 \
+CORRTRACK_PROFILE_PATH=tmp_artifacts/corrtrack_profile.log \
+python3 corrtrack_run_corrtrack.py \
+  --dataset-config experiment_dataset_synth_demo.py \
+  --artifact-mode final
+```
+
+Add `CORRTRACK_PROFILE_SILENT=1` to suppress stdout while still appending to the profile log.
+
+---
+
 ## Swapping Datasets
 
 1. Implement a loader function that returns `(data_array, id_array)` for each dataset.
@@ -458,7 +532,7 @@ No code changes are required beyond the new config and loader.
 ## Tips
 
 * **Incremental writing:** Use `--artifact-mode iterative` for per-window CSV updates; `final` writes only once at the end.
-* **Result paths include exec-mode** (`…_exec<mode>`), preventing collisions across runs with different execution policies.
+* **Result paths include execution mode** (`…_exec<mode>`), preventing collisions across runs with different execution policies.
 * **Backward compatibility:** `load_data_asos.py` now defers to the new loader. Legacy scripts that import it remain functional.
 * **Validation:** Each stage ensures prerequisites (loader, best params, etc.) exist and will exit with a clear message if not.
 

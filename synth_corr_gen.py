@@ -2,8 +2,8 @@ import os
 import json
 import math
 import csv
-from collections import defaultdict
 from typing import Dict, List, Tuple, Optional, Any
+
 import numpy as np
 
 
@@ -11,13 +11,35 @@ def _format_rate(z: float) -> str:
     return f"{z:.2f}".replace(".", "p")
 
 
+_STAT_TYPES = {
+    "ar1",
+    "wn",
+    "white",
+    "white_noise",
+    "white-noise",
+    "seasonal_arima",
+    "lagged_seasonal_ar",
+    "ou",
+}
+
+_NONSTAT_TYPES = {
+    "rw",
+    "randomwalk",
+    "random_walk",
+    "random-walk",
+    "rw_seasonal_drift",
+    "trend_poly",
+    "integrated_seasonal",
+}
+
+
 def _stationarity_tag(base_proc: Optional[Dict[str, Any]]) -> str:
     if not base_proc:
         return "stat"
     t = str(base_proc.get("type", "ar1")).lower()
-    if t in ("ar1", "wn", "white", "white_noise", "white-noise"):
+    if t in _STAT_TYPES:
         return "stat"
-    if t in ("rw", "randomwalk", "random_walk", "random-walk"):
+    if t in _NONSTAT_TYPES:
         return "nonstat"
     return "stat"
 
@@ -26,19 +48,21 @@ def _build_stem(
     m: int,
     n: int,
     w: int,
-    s: int,
     z: float,
     corr_sign: str,
     threshold: float,
-    max_lag: int,
+    template_len: int,
+    num_templates: int,
     base_proc: Optional[Dict[str, Any]],
 ) -> str:
     stat_tag = _stationarity_tag(base_proc)
     rate_tag = _format_rate(z)
     sign_tag = corr_sign.lower()
+    proc_type = (base_proc or {}).get("type", "ar1")
+    proc_tag = str(proc_type).lower().replace(" ", "_")
     stem = (
-        f"synt_{stat_tag}_corr{rate_tag}_m{m}_w{w}_s{s}_"
-        f"sign{sign_tag}_thr{str(threshold).replace('.', 'p')}_lag{max_lag}"
+        f"synt_{stat_tag}_{proc_tag}_corr{rate_tag}_m{m}_w{w}_p{template_len}_"
+        f"g{num_templates}_sign{sign_tag}_thr{str(threshold).replace('.', 'p')}"
     )
     return stem
 
@@ -66,6 +90,86 @@ def _gen_base_series(
             X[:, t] = X[:, t - 1] + eps[:, t]
         return X
 
+    if kind == "seasonal_arima":
+        phi = float(base_proc.get("phi", 0.6))
+        theta = float(base_proc.get("theta", -0.3))
+        period = int(base_proc.get("season_period", 200))
+        amplitude = float(base_proc.get("season_amplitude", 1.0))
+        phases = rng.uniform(0.0, 2 * math.pi, size=m)
+        noise = rng.normal(0.0, sigma, size=(m, n)).astype(np.float32)
+        ma_noise = rng.normal(0.0, sigma, size=(m, n)).astype(np.float32)
+        X[:, 0] = noise[:, 0]
+        for t in range(1, n):
+            ma_term = theta * ma_noise[:, t - 1]
+            X[:, t] = phi * X[:, t - 1] + noise[:, t] + ma_term
+        t_idx = np.arange(n, dtype=np.float32)
+        seasonal = amplitude * np.sin(2 * math.pi * t_idx[None, :] / max(1, period) + phases[:, None])
+        return (X + seasonal).astype(np.float32)
+
+    if kind == "lagged_seasonal_ar":
+        phi_short = float(base_proc.get("phi_short", 0.3))
+        phi_long = float(base_proc.get("phi_long", 0.6))
+        lag = int(base_proc.get("season_lag", 24))
+        lag = max(1, lag)
+        eps = rng.normal(0.0, sigma, size=(m, n)).astype(np.float32)
+        X[:, :lag] = eps[:, :lag]
+        for t in range(lag, n):
+            X[:, t] = (
+                phi_short * X[:, t - 1]
+                + phi_long * X[:, t - lag]
+                + eps[:, t]
+            )
+        return X
+
+    if kind == "ou":
+        theta = float(base_proc.get("theta", 0.3))
+        mean_level = float(base_proc.get("mu", 0.0))
+        dt = float(base_proc.get("dt", 1.0))
+        X[:, 0] = rng.normal(mean_level, sigma, size=m)
+        for t in range(1, n):
+            noise = rng.normal(0.0, sigma * math.sqrt(dt), size=m)
+            X[:, t] = X[:, t - 1] + theta * (mean_level - X[:, t - 1]) * dt + noise
+        return X.astype(np.float32)
+
+    if kind == "rw_seasonal_drift":
+        drift = float(base_proc.get("drift", 0.05))
+        amplitude = float(base_proc.get("season_amplitude", 0.5))
+        period = int(base_proc.get("season_period", 288))
+        phases = rng.uniform(0.0, 2 * math.pi, size=m)
+        eps = rng.normal(0.0, sigma, size=(m, n)).astype(np.float32)
+        X[:, 0] = eps[:, 0]
+        for t in range(1, n):
+            seasonal = amplitude * np.sin(2 * math.pi * t / max(1, period) + phases)
+            X[:, t] = X[:, t - 1] + drift + seasonal + eps[:, t]
+        return X.astype(np.float32)
+
+    if kind == "trend_poly":
+        t_norm = np.linspace(0.0, 1.0, n, dtype=np.float32)
+        slopes = rng.normal(0.5, 0.2, size=m)
+        curves = rng.normal(0.0, 0.1, size=m)
+        trend = slopes[:, None] * t_norm[None, :] + curves[:, None] * (t_norm[None, :] ** 2)
+        noise = rng.normal(0.0, sigma, size=(m, n)).astype(np.float32)
+        ar_coeff = float(base_proc.get("phi", 0.5))
+        ar_component = np.zeros((m, n), dtype=np.float32)
+        for t in range(1, n):
+            ar_component[:, t] = ar_coeff * ar_component[:, t - 1] + noise[:, t]
+        return (trend + ar_component).astype(np.float32)
+
+    if kind == "integrated_seasonal":
+        lag = int(base_proc.get("season_lag", 24))
+        lag = max(1, lag)
+        phi = float(base_proc.get("phi", 0.4))
+        psi = float(base_proc.get("psi", 0.5))
+        eps = rng.normal(0.0, sigma, size=(m, n)).astype(np.float32)
+        seasonal = np.zeros((m, n), dtype=np.float32)
+        seasonal[:, :lag] = eps[:, :lag]
+        for t in range(lag, n):
+            seasonal[:, t] = phi * seasonal[:, t - 1] + psi * seasonal[:, t - lag] + eps[:, t]
+        X[:, 0] = seasonal[:, 0]
+        for t in range(1, n):
+            X[:, t] = X[:, t - 1] + seasonal[:, t]
+        return X.astype(np.float32)
+
     # Default AR(1)
     phi = float(base_proc.get("phi", 0.6))
     eps = rng.normal(0.0, sigma, size=(m, n)).astype(np.float32)
@@ -73,6 +177,48 @@ def _gen_base_series(
     for t in range(1, n):
         X[:, t] = phi * X[:, t - 1] + eps[:, t]
     return X
+
+
+def _apply_volatility_equalizer(
+    X: np.ndarray,
+    config: Optional[Dict[str, Any]],
+    default_window: int,
+) -> None:
+    """
+    Normalize local volatility so that sliding windows have comparable std dev.
+
+    Parameters in ``config``:
+      - ``window``: window length used to estimate local variance (default: default_window).
+      - ``target_std``: target standard deviation after normalization (default: 1.0).
+      - ``min_std``: lower bound to avoid division by very small numbers (default: 1e-3).
+      - ``pad_mode``: numpy.pad mode ("reflect", "edge", "constant"; default: "reflect").
+    """
+    if not config:
+        return
+
+    window = int(config.get("window", default_window))
+    if window <= 1:
+        return
+    window = min(window, X.shape[1])
+    target_std = float(config.get("target_std", 1.0))
+    min_std = float(config.get("min_std", 1e-3))
+    pad_mode = str(config.get("pad_mode", "reflect")).lower()
+    if pad_mode not in {"reflect", "edge", "constant"}:
+        pad_mode = "reflect"
+
+    pad_left = window // 2
+    pad_right = window - 1 - pad_left
+    kernel = np.ones(window, dtype=np.float64) / float(window)
+
+    for idx in range(X.shape[0]):
+        series = X[idx].astype(np.float64, copy=False)
+        padded = np.pad(series, (pad_left, pad_right), mode=pad_mode)
+        mean = np.convolve(padded, kernel, mode="valid")
+        sq = np.convolve(padded * padded, kernel, mode="valid")
+        var = np.maximum(sq - mean * mean, min_std * min_std)
+        std = np.sqrt(var)
+        scaled = series / std * target_std
+        X[idx] = scaled.astype(np.float32, copy=False)
 
 
 def _choose_sign(corr_sign: str, rng: np.random.Generator) -> int:
@@ -94,398 +240,83 @@ def _pearson_raw(x: np.ndarray, y: np.ndarray) -> float:
     return float(r)
 
 
-def _compute_z_max(m: int, n: int, w: int, s: int) -> Tuple[float, int]:
-    """
-    Compute theoretical z_max under physical non-overlap (ignoring lag constraints),
-    and the max number of non-overlapping windows across all series.
-    """
-    W_s = (n - w) // s + 1
-    if W_s <= 0 or m <= 0:
-        return 0.0, 0
-
-    g_step = math.ceil(w / s)  # min grid index spacing to avoid overlap
-    max_windows_per_series = (W_s - 1) // g_step + 1
-    max_windows_total = m * max_windows_per_series
-    z_max = max_windows_total / (m * W_s)
-    return z_max, max_windows_total
-
-
-def _make_nonoverlap_slots(
-    m: int, n: int, w: int, s: int, rng: np.random.Generator
-) -> List[Tuple[int, int]]:
-    """
-    Return a list of (series_index, start) giving all physically non-overlapping
-    window starts across all series, using grid step ceil(w/s) and a random
-    offset per series for variability.
-    """
-    g_step = math.ceil(w / s)
-    slots: List[Tuple[int, int]] = []
-    for i in range(m):
-        # random offset in grid units for this series
-        offset_g = int(rng.integers(0, g_step))
-        start = offset_g * s
-        while start + w <= n:
-            slots.append((i, start))
-            start += g_step * s
-    return slots
-
-
-def _collect_overlapping_record_indices(
-    series_idx: int,
-    start: int,
-    grid_records: List[Dict[int, List[int]]],
-    s: int,
-    g_step: int,
-    W_s: int,
-) -> List[int]:
-    """Return indices of existing window pairs whose slots overlap a start on a series."""
-    gi = start // s
-    indices: List[int] = []
-    bucket = grid_records[series_idx]
-    for delta in range(-g_step + 1, g_step):
-        gj = gi + delta
-        if 0 <= gj < W_s:
-            indices.extend(bucket.get(gj, ()))
-    return indices
-
-
-def _find_overlapping_records(
-    series_windows: List[List[Tuple[int, int]]],
-    series_idx: int,
-    start: int,
-    w: int,
-) -> List[int]:
-    """Return record indices whose window on series_idx overlaps [start, start + w)."""
-    overlaps: List[int] = []
-    for existing_start, rec_idx in series_windows[series_idx]:
-        if not (existing_start + w <= start or existing_start >= start + w):
-            overlaps.append(rec_idx)
-    return overlaps
-
-
-def _recompute_corr(
-    X: np.ndarray,
-    record: Tuple[int, int, int, int],
-    w: int,
-) -> float:
-    i1, start1, i2, start2 = record
-    return _pearson_raw(
-        X[i1, start1 : start1 + w],
-        X[i2, start2 : start2 + w],
-    )
-
-
-def _try_blend_pair(
-    X: np.ndarray,
-    i1: int,
-    start1: int,
-    i2: int,
-    start2: int,
-    xw: np.ndarray,
-    yw: np.ndarray,
-    threshold: float,
-    records: List[Tuple[int, int, int, int]],
-    grid_records: List[Dict[int, List[int]]],
-    s: int,
-    g_step: int,
-    W_s: int,
-    w: int,
-) -> Tuple[bool, float]:
-    """
-    Attempt to blend a new correlated window pair into X without breaking prior correlations.
-
-    Returns (success, achieved_r).
-    """
-    betas = (1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4)
-    original1 = X[i1, start1 : start1 + w].copy()
-    original2 = X[i2, start2 : start2 + w].copy()
-    original1_f = original1.astype(np.float64)
-    original2_f = original2.astype(np.float64)
-    xw_f = xw.astype(np.float64)
-    yw_f = yw.astype(np.float64)
-
-    overlap_indices = set(
-        _collect_overlapping_record_indices(i1, start1, grid_records, s, g_step, W_s)
-    )
-    overlap_indices.update(
-        _collect_overlapping_record_indices(i2, start2, grid_records, s, g_step, W_s)
-    )
-
-    for beta in betas:
-        blended1 = (1.0 - beta) * original1_f + beta * xw_f
-        blended2 = (1.0 - beta) * original2_f + beta * yw_f
-
-        X[i1, start1 : start1 + w] = blended1.astype(np.float32, copy=False)
-        X[i2, start2 : start2 + w] = blended2.astype(np.float32, copy=False)
-
-        r_new = _pearson_raw(
-            X[i1, start1 : start1 + w],
-            X[i2, start2 : start2 + w],
-        )
-        if abs(r_new) < threshold:
-            X[i1, start1 : start1 + w] = original1
-            X[i2, start2 : start2 + w] = original2
-            continue
-
-        ok = True
-        for idx in overlap_indices:
-            if idx < 0 or idx >= len(records):
-                continue
-            rec = records[idx]
-            if abs(_recompute_corr(X, rec, w)) < threshold:
-                ok = False
-                break
-
-        if ok:
-            return True, r_new
-
-        X[i1, start1 : start1 + w] = original1
-        X[i2, start2 : start2 + w] = original2
-
-    return False, 0.0
-
-
-def _blend_fill(
-    X: np.ndarray,
-    records: List[Tuple[int, int, int, int]],
-    series_windows: List[List[Tuple[int, int]]],
-    grid_records: List[Dict[int, List[int]]],
-    correlated_rows: List[Tuple[str, str, int, int, float]],
-    pair_goal: int,
+def _sample_base_correlated_template(
+    base_proc: Optional[Dict[str, Any]],
+    length: int,
     threshold: float,
     corr_sign: str,
     rng: np.random.Generator,
-    s: int,
-    w: int,
-    n: int,
-    m: int,
-    W_s: int,
-    lag_values: List[int],
-    g_step: int,
-) -> Tuple[int, int]:
+    max_attempts: int = 64,
+) -> Optional[Tuple[np.ndarray, np.ndarray, float]]:
     """
-    Continue injecting windows beyond the non-overlap limit by blending overlapping pairs.
-    Returns (pairs_added, attempts).
+    Draw correlated windows whose marginal stats follow the configured base process.
     """
-    pairs_added = 0
-    attempts = 0
-    remaining = max(pair_goal - len(records), 0)
-    if remaining <= 0:
-        return 0, 0
+    min_std = 1e-3
+    for _ in range(max_attempts):
+        base = _gen_base_series(2, length, base_proc, rng)
+        x_raw = base[0].astype(np.float64, copy=False)
+        y_raw = base[1].astype(np.float64, copy=False)
 
-    max_attempts = max(8 * remaining, 2000)
-
-    while len(records) < pair_goal and attempts < max_attempts:
-        attempts += 1
-        i1 = int(rng.integers(0, m))
-        i2 = int(rng.integers(0, m))
-        if i1 == i2:
-            continue
-        gi = int(rng.integers(0, W_s))
-        start1 = gi * s
-        lag = int(rng.choice(lag_values))
-        if lag % s != 0:
-            continue
-        start2 = start1 - lag
-        if start1 < 0 or start1 + w > n or start2 < 0 or start2 + w > n:
+        mx = float(x_raw.mean())
+        sx = float(x_raw.std())
+        my = float(y_raw.mean())
+        sy = float(y_raw.std())
+        if sx < min_std or sy < min_std:
             continue
 
-        # Build template
-        u = rng.normal(0.0, 1.0, size=w)
-        u = u - u.mean()
-        std_u = u.std()
-        if std_u < 1e-12:
-            continue
-        u = u / std_u
+        x_norm = (x_raw - mx) / sx
+        eps = rng.normal(0.0, 1.0, size=length)
+        r_star = threshold + rng.random() * (1.0 - threshold)
+        r_star = min(r_star, 1.0)
+        sign = _choose_sign(corr_sign, rng)
+        noise_scale = math.sqrt(max(0.0, 1.0 - r_star * r_star))
+        y_corr = sign * r_star * x_norm + noise_scale * eps
+        y_new = my + sy * y_corr
 
-        max_inner_attempts = 20
-        accepted = False
-        for _ in range(max_inner_attempts):
-            r_star = threshold + rng.random() * (1.0 - threshold)
-            if r_star >= 1.0:
-                eps = np.zeros(w, dtype=np.float64)
-            else:
-                sigma2 = 1.0 / (r_star**2) - 1.0
-                sigma2 = max(sigma2, 0.0)
-                eps = rng.normal(0.0, math.sqrt(sigma2), size=w)
-            sign = _choose_sign(corr_sign, rng)
-            xw = u.astype(np.float32)
-            yw = (sign * u + eps).astype(np.float32)
-            if abs(_pearson_raw(xw, yw)) >= threshold:
-                accepted = True
-                break
-        if not accepted:
-            continue
-
-        success, r_new = _try_blend_pair(
-            X,
-            i1,
-            start1,
-            i2,
-            start2,
-            xw,
-            yw,
-            threshold,
-            records,
-            grid_records,
-            s,
-            g_step,
-            W_s,
-            w,
-        )
-        if not success:
-            continue
-
-        idx = len(records)
-        records.append((i1, start1, i2, start2))
-        series_windows[i1].append((start1, idx))
-        series_windows[i2].append((start2, idx))
-        grid_records[i1][start1 // s].append(idx)
-        grid_records[i2][start2 // s].append(idx)
-        correlated_rows.append(
-            (f"s{i1+1}", f"s{i2+1}", start1 + 1, start2 + 1, r_new)
-        )
-        pairs_added += 1
-
-    return pairs_added, attempts
+        xw = x_raw.astype(np.float32, copy=False)
+        yw = y_new.astype(np.float32, copy=False)
+        r = _pearson_raw(xw, yw)
+        if abs(r) >= threshold:
+            return xw, yw, r
+    return None
 
 
-def _latent_template_fill(
-    X: np.ndarray,
-    records: List[Tuple[int, int, int, int]],
-    series_windows: List[List[Tuple[int, int]]],
-    correlated_rows: List[Tuple[str, str, int, int, float]],
-    pair_goal: int,
+def _make_base_templates(
+    num_templates: int,
+    length: int,
     threshold: float,
     corr_sign: str,
+    base_proc: Optional[Dict[str, Any]],
     rng: np.random.Generator,
-    s: int,
-    w: int,
-    n: int,
-    m: int,
-    W_s: int,
-    lag_values: List[int],
-) -> Tuple[int, int]:
-    """
-    Final fallback: reuse common latent templates by overwriting overlapping windows while
-    propagating identical adjustments across all affected pairs.
-    Returns (pairs_added, attempts).
-    """
-    pairs_added = 0
+) -> List[Tuple[np.ndarray, np.ndarray, float]]:
+    templates: List[Tuple[np.ndarray, np.ndarray, float]] = []
     attempts = 0
-    remaining = max(pair_goal - len(records), 0)
-    if remaining <= 0:
-        return 0, 0
-
-    max_attempts = max(600 * remaining, 60000)
-
-    while len(records) < pair_goal and attempts < max_attempts:
+    max_attempts = max(200, 20 * max(1, num_templates))
+    while len(templates) < num_templates and attempts < max_attempts:
         attempts += 1
-        i1 = int(rng.integers(0, m))
-        i2 = int(rng.integers(0, m))
-        if i1 == i2:
-            continue
-        gi = int(rng.integers(0, W_s))
-        start1 = gi * s
-        lag = int(rng.choice(lag_values))
-        start2 = start1 - lag
-        if start1 < 0 or start1 + w > n or start2 < 0 or start2 + w > n:
-            continue
-
-        # Build template
-        u = rng.normal(0.0, 1.0, size=w)
-        u = u - u.mean()
-        std_u = u.std()
-        if std_u < 1e-12:
-            continue
-        u = u / std_u
-
-        max_inner_attempts = 20
-        accepted = False
-        for _ in range(max_inner_attempts):
-            r_star = threshold + rng.random() * (1.0 - threshold)
-            if r_star >= 1.0:
-                eps = np.zeros(w, dtype=np.float64)
-            else:
-                sigma2 = 1.0 / (r_star**2) - 1.0
-                sigma2 = max(sigma2, 0.0)
-                eps = rng.normal(0.0, math.sqrt(sigma2), size=w)
-            sign = _choose_sign(corr_sign, rng)
-            xw = u.astype(np.float32)
-            yw = (sign * u + eps).astype(np.float32)
-            if abs(_pearson_raw(xw, yw)) >= threshold:
-                accepted = True
-                break
-        if not accepted:
-            continue
-
-        seg1 = X[i1, start1 : start1 + w].copy()
-        seg2 = X[i2, start2 : start2 + w].copy()
-        delta1 = xw - seg1
-        delta2 = yw - seg2
-
-        overlaps1 = _find_overlapping_records(series_windows, i1, start1, w)
-        overlaps2 = _find_overlapping_records(series_windows, i2, start2, w)
-
-        affected: Dict[int, np.ndarray] = {}
-        for rec_idx in overlaps1:
-            affected.setdefault(rec_idx, np.zeros(w, dtype=np.float32))
-            affected[rec_idx] += delta1
-        for rec_idx in overlaps2:
-            affected.setdefault(rec_idx, np.zeros(w, dtype=np.float32))
-            affected[rec_idx] += delta2
-
-        snapshots: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
-        for rec_idx in affected:
-            i_a, start_a, i_b, start_b = records[rec_idx]
-            snapshots[rec_idx] = (
-                X[i_a, start_a : start_a + w].copy(),
-                X[i_b, start_b : start_b + w].copy(),
-            )
-
-        ok = True
-        try:
-            for rec_idx, delta in affected.items():
-                i_a, start_a, i_b, start_b = records[rec_idx]
-                X[i_a, start_a : start_a + w] += delta
-                X[i_b, start_b : start_b + w] += delta
-
-            X[i1, start1 : start1 + w] = xw
-            X[i2, start2 : start2 + w] = yw
-
-            r_new = _pearson_raw(
-                X[i1, start1 : start1 + w],
-                X[i2, start2 : start2 + w],
-            )
-            if abs(r_new) < threshold:
-                ok = False
-            else:
-                for rec_idx in affected:
-                    if abs(_recompute_corr(X, records[rec_idx], w)) < threshold:
-                        ok = False
-                        break
-        finally:
-            if not ok:
-                for rec_idx, (seg_a, seg_b) in snapshots.items():
-                    i_a, start_a, i_b, start_b = records[rec_idx]
-                    X[i_a, start_a : start_a + w] = seg_a
-                    X[i_b, start_b : start_b + w] = seg_b
-                X[i1, start1 : start1 + w] = seg1
-                X[i2, start2 : start2 + w] = seg2
-
-        if not ok:
-            continue
-
-        idx = len(records)
-        records.append((i1, start1, i2, start2))
-        series_windows[i1].append((start1, idx))
-        series_windows[i2].append((start2, idx))
-        correlated_rows.append(
-            (f"s{i1+1}", f"s{i2+1}", start1 + 1, start2 + 1, r_new)
+        tpl = _sample_base_correlated_template(base_proc, length, threshold, corr_sign, rng)
+        if tpl is not None:
+            templates.append(tpl)
+    if len(templates) < num_templates:
+        raise RuntimeError(
+            f"Could not build {num_templates} base templates of length {length} meeting |r| >= {threshold}"
         )
-        pairs_added += 1
+    return templates
 
-    return pairs_added, attempts
+
+def _series_with_slots(slots_by_series: List[List[int]]) -> List[int]:
+    return [idx for idx, slots in enumerate(slots_by_series) if slots]
+
+
+def _pick_series_with_weight(
+    series_indices: List[int],
+    slots_by_series: List[List[int]],
+    rng: np.random.Generator,
+) -> int:
+    counts = np.array([len(slots_by_series[i]) for i in series_indices], dtype=np.float64)
+    probs = counts / counts.sum()
+    choice = int(rng.choice(series_indices, p=probs))
+    return choice
 
 
 def make_corr_dataset(
@@ -494,389 +325,107 @@ def make_corr_dataset(
     n: int,
     z: float,
     w: int,
-    s: int = 1,
+    *,
+    template_len: Optional[int] = None,
+    num_templates: int = 4,
     threshold: float = 0.7,
     corr_sign: str = "pos",  # "pos" | "neg" | "both"
     base_proc: Optional[Dict[str, Any]] = None,
-    nonoverlap: bool = True,
-    max_lag: int = 0,
-    lag_step: Optional[int] = None,
+    volatility_equalizer: Optional[Dict[str, Any]] = None,
     seed: Optional[int] = 7,
+    hash_seed: Optional[int] = None,
 ) -> Dict[str, str]:
     """
-    Generate m synthetic time series of length n with approximately z fraction of windows
-    participating in high Pearson correlation pairs (|r| >= threshold).
+    Generate m synthetic time series of length n with a fraction z of all samples
+    participating in correlated window pairs of length ``template_len``.
 
-    Lags are counted BACK:
-      time2 = time1 - lag
-
-    When nonoverlap=True (default), physical non-overlap is enforced:
-      no sample index belongs to more than one injected window in any series.
-    In this mode, we:
-      - compute z_max (theoretical upper bound under physical non-overlap),
-      - fill as many non-overlapping slots as possible with exact templates,
-      - then blend controlled overlaps where we can keep prior correlations intact,
-      - and, if there is still shortfall, fall back to common latent templates that
-        overwrite overlapping windows while mirroring the adjustment across every
-        affected pair so |r| >= threshold continues to hold.
-
-    When nonoverlap=False (allow-overlap), we fall back to a random injection
-    strategy; z is best-effort and z_max is less meaningful.
+    Semantics:
+      - Concatenate all series into one vector of length m * n.
+      - Target number of correlated pairs: floor(z * m * n / (2 * p)), where p = template_len.
+      - Each pair uses two non-overlapping windows of length p (one per series).
+      - Templates are sampled from the base process so marginals match the background.
+      - w is the evaluation window length and must be divisible by p (p defaults to w).
     """
     assert 0.0 <= z <= 1.0, "z must be in [0,1]"
-    assert w > 0 and n > w, "n must be > w"
-    assert s >= 1, "stride s must be >= 1"
-    if lag_step is None:
-        lag_step = s
-    assert lag_step >= 1, "lag_step must be >= 1"
+    assert w > 0 and n > 0, "w and n must be positive"
+    if template_len is None:
+        template_len = w
+    p = int(template_len)
+    assert p > 0, "template_len must be positive"
+    assert p <= n, "template_len must be <= n"
+    if w % p != 0:
+        raise ValueError(f"w ({w}) must be divisible by template_len ({p})")
 
+    if hash_seed is not None:
+        os.environ["PYTHONHASHSEED"] = str(hash_seed)
     rng = np.random.default_rng(seed)
 
     # Base data
     X = _gen_base_series(m, n, base_proc, rng)  # shape (m, n)
+    _apply_volatility_equalizer(X, volatility_equalizer, w)
 
-    # Sliding windows
-    W_s = (n - w) // s + 1
+    # Prepare slots: non-overlapping p-length segments per series
+    slots_by_series: List[List[int]] = [
+        list(range(0, n - p + 1, p)) for _ in range(m)
+    ]
+    slots_total = sum(len(s) for s in slots_by_series)
+    max_pairs = slots_total // 2
 
-    # Precompute lag grid for consistency (though systematic pairing doesn't force lags)
-    if max_lag <= 0:
-        lag_allowed = lambda lag: True  # no restriction if max_lag <= 0
-        lag_values = [0]
-    else:
+    pair_target = int(z * m * n // (2 * p))
+    pair_goal = min(pair_target, max_pairs)
+    if pair_goal <= 0 or slots_total < 2:
+        pair_goal = 0
 
-        def lag_allowed(lag: int) -> bool:
-            if abs(lag) > max_lag:
-                return False
-            if lag % lag_step != 0:
-                return False
-            return True
-
-        lag_values = list(range(-max_lag, max_lag + 1, lag_step))
-
-    # ------------------------------------------------------------------
-    # NON-OVERLAP MODE (Option A, with z_max)
-    # ------------------------------------------------------------------
-    if nonoverlap:
-        g_step = math.ceil(w / s)
-        z_max, max_windows_total = _compute_z_max(m, n, w, s)
-        target_windows = int(round(z * m * W_s))
-        if target_windows % 2 == 1:
-            target_windows -= 1
-        if target_windows < 2:
-            target_windows = 0
-
-        nonoverlap_window_goal = min(target_windows, max_windows_total)
-        if nonoverlap_window_goal % 2 == 1:
-            nonoverlap_window_goal -= 1
-        nonoverlap_pair_goal = nonoverlap_window_goal // 2
-        total_pair_goal = target_windows // 2
-
-        # systematic non-overlapping slots; keep all and pick as many as needed
-        slots = _make_nonoverlap_slots(m, n, w, s, rng)
-
-        # Build adjacency lists of lag-compatible slot indices.
-        adjacency: List[List[int]] = [[] for _ in range(len(slots))]
-        for idx in range(len(slots)):
-            start_i = slots[idx][1]
-            for jdx in range(idx + 1, len(slots)):
-                start_j = slots[jdx][1]
-                if lag_allowed(start_i - start_j):
-                    adjacency[idx].append(jdx)
-                    adjacency[jdx].append(idx)
-
-        max_pairs_target = min(nonoverlap_pair_goal, len(slots) // 2)
-        pairs_idx: List[Tuple[Tuple[int, int], Tuple[int, int]]] = []
-
-        # Deterministic-but-randomized tie-breaking to keep reproducibility per seed.
-        rank = list(range(len(slots)))
-        rng.shuffle(rank)
-        order_rank = {node: pos for pos, node in enumerate(rank)}
-
-        available = set(range(len(slots)))
-
-        def available_degree(node: int) -> int:
-            return sum(1 for neigh in adjacency[node] if neigh in available)
-
-        while available and len(pairs_idx) < max_pairs_target:
-            # pick the most constrained slot first
-            idx = min(
-                available,
-                key=lambda node: (available_degree(node), order_rank[node]),
-            )
-            neighbors = [neigh for neigh in adjacency[idx] if neigh in available]
-            if not neighbors:
-                available.discard(idx)
-                continue
-            partner = min(
-                neighbors,
-                key=lambda node: (available_degree(node), order_rank[node]),
-            )
-
-            available.discard(idx)
-            available.discard(partner)
-            pairs_idx.append((slots[idx], slots[partner]))
-
-        correlated_rows: List[Tuple[str, str, int, int, float]] = []
-        series_windows: List[List[Tuple[int, int]]] = [[] for _ in range(m)]
-        records: List[Tuple[int, int, int, int]] = []
-        grid_records: List[Dict[int, List[int]]] = [defaultdict(list) for _ in range(m)]
-        used = np.zeros((m, n), dtype=np.uint8)  # physical occupancy
-
-        for (i1, start1), (i2, start2) in pairs_idx:
-            if i1 == i2:
-                continue
-            # Respect physical non-overlap (should already be guaranteed by construction,
-            # but we double-check in case of any edge case).
-            if np.any(used[i1, start1:start1 + w]) or np.any(
-                used[i2, start2:start2 + w]
-            ):
-                continue
-
-            # Compute lag according to counted-back convention: time2 = time1 - lag
-            # Here we choose time1 = start1, time2 = start2 (both 0-based),
-            # so lag = start1 - start2.
-            lag = start1 - start2
-            if not lag_allowed(lag):
-                continue
-
-            # Build template
-            u = rng.normal(0.0, 1.0, size=w)
-            u = u - u.mean()
-            std_u = u.std()
-            if std_u < 1e-12:
-                continue
-            u = u / std_u
-
-            # Rejection sample to ensure |r| >= threshold on constructed windows
-            max_inner_attempts = 20
-            accepted = False
-            for _ in range(max_inner_attempts):
-                r_star = threshold + rng.random() * (1.0 - threshold)
-                if r_star >= 1.0:
-                    eps = np.zeros(w, dtype=np.float64)
-                else:
-                    sigma2 = 1.0 / (r_star**2) - 1.0
-                    sigma2 = max(sigma2, 0.0)
-                    eps = rng.normal(0.0, math.sqrt(sigma2), size=w)
-                sign = _choose_sign(corr_sign, rng)
-                xw = u.astype(np.float32)
-                yw = (sign * u + eps).astype(np.float32)
-                r = _pearson_raw(xw, yw)
-                if abs(r) >= threshold:
-                    accepted = True
-                    break
-            if not accepted:
-                continue
-
-            # Write into X
-            X[i1, start1 : start1 + w] = xw
-            X[i2, start2 : start2 + w] = yw
-
-            # Mark occupancy
-            used[i1, start1 : start1 + w] = 1
-            used[i2, start2 : start2 + w] = 1
-
-            # 1-based times; ids s1..sm
-            correlated_rows.append((f"s{i1+1}", f"s{i2+1}", start1 + 1, start2 + 1, r))
-            idx = len(records)
-            records.append((i1, start1, i2, start2))
-            series_windows[i1].append((start1, idx))
-            series_windows[i2].append((start2, idx))
-            grid_records[i1][start1 // s].append(idx)
-            grid_records[i2][start2 // s].append(idx)
-
-        pairs_nonoverlap = len(records)
-        blended_pairs = 0
-        blend_attempts = 0
-        if total_pair_goal > len(records) and target_windows > 0:
-            blended_pairs, blend_attempts = _blend_fill(
-                X,
-                records,
-                series_windows,
-                grid_records,
-                correlated_rows,
-                total_pair_goal,
-                threshold,
-                corr_sign,
-                rng,
-                s,
-                w,
-                n,
-                m,
-                W_s,
-                lag_values,
-                g_step,
-            )
-        latent_pairs = 0
-        latent_attempts = 0
-        if total_pair_goal > len(records) and target_windows > 0:
-            latent_pairs, latent_attempts = _latent_template_fill(
-                X,
-                records,
-                series_windows,
-                correlated_rows,
-                total_pair_goal,
-                threshold,
-                corr_sign,
-                rng,
-                s,
-                w,
-                n,
-                m,
-                W_s,
-                lag_values,
-            )
-
-        windows_used = 2 * len(records)
-        if W_s > 0 and m > 0:
-            achieved_z = windows_used / (m * W_s)
-        else:
-            achieved_z = 0.0
-
-        stem = _build_stem(m, n, w, s, z, corr_sign, threshold, max_lag, base_proc)
-        os.makedirs(save_dir, exist_ok=True)
-
-        # Data .npz: (n, m+1) with first column = index 1..n, then S1..Sm
-        arr = np.zeros((n, m + 1), dtype=np.float32)
-        arr[:, 0] = np.arange(1, n + 1, dtype=np.float32)
-        arr[:, 1:] = X.T
-
-        data_path = os.path.join(save_dir, f"{stem}.npz")
-        np.savez_compressed(data_path, arr)
-
-        # Correlated pairs CSV
-        corr_csv_path = os.path.join(save_dir, f"{stem}_correlated.csv")
-        with open(corr_csv_path, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["id1", "id2", "time1", "time2", "corr"])
-            for row in correlated_rows:
-                writer.writerow(row)
-
-        meta = {
-            "m": m,
-            "n": n,
-            "w": w,
-            "s": s,
-            "threshold": threshold,
-            "corr_sign": corr_sign,
-            "max_lag": max_lag,
-            "lag_step": lag_step,
-            "target_z": z,
-            "z_max_nonoverlap": z_max,
-            "achieved_z": achieved_z,
-            "windows_target": target_windows,
-            "windows_target_eff": nonoverlap_window_goal,
-            "windows_used": windows_used,
-            "n_pairs": len(records),
-            "pairs_nonoverlap": pairs_nonoverlap,
-            "pairs_blended": blended_pairs,
-            "blend_attempts": blend_attempts,
-            "pairs_latent": latent_pairs,
-            "latent_attempts": latent_attempts,
-            "windows_latent": 2 * latent_pairs,
-            "windows_blended": 2 * blended_pairs,
-            "nonoverlap": True,
-        }
-        meta_path = os.path.join(save_dir, f"{stem}_meta.json")
-        with open(meta_path, "w") as f:
-            json.dump(meta, f, indent=2)
-
-        params = {
-            "seed": seed,
-            "base_proc": base_proc
-            if base_proc is not None
-            else {"type": "ar1", "phi": 0.6, "sigma": 1.0},
-        }
-        params_path = os.path.join(save_dir, f"{stem}_params.json")
-        with open(params_path, "w") as f:
-            json.dump(params, f, indent=2)
-
-        return {
-            "data_npz": data_path,
-            "correlated_csv": corr_csv_path,
-            "meta_json": meta_path,
-            "params_json": params_path,
-            "stem": stem,
-        }
-
-    # ------------------------------------------------------------------
-    # OVERLAP-ALLOWED MODE (best-effort, no strong z guarantee)
-    # ------------------------------------------------------------------
-    # fall back to simpler random injection when nonoverlap=False
-    # (not the mode you care about for tight z control)
-    W_s = (n - w) // s + 1
-    K_target = int(math.ceil(z * (m * W_s) / 2.0))
+    templates = _make_base_templates(num_templates, p, threshold, corr_sign, base_proc, rng)
 
     correlated_rows: List[Tuple[str, str, int, int, float]] = []
-    attempts = 0
-    max_attempts = max(5 * max(K_target, 1), 1000)
+    pairs_used = 0
 
-    while len(correlated_rows) < K_target and attempts < max_attempts:
-        attempts += 1
-        i1 = int(rng.integers(0, m))
-        i2 = int(rng.integers(0, m))
-        # choose grid index for first window
-        gi = int(rng.integers(0, W_s))
-        start1 = gi * s
-        if start1 < 0 or start1 + w > n:
+    while pairs_used < pair_goal:
+        available_series = _series_with_slots(slots_by_series)
+        if len(available_series) < 2:
+            break
+
+        i1 = _pick_series_with_weight(available_series, slots_by_series, rng)
+        remaining_series = [i for i in available_series if i != i1]
+        if not remaining_series:
+            break
+        i2 = _pick_series_with_weight(remaining_series, slots_by_series, rng)
+
+        slots1 = slots_by_series[i1]
+        slots2 = slots_by_series[i2]
+        if not slots1 or not slots2:
             continue
 
-        # choose lag by sampling admissible lag values uniformly
-        if max_lag <= 0:
-            lag = 0
-        else:
-            # build lag grid once (could be optimized)
-            L = [l for l in range(-max_lag, max_lag + 1, lag_step)]
-            lag = int(rng.choice(L))
-        start2 = start1 - lag
-        if start2 < 0 or start2 + w > n:
-            continue
+        start1 = slots1.pop(int(rng.integers(0, len(slots1))))
+        start2 = slots2.pop(int(rng.integers(0, len(slots2))))
 
-        # build template
-        u = rng.normal(0.0, 1.0, size=w)
-        u = u - u.mean()
-        std_u = u.std()
-        if std_u < 1e-12:
-            continue
-        u = u / std_u
+        tpl = templates[int(rng.integers(0, len(templates)))]
+        xw, yw, r_tpl = tpl
 
-        max_inner_attempts = 20
-        accepted = False
-        for _ in range(max_inner_attempts):
-            r_star = threshold + rng.random() * (1.0 - threshold)
-            if r_star >= 1.0:
-                eps = np.zeros(w, dtype=np.float64)
-            else:
-                sigma2 = 1.0 / (r_star**2) - 1.0
-                sigma2 = max(sigma2, 0.0)
-                eps = rng.normal(0.0, math.sqrt(sigma2), size=w)
-            sign = _choose_sign(corr_sign, rng)
-            xw = u.astype(np.float32)
-            yw = (sign * u + eps).astype(np.float32)
-            r = _pearson_raw(xw, yw)
-            if abs(r) >= threshold:
-                accepted = True
-                break
-        if not accepted:
-            continue
+        X[i1, start1 : start1 + p] = xw
+        X[i2, start2 : start2 + p] = yw
 
-        X[i1, start1 : start1 + w] = xw
-        X[i2, start2 : start2 + w] = yw
+        correlated_rows.append((f"s{i1+1}", f"s{i2+1}", start1 + 1, start2 + 1, r_tpl))
+        pairs_used += 1
 
-        correlated_rows.append((f"s{i1+1}", f"s{i2+1}", start1 + 1, start2 + 1, r))
+    samples_correlated = pairs_used * 2 * p
+    achieved_z = samples_correlated / float(m * n) if m * n > 0 else 0.0
 
-    windows_used = 2 * len(correlated_rows)
-    if W_s > 0 and m > 0:
-        achieved_z = windows_used / (m * W_s)
-    else:
-        achieved_z = 0.0
-
-    # z_max is not meaningful in overlap mode; we set it to 1.0 as a placeholder
-    z_max = 1.0
-
-    stem = _build_stem(m, n, w, s, z, corr_sign, threshold, max_lag, base_proc)
+    stem = _build_stem(
+        m=m,
+        n=n,
+        w=w,
+        z=z,
+        corr_sign=corr_sign,
+        threshold=threshold,
+        template_len=p,
+        num_templates=num_templates,
+        base_proc=base_proc,
+    )
     os.makedirs(save_dir, exist_ok=True)
 
+    # Data .npz: (n, m+1) with first column = index 1..n, then S1..Sm
     arr = np.zeros((n, m + 1), dtype=np.float32)
     arr[:, 0] = np.arange(1, n + 1, dtype=np.float32)
     arr[:, 1:] = X.T
@@ -884,6 +433,7 @@ def make_corr_dataset(
     data_path = os.path.join(save_dir, f"{stem}.npz")
     np.savez_compressed(data_path, arr)
 
+    # Correlated pairs CSV
     corr_csv_path = os.path.join(save_dir, f"{stem}_correlated.csv")
     with open(corr_csv_path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -895,39 +445,31 @@ def make_corr_dataset(
         "m": m,
         "n": n,
         "w": w,
-        "s": s,
+        "template_len": p,
+        "num_templates": num_templates,
         "threshold": threshold,
         "corr_sign": corr_sign,
-        "max_lag": max_lag,
-        "lag_step": lag_step,
         "target_z": z,
-        "z_max_nonoverlap": z_max,
         "achieved_z": achieved_z,
-        "windows_target": int(round(z * m * W_s)),
-        "windows_used": windows_used,
-        "n_pairs": len(correlated_rows),
-        "nonoverlap": False,
-        "attempts": attempts,
+        "pair_target": pair_target,
+        "pair_goal": pair_goal,
+        "pairs_used": pairs_used,
+        "samples_correlated": samples_correlated,
+        "slots_total": slots_total,
+        "slots_used": pairs_used * 2,
+        "base_proc": base_proc,
+        "volatility_equalizer": volatility_equalizer,
+        "seed": seed,
+        "hash_seed": hash_seed,
     }
     meta_path = os.path.join(save_dir, f"{stem}_meta.json")
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
 
-    params = {
-        "seed": seed,
-        "base_proc": base_proc
-        if base_proc is not None
-        else {"type": "ar1", "phi": 0.6, "sigma": 1.0},
-    }
-    params_path = os.path.join(save_dir, f"{stem}_params.json")
-    with open(params_path, "w") as f:
-        json.dump(params, f, indent=2)
-
     return {
         "data_npz": data_path,
         "correlated_csv": corr_csv_path,
         "meta_json": meta_path,
-        "params_json": params_path,
         "stem": stem,
     }
 
@@ -948,14 +490,20 @@ def _parse_args():
         "--z",
         type=float,
         required=True,
-        help="Target fraction of correlated windows (0..1).",
+        help="Target fraction of all samples that belong to correlated pairs (0..1).",
     )
-    p.add_argument("--w", type=int, required=True, help="Window length.")
+    p.add_argument("--w", type=int, required=True, help="Evaluation window length (must be divisible by p).")
     p.add_argument(
-        "--s",
+        "--template-len",
         type=int,
-        default=1,
-        help="Stride/step between window starts (default: 1).",
+        default=None,
+        help="Length p of each correlated template (defaults to w).",
+    )
+    p.add_argument(
+        "--num-templates",
+        type=int,
+        default=4,
+        help="How many distinct base templates to sample and reuse.",
     )
     p.add_argument(
         "--threshold",
@@ -971,45 +519,16 @@ def _parse_args():
         help="Correlation sign to inject: pos, neg, or both (default: pos).",
     )
     p.add_argument(
-        "--base-type",
+        "--base-proc",
         type=str,
-        choices=["ar1", "rw", "wn"],
-        default="ar1",
-        help="Base process: ar1 (stationary), rw (nonstationary), wn (white noise).",
-    )
-    p.add_argument(
-        "--phi",
-        type=float,
-        default=0.6,
-        help="AR(1) phi (only for base-type=ar1).",
-    )
-    p.add_argument(
-        "--sigma",
-        type=float,
-        default=1.0,
-        help="Noise sigma for base process.",
-    )
-    p.add_argument(
-        "--nonoverlap",
-        action="store_true",
-        help=("Enforce physical non-overlap of injected windows (default)."),
-    )
-    p.add_argument(
-        "--allow-overlap",
-        action="store_true",
-        help=("Allow overlapping injected windows (sets nonoverlap=False)."),
-    )
-    p.add_argument(
-        "--max-lag",
-        type=int,
-        default=0,
-        help="Maximum absolute lag (default: 0).",
-    )
-    p.add_argument(
-        "--lag-step",
-        type=int,
         default=None,
-        help="Lag grid step (default: s).",
+        help="JSON string describing the base process (e.g., '{\"type\":\"ar1\",\"phi\":0.6,\"sigma\":1.0}').",
+    )
+    p.add_argument(
+        "--volatility-equalizer",
+        type=str,
+        default=None,
+        help="Optional JSON string with volatility equalizer config.",
     )
     p.add_argument(
         "--seed",
@@ -1017,18 +536,16 @@ def _parse_args():
         default=7,
         help="Random seed (default: 7).",
     )
+    p.add_argument(
+        "--hash-seed",
+        type=int,
+        default=None,
+        help="PYTHONHASHSEED value (default: None).",
+    )
     args = p.parse_args()
 
-    base_proc = {"type": args.base_type, "sigma": args.sigma}
-    if args.base_type == "ar1":
-        base_proc["phi"] = args.phi
-
-    # default: nonoverlap=True; allow-overlap overrides
-    nonoverlap = True
-    if args.allow_overlap:
-        nonoverlap = False
-    if args.nonoverlap:
-        nonoverlap = True
+    base_proc = json.loads(args.base_proc) if args.base_proc else None
+    vol_eq = json.loads(args.volatility_equalizer) if args.volatility_equalizer else None
 
     return dict(
         save_dir=args.save_dir,
@@ -1036,14 +553,14 @@ def _parse_args():
         n=args.n,
         z=args.z,
         w=args.w,
-        s=args.s,
+        template_len=args.template_len,
+        num_templates=args.num_templates,
         threshold=args.threshold,
         corr_sign=args.corr_sign,
         base_proc=base_proc,
-        nonoverlap=nonoverlap,
-        max_lag=args.max_lag,
-        lag_step=args.lag_step,
+        volatility_equalizer=vol_eq,
         seed=args.seed,
+        hash_seed=args.hash_seed,
     )
 
 

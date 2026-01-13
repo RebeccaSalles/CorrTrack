@@ -14,7 +14,8 @@ DEFAULT_BASIC_WINDOW = None
 DEFAULT_N_LAGS = 7 * 24
 DEFAULT_CORR_THRESHOLD = 0.7
 
-DEFAULT_EXEC_MODE = "sequential"
+DEFAULT_PARALLEL = False
+DEFAULT_EXEC_MODE = "thread" if DEFAULT_PARALLEL else "sequential"
 DEFAULT_NEG_CORR = False
 DEFAULT_EXTRA_FILTER = False
 DEFAULT_RECALL_BY_WINDOW = True
@@ -30,6 +31,7 @@ WINDOW_STEP = DEFAULT_WINDOW_STEP
 BASIC_WINDOW = DEFAULT_BASIC_WINDOW
 N_LAGS = DEFAULT_N_LAGS
 CORR_THRESHOLD = DEFAULT_CORR_THRESHOLD
+PARALLEL = DEFAULT_PARALLEL
 EXEC_MODE = DEFAULT_EXEC_MODE
 NEG_CORR = DEFAULT_NEG_CORR
 EXTRA_FILTER = DEFAULT_EXTRA_FILTER
@@ -164,7 +166,8 @@ def parse_args():
     parser.add_argument("--basic-window", type=int, default=DEFAULT_BASIC_WINDOW)
     parser.add_argument("--n-lags", type=int, default=DEFAULT_N_LAGS)
     parser.add_argument("--corr-threshold", type=float, default=DEFAULT_CORR_THRESHOLD)
-    parser.add_argument("--exec-mode", type=str, default=DEFAULT_EXEC_MODE)
+    parser.add_argument("--parallel", dest="parallel", action="store_true")
+    parser.add_argument("--sequential", dest="parallel", action="store_false")
     parser.add_argument("--neg-corr", dest="neg_corr", action="store_true")
     parser.add_argument("--no-neg-corr", dest="neg_corr", action="store_false")
     parser.add_argument("--extra-filter", dest="extra_filter", action="store_true")
@@ -183,6 +186,7 @@ def parse_args():
         help="Disable recall-by-window mode (enabled by default).",
     )
     parser.set_defaults(
+        parallel=DEFAULT_PARALLEL,
         neg_corr=DEFAULT_NEG_CORR,
         extra_filter=DEFAULT_EXTRA_FILTER,
         recall_by_window=DEFAULT_RECALL_BY_WINDOW,
@@ -196,7 +200,7 @@ def main():
     _apply_dataset_config(cfg_dataset)
 
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
-    global EXEC_MODE, NEG_CORR, EXTRA_FILTER, RECALL_BY_WINDOW, ARTIFACT_MODE
+    global PARALLEL, EXEC_MODE, NEG_CORR, EXTRA_FILTER, RECALL_BY_WINDOW, ARTIFACT_MODE
     global DATA_LOADER
 
     WINDOW_SIZE = args.window_size
@@ -204,7 +208,8 @@ def main():
     BASIC_WINDOW = args.basic_window
     N_LAGS = args.n_lags
     CORR_THRESHOLD = args.corr_threshold
-    EXEC_MODE = args.exec_mode
+    PARALLEL = args.parallel
+    EXEC_MODE = "thread" if PARALLEL else "sequential"
     NEG_CORR = args.neg_corr
     EXTRA_FILTER = args.extra_filter
     RECALL_BY_WINDOW = args.recall_by_window

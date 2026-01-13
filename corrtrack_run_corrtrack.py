@@ -15,7 +15,8 @@ DEFAULT_BASIC_WINDOW = None
 DEFAULT_N_LAGS = 7 * 24
 DEFAULT_CORR_THRESHOLD = 0.7
 
-DEFAULT_EXEC_MODE = "sequential"
+DEFAULT_PARALLEL = False
+DEFAULT_EXEC_MODE = "thread" if DEFAULT_PARALLEL else "sequential"
 DEFAULT_NEG_CORR = False
 DEFAULT_CORR_VAL = True
 DEFAULT_EXTRA_FILTER = False
@@ -32,6 +33,7 @@ WINDOW_STEP = DEFAULT_WINDOW_STEP
 BASIC_WINDOW = DEFAULT_BASIC_WINDOW
 N_LAGS = DEFAULT_N_LAGS
 CORR_THRESHOLD = DEFAULT_CORR_THRESHOLD
+PARALLEL = DEFAULT_PARALLEL
 EXEC_MODE = DEFAULT_EXEC_MODE
 NEG_CORR = DEFAULT_NEG_CORR
 CORR_VAL = DEFAULT_CORR_VAL
@@ -59,11 +61,21 @@ def _load_config(config_path: Path):
     return module
 
 
+def _resolve_parallel(cfg) -> bool:
+    if hasattr(cfg, "PARALLEL"):
+        return bool(getattr(cfg, "PARALLEL"))
+    if hasattr(cfg, "EXEC_MODE"):
+        mode = str(getattr(cfg, "EXEC_MODE", "")).strip().lower()
+        return mode not in {"sequential", "seq", "false", "0"}
+    return DEFAULT_PARALLEL
+
+
 def _apply_run_config(cfg):
-    global EXEC_MODE, NEG_CORR, CORR_VAL, EXTRA_FILTER, RECALL_BY_WINDOW
+    global PARALLEL, EXEC_MODE, NEG_CORR, CORR_VAL, EXTRA_FILTER, RECALL_BY_WINDOW
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
 
-    EXEC_MODE = cfg.EXEC_MODE
+    PARALLEL = _resolve_parallel(cfg)
+    EXEC_MODE = "thread" if PARALLEL else "sequential"
     NEG_CORR = cfg.NEG_CORR
     CORR_VAL = cfg.CORR_VAL
     EXTRA_FILTER = cfg.EXTRA_FILTER
@@ -198,7 +210,8 @@ def main():
     parser.add_argument("--basic-window", type=int, default=DEFAULT_BASIC_WINDOW)
     parser.add_argument("--n-lags", type=int, default=DEFAULT_N_LAGS)
     parser.add_argument("--corr-threshold", type=float, default=DEFAULT_CORR_THRESHOLD)
-    parser.add_argument("--exec-mode", type=str, default=DEFAULT_EXEC_MODE)
+    parser.add_argument("--parallel", dest="parallel", action="store_true")
+    parser.add_argument("--sequential", dest="parallel", action="store_false")
     parser.add_argument("--neg-corr", dest="neg_corr", action="store_true")
     parser.add_argument("--no-neg-corr", dest="neg_corr", action="store_false")
     parser.add_argument("--corr-val", dest="corr_val", action="store_true")
@@ -219,20 +232,22 @@ def main():
         extra_filter=DEFAULT_EXTRA_FILTER,
         recall_by_window=DEFAULT_RECALL_BY_WINDOW,
     )
+    parser.set_defaults(parallel=DEFAULT_PARALLEL)
     args = parser.parse_args()
 
     cfg_dataset = _load_dataset_config(args.dataset_config)
     _apply_dataset_config(cfg_dataset)
 
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
-    global EXEC_MODE, NEG_CORR, CORR_VAL, EXTRA_FILTER, RECALL_BY_WINDOW, ARTIFACT_MODE, DATA_LOADER
+    global PARALLEL, EXEC_MODE, NEG_CORR, CORR_VAL, EXTRA_FILTER, RECALL_BY_WINDOW, ARTIFACT_MODE, DATA_LOADER
 
     WINDOW_SIZE = args.window_size
     WINDOW_STEP = args.window_step
     BASIC_WINDOW = args.basic_window
     N_LAGS = args.n_lags
     CORR_THRESHOLD = args.corr_threshold
-    EXEC_MODE = args.exec_mode
+    PARALLEL = args.parallel
+    EXEC_MODE = "thread" if PARALLEL else "sequential"
     NEG_CORR = args.neg_corr
     CORR_VAL = args.corr_val
     EXTRA_FILTER = args.extra_filter
