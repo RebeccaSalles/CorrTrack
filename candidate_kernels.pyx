@@ -1,19 +1,22 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True
 
-from cpython.list cimport PyList_GET_ITEM, PyList_GET_SIZE
-from cpython.float cimport PyFloat_AsDouble
-from cpython.long cimport PyLong_AsLong
+import numpy as np
+cimport numpy as np
 from libc.math cimport sqrt, fabs
+from libc.stdlib cimport malloc, realloc, free
+from libc.stdint cimport int64_t
+
+np.import_array()
 
 
-cdef inline Py_ssize_t _bisect_left(list values, double x):
+cdef inline Py_ssize_t _bisect_left(double[:] values, double x) nogil:
     cdef Py_ssize_t lo = 0
-    cdef Py_ssize_t hi = PyList_GET_SIZE(values)
+    cdef Py_ssize_t hi = values.shape[0]
     cdef Py_ssize_t mid
     cdef double v
     while lo < hi:
         mid = (lo + hi) // 2
-        v = PyFloat_AsDouble(<object>PyList_GET_ITEM(values, mid))
+        v = values[mid]
         if v < x:
             lo = mid + 1
         else:
@@ -21,14 +24,14 @@ cdef inline Py_ssize_t _bisect_left(list values, double x):
     return lo
 
 
-cdef inline Py_ssize_t _bisect_right(list values, double x):
+cdef inline Py_ssize_t _bisect_right(double[:] values, double x) nogil:
     cdef Py_ssize_t lo = 0
-    cdef Py_ssize_t hi = PyList_GET_SIZE(values)
+    cdef Py_ssize_t hi = values.shape[0]
     cdef Py_ssize_t mid
     cdef double v
     while lo < hi:
         mid = (lo + hi) // 2
-        v = PyFloat_AsDouble(<object>PyList_GET_ITEM(values, mid))
+        v = values[mid]
         if v <= x:
             lo = mid + 1
         else:
@@ -36,42 +39,67 @@ cdef inline Py_ssize_t _bisect_right(list values, double x):
     return lo
 
 
-def find_candidate_pairs(list values,
-                         list value_window_idx,
-                         list recent_values,
-                         list recent_window_idx,
-                         list win_sid_idx,
-                         list win_time,
+def find_candidate_pairs(double[:] values,
+                         long[:] value_window_idx,
+                         double[:] recent_values,
+                         long[:] recent_window_idx,
+                         long[:] win_sid_idx,
+                         long[:] win_time,
                          double tau):
     """Return list of (window_idx, other_idx) pairs within +/- tau range."""
-    cdef Py_ssize_t n_recent = PyList_GET_SIZE(recent_values)
-    cdef Py_ssize_t n_values = PyList_GET_SIZE(values)
+    cdef Py_ssize_t n_recent = recent_values.shape[0]
+    cdef Py_ssize_t n_values = values.shape[0]
     cdef Py_ssize_t i, j, left, right
     cdef double val, lower, upper
-    cdef long ridx, other_idx
+    cdef Py_ssize_t ridx, other_idx
     cdef long sid_r, sid_o, time_r, time_o
-    pairs = []
-    if n_recent == 0 or n_values == 0:
-        return pairs
+    cdef Py_ssize_t count = 0
+    cdef Py_ssize_t cap = 1024
+    cdef int64_t *buf = <int64_t *>malloc(cap * 2 * sizeof(int64_t))
+    cdef bint failed = False
+    if buf == NULL:
+        raise MemoryError()
 
-    for i in range(n_recent):
-        val = PyFloat_AsDouble(<object>PyList_GET_ITEM(recent_values, i))
-        ridx = PyLong_AsLong(<object>PyList_GET_ITEM(recent_window_idx, i))
-        lower = val - tau
-        upper = val + tau
-        left = _bisect_left(values, lower)
-        right = _bisect_right(values, upper)
-        sid_r = PyLong_AsLong(<object>PyList_GET_ITEM(win_sid_idx, ridx))
-        time_r = PyLong_AsLong(<object>PyList_GET_ITEM(win_time, ridx))
-        for j in range(left, right):
-            other_idx = PyLong_AsLong(<object>PyList_GET_ITEM(value_window_idx, j))
-            if other_idx == ridx:
-                continue
-            sid_o = PyLong_AsLong(<object>PyList_GET_ITEM(win_sid_idx, other_idx))
-            time_o = PyLong_AsLong(<object>PyList_GET_ITEM(win_time, other_idx))
-            if sid_o == sid_r and time_o == time_r:
-                continue
-            pairs.append((ridx, other_idx))
+    if n_recent == 0 or n_values == 0:
+        free(buf)
+        return []
+
+    with nogil:
+        for i in range(n_recent):
+            val = recent_values[i]
+            ridx = <Py_ssize_t>recent_window_idx[i]
+            lower = val - tau
+            upper = val + tau
+            left = _bisect_left(values, lower)
+            right = _bisect_right(values, upper)
+            sid_r = win_sid_idx[ridx]
+            time_r = win_time[ridx]
+            for j in range(left, right):
+                other_idx = <Py_ssize_t>value_window_idx[j]
+                if other_idx == ridx:
+                    continue
+                sid_o = win_sid_idx[other_idx]
+                time_o = win_time[other_idx]
+                if sid_o == sid_r and time_o == time_r:
+                    continue
+                if count >= cap:
+                    cap = cap * 2
+                    buf = <int64_t *>realloc(buf, cap * 2 * sizeof(int64_t))
+                    if buf == NULL:
+                        failed = True
+                        break
+                buf[2 * count] = <int64_t>ridx
+                buf[2 * count + 1] = <int64_t>other_idx
+                count += 1
+            if failed:
+                break
+
+    if failed:
+        free(buf)
+        raise MemoryError()
+
+    pairs = [(int(buf[2 * i]), int(buf[2 * i + 1])) for i in range(count)]
+    free(buf)
     return pairs
 
 

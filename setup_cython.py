@@ -10,6 +10,7 @@ import numpy as np
 extensions = [
     Extension("candidate_kernels", ["candidate_kernels.pyx"], include_dirs=[np.get_include()]),
     Extension("sketch_kernels", ["sketch_kernels.pyx"], include_dirs=[np.get_include()]),
+    Extension("partition_kernels", ["partition_kernels.pyx"], include_dirs=[np.get_include()]),
 ]
 
 setup(

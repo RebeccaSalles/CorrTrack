@@ -36,6 +36,12 @@ def _is_structurally_spiked_stats(x, mean, var_sum, n, kurt_thresh=5.0, mu4_sum=
 
 def find_candidate_pairs(values, value_window_idx, recent_values, recent_window_idx, win_sid_idx, win_time, tau):
     pairs = []
+    values = np.asarray(values, dtype=np.float64).tolist()
+    value_window_idx = np.asarray(value_window_idx, dtype=np.int64).tolist()
+    recent_values = np.asarray(recent_values, dtype=np.float64).tolist()
+    recent_window_idx = np.asarray(recent_window_idx, dtype=np.int64).tolist()
+    win_sid_idx = np.asarray(win_sid_idx, dtype=np.int64).tolist()
+    win_time = np.asarray(win_time, dtype=np.int64).tolist()
     if not recent_values or not values:
         return pairs
     for val, ridx in zip(recent_values, recent_window_idx):

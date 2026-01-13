@@ -6,8 +6,8 @@ cimport numpy as np
 np.import_array()
 
 
-def compute_series_dots(np.ndarray[np.float64_t, ndim=3] window_blocks,
-                        np.ndarray[np.float64_t, ndim=3] weights):
+def compute_series_dots(double[:, :, ::1] window_blocks,
+                        double[:, :, ::1] weights):
     """Compute per-series, per-basic-window dot products."""
     cdef Py_ssize_t n_series = window_blocks.shape[0]
     cdef Py_ssize_t n_basic = window_blocks.shape[1]
@@ -20,14 +20,16 @@ def compute_series_dots(np.ndarray[np.float64_t, ndim=3] window_blocks,
         raise ValueError("weights shape mismatch")
 
     cdef np.ndarray[np.float64_t, ndim=3] out = np.empty((n_series, n_basic, n_vectors), dtype=np.float64)
+    cdef double[:, :, ::1] out_mv = out
     cdef Py_ssize_t s, b, v, w
     cdef double acc
 
-    for s in range(n_series):
-        for b in range(n_basic):
-            for v in range(n_vectors):
-                acc = 0.0
-                for w in range(basic_window):
-                    acc += window_blocks[s, b, w] * weights[b, v, w]
-                out[s, b, v] = acc
+    with nogil:
+        for s in range(n_series):
+            for b in range(n_basic):
+                for v in range(n_vectors):
+                    acc = 0.0
+                    for w in range(basic_window):
+                        acc += window_blocks[s, b, w] * weights[b, v, w]
+                    out_mv[s, b, v] = acc
     return out

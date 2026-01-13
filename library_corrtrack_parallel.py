@@ -13,6 +13,7 @@ import pandas as pd
 from itertools import combinations, product, repeat
 from collections import defaultdict
 import math
+import warnings
 from scipy.stats import norm
 from functools import partial
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -39,6 +40,11 @@ except Exception:  # pragma: no cover
     _cy_fast_corr_and_dist = None
     _cy_validate_corr_batch = None
     _HAS_CYTHON_KERNELS = False
+
+try:
+    from partition_kernels import build_partitions as _cy_build_partitions
+except Exception:  # pragma: no cover
+    _cy_build_partitions = None
 
 try:
     from sketch_kernels import compute_series_dots as _cy_compute_series_dots
@@ -771,7 +777,11 @@ def _fast_corr_and_dist(x, y, return_stats=False):
 
 
 def _compute_series_dots(window_blocks, weights):
-    kernel = os.environ.get("CORRTRACK_SKETCH_KERNEL", "numpy").strip().lower()
+    kernel = os.environ.get("CORRTRACK_SKETCH_KERNEL")
+    if kernel:
+        kernel = kernel.strip().lower()
+    else:
+        kernel = "cython" if _cy_compute_series_dots is not None else "numpy"
     if kernel == "cython" and _cy_compute_series_dots is not None:
         try:
             wb = np.ascontiguousarray(window_blocks, dtype=np.float64)
@@ -1583,6 +1593,20 @@ class CorrTrack:
             return
 
         self.n_sketch_nodes = min(self.n_nodes, n_ids) if n_ids > 0 else 0
+        if not getattr(self, "_parallel_warned", False):
+            if n_ids > 1 and self.n_sketch_nodes < 2:
+                warnings.warn(
+                    "Parallel mode requested but only one sketch node is available; "
+                    "increase max_workers or provide more series to enable sketch parallelism.",
+                    RuntimeWarning,
+                )
+            if self.n_grids < 2:
+                warnings.warn(
+                    "Parallel mode requested but n_grids=1; reduce grid_dimension or "
+                    "increase n_vectors to enable grid parallelism.",
+                    RuntimeWarning,
+                )
+            self._parallel_warned = True
 
         flat_map_ids = [i for node_ids in self.map_ids for i in node_ids]
         if len(self.map_ids) == 0 or len(set(flat_map_ids) ^ set(ids)) > 0:
@@ -3436,6 +3460,9 @@ class Sketches:
         self._sketch_matrix = None
         self._orth_perm = None
         self._orth_signs = None
+        self._sketch_keys = []
+        debug_env = os.environ.get("CORRTRACK_DEBUG_SKETCHES", "").strip().lower()
+        self._debug_sketches = debug_env in ("1", "true", "yes")
         # Parameters grids
         self.grid_dimensions = grid_dimension #2D grid
         self.n_grids = int(n_vectors/self.grid_dimensions) #divides n_vectors (sketch size) for 2D grid
@@ -3882,6 +3909,7 @@ class Sketches:
             self.basicDots.append(np.empty((0, self.n_basic_windows, self.n_vectors), dtype=np.float64))
             self.sketches = {}
             self._sketch_matrix = None
+            self._sketch_keys = []
             return
 
         window_blocks = current_window.reshape(n_series, self.n_basic_windows, self.basic_window)
@@ -3903,17 +3931,21 @@ class Sketches:
         raw_matrix = np.array(sketch_vectors, dtype=np.float64, copy=False)
         if perm is not None and signs is not None and raw_matrix.shape[1] == perm.shape[0]:
             raw_matrix = raw_matrix[:, perm] * signs
-        for s in range(n_series):
-            try:
-                self._debug_raw_sketches[(self.series_ids[s], curr_start, window_size)] = np.array(
-                    raw_matrix[s], dtype=np.float64, copy=True
-                )
-            except Exception:
-                pass
+        if self._debug_sketches or self.testing:
+            for s in range(n_series):
+                try:
+                    self._debug_raw_sketches[(self.series_ids[s], curr_start, window_size)] = np.array(
+                        raw_matrix[s], dtype=np.float64, copy=True
+                    )
+                except Exception:
+                    pass
         norm_matrix = self._normalize_sketch_matrix(raw_matrix)
         self._sketch_matrix = norm_matrix
-        for s in range(n_series):
-            self.sketches[(self.series_ids[s], curr_start, window_size)] = norm_matrix[s]
+        series_ids = list(self.series_ids)
+        if len(series_ids) < n_series:
+            series_ids = series_ids + [None] * (n_series - len(series_ids))
+        self._sketch_keys = [(series_ids[s], curr_start, window_size) for s in range(n_series)]
+        self.sketches = dict(zip(self._sketch_keys, norm_matrix))
     
     def _print_incremental_intermediary_window(self):
         if(self.verbose):
@@ -3956,6 +3988,7 @@ class Sketches:
                 if n_series == 0:
                     self.basicDots.append(np.empty((0, self.n_basic_windows, self.n_vectors), dtype=np.float64))
                     self._sketch_matrix = None
+                    self._sketch_keys = []
                     continue
                 curr_start = self._curr_startTime()
                 window_size = self.window_size
@@ -3970,17 +4003,21 @@ class Sketches:
                 if perm is not None and signs is not None and raw_matrix.shape[1] == perm.shape[0]:
                     raw_matrix = raw_matrix[:, perm] * signs
 
-                for s in range(n_series):
-                    try:
-                        self._debug_raw_sketches[(self.series_ids[s], curr_start, window_size)] = np.array(
-                            raw_matrix[s], dtype=np.float64, copy=True
-                        )
-                    except Exception:
-                        pass
+                if self._debug_sketches or self.testing:
+                    for s in range(n_series):
+                        try:
+                            self._debug_raw_sketches[(self.series_ids[s], curr_start, window_size)] = np.array(
+                                raw_matrix[s], dtype=np.float64, copy=True
+                            )
+                        except Exception:
+                            pass
                 norm_matrix = self._normalize_sketch_matrix(raw_matrix)
                 self._sketch_matrix = norm_matrix
-                for s in range(n_series):
-                    self.sketches[(self.series_ids[s], curr_start, window_size)] = norm_matrix[s]
+                series_ids = list(self.series_ids)
+                if len(series_ids) < n_series:
+                    series_ids = series_ids + [None] * (n_series - len(series_ids))
+                self._sketch_keys = [(series_ids[s], curr_start, window_size) for s in range(n_series)]
+                self.sketches = dict(zip(self._sketch_keys, norm_matrix))
             del self.basicDots[0]
             del self.incrementable_index[0]                
 
@@ -4065,18 +4102,22 @@ class Sketches:
         if perm is not None and signs is not None and raw_matrix.shape[1] == perm.shape[0]:
             raw_matrix = raw_matrix[:, perm] * signs
 
-        for s in range(n_series):
-            try:
-                self._debug_raw_sketches[(self.series_ids[s], curr_start, window_size)] = np.array(
-                    raw_matrix[s], dtype=np.float64, copy=True
-                )
-            except Exception:
-                pass
+        if self._debug_sketches or self.testing:
+            for s in range(n_series):
+                try:
+                    self._debug_raw_sketches[(self.series_ids[s], curr_start, window_size)] = np.array(
+                        raw_matrix[s], dtype=np.float64, copy=True
+                    )
+                except Exception:
+                    pass
 
         norm_matrix = self._normalize_sketch_matrix(raw_matrix)
         self._sketch_matrix = norm_matrix
-        for s in range(n_series):
-            self.sketches[(self.series_ids[s], curr_start, window_size)] = norm_matrix[s]
+        series_ids = list(self.series_ids)
+        if len(series_ids) < n_series:
+            series_ids = series_ids + [None] * (n_series - len(series_ids))
+        self._sketch_keys = [(series_ids[s], curr_start, window_size) for s in range(n_series)]
+        self.sketches = dict(zip(self._sketch_keys, norm_matrix))
 
         del self.basicDots[0]
         del self.incrementable_index[0]
@@ -4218,7 +4259,7 @@ class Sketches:
         return signs * vector[perm]
 
     def partition_sketches(self, window_size):
-        if len(self.sketches) == 0:
+        if len(self.sketches) == 0 and not self._sketch_keys:
             return
 
         self.partitions = [dict() for _ in range(self.n_grids)]
@@ -4226,31 +4267,78 @@ class Sketches:
         if total_dim <= 0:
             return
 
-        for k, v in self.sketches.items():
-            if k[2] != window_size:
-                continue
+        keys = self._sketch_keys
+        matrix = self._sketch_matrix
+        if (
+            matrix is None
+            or not keys
+            or matrix.shape[0] != len(keys)
+            or any(k[2] != window_size for k in keys)
+        ):
+            keys = []
+            rows = []
+            for k, v in self.sketches.items():
+                if k[2] != window_size:
+                    continue
+                v_arr = np.asarray(v, dtype=np.float64)
+                if v_arr.size == 0:
+                    continue
+                keys.append(k)
+                rows.append(v_arr)
+            if not rows:
+                return
+            matrix = np.vstack(rows)
 
-            length = v.shape[0]
-            if length == 0:
-                continue
+        n_rows, n_dim = matrix.shape
+        if n_rows == 0 or n_dim == 0:
+            return
 
-            base_indices = np.arange(length, dtype=int)
-            for grid in range(self.n_grids):
+        const_flags = np.array(
+            [bool(self.is_constant.get(k[0], False)) for k in keys],
+            dtype=np.uint8,
+        )
+
+        chunks = norms = is_const = None
+        if _cy_build_partitions is not None:
+            try:
+                matrix_c = np.ascontiguousarray(matrix, dtype=np.float64)
+                const_c = np.ascontiguousarray(const_flags, dtype=np.uint8)
+                chunks, norms, is_const = _cy_build_partitions(
+                    matrix_c,
+                    int(self.grid_dimensions),
+                    const_c,
+                )
+            except Exception:
+                chunks = norms = is_const = None
+
+        if chunks is None:
+            n_grids = min(self.n_grids, n_dim // self.grid_dimensions)
+            chunks = np.empty((n_grids, n_rows, self.grid_dimensions), dtype=np.float64)
+            norms = np.empty((n_grids, n_rows), dtype=np.float64)
+            is_const = np.empty((n_grids, n_rows), dtype=np.uint8)
+            for grid in range(n_grids):
                 start = grid * self.grid_dimensions
                 end = start + self.grid_dimensions
-                if end > base_indices.shape[0]:
-                    break
-                indices = base_indices[start:end]
-                chunk = np.array(v[indices], dtype=np.float64, copy=True)
-                chunk_norm = float(np.linalg.norm(chunk))
-                if not np.isfinite(chunk_norm):
-                    chunk_norm = 0.0
-                is_const = bool(self.is_constant.get(k[0], False)) or chunk_norm == 0.0
-                self.partitions[grid][k] = (
-                    chunk,
-                    is_const,
-                    chunk_norm,
+                chunk = matrix[:, start:end]
+                chunks[grid] = chunk
+                grid_norms = np.linalg.norm(chunk, axis=1)
+                grid_norms = np.where(np.isfinite(grid_norms), grid_norms, 0.0)
+                norms[grid] = grid_norms
+                is_const[grid] = np.logical_or(const_flags != 0, grid_norms == 0.0).astype(np.uint8)
+
+        n_grids = min(self.n_grids, chunks.shape[0])
+        for grid in range(n_grids):
+            part = {}
+            chunk = chunks[grid]
+            grid_norms = norms[grid]
+            grid_const = is_const[grid]
+            for i, k in enumerate(keys):
+                part[k] = (
+                    np.array(chunk[i], dtype=np.float64, copy=True),
+                    bool(grid_const[i]),
+                    float(grid_norms[i]),
                 )
+            self.partitions[grid] = part
 
     def distribute_partitions(self):
         if len(self.partitions)>0:
@@ -4438,11 +4526,20 @@ class Candidates:
         self.cell_size = cell_size
         self.grid_max = grid_max
         self.sketches = {}
-        # BST-like storage over scalar sketch values
-        self._entries = []  # (value, window_id_key, window_id)
-        self._values = []   # parallel list of values for bisect
-        self._reverse_index = defaultdict(list)  # window_id -> list of inserted values (includes neg when needed)
-        self._recent_window_ids = set()
+        # Sorted index over scalar sketch values
+        self._values = []
+        self._entry_window_idx = []
+        self._window_ids = []
+        self._window_id_to_idx = {}
+        self._win_sid_idx = []
+        self._win_time = []
+        self._sid_to_idx = {}
+        self._sid_list = []
+        self._reverse_index = []
+        self._recent_window_idx = []
+        self._recent_window_set = set()
+        self._free_window_idx = []
+        self._bin_index = defaultdict(set)
         # Parameters thresholds
         self.freq_threshold = freq_threshold
         self.corr_threshold = corr_threshold
@@ -4461,44 +4558,120 @@ class Candidates:
     def from_state(cls, state):
         obj = cls.__new__(cls)
         obj.__dict__.update(state)
+        reverse_index = getattr(obj, "_reverse_index", [])
+        if isinstance(reverse_index, dict):
+            window_ids = getattr(obj, "_window_ids", [])
+            obj._reverse_index = [reverse_index.get(wid, []) for wid in window_ids]
+        elif isinstance(reverse_index, list):
+            obj._reverse_index = reverse_index
+        else:
+            obj._reverse_index = []
+        obj._recent_window_set = set(getattr(obj, "_recent_window_set", set()))
+        obj._recent_window_idx = list(getattr(obj, "_recent_window_idx", []))
+        obj._free_window_idx = list(getattr(obj, "_free_window_idx", []))
+        obj._window_id_to_idx = dict(getattr(obj, "_window_id_to_idx", {}))
+        obj._bin_index = defaultdict(set, getattr(obj, "_bin_index", {}))
         return obj
 
     def load_state(self, state):
         self.__dict__.update(state)
+        reverse_index = getattr(self, "_reverse_index", [])
+        if isinstance(reverse_index, dict):
+            window_ids = getattr(self, "_window_ids", [])
+            self._reverse_index = [reverse_index.get(wid, []) for wid in window_ids]
+        elif isinstance(reverse_index, list):
+            self._reverse_index = reverse_index
+        else:
+            self._reverse_index = []
+        self._recent_window_set = set(getattr(self, "_recent_window_set", set()))
+        self._recent_window_idx = list(getattr(self, "_recent_window_idx", []))
+        self._free_window_idx = list(getattr(self, "_free_window_idx", []))
+        self._window_id_to_idx = dict(getattr(self, "_window_id_to_idx", {}))
+        self._bin_index = defaultdict(set, getattr(self, "_bin_index", {}))
 
     def append_partition(self,curr_time,new_partition):
+        if new_partition is None:
+            return
         if self.curr_time != curr_time:
             self.curr_time = curr_time
             self.partition.append(new_partition)
         else:
             self.partition[-1].update(new_partition)
-        self._recent_window_ids = set()
+        self._recent_window_set.clear()
+        self._recent_window_idx = []
 
-    def _window_id_key(self, window_id):
+    def _bin_id(self, value):
+        if self.cell_size is None:
+            return None
+        tau = float(self.cell_size)
+        if tau <= 0.0:
+            return None
+        return int(math.floor(value / tau))
+
+    def _bin_add(self, value, window_idx):
+        bin_id = self._bin_id(value)
+        if bin_id is None:
+            return
+        self._bin_index[bin_id].add(window_idx)
+
+    def _bin_remove(self, value, window_idx):
+        bin_id = self._bin_id(value)
+        if bin_id is None:
+            return
+        bucket = self._bin_index.get(bin_id)
+        if not bucket:
+            return
+        bucket.discard(window_idx)
+        if not bucket:
+            self._bin_index.pop(bin_id, None)
+
+    def _sid_index(self, sid):
+        key = str(sid)
+        idx = self._sid_to_idx.get(key)
+        if idx is None:
+            idx = len(self._sid_list)
+            self._sid_list.append(key)
+            self._sid_to_idx[key] = idx
+        return idx
+
+    def _ensure_window_index(self, window_id):
+        idx = self._window_id_to_idx.get(window_id)
+        if idx is not None:
+            return idx
         sid, start_time, window_size = window_id
-        return (str(sid), int(start_time), int(window_size))
+        if self._free_window_idx:
+            idx = self._free_window_idx.pop()
+            self._window_ids[idx] = window_id
+            self._win_sid_idx[idx] = self._sid_index(sid)
+            self._win_time[idx] = int(start_time)
+            self._reverse_index[idx] = []
+        else:
+            idx = len(self._window_ids)
+            self._window_ids.append(window_id)
+            self._win_sid_idx.append(self._sid_index(sid))
+            self._win_time.append(int(start_time))
+            self._reverse_index.append([])
+        self._window_id_to_idx[window_id] = idx
+        return idx
 
-    def _insert_entry(self, value, window_id):
-        key = self._window_id_key(window_id)
+    def _insert_entry(self, value, window_idx):
         start = bisect.bisect_left(self._values, value)
         end = bisect.bisect_right(self._values, value)
         if start == end:
             idx = start
         else:
-            subkeys = [self._entries[i][1] for i in range(start, end)]
-            offset = bisect.bisect_left(subkeys, key)
+            subkeys = self._entry_window_idx[start:end]
+            offset = bisect.bisect_left(subkeys, window_idx)
             idx = start + offset
         self._values.insert(idx, value)
-        self._entries.insert(idx, (value, key, window_id))
+        self._entry_window_idx.insert(idx, window_idx)
 
-    def _remove_entry(self, value, window_id):
-        key = self._window_id_key(window_id)
+    def _remove_entry(self, value, window_idx):
         idx = bisect.bisect_left(self._values, value)
         while idx < len(self._values) and self._values[idx] == value:
-            _, entry_key, entry_id = self._entries[idx]
-            if entry_key == key and entry_id == window_id:
+            if self._entry_window_idx[idx] == window_idx:
                 self._values.pop(idx)
-                self._entries.pop(idx)
+                self._entry_window_idx.pop(idx)
                 return True
             idx += 1
         return False
@@ -4507,14 +4680,15 @@ class Candidates:
         idx = bisect.bisect_left(self._values, lower)
         n = len(self._values)
         while idx < n and self._values[idx] <= upper:
-            yield self._entries[idx][2]
+            yield self._entry_window_idx[idx]
             idx += 1
 
     def _input_tree(self):
         if not self.partition:
             return
         last_partition = self.partition[-1]
-        self._recent_window_ids = set()
+        self._recent_window_set.clear()
+        self._recent_window_idx = []
         for k, v in last_partition.items():
             if len(v) >= 3:
                 sketch, is_constant, _norm = v[:3]
@@ -4526,14 +4700,19 @@ class Candidates:
             if vec.size == 0:
                 continue
             value = float(vec[0])
-            self._insert_entry(value, k)
-            self._reverse_index[k].append(value)
+            window_idx = self._ensure_window_index(k)
+            self._insert_entry(value, window_idx)
+            self._reverse_index[window_idx].append(value)
+            self._bin_add(value, window_idx)
             if self.neg_corr:
                 neg_value = -value
-                self._insert_entry(neg_value, k)
-                self._reverse_index[k].append(neg_value)
+                self._insert_entry(neg_value, window_idx)
+                self._reverse_index[window_idx].append(neg_value)
+                self._bin_add(neg_value, window_idx)
             self.sketches[k] = value
-            self._recent_window_ids.add(k)
+            if window_idx not in self._recent_window_set:
+                self._recent_window_set.add(window_idx)
+                self._recent_window_idx.append(window_idx)
 
     def _clean_old_sketches(self):
         if len(self.partition) > self.n_lagged_windows:
@@ -4543,13 +4722,20 @@ class Candidates:
                     _sketch, is_constant, _norm = v[:3]
                 else:
                     continue
-                values = self._reverse_index.pop(k, [])
-                if is_constant:
-                    self.sketches.pop(k, None)
+                window_idx = self._window_id_to_idx.pop(k, None)
+                if window_idx is None:
                     continue
-                for val in values:
-                    self._remove_entry(val, k)
+                values = self._reverse_index[window_idx]
+                if not is_constant:
+                    for val in values:
+                        self._remove_entry(val, window_idx)
+                        self._bin_remove(val, window_idx)
                 self.sketches.pop(k, None)
+                self._reverse_index[window_idx] = []
+                self._window_ids[window_idx] = None
+                self._win_sid_idx[window_idx] = -1
+                self._win_time[window_idx] = 0
+                self._free_window_idx.append(window_idx)
 
     def _update_grid(self, n_ids):
         if self.partition and len(self.partition[-1]) >= n_ids:
@@ -4576,8 +4762,16 @@ class Candidates:
     def update_n_lagged_windows(self,n_lagged_windows):
         self.n_lagged_windows = n_lagged_windows
 
+    def _values_within_range(self, value, other_idx, tau):
+        if other_idx >= len(self._reverse_index):
+            return False
+        for other_value in set(self._reverse_index[other_idx]):
+            if abs(other_value - value) <= tau:
+                return True
+        return False
+
     def _increment_candidates(self, freq_pairs, candidates):
-        if not self._recent_window_ids:
+        if not self._recent_window_idx:
             return
         if self.cell_size is None:
             return
@@ -4585,13 +4779,91 @@ class Candidates:
         if tau < 0.0:
             return
         seen_pairs = set()
-        for window_id in self._recent_window_ids:
-            values = self._reverse_index.get(window_id, ())
+        if _cy_find_candidate_pairs is not None and self._values:
+            recent_values = []
+            recent_idx = []
+            for window_idx in self._recent_window_idx:
+                if window_idx >= len(self._reverse_index):
+                    continue
+                values = self._reverse_index[window_idx]
+                for value in set(values):
+                    recent_values.append(float(value))
+                    recent_idx.append(int(window_idx))
+            if recent_values:
+                values_arr = np.asarray(self._values, dtype=np.float64)
+                value_idx_arr = np.asarray(self._entry_window_idx, dtype=np.int64)
+                recent_vals_arr = np.asarray(recent_values, dtype=np.float64)
+                recent_idx_arr = np.asarray(recent_idx, dtype=np.int64)
+                win_sid_arr = np.asarray(self._win_sid_idx, dtype=np.int64)
+                win_time_arr = np.asarray(self._win_time, dtype=np.int64)
+                pairs = _cy_find_candidate_pairs(
+                    values_arr,
+                    value_idx_arr,
+                    recent_vals_arr,
+                    recent_idx_arr,
+                    win_sid_arr,
+                    win_time_arr,
+                    tau,
+                )
+                for window_idx, other_idx in pairs:
+                    window_id = self._window_ids[window_idx] if window_idx < len(self._window_ids) else None
+                    other_id = self._window_ids[other_idx] if other_idx < len(self._window_ids) else None
+                    if window_id is None or other_id is None:
+                        continue
+                    pair_id = self._normalize_key((window_id[0], other_id[0], window_id[1], other_id[1], window_id[2]))
+                    if pair_id in seen_pairs:
+                        continue
+                    seen_pairs.add(pair_id)
+                    freq_pairs[pair_id] = freq_pairs.get(pair_id, 0.0) + 1.0
+                    if freq_pairs[pair_id] >= self.freq_threshold:
+                        candidates[pair_id] = 1
+                return
+        if self._bin_index:
+            for window_idx in self._recent_window_idx:
+                if window_idx >= len(self._reverse_index):
+                    continue
+                window_id = self._window_ids[window_idx] if window_idx < len(self._window_ids) else None
+                if window_id is None:
+                    continue
+                values = self._reverse_index[window_idx]
+                for value in set(values):
+                    bin_id = self._bin_id(value)
+                    if bin_id is None:
+                        continue
+                    for cand_bin in (bin_id - 1, bin_id, bin_id + 1):
+                        for other_idx in self._bin_index.get(cand_bin, ()):
+                            if other_idx == window_idx:
+                                continue
+                            other_id = self._window_ids[other_idx] if other_idx < len(self._window_ids) else None
+                            if other_id is None:
+                                continue
+                            if window_id[0] == other_id[0] and window_id[1] == other_id[1]:
+                                continue
+                            if not self._values_within_range(value, other_idx, tau):
+                                continue
+                            pair_id = self._normalize_key((window_id[0], other_id[0], window_id[1], other_id[1], window_id[2]))
+                            if pair_id in seen_pairs:
+                                continue
+                            seen_pairs.add(pair_id)
+                            freq_pairs[pair_id] = freq_pairs.get(pair_id, 0.0) + 1.0
+                            if freq_pairs[pair_id] >= self.freq_threshold:
+                                candidates[pair_id] = 1
+            return
+        for window_idx in self._recent_window_idx:
+            if window_idx >= len(self._reverse_index):
+                continue
+            window_id = self._window_ids[window_idx] if window_idx < len(self._window_ids) else None
+            if window_id is None:
+                continue
+            values = self._reverse_index[window_idx]
             for value in set(values):
                 lower = value - tau
                 upper = value + tau
-                for other_id in self._range_search_ids(lower, upper):
-                    if other_id == window_id:
+                for other_idx in self._range_search_ids(lower, upper):
+                    other_id = self._window_ids[other_idx] if other_idx < len(self._window_ids) else None
+                    if other_id is None:
+                        continue
+                    if other_idx == window_idx:
                         continue
                     if window_id[0] == other_id[0] and window_id[1] == other_id[1]:
                         continue
