@@ -17,7 +17,7 @@ The sections below describe the repository structure, configuration model, and h
 ## Repository Layout
 
 ```
-corrtrack_release_sorted/
+repo-root/
 ├─ README.md
 ├─ corrtrack_run_bruteforce.py        # Stage 1: brute-force baseline
 ├─ corrtrack_param_search.py          # Stage 2: CorrTrack hyper-param sweep
@@ -51,11 +51,9 @@ Utility modules such as `load_data_asos.py` are retained for backwards compatibi
 Suggested setup:
 
 ```bash
-cd corrtrack_release_sorted
 python3 -m venv .venv
 source .venv/bin/activate
 pip install numpy pandas scipy scikit-learn matplotlib
-export PYTHONPATH=$(pwd)
 ```
 
 ---
@@ -67,7 +65,6 @@ The repository includes optional Cython kernels for candidate search and sketch 
 Build in place:
 
 ```bash
-cd corrtrack_release_sorted
 python3 -m pip install cython numpy
 python3 setup_cython.py build_ext --inplace
 ```
@@ -227,7 +224,6 @@ Use `plot_correlated_windows_example.py` to visualize injected windows for any s
 Example command (matching the dataset generated above):
 
 ```bash
-cd corrtrack_release_sorted
 python3 plot_correlated_windows_example.py \
   --data-npz  datasets/synth_outputs/synthetic/synt_stat_ar1_corr0p25_m16_w96_p96_g4_signboth_thr0p8.npz \
   --correlated-csv  datasets/synth_outputs/synthetic/synt_stat_ar1_corr0p25_m16_w96_p96_g4_signboth_thr0p8_correlated.csv \
@@ -325,8 +321,7 @@ python3 run_corrtrack_experiment.py \
 ### Adding overrides
 
 > **Environment note**  
-> All commands assume you are inside the `corrtrack_release_sorted/` directory and that the repository root is on `PYTHONPATH`.  
-> Run `cd corrtrack_release_sorted` then `export PYTHONPATH=$(pwd)` (or prefix commands with `PYTHONPATH=$(pwd)`) before executing the examples below.
+> All commands assume you are inside the repository root.
 
 Any extra flags you pass to the orchestrator are dispatched automatically to the relevant stages. For example:
 
