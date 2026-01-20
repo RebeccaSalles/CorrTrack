@@ -24,6 +24,9 @@ DEFAULT_N_LAGS = 7 * 24
 DEFAULT_CORR_THRESHOLD = 0.7
 
 DEFAULT_PARALLEL = False
+DEFAULT_PARALLEL_SKETCH = None
+DEFAULT_PARALLEL_CANDIDATES = None
+DEFAULT_PARALLEL_VALIDATION = None
 DEFAULT_EXEC_MODE = "thread" if DEFAULT_PARALLEL else "sequential"
 DEFAULT_NEG_CORR = False
 DEFAULT_CORR_VAL = True
@@ -33,6 +36,9 @@ DEFAULT_TARGET_RECALL = 0.95
 DEFAULT_TRAIN_RATIO = 0.3
 
 PARALLEL = DEFAULT_PARALLEL
+PARALLEL_SKETCH = DEFAULT_PARALLEL_SKETCH
+PARALLEL_CANDIDATES = DEFAULT_PARALLEL_CANDIDATES
+PARALLEL_VALIDATION = DEFAULT_PARALLEL_VALIDATION
 EXEC_MODE = DEFAULT_EXEC_MODE
 NEG_CORR = DEFAULT_NEG_CORR
 CORR_VAL = DEFAULT_CORR_VAL
@@ -63,6 +69,27 @@ def _load_module(config_path: Path, name: str):
 def _load_param_grid(config_path: Path):
     module = _load_module(config_path, "experiment_param_grid")
     return module.PARAM_GRID
+
+
+def _coerce_optional_bool(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "t", "yes", "y"}
+    return bool(value)
+
+
+def _any_parallel(*values) -> bool:
+    return any(val is True for val in values)
+
+
+def _apply_parallel_defaults_from_cfg(cfg, args):
+    if getattr(args, "parallel_sketch", None) is None and hasattr(cfg, "PARALLEL_SKETCH"):
+        args.parallel_sketch = _coerce_optional_bool(getattr(cfg, "PARALLEL_SKETCH"))
+    if getattr(args, "parallel_candidates", None) is None and hasattr(cfg, "PARALLEL_CANDIDATES"):
+        args.parallel_candidates = _coerce_optional_bool(getattr(cfg, "PARALLEL_CANDIDATES"))
+    if getattr(args, "parallel_validation", None) is None and hasattr(cfg, "PARALLEL_VALIDATION"):
+        args.parallel_validation = _coerce_optional_bool(getattr(cfg, "PARALLEL_VALIDATION"))
 
 
 def _get_cfg_attr(cfg, *names):
@@ -190,6 +217,12 @@ def main():
     parser.add_argument("--corr-threshold", type=float, default=DEFAULT_CORR_THRESHOLD)
     parser.add_argument("--parallel", dest="parallel", action="store_true")
     parser.add_argument("--sequential", dest="parallel", action="store_false")
+    parser.add_argument("--parallel-sketch", dest="parallel_sketch", action="store_true")
+    parser.add_argument("--sequential-sketch", dest="parallel_sketch", action="store_false")
+    parser.add_argument("--parallel-candidates", dest="parallel_candidates", action="store_true")
+    parser.add_argument("--sequential-candidates", dest="parallel_candidates", action="store_false")
+    parser.add_argument("--parallel-validation", dest="parallel_validation", action="store_true")
+    parser.add_argument("--sequential-validation", dest="parallel_validation", action="store_false")
     parser.add_argument("--neg-corr", dest="neg_corr", action="store_true")
     parser.add_argument("--no-neg-corr", dest="neg_corr", action="store_false")
     parser.add_argument("--corr-val", dest="corr_val", action="store_true")
@@ -200,6 +233,9 @@ def main():
     parser.add_argument("--no-recall-by-window", dest="recall_by_window", action="store_false")
     parser.set_defaults(
         parallel=DEFAULT_PARALLEL,
+        parallel_sketch=DEFAULT_PARALLEL_SKETCH,
+        parallel_candidates=DEFAULT_PARALLEL_CANDIDATES,
+        parallel_validation=DEFAULT_PARALLEL_VALIDATION,
         neg_corr=DEFAULT_NEG_CORR,
         corr_val=DEFAULT_CORR_VAL,
         extra_filter=DEFAULT_EXTRA_FILTER,
@@ -211,9 +247,11 @@ def main():
 
     cfg_dataset = _load_module(args.dataset_config, "experiment_dataset")
     _apply_dataset_config(cfg_dataset)
+    _apply_parallel_defaults_from_cfg(cfg_dataset, args)
 
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
-    global PARALLEL, EXEC_MODE, NEG_CORR, CORR_VAL, EXTRA_FILTER, RECALL_BY_WINDOW
+    global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
+    global EXEC_MODE, NEG_CORR, CORR_VAL, EXTRA_FILTER, RECALL_BY_WINDOW
     global TARGET_RECALL, TRAIN_RATIO, PARAM_GRID, DATA_LOADER
 
     WINDOW_SIZE = args.window_size
@@ -222,7 +260,10 @@ def main():
     N_LAGS = args.n_lags
     CORR_THRESHOLD = args.corr_threshold
     PARALLEL = args.parallel
-    EXEC_MODE = "thread" if PARALLEL else "sequential"
+    PARALLEL_SKETCH = args.parallel_sketch
+    PARALLEL_CANDIDATES = args.parallel_candidates
+    PARALLEL_VALIDATION = args.parallel_validation
+    EXEC_MODE = "thread" if _any_parallel(PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION) else "sequential"
     NEG_CORR = args.neg_corr
     CORR_VAL = args.corr_val
     EXTRA_FILTER = args.extra_filter
@@ -265,6 +306,9 @@ def main():
                         CORR_VAL,
                         extra_filter=EXTRA_FILTER,
                         exec=EXEC_MODE,
+                        parallel_sketch=PARALLEL_SKETCH,
+                        parallel_candidates=PARALLEL_CANDIDATES,
+                        parallel_validation=PARALLEL_VALIDATION,
                     )
 
                     output_prefix = os.path.join(output_dir, f"corrtrack_optim_{dataset_id}")

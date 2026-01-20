@@ -61,6 +61,7 @@ def find_candidate_pairs(values, value_window_idx, recent_values, recent_window_
     return pairs
 
 
+
 def fast_corr_and_dist(x, y):
 
     x = np.asarray(x, dtype=np.float64)

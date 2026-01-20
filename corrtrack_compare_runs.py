@@ -14,6 +14,8 @@ from typing import Callable
 
 from library_corrtrack_parallel import CorrTrack_compare
 
+CSV_DELIMITER = ";"
+
 DEFAULT_WINDOW_SIZE = 7 * 24
 DEFAULT_WINDOW_STEP = 12
 DEFAULT_BASIC_WINDOW = None
@@ -21,6 +23,9 @@ DEFAULT_N_LAGS = 7 * 24
 DEFAULT_CORR_THRESHOLD = 0.7
 
 DEFAULT_PARALLEL = False
+DEFAULT_PARALLEL_SKETCH = None
+DEFAULT_PARALLEL_CANDIDATES = None
+DEFAULT_PARALLEL_VALIDATION = None
 DEFAULT_EXEC_MODE = "thread" if DEFAULT_PARALLEL else "sequential"
 DEFAULT_NEG_CORR = False
 DEFAULT_CORR_VAL = True
@@ -39,6 +44,9 @@ BASIC_WINDOW = DEFAULT_BASIC_WINDOW
 N_LAGS = DEFAULT_N_LAGS
 CORR_THRESHOLD = DEFAULT_CORR_THRESHOLD
 PARALLEL = DEFAULT_PARALLEL
+PARALLEL_SKETCH = DEFAULT_PARALLEL_SKETCH
+PARALLEL_CANDIDATES = DEFAULT_PARALLEL_CANDIDATES
+PARALLEL_VALIDATION = DEFAULT_PARALLEL_VALIDATION
 EXEC_MODE = DEFAULT_EXEC_MODE
 NEG_CORR = DEFAULT_NEG_CORR
 CORR_VAL = DEFAULT_CORR_VAL
@@ -56,6 +64,27 @@ def _load_dataset_config(config_path: Path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)  # type: ignore[attr-defined]
     return module
+
+
+def _coerce_optional_bool(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "t", "yes", "y"}
+    return bool(value)
+
+
+def _any_parallel(*values) -> bool:
+    return any(val is True for val in values)
+
+
+def _apply_parallel_defaults_from_cfg(cfg, args):
+    if getattr(args, "parallel_sketch", None) is None and hasattr(cfg, "PARALLEL_SKETCH"):
+        args.parallel_sketch = _coerce_optional_bool(getattr(cfg, "PARALLEL_SKETCH"))
+    if getattr(args, "parallel_candidates", None) is None and hasattr(cfg, "PARALLEL_CANDIDATES"):
+        args.parallel_candidates = _coerce_optional_bool(getattr(cfg, "PARALLEL_CANDIDATES"))
+    if getattr(args, "parallel_validation", None) is None and hasattr(cfg, "PARALLEL_VALIDATION"):
+        args.parallel_validation = _coerce_optional_bool(getattr(cfg, "PARALLEL_VALIDATION"))
 
 
 def _get_cfg_attr(cfg, *names):
@@ -166,6 +195,12 @@ def parse_args():
     parser.add_argument("--corr-threshold", type=float, default=DEFAULT_CORR_THRESHOLD)
     parser.add_argument("--parallel", dest="parallel", action="store_true")
     parser.add_argument("--sequential", dest="parallel", action="store_false")
+    parser.add_argument("--parallel-sketch", dest="parallel_sketch", action="store_true")
+    parser.add_argument("--sequential-sketch", dest="parallel_sketch", action="store_false")
+    parser.add_argument("--parallel-candidates", dest="parallel_candidates", action="store_true")
+    parser.add_argument("--sequential-candidates", dest="parallel_candidates", action="store_false")
+    parser.add_argument("--parallel-validation", dest="parallel_validation", action="store_true")
+    parser.add_argument("--sequential-validation", dest="parallel_validation", action="store_false")
     parser.add_argument("--neg-corr", dest="neg_corr", action="store_true")
     parser.add_argument("--no-neg-corr", dest="neg_corr", action="store_false")
     parser.add_argument("--corr-val", dest="corr_val", action="store_true")
@@ -187,6 +222,9 @@ def parse_args():
     )
     parser.set_defaults(
         parallel=DEFAULT_PARALLEL,
+        parallel_sketch=DEFAULT_PARALLEL_SKETCH,
+        parallel_candidates=DEFAULT_PARALLEL_CANDIDATES,
+        parallel_validation=DEFAULT_PARALLEL_VALIDATION,
         neg_corr=DEFAULT_NEG_CORR,
         corr_val=DEFAULT_CORR_VAL,
         extra_filter=DEFAULT_EXTRA_FILTER,
@@ -201,7 +239,7 @@ def _extract_timeseries_ids(bf_run_path: Path) -> set[str]:
         return set()
 
     with bf_run_path.open("r", newline="") as fh:
-        reader = csv.DictReader(fh)
+        reader = csv.DictReader(fh, delimiter=CSV_DELIMITER)
         if not reader.fieldnames or "artifact_path" not in reader.fieldnames:
             print(
                 f"[corrtrack_compare_runs] Skipping FilCorr integration: "
@@ -304,9 +342,11 @@ def main():
     args = parse_args()
     cfg_dataset = _load_dataset_config(args.dataset_config)
     _apply_dataset_config(cfg_dataset)
+    _apply_parallel_defaults_from_cfg(cfg_dataset, args)
 
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
-    global PARALLEL, EXEC_MODE, NEG_CORR, CORR_VAL, EXTRA_FILTER, RECALL_BY_WINDOW, TRAIN_RATIO, DATA_LOADER
+    global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
+    global EXEC_MODE, NEG_CORR, CORR_VAL, EXTRA_FILTER, RECALL_BY_WINDOW, TRAIN_RATIO, DATA_LOADER
 
     WINDOW_SIZE = args.window_size
     WINDOW_STEP = args.window_step
@@ -314,7 +354,10 @@ def main():
     N_LAGS = args.n_lags
     CORR_THRESHOLD = args.corr_threshold
     PARALLEL = args.parallel
-    EXEC_MODE = "thread" if PARALLEL else "sequential"
+    PARALLEL_SKETCH = args.parallel_sketch
+    PARALLEL_CANDIDATES = args.parallel_candidates
+    PARALLEL_VALIDATION = args.parallel_validation
+    EXEC_MODE = "thread" if _any_parallel(PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION) else "sequential"
     NEG_CORR = args.neg_corr
     CORR_VAL = args.corr_val
     EXTRA_FILTER = args.extra_filter
@@ -362,6 +405,9 @@ def main():
                     CORR_VAL,
                     MODES,
                     exec=EXEC_MODE,
+                    parallel_sketch=PARALLEL_SKETCH,
+                    parallel_candidates=PARALLEL_CANDIDATES,
+                    parallel_validation=PARALLEL_VALIDATION,
                     extra_filter=EXTRA_FILTER,
                 )
 

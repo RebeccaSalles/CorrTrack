@@ -12,3 +12,8 @@ N_YEARS = [1]
 MODES = ["nD"]
 
 DATA_LOADER = partial(load_dataset, root="correlation/asos-airports")
+
+# Optional per-phase parallel defaults (set to True/False to override CLI defaults).
+PARALLEL_SKETCH = None
+PARALLEL_CANDIDATES = None
+PARALLEL_VALIDATION = None

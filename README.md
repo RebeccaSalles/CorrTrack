@@ -1,5 +1,3 @@
-<img src="header.png" alt="CorrTrack" width="1100" align="center"/>
-
 # CorrTrack Experiment Pipeline
 
 This repository contains a modular pipeline for running the CorrTrack correlation engine against arbitrary datasets. The workflow is designed to let you:
@@ -247,7 +245,10 @@ Each stage script defines default CorrTrack settings (window size, lag count, co
 --basic-window          default auto (divides window-size)
 --n-lags                default 7*24
 --corr-threshold        default 0.7
---parallel / --sequential (default sequential)
+--parallel / --sequential (global default, see per-phase flags below)
+--parallel-sketch / --sequential-sketch
+--parallel-candidates / --sequential-candidates
+--parallel-validation / --sequential-validation
 --neg-corr / --no-neg-corr
 --corr-val / --no-corr-val (param search + corrtrack + compare)
 --extra-filter / --no-extra-filter
@@ -257,7 +258,7 @@ Each stage script defines default CorrTrack settings (window size, lag count, co
 --train-ratio           (hyper-param search & comparison) default 0.3
 ```
 
-Artifacts are written under `correlation/<RESULT_FOLDER>/<dataset_id>/ws…_exec<mode>/…`, so runs with different execution policies do not collide.
+Artifacts are written under `correlation/<RESULT_FOLDER>/<dataset_id>/ws…_exec<mode>/…`, so runs with different execution policies do not collide. The execution mode is `thread` if any phase runs in parallel, otherwise `sequential`.
 
 ### Full parameter reference
 
@@ -269,7 +270,10 @@ Stage scripts (`corrtrack_run_bruteforce.py`, `corrtrack_param_search.py`, `corr
 | `--loader module:callable` | Optional override for the dataset loader function; defaults to the `DATA_LOADER` exported by the dataset config. |
 | `--window-size`, `--window-step`, `--basic-window`, `--n-lags` | Sliding-window geometry; `basic-window` must divide `window-size` (auto when omitted). |
 | `--corr-threshold` | Minimum correlation absolute value. |
-| `--parallel` / `--sequential` | Run in threaded parallel mode or sequential mode. |
+| `--parallel` / `--sequential` | Global default for execution mode (applies to all phases unless overridden by per-phase flags). |
+| `--parallel-sketch` / `--sequential-sketch` | Enable or disable parallelism for sketch computation only. |
+| `--parallel-candidates` / `--sequential-candidates` | Enable or disable parallelism for candidate generation only. |
+| `--parallel-validation` / `--sequential-validation` | Enable or disable parallelism for candidate validation only. |
 | `--neg-corr` / `--no-neg-corr` | Enable or disable mining negative correlations. |
 | `--extra-filter` / `--no-extra-filter` | Toggle the candidate pre-filtering stage. |
 | `--recall-by-window` / `--no-recall-by-window` | Whether recall is computed per time window or globally. |
@@ -291,6 +295,20 @@ Stage-specific parameters:
 | `debug_corrtrack.py` | `--param-grid-config PATH`, `--samples-per-class`, `--output-dir`, `--skip-initial-run`, `--refresh-artifacts`. |
 
 Any extra flags given to `run_corrtrack_experiment.py` are filtered and forwarded only to the stages that understand them.
+
+### Per-phase execution control
+
+Each CorrTrack phase can run sequentially or in threads, independently. The per-phase flags take priority over the global `--parallel/--sequential` default:
+
+```
+python3 corrtrack_run_corrtrack.py \
+  --dataset-config experiment_dataset_synth_demo.py \
+  --parallel-sketch \
+  --sequential-candidates \
+  --parallel-validation
+```
+
+This example uses threads for sketches and validation, while keeping candidate generation sequential. The output folder will still be tagged as `exec<mode>`, where `<mode>` is `thread` whenever any phase is parallel.
 
 ---
 

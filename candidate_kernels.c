@@ -20805,7 +20805,7 @@ static PyObject *__pyx_pf_17candidate_kernels_find_candidate_pairs(CYTHON_UNUSED
   return __pyx_r;
 }
 
-/* "candidate_kernels.pyx":106
+/* "candidate_kernels.pyx":107
  * 
  * 
  * def fast_corr_and_dist(double[:] x, double[:] y):             # <<<<<<<<<<<<<<
@@ -20870,7 +20870,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[0]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 106, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 107, __pyx_L3_error)
         else goto __pyx_L5_argtuple_error;
         CYTHON_FALLTHROUGH;
         case  1:
@@ -20878,14 +20878,14 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[1]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 106, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 107, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("fast_corr_and_dist", 1, 2, 2, 1); __PYX_ERR(0, 106, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("fast_corr_and_dist", 1, 2, 2, 1); __PYX_ERR(0, 107, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
         const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "fast_corr_and_dist") < 0)) __PYX_ERR(0, 106, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "fast_corr_and_dist") < 0)) __PYX_ERR(0, 107, __pyx_L3_error)
       }
     } else if (unlikely(__pyx_nargs != 2)) {
       goto __pyx_L5_argtuple_error;
@@ -20893,12 +20893,12 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       values[0] = __Pyx_Arg_FASTCALL(__pyx_args, 0);
       values[1] = __Pyx_Arg_FASTCALL(__pyx_args, 1);
     }
-    __pyx_v_x = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_x.memview)) __PYX_ERR(0, 106, __pyx_L3_error)
-    __pyx_v_y = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_y.memview)) __PYX_ERR(0, 106, __pyx_L3_error)
+    __pyx_v_x = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_x.memview)) __PYX_ERR(0, 107, __pyx_L3_error)
+    __pyx_v_y = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_y.memview)) __PYX_ERR(0, 107, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("fast_corr_and_dist", 1, 2, 2, __pyx_nargs); __PYX_ERR(0, 106, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("fast_corr_and_dist", 1, 2, 2, __pyx_nargs); __PYX_ERR(0, 107, __pyx_L3_error)
   __pyx_L6_skip:;
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
@@ -20968,7 +20968,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("fast_corr_and_dist", 1);
 
-  /* "candidate_kernels.pyx":108
+  /* "candidate_kernels.pyx":109
  * def fast_corr_and_dist(double[:] x, double[:] y):
  *     """Compute Pearson correlation and Euclidean distance for two vectors."""
  *     cdef Py_ssize_t n = x.shape[0]             # <<<<<<<<<<<<<<
@@ -20977,7 +20977,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   __pyx_v_n = (__pyx_v_x.shape[0]);
 
-  /* "candidate_kernels.pyx":109
+  /* "candidate_kernels.pyx":110
  *     """Compute Pearson correlation and Euclidean distance for two vectors."""
  *     cdef Py_ssize_t n = x.shape[0]
  *     if n == 0:             # <<<<<<<<<<<<<<
@@ -20987,7 +20987,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
   __pyx_t_1 = (__pyx_v_n == 0);
   if (__pyx_t_1) {
 
-    /* "candidate_kernels.pyx":110
+    /* "candidate_kernels.pyx":111
  *     cdef Py_ssize_t n = x.shape[0]
  *     if n == 0:
  *         return float("nan"), float("inf"), (0, 0.0, 0.0, 0.0, 0.0)             # <<<<<<<<<<<<<<
@@ -20995,28 +20995,28 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  *     cdef double sx = 0.0
  */
     __Pyx_XDECREF(__pyx_r);
-    __pyx_t_2 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_nan); if (unlikely(__pyx_t_2 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 110, __pyx_L1_error)
-    __pyx_t_3 = PyFloat_FromDouble(__pyx_t_2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 110, __pyx_L1_error)
+    __pyx_t_2 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_nan); if (unlikely(__pyx_t_2 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 111, __pyx_L1_error)
+    __pyx_t_3 = PyFloat_FromDouble(__pyx_t_2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 111, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
-    __pyx_t_2 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_inf); if (unlikely(__pyx_t_2 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 110, __pyx_L1_error)
-    __pyx_t_4 = PyFloat_FromDouble(__pyx_t_2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 110, __pyx_L1_error)
+    __pyx_t_2 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_inf); if (unlikely(__pyx_t_2 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 111, __pyx_L1_error)
+    __pyx_t_4 = PyFloat_FromDouble(__pyx_t_2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 111, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_4);
-    __pyx_t_5 = PyTuple_New(3); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 110, __pyx_L1_error)
+    __pyx_t_5 = PyTuple_New(3); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 111, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_5);
     __Pyx_GIVEREF(__pyx_t_3);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_3)) __PYX_ERR(0, 110, __pyx_L1_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_3)) __PYX_ERR(0, 111, __pyx_L1_error);
     __Pyx_GIVEREF(__pyx_t_4);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 1, __pyx_t_4)) __PYX_ERR(0, 110, __pyx_L1_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 1, __pyx_t_4)) __PYX_ERR(0, 111, __pyx_L1_error);
     __Pyx_INCREF(__pyx_tuple__11);
     __Pyx_GIVEREF(__pyx_tuple__11);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 2, __pyx_tuple__11)) __PYX_ERR(0, 110, __pyx_L1_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 2, __pyx_tuple__11)) __PYX_ERR(0, 111, __pyx_L1_error);
     __pyx_t_3 = 0;
     __pyx_t_4 = 0;
     __pyx_r = __pyx_t_5;
     __pyx_t_5 = 0;
     goto __pyx_L0;
 
-    /* "candidate_kernels.pyx":109
+    /* "candidate_kernels.pyx":110
  *     """Compute Pearson correlation and Euclidean distance for two vectors."""
  *     cdef Py_ssize_t n = x.shape[0]
  *     if n == 0:             # <<<<<<<<<<<<<<
@@ -21025,7 +21025,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   }
 
-  /* "candidate_kernels.pyx":112
+  /* "candidate_kernels.pyx":113
  *         return float("nan"), float("inf"), (0, 0.0, 0.0, 0.0, 0.0)
  *     cdef Py_ssize_t i
  *     cdef double sx = 0.0             # <<<<<<<<<<<<<<
@@ -21034,7 +21034,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   __pyx_v_sx = 0.0;
 
-  /* "candidate_kernels.pyx":113
+  /* "candidate_kernels.pyx":114
  *     cdef Py_ssize_t i
  *     cdef double sx = 0.0
  *     cdef double sy = 0.0             # <<<<<<<<<<<<<<
@@ -21043,7 +21043,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   __pyx_v_sy = 0.0;
 
-  /* "candidate_kernels.pyx":114
+  /* "candidate_kernels.pyx":115
  *     cdef double sx = 0.0
  *     cdef double sy = 0.0
  *     cdef double sum_xy = 0.0             # <<<<<<<<<<<<<<
@@ -21052,7 +21052,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   __pyx_v_sum_xy = 0.0;
 
-  /* "candidate_kernels.pyx":115
+  /* "candidate_kernels.pyx":116
  *     cdef double sy = 0.0
  *     cdef double sum_xy = 0.0
  *     cdef double sum_xx = 0.0             # <<<<<<<<<<<<<<
@@ -21061,7 +21061,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   __pyx_v_sum_xx = 0.0;
 
-  /* "candidate_kernels.pyx":116
+  /* "candidate_kernels.pyx":117
  *     cdef double sum_xy = 0.0
  *     cdef double sum_xx = 0.0
  *     cdef double sum_yy = 0.0             # <<<<<<<<<<<<<<
@@ -21070,7 +21070,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   __pyx_v_sum_yy = 0.0;
 
-  /* "candidate_kernels.pyx":118
+  /* "candidate_kernels.pyx":119
  *     cdef double sum_yy = 0.0
  *     cdef double xi, yi
  *     for i in range(n):             # <<<<<<<<<<<<<<
@@ -21082,7 +21082,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
   for (__pyx_t_8 = 0; __pyx_t_8 < __pyx_t_7; __pyx_t_8+=1) {
     __pyx_v_i = __pyx_t_8;
 
-    /* "candidate_kernels.pyx":119
+    /* "candidate_kernels.pyx":120
  *     cdef double xi, yi
  *     for i in range(n):
  *         xi = x[i]             # <<<<<<<<<<<<<<
@@ -21092,7 +21092,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
     __pyx_t_9 = __pyx_v_i;
     __pyx_v_xi = (*((double *) ( /* dim=0 */ (__pyx_v_x.data + __pyx_t_9 * __pyx_v_x.strides[0]) )));
 
-    /* "candidate_kernels.pyx":120
+    /* "candidate_kernels.pyx":121
  *     for i in range(n):
  *         xi = x[i]
  *         yi = y[i]             # <<<<<<<<<<<<<<
@@ -21102,7 +21102,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
     __pyx_t_9 = __pyx_v_i;
     __pyx_v_yi = (*((double *) ( /* dim=0 */ (__pyx_v_y.data + __pyx_t_9 * __pyx_v_y.strides[0]) )));
 
-    /* "candidate_kernels.pyx":121
+    /* "candidate_kernels.pyx":122
  *         xi = x[i]
  *         yi = y[i]
  *         sx += xi             # <<<<<<<<<<<<<<
@@ -21111,7 +21111,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
     __pyx_v_sx = (__pyx_v_sx + __pyx_v_xi);
 
-    /* "candidate_kernels.pyx":122
+    /* "candidate_kernels.pyx":123
  *         yi = y[i]
  *         sx += xi
  *         sy += yi             # <<<<<<<<<<<<<<
@@ -21120,7 +21120,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
     __pyx_v_sy = (__pyx_v_sy + __pyx_v_yi);
 
-    /* "candidate_kernels.pyx":123
+    /* "candidate_kernels.pyx":124
  *         sx += xi
  *         sy += yi
  *         sum_xy += xi * yi             # <<<<<<<<<<<<<<
@@ -21129,7 +21129,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
     __pyx_v_sum_xy = (__pyx_v_sum_xy + (__pyx_v_xi * __pyx_v_yi));
 
-    /* "candidate_kernels.pyx":124
+    /* "candidate_kernels.pyx":125
  *         sy += yi
  *         sum_xy += xi * yi
  *         sum_xx += xi * xi             # <<<<<<<<<<<<<<
@@ -21138,7 +21138,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
     __pyx_v_sum_xx = (__pyx_v_sum_xx + (__pyx_v_xi * __pyx_v_xi));
 
-    /* "candidate_kernels.pyx":125
+    /* "candidate_kernels.pyx":126
  *         sum_xy += xi * yi
  *         sum_xx += xi * xi
  *         sum_yy += yi * yi             # <<<<<<<<<<<<<<
@@ -21148,7 +21148,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
     __pyx_v_sum_yy = (__pyx_v_sum_yy + (__pyx_v_yi * __pyx_v_yi));
   }
 
-  /* "candidate_kernels.pyx":126
+  /* "candidate_kernels.pyx":127
  *         sum_xx += xi * xi
  *         sum_yy += yi * yi
  *     cdef double mean_x = sx / n             # <<<<<<<<<<<<<<
@@ -21157,7 +21157,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   __pyx_v_mean_x = (__pyx_v_sx / ((double)__pyx_v_n));
 
-  /* "candidate_kernels.pyx":127
+  /* "candidate_kernels.pyx":128
  *         sum_yy += yi * yi
  *     cdef double mean_x = sx / n
  *     cdef double mean_y = sy / n             # <<<<<<<<<<<<<<
@@ -21166,7 +21166,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   __pyx_v_mean_y = (__pyx_v_sy / ((double)__pyx_v_n));
 
-  /* "candidate_kernels.pyx":128
+  /* "candidate_kernels.pyx":129
  *     cdef double mean_x = sx / n
  *     cdef double mean_y = sy / n
  *     cdef double var_x = sum_xx - (sx * sx) / n             # <<<<<<<<<<<<<<
@@ -21175,7 +21175,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   __pyx_v_var_x = (__pyx_v_sum_xx - ((__pyx_v_sx * __pyx_v_sx) / ((double)__pyx_v_n)));
 
-  /* "candidate_kernels.pyx":129
+  /* "candidate_kernels.pyx":130
  *     cdef double mean_y = sy / n
  *     cdef double var_x = sum_xx - (sx * sx) / n
  *     cdef double var_y = sum_yy - (sy * sy) / n             # <<<<<<<<<<<<<<
@@ -21184,7 +21184,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   __pyx_v_var_y = (__pyx_v_sum_yy - ((__pyx_v_sy * __pyx_v_sy) / ((double)__pyx_v_n)));
 
-  /* "candidate_kernels.pyx":130
+  /* "candidate_kernels.pyx":131
  *     cdef double var_x = sum_xx - (sx * sx) / n
  *     cdef double var_y = sum_yy - (sy * sy) / n
  *     if var_x < 0.0:             # <<<<<<<<<<<<<<
@@ -21194,7 +21194,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
   __pyx_t_1 = (__pyx_v_var_x < 0.0);
   if (__pyx_t_1) {
 
-    /* "candidate_kernels.pyx":131
+    /* "candidate_kernels.pyx":132
  *     cdef double var_y = sum_yy - (sy * sy) / n
  *     if var_x < 0.0:
  *         var_x = 0.0             # <<<<<<<<<<<<<<
@@ -21203,7 +21203,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
     __pyx_v_var_x = 0.0;
 
-    /* "candidate_kernels.pyx":130
+    /* "candidate_kernels.pyx":131
  *     cdef double var_x = sum_xx - (sx * sx) / n
  *     cdef double var_y = sum_yy - (sy * sy) / n
  *     if var_x < 0.0:             # <<<<<<<<<<<<<<
@@ -21212,7 +21212,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   }
 
-  /* "candidate_kernels.pyx":132
+  /* "candidate_kernels.pyx":133
  *     if var_x < 0.0:
  *         var_x = 0.0
  *     if var_y < 0.0:             # <<<<<<<<<<<<<<
@@ -21222,7 +21222,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
   __pyx_t_1 = (__pyx_v_var_y < 0.0);
   if (__pyx_t_1) {
 
-    /* "candidate_kernels.pyx":133
+    /* "candidate_kernels.pyx":134
  *         var_x = 0.0
  *     if var_y < 0.0:
  *         var_y = 0.0             # <<<<<<<<<<<<<<
@@ -21231,7 +21231,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
     __pyx_v_var_y = 0.0;
 
-    /* "candidate_kernels.pyx":132
+    /* "candidate_kernels.pyx":133
  *     if var_x < 0.0:
  *         var_x = 0.0
  *     if var_y < 0.0:             # <<<<<<<<<<<<<<
@@ -21240,7 +21240,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   }
 
-  /* "candidate_kernels.pyx":134
+  /* "candidate_kernels.pyx":135
  *     if var_y < 0.0:
  *         var_y = 0.0
  *     cdef double denom = sqrt(var_x * var_y)             # <<<<<<<<<<<<<<
@@ -21249,7 +21249,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   __pyx_v_denom = sqrt((__pyx_v_var_x * __pyx_v_var_y));
 
-  /* "candidate_kernels.pyx":136
+  /* "candidate_kernels.pyx":137
  *     cdef double denom = sqrt(var_x * var_y)
  *     cdef double corr
  *     if denom == 0.0:             # <<<<<<<<<<<<<<
@@ -21259,17 +21259,17 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
   __pyx_t_1 = (__pyx_v_denom == 0.0);
   if (__pyx_t_1) {
 
-    /* "candidate_kernels.pyx":137
+    /* "candidate_kernels.pyx":138
  *     cdef double corr
  *     if denom == 0.0:
  *         corr = float("nan")             # <<<<<<<<<<<<<<
  *     else:
  *         corr = (sum_xy - (sx * sy) / n) / denom
  */
-    __pyx_t_2 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_nan); if (unlikely(__pyx_t_2 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 137, __pyx_L1_error)
+    __pyx_t_2 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_nan); if (unlikely(__pyx_t_2 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 138, __pyx_L1_error)
     __pyx_v_corr = __pyx_t_2;
 
-    /* "candidate_kernels.pyx":136
+    /* "candidate_kernels.pyx":137
  *     cdef double denom = sqrt(var_x * var_y)
  *     cdef double corr
  *     if denom == 0.0:             # <<<<<<<<<<<<<<
@@ -21279,7 +21279,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
     goto __pyx_L8;
   }
 
-  /* "candidate_kernels.pyx":139
+  /* "candidate_kernels.pyx":140
  *         corr = float("nan")
  *     else:
  *         corr = (sum_xy - (sx * sy) / n) / denom             # <<<<<<<<<<<<<<
@@ -21289,7 +21289,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
   /*else*/ {
     __pyx_v_corr = ((__pyx_v_sum_xy - ((__pyx_v_sx * __pyx_v_sy) / ((double)__pyx_v_n))) / __pyx_v_denom);
 
-    /* "candidate_kernels.pyx":140
+    /* "candidate_kernels.pyx":141
  *     else:
  *         corr = (sum_xy - (sx * sy) / n) / denom
  *         if corr > 1.0:             # <<<<<<<<<<<<<<
@@ -21299,7 +21299,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
     __pyx_t_1 = (__pyx_v_corr > 1.0);
     if (__pyx_t_1) {
 
-      /* "candidate_kernels.pyx":141
+      /* "candidate_kernels.pyx":142
  *         corr = (sum_xy - (sx * sy) / n) / denom
  *         if corr > 1.0:
  *             corr = 1.0             # <<<<<<<<<<<<<<
@@ -21308,7 +21308,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
       __pyx_v_corr = 1.0;
 
-      /* "candidate_kernels.pyx":140
+      /* "candidate_kernels.pyx":141
  *     else:
  *         corr = (sum_xy - (sx * sy) / n) / denom
  *         if corr > 1.0:             # <<<<<<<<<<<<<<
@@ -21318,7 +21318,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
       goto __pyx_L9;
     }
 
-    /* "candidate_kernels.pyx":142
+    /* "candidate_kernels.pyx":143
  *         if corr > 1.0:
  *             corr = 1.0
  *         elif corr < -1.0:             # <<<<<<<<<<<<<<
@@ -21328,7 +21328,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
     __pyx_t_1 = (__pyx_v_corr < -1.0);
     if (__pyx_t_1) {
 
-      /* "candidate_kernels.pyx":143
+      /* "candidate_kernels.pyx":144
  *             corr = 1.0
  *         elif corr < -1.0:
  *             corr = -1.0             # <<<<<<<<<<<<<<
@@ -21337,7 +21337,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
       __pyx_v_corr = -1.0;
 
-      /* "candidate_kernels.pyx":142
+      /* "candidate_kernels.pyx":143
  *         if corr > 1.0:
  *             corr = 1.0
  *         elif corr < -1.0:             # <<<<<<<<<<<<<<
@@ -21349,7 +21349,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
   }
   __pyx_L8:;
 
-  /* "candidate_kernels.pyx":144
+  /* "candidate_kernels.pyx":145
  *         elif corr < -1.0:
  *             corr = -1.0
  *     cdef double dist_sq = sum_xx + sum_yy - 2.0 * sum_xy             # <<<<<<<<<<<<<<
@@ -21358,7 +21358,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   __pyx_v_dist_sq = ((__pyx_v_sum_xx + __pyx_v_sum_yy) - (2.0 * __pyx_v_sum_xy));
 
-  /* "candidate_kernels.pyx":145
+  /* "candidate_kernels.pyx":146
  *             corr = -1.0
  *     cdef double dist_sq = sum_xx + sum_yy - 2.0 * sum_xy
  *     if dist_sq < 0.0:             # <<<<<<<<<<<<<<
@@ -21368,7 +21368,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
   __pyx_t_1 = (__pyx_v_dist_sq < 0.0);
   if (__pyx_t_1) {
 
-    /* "candidate_kernels.pyx":146
+    /* "candidate_kernels.pyx":147
  *     cdef double dist_sq = sum_xx + sum_yy - 2.0 * sum_xy
  *     if dist_sq < 0.0:
  *         dist_sq = 0.0             # <<<<<<<<<<<<<<
@@ -21377,7 +21377,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
     __pyx_v_dist_sq = 0.0;
 
-    /* "candidate_kernels.pyx":145
+    /* "candidate_kernels.pyx":146
  *             corr = -1.0
  *     cdef double dist_sq = sum_xx + sum_yy - 2.0 * sum_xy
  *     if dist_sq < 0.0:             # <<<<<<<<<<<<<<
@@ -21386,7 +21386,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   }
 
-  /* "candidate_kernels.pyx":147
+  /* "candidate_kernels.pyx":148
  *     if dist_sq < 0.0:
  *         dist_sq = 0.0
  *     cdef double dist = sqrt(dist_sq)             # <<<<<<<<<<<<<<
@@ -21395,7 +21395,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  */
   __pyx_v_dist = sqrt(__pyx_v_dist_sq);
 
-  /* "candidate_kernels.pyx":148
+  /* "candidate_kernels.pyx":149
  *         dist_sq = 0.0
  *     cdef double dist = sqrt(dist_sq)
  *     return corr, dist, (n, mean_x, mean_y, var_x, var_y)             # <<<<<<<<<<<<<<
@@ -21403,45 +21403,45 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
  * 
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_5 = PyFloat_FromDouble(__pyx_v_corr); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 148, __pyx_L1_error)
+  __pyx_t_5 = PyFloat_FromDouble(__pyx_v_corr); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 149, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_4 = PyFloat_FromDouble(__pyx_v_dist); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 148, __pyx_L1_error)
+  __pyx_t_4 = PyFloat_FromDouble(__pyx_v_dist); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 149, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_n); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 148, __pyx_L1_error)
+  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_n); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 149, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_10 = PyFloat_FromDouble(__pyx_v_mean_x); if (unlikely(!__pyx_t_10)) __PYX_ERR(0, 148, __pyx_L1_error)
+  __pyx_t_10 = PyFloat_FromDouble(__pyx_v_mean_x); if (unlikely(!__pyx_t_10)) __PYX_ERR(0, 149, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_10);
-  __pyx_t_11 = PyFloat_FromDouble(__pyx_v_mean_y); if (unlikely(!__pyx_t_11)) __PYX_ERR(0, 148, __pyx_L1_error)
+  __pyx_t_11 = PyFloat_FromDouble(__pyx_v_mean_y); if (unlikely(!__pyx_t_11)) __PYX_ERR(0, 149, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_11);
-  __pyx_t_12 = PyFloat_FromDouble(__pyx_v_var_x); if (unlikely(!__pyx_t_12)) __PYX_ERR(0, 148, __pyx_L1_error)
+  __pyx_t_12 = PyFloat_FromDouble(__pyx_v_var_x); if (unlikely(!__pyx_t_12)) __PYX_ERR(0, 149, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_12);
-  __pyx_t_13 = PyFloat_FromDouble(__pyx_v_var_y); if (unlikely(!__pyx_t_13)) __PYX_ERR(0, 148, __pyx_L1_error)
+  __pyx_t_13 = PyFloat_FromDouble(__pyx_v_var_y); if (unlikely(!__pyx_t_13)) __PYX_ERR(0, 149, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_13);
-  __pyx_t_14 = PyTuple_New(5); if (unlikely(!__pyx_t_14)) __PYX_ERR(0, 148, __pyx_L1_error)
+  __pyx_t_14 = PyTuple_New(5); if (unlikely(!__pyx_t_14)) __PYX_ERR(0, 149, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_14);
   __Pyx_GIVEREF(__pyx_t_3);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 0, __pyx_t_3)) __PYX_ERR(0, 148, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 0, __pyx_t_3)) __PYX_ERR(0, 149, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_10);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 1, __pyx_t_10)) __PYX_ERR(0, 148, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 1, __pyx_t_10)) __PYX_ERR(0, 149, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_11);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 2, __pyx_t_11)) __PYX_ERR(0, 148, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 2, __pyx_t_11)) __PYX_ERR(0, 149, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_12);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 3, __pyx_t_12)) __PYX_ERR(0, 148, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 3, __pyx_t_12)) __PYX_ERR(0, 149, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_13);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 4, __pyx_t_13)) __PYX_ERR(0, 148, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 4, __pyx_t_13)) __PYX_ERR(0, 149, __pyx_L1_error);
   __pyx_t_3 = 0;
   __pyx_t_10 = 0;
   __pyx_t_11 = 0;
   __pyx_t_12 = 0;
   __pyx_t_13 = 0;
-  __pyx_t_13 = PyTuple_New(3); if (unlikely(!__pyx_t_13)) __PYX_ERR(0, 148, __pyx_L1_error)
+  __pyx_t_13 = PyTuple_New(3); if (unlikely(!__pyx_t_13)) __PYX_ERR(0, 149, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_13);
   __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_13, 0, __pyx_t_5)) __PYX_ERR(0, 148, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_13, 0, __pyx_t_5)) __PYX_ERR(0, 149, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_4);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_13, 1, __pyx_t_4)) __PYX_ERR(0, 148, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_13, 1, __pyx_t_4)) __PYX_ERR(0, 149, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_14);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_13, 2, __pyx_t_14)) __PYX_ERR(0, 148, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_13, 2, __pyx_t_14)) __PYX_ERR(0, 149, __pyx_L1_error);
   __pyx_t_5 = 0;
   __pyx_t_4 = 0;
   __pyx_t_14 = 0;
@@ -21449,7 +21449,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
   __pyx_t_13 = 0;
   goto __pyx_L0;
 
-  /* "candidate_kernels.pyx":106
+  /* "candidate_kernels.pyx":107
  * 
  * 
  * def fast_corr_and_dist(double[:] x, double[:] y):             # <<<<<<<<<<<<<<
@@ -21475,7 +21475,7 @@ static PyObject *__pyx_pf_17candidate_kernels_2fast_corr_and_dist(CYTHON_UNUSED 
   return __pyx_r;
 }
 
-/* "candidate_kernels.pyx":151
+/* "candidate_kernels.pyx":152
  * 
  * 
  * def validate_corr_batch(double[:, :] x,             # <<<<<<<<<<<<<<
@@ -21552,7 +21552,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[0]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 151, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 152, __pyx_L3_error)
         else goto __pyx_L5_argtuple_error;
         CYTHON_FALLTHROUGH;
         case  1:
@@ -21560,9 +21560,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[1]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 151, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 152, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("validate_corr_batch", 0, 4, 6, 1); __PYX_ERR(0, 151, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("validate_corr_batch", 0, 4, 6, 1); __PYX_ERR(0, 152, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  2:
@@ -21570,9 +21570,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[2]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 151, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 152, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("validate_corr_batch", 0, 4, 6, 2); __PYX_ERR(0, 151, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("validate_corr_batch", 0, 4, 6, 2); __PYX_ERR(0, 152, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  3:
@@ -21580,28 +21580,28 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[3]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 151, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 152, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("validate_corr_batch", 0, 4, 6, 3); __PYX_ERR(0, 151, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("validate_corr_batch", 0, 4, 6, 3); __PYX_ERR(0, 152, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  4:
         if (kw_args > 0) {
           PyObject* value = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_std_thresh);
           if (value) { values[4] = __Pyx_Arg_NewRef_FASTCALL(value); kw_args--; }
-          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 151, __pyx_L3_error)
+          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 152, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  5:
         if (kw_args > 0) {
           PyObject* value = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_kurt_thresh);
           if (value) { values[5] = __Pyx_Arg_NewRef_FASTCALL(value); kw_args--; }
-          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 151, __pyx_L3_error)
+          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 152, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
         const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "validate_corr_batch") < 0)) __PYX_ERR(0, 151, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "validate_corr_batch") < 0)) __PYX_ERR(0, 152, __pyx_L3_error)
       }
     } else {
       switch (__pyx_nargs) {
@@ -21617,24 +21617,24 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
         default: goto __pyx_L5_argtuple_error;
       }
     }
-    __pyx_v_x = __Pyx_PyObject_to_MemoryviewSlice_dsds_double(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_x.memview)) __PYX_ERR(0, 151, __pyx_L3_error)
-    __pyx_v_y = __Pyx_PyObject_to_MemoryviewSlice_dsds_double(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_y.memview)) __PYX_ERR(0, 152, __pyx_L3_error)
-    __pyx_v_corr_threshold = __pyx_PyFloat_AsDouble(values[2]); if (unlikely((__pyx_v_corr_threshold == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 153, __pyx_L3_error)
-    __pyx_v_neg_corr = __Pyx_PyObject_IsTrue(values[3]); if (unlikely((__pyx_v_neg_corr == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 154, __pyx_L3_error)
+    __pyx_v_x = __Pyx_PyObject_to_MemoryviewSlice_dsds_double(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_x.memview)) __PYX_ERR(0, 152, __pyx_L3_error)
+    __pyx_v_y = __Pyx_PyObject_to_MemoryviewSlice_dsds_double(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_y.memview)) __PYX_ERR(0, 153, __pyx_L3_error)
+    __pyx_v_corr_threshold = __pyx_PyFloat_AsDouble(values[2]); if (unlikely((__pyx_v_corr_threshold == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 154, __pyx_L3_error)
+    __pyx_v_neg_corr = __Pyx_PyObject_IsTrue(values[3]); if (unlikely((__pyx_v_neg_corr == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 155, __pyx_L3_error)
     if (values[4]) {
-      __pyx_v_std_thresh = __pyx_PyFloat_AsDouble(values[4]); if (unlikely((__pyx_v_std_thresh == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 155, __pyx_L3_error)
+      __pyx_v_std_thresh = __pyx_PyFloat_AsDouble(values[4]); if (unlikely((__pyx_v_std_thresh == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 156, __pyx_L3_error)
     } else {
       __pyx_v_std_thresh = ((double)((double)1e-3));
     }
     if (values[5]) {
-      __pyx_v_kurt_thresh = __pyx_PyFloat_AsDouble(values[5]); if (unlikely((__pyx_v_kurt_thresh == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 156, __pyx_L3_error)
+      __pyx_v_kurt_thresh = __pyx_PyFloat_AsDouble(values[5]); if (unlikely((__pyx_v_kurt_thresh == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 157, __pyx_L3_error)
     } else {
       __pyx_v_kurt_thresh = ((double)((double)5.0));
     }
   }
   goto __pyx_L6_skip;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("validate_corr_batch", 0, 4, 6, __pyx_nargs); __PYX_ERR(0, 151, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("validate_corr_batch", 0, 4, 6, __pyx_nargs); __PYX_ERR(0, 152, __pyx_L3_error)
   __pyx_L6_skip:;
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
@@ -21722,7 +21722,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("validate_corr_batch", 1);
 
-  /* "candidate_kernels.pyx":158
+  /* "candidate_kernels.pyx":159
  *                         double kurt_thresh=5.0):
  *     """Validate batches of x/y vectors; return list of tuples."""
  *     cdef Py_ssize_t n_items = x.shape[0]             # <<<<<<<<<<<<<<
@@ -21731,7 +21731,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
   __pyx_v_n_items = (__pyx_v_x.shape[0]);
 
-  /* "candidate_kernels.pyx":159
+  /* "candidate_kernels.pyx":160
  *     """Validate batches of x/y vectors; return list of tuples."""
  *     cdef Py_ssize_t n_items = x.shape[0]
  *     cdef Py_ssize_t n = x.shape[1]             # <<<<<<<<<<<<<<
@@ -21740,7 +21740,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
   __pyx_v_n = (__pyx_v_x.shape[1]);
 
-  /* "candidate_kernels.pyx":160
+  /* "candidate_kernels.pyx":161
  *     cdef Py_ssize_t n_items = x.shape[0]
  *     cdef Py_ssize_t n = x.shape[1]
  *     if y.shape[0] != n_items or y.shape[1] != n:             # <<<<<<<<<<<<<<
@@ -21758,20 +21758,20 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
   __pyx_L4_bool_binop_done:;
   if (unlikely(__pyx_t_1)) {
 
-    /* "candidate_kernels.pyx":161
+    /* "candidate_kernels.pyx":162
  *     cdef Py_ssize_t n = x.shape[1]
  *     if y.shape[0] != n_items or y.shape[1] != n:
  *         raise ValueError("x and y must have the same shape")             # <<<<<<<<<<<<<<
  * 
  *     cdef Py_ssize_t i, j
  */
-    __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__12, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 161, __pyx_L1_error)
+    __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__12, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 162, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
     __Pyx_Raise(__pyx_t_3, 0, 0, 0);
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-    __PYX_ERR(0, 161, __pyx_L1_error)
+    __PYX_ERR(0, 162, __pyx_L1_error)
 
-    /* "candidate_kernels.pyx":160
+    /* "candidate_kernels.pyx":161
  *     cdef Py_ssize_t n_items = x.shape[0]
  *     cdef Py_ssize_t n = x.shape[1]
  *     if y.shape[0] != n_items or y.shape[1] != n:             # <<<<<<<<<<<<<<
@@ -21780,19 +21780,19 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
   }
 
-  /* "candidate_kernels.pyx":172
+  /* "candidate_kernels.pyx":173
  *     cdef bint is_const, is_spiked, is_corr
  * 
  *     results = []             # <<<<<<<<<<<<<<
  * 
  *     for i in range(n_items):
  */
-  __pyx_t_3 = PyList_New(0); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 172, __pyx_L1_error)
+  __pyx_t_3 = PyList_New(0); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 173, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __pyx_v_results = ((PyObject*)__pyx_t_3);
   __pyx_t_3 = 0;
 
-  /* "candidate_kernels.pyx":174
+  /* "candidate_kernels.pyx":175
  *     results = []
  * 
  *     for i in range(n_items):             # <<<<<<<<<<<<<<
@@ -21804,7 +21804,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
   for (__pyx_t_6 = 0; __pyx_t_6 < __pyx_t_5; __pyx_t_6+=1) {
     __pyx_v_i = __pyx_t_6;
 
-    /* "candidate_kernels.pyx":175
+    /* "candidate_kernels.pyx":176
  * 
  *     for i in range(n_items):
  *         if n == 0:             # <<<<<<<<<<<<<<
@@ -21814,40 +21814,40 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
     __pyx_t_1 = (__pyx_v_n == 0);
     if (__pyx_t_1) {
 
-      /* "candidate_kernels.pyx":176
+      /* "candidate_kernels.pyx":177
  *     for i in range(n_items):
  *         if n == 0:
  *             results.append((False, float("nan"), float("inf"), True, False))             # <<<<<<<<<<<<<<
  *             continue
  *         sx = sy = 0.0
  */
-      __pyx_t_7 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_nan); if (unlikely(__pyx_t_7 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 176, __pyx_L1_error)
-      __pyx_t_3 = PyFloat_FromDouble(__pyx_t_7); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 176, __pyx_L1_error)
+      __pyx_t_7 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_nan); if (unlikely(__pyx_t_7 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 177, __pyx_L1_error)
+      __pyx_t_3 = PyFloat_FromDouble(__pyx_t_7); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 177, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
-      __pyx_t_7 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_inf); if (unlikely(__pyx_t_7 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 176, __pyx_L1_error)
-      __pyx_t_8 = PyFloat_FromDouble(__pyx_t_7); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 176, __pyx_L1_error)
+      __pyx_t_7 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_inf); if (unlikely(__pyx_t_7 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 177, __pyx_L1_error)
+      __pyx_t_8 = PyFloat_FromDouble(__pyx_t_7); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 177, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_8);
-      __pyx_t_9 = PyTuple_New(5); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 176, __pyx_L1_error)
+      __pyx_t_9 = PyTuple_New(5); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 177, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_9);
       __Pyx_INCREF(Py_False);
       __Pyx_GIVEREF(Py_False);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 0, Py_False)) __PYX_ERR(0, 176, __pyx_L1_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 0, Py_False)) __PYX_ERR(0, 177, __pyx_L1_error);
       __Pyx_GIVEREF(__pyx_t_3);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 1, __pyx_t_3)) __PYX_ERR(0, 176, __pyx_L1_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 1, __pyx_t_3)) __PYX_ERR(0, 177, __pyx_L1_error);
       __Pyx_GIVEREF(__pyx_t_8);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 2, __pyx_t_8)) __PYX_ERR(0, 176, __pyx_L1_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 2, __pyx_t_8)) __PYX_ERR(0, 177, __pyx_L1_error);
       __Pyx_INCREF(Py_True);
       __Pyx_GIVEREF(Py_True);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 3, Py_True)) __PYX_ERR(0, 176, __pyx_L1_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 3, Py_True)) __PYX_ERR(0, 177, __pyx_L1_error);
       __Pyx_INCREF(Py_False);
       __Pyx_GIVEREF(Py_False);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 4, Py_False)) __PYX_ERR(0, 176, __pyx_L1_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 4, Py_False)) __PYX_ERR(0, 177, __pyx_L1_error);
       __pyx_t_3 = 0;
       __pyx_t_8 = 0;
-      __pyx_t_10 = __Pyx_PyList_Append(__pyx_v_results, __pyx_t_9); if (unlikely(__pyx_t_10 == ((int)-1))) __PYX_ERR(0, 176, __pyx_L1_error)
+      __pyx_t_10 = __Pyx_PyList_Append(__pyx_v_results, __pyx_t_9); if (unlikely(__pyx_t_10 == ((int)-1))) __PYX_ERR(0, 177, __pyx_L1_error)
       __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
 
-      /* "candidate_kernels.pyx":177
+      /* "candidate_kernels.pyx":178
  *         if n == 0:
  *             results.append((False, float("nan"), float("inf"), True, False))
  *             continue             # <<<<<<<<<<<<<<
@@ -21856,7 +21856,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       goto __pyx_L6_continue;
 
-      /* "candidate_kernels.pyx":175
+      /* "candidate_kernels.pyx":176
  * 
  *     for i in range(n_items):
  *         if n == 0:             # <<<<<<<<<<<<<<
@@ -21865,7 +21865,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     }
 
-    /* "candidate_kernels.pyx":178
+    /* "candidate_kernels.pyx":179
  *             results.append((False, float("nan"), float("inf"), True, False))
  *             continue
  *         sx = sy = 0.0             # <<<<<<<<<<<<<<
@@ -21875,7 +21875,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
     __pyx_v_sx = 0.0;
     __pyx_v_sy = 0.0;
 
-    /* "candidate_kernels.pyx":179
+    /* "candidate_kernels.pyx":180
  *             continue
  *         sx = sy = 0.0
  *         sum_xy = sum_xx = sum_yy = 0.0             # <<<<<<<<<<<<<<
@@ -21886,7 +21886,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
     __pyx_v_sum_xx = 0.0;
     __pyx_v_sum_yy = 0.0;
 
-    /* "candidate_kernels.pyx":180
+    /* "candidate_kernels.pyx":181
  *         sx = sy = 0.0
  *         sum_xy = sum_xx = sum_yy = 0.0
  *         sum_xxx = sum_yyy = 0.0             # <<<<<<<<<<<<<<
@@ -21896,7 +21896,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
     __pyx_v_sum_xxx = 0.0;
     __pyx_v_sum_yyy = 0.0;
 
-    /* "candidate_kernels.pyx":181
+    /* "candidate_kernels.pyx":182
  *         sum_xy = sum_xx = sum_yy = 0.0
  *         sum_xxx = sum_yyy = 0.0
  *         sum_xxxx = sum_yyyy = 0.0             # <<<<<<<<<<<<<<
@@ -21906,7 +21906,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
     __pyx_v_sum_xxxx = 0.0;
     __pyx_v_sum_yyyy = 0.0;
 
-    /* "candidate_kernels.pyx":182
+    /* "candidate_kernels.pyx":183
  *         sum_xxx = sum_yyy = 0.0
  *         sum_xxxx = sum_yyyy = 0.0
  *         for j in range(n):             # <<<<<<<<<<<<<<
@@ -21918,7 +21918,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
     for (__pyx_t_13 = 0; __pyx_t_13 < __pyx_t_12; __pyx_t_13+=1) {
       __pyx_v_j = __pyx_t_13;
 
-      /* "candidate_kernels.pyx":183
+      /* "candidate_kernels.pyx":184
  *         sum_xxxx = sum_yyyy = 0.0
  *         for j in range(n):
  *             xi = x[i, j]             # <<<<<<<<<<<<<<
@@ -21929,7 +21929,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
       __pyx_t_15 = __pyx_v_j;
       __pyx_v_xi = (*((double *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_x.data + __pyx_t_14 * __pyx_v_x.strides[0]) ) + __pyx_t_15 * __pyx_v_x.strides[1]) )));
 
-      /* "candidate_kernels.pyx":184
+      /* "candidate_kernels.pyx":185
  *         for j in range(n):
  *             xi = x[i, j]
  *             yi = y[i, j]             # <<<<<<<<<<<<<<
@@ -21940,7 +21940,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
       __pyx_t_14 = __pyx_v_j;
       __pyx_v_yi = (*((double *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_y.data + __pyx_t_15 * __pyx_v_y.strides[0]) ) + __pyx_t_14 * __pyx_v_y.strides[1]) )));
 
-      /* "candidate_kernels.pyx":185
+      /* "candidate_kernels.pyx":186
  *             xi = x[i, j]
  *             yi = y[i, j]
  *             sx += xi             # <<<<<<<<<<<<<<
@@ -21949,7 +21949,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       __pyx_v_sx = (__pyx_v_sx + __pyx_v_xi);
 
-      /* "candidate_kernels.pyx":186
+      /* "candidate_kernels.pyx":187
  *             yi = y[i, j]
  *             sx += xi
  *             sy += yi             # <<<<<<<<<<<<<<
@@ -21958,7 +21958,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       __pyx_v_sy = (__pyx_v_sy + __pyx_v_yi);
 
-      /* "candidate_kernels.pyx":187
+      /* "candidate_kernels.pyx":188
  *             sx += xi
  *             sy += yi
  *             sum_xy += xi * yi             # <<<<<<<<<<<<<<
@@ -21967,7 +21967,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       __pyx_v_sum_xy = (__pyx_v_sum_xy + (__pyx_v_xi * __pyx_v_yi));
 
-      /* "candidate_kernels.pyx":188
+      /* "candidate_kernels.pyx":189
  *             sy += yi
  *             sum_xy += xi * yi
  *             sum_xx += xi * xi             # <<<<<<<<<<<<<<
@@ -21976,7 +21976,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       __pyx_v_sum_xx = (__pyx_v_sum_xx + (__pyx_v_xi * __pyx_v_xi));
 
-      /* "candidate_kernels.pyx":189
+      /* "candidate_kernels.pyx":190
  *             sum_xy += xi * yi
  *             sum_xx += xi * xi
  *             sum_yy += yi * yi             # <<<<<<<<<<<<<<
@@ -21985,7 +21985,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       __pyx_v_sum_yy = (__pyx_v_sum_yy + (__pyx_v_yi * __pyx_v_yi));
 
-      /* "candidate_kernels.pyx":190
+      /* "candidate_kernels.pyx":191
  *             sum_xx += xi * xi
  *             sum_yy += yi * yi
  *             sum_xxx += xi * xi * xi             # <<<<<<<<<<<<<<
@@ -21994,7 +21994,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       __pyx_v_sum_xxx = (__pyx_v_sum_xxx + ((__pyx_v_xi * __pyx_v_xi) * __pyx_v_xi));
 
-      /* "candidate_kernels.pyx":191
+      /* "candidate_kernels.pyx":192
  *             sum_yy += yi * yi
  *             sum_xxx += xi * xi * xi
  *             sum_yyy += yi * yi * yi             # <<<<<<<<<<<<<<
@@ -22003,7 +22003,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       __pyx_v_sum_yyy = (__pyx_v_sum_yyy + ((__pyx_v_yi * __pyx_v_yi) * __pyx_v_yi));
 
-      /* "candidate_kernels.pyx":192
+      /* "candidate_kernels.pyx":193
  *             sum_xxx += xi * xi * xi
  *             sum_yyy += yi * yi * yi
  *             sum_xxxx += xi * xi * xi * xi             # <<<<<<<<<<<<<<
@@ -22012,7 +22012,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       __pyx_v_sum_xxxx = (__pyx_v_sum_xxxx + (((__pyx_v_xi * __pyx_v_xi) * __pyx_v_xi) * __pyx_v_xi));
 
-      /* "candidate_kernels.pyx":193
+      /* "candidate_kernels.pyx":194
  *             sum_yyy += yi * yi * yi
  *             sum_xxxx += xi * xi * xi * xi
  *             sum_yyyy += yi * yi * yi * yi             # <<<<<<<<<<<<<<
@@ -22022,7 +22022,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
       __pyx_v_sum_yyyy = (__pyx_v_sum_yyyy + (((__pyx_v_yi * __pyx_v_yi) * __pyx_v_yi) * __pyx_v_yi));
     }
 
-    /* "candidate_kernels.pyx":195
+    /* "candidate_kernels.pyx":196
  *             sum_yyyy += yi * yi * yi * yi
  * 
  *         mean_x = sx / n             # <<<<<<<<<<<<<<
@@ -22031,7 +22031,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     __pyx_v_mean_x = (__pyx_v_sx / ((double)__pyx_v_n));
 
-    /* "candidate_kernels.pyx":196
+    /* "candidate_kernels.pyx":197
  * 
  *         mean_x = sx / n
  *         mean_y = sy / n             # <<<<<<<<<<<<<<
@@ -22040,7 +22040,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     __pyx_v_mean_y = (__pyx_v_sy / ((double)__pyx_v_n));
 
-    /* "candidate_kernels.pyx":197
+    /* "candidate_kernels.pyx":198
  *         mean_x = sx / n
  *         mean_y = sy / n
  *         var_x = sum_xx - (sx * sx) / n             # <<<<<<<<<<<<<<
@@ -22049,7 +22049,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     __pyx_v_var_x = (__pyx_v_sum_xx - ((__pyx_v_sx * __pyx_v_sx) / ((double)__pyx_v_n)));
 
-    /* "candidate_kernels.pyx":198
+    /* "candidate_kernels.pyx":199
  *         mean_y = sy / n
  *         var_x = sum_xx - (sx * sx) / n
  *         var_y = sum_yy - (sy * sy) / n             # <<<<<<<<<<<<<<
@@ -22058,7 +22058,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     __pyx_v_var_y = (__pyx_v_sum_yy - ((__pyx_v_sy * __pyx_v_sy) / ((double)__pyx_v_n)));
 
-    /* "candidate_kernels.pyx":199
+    /* "candidate_kernels.pyx":200
  *         var_x = sum_xx - (sx * sx) / n
  *         var_y = sum_yy - (sy * sy) / n
  *         if var_x < 0.0:             # <<<<<<<<<<<<<<
@@ -22068,7 +22068,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
     __pyx_t_1 = (__pyx_v_var_x < 0.0);
     if (__pyx_t_1) {
 
-      /* "candidate_kernels.pyx":200
+      /* "candidate_kernels.pyx":201
  *         var_y = sum_yy - (sy * sy) / n
  *         if var_x < 0.0:
  *             var_x = 0.0             # <<<<<<<<<<<<<<
@@ -22077,7 +22077,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       __pyx_v_var_x = 0.0;
 
-      /* "candidate_kernels.pyx":199
+      /* "candidate_kernels.pyx":200
  *         var_x = sum_xx - (sx * sx) / n
  *         var_y = sum_yy - (sy * sy) / n
  *         if var_x < 0.0:             # <<<<<<<<<<<<<<
@@ -22086,7 +22086,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     }
 
-    /* "candidate_kernels.pyx":201
+    /* "candidate_kernels.pyx":202
  *         if var_x < 0.0:
  *             var_x = 0.0
  *         if var_y < 0.0:             # <<<<<<<<<<<<<<
@@ -22096,7 +22096,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
     __pyx_t_1 = (__pyx_v_var_y < 0.0);
     if (__pyx_t_1) {
 
-      /* "candidate_kernels.pyx":202
+      /* "candidate_kernels.pyx":203
  *             var_x = 0.0
  *         if var_y < 0.0:
  *             var_y = 0.0             # <<<<<<<<<<<<<<
@@ -22105,7 +22105,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       __pyx_v_var_y = 0.0;
 
-      /* "candidate_kernels.pyx":201
+      /* "candidate_kernels.pyx":202
  *         if var_x < 0.0:
  *             var_x = 0.0
  *         if var_y < 0.0:             # <<<<<<<<<<<<<<
@@ -22114,7 +22114,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     }
 
-    /* "candidate_kernels.pyx":204
+    /* "candidate_kernels.pyx":205
  *             var_y = 0.0
  * 
  *         is_const = (var_x <= (std_thresh * std_thresh) * n) or (var_y <= (std_thresh * std_thresh) * n)             # <<<<<<<<<<<<<<
@@ -22132,7 +22132,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
     __pyx_L13_bool_binop_done:;
     __pyx_v_is_const = __pyx_t_1;
 
-    /* "candidate_kernels.pyx":205
+    /* "candidate_kernels.pyx":206
  * 
  *         is_const = (var_x <= (std_thresh * std_thresh) * n) or (var_y <= (std_thresh * std_thresh) * n)
  *         if is_const:             # <<<<<<<<<<<<<<
@@ -22141,40 +22141,40 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     if (__pyx_v_is_const) {
 
-      /* "candidate_kernels.pyx":206
+      /* "candidate_kernels.pyx":207
  *         is_const = (var_x <= (std_thresh * std_thresh) * n) or (var_y <= (std_thresh * std_thresh) * n)
  *         if is_const:
  *             results.append((False, float("nan"), float("inf"), True, False))             # <<<<<<<<<<<<<<
  *             continue
  * 
  */
-      __pyx_t_7 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_nan); if (unlikely(__pyx_t_7 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 206, __pyx_L1_error)
-      __pyx_t_9 = PyFloat_FromDouble(__pyx_t_7); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 206, __pyx_L1_error)
+      __pyx_t_7 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_nan); if (unlikely(__pyx_t_7 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 207, __pyx_L1_error)
+      __pyx_t_9 = PyFloat_FromDouble(__pyx_t_7); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 207, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_9);
-      __pyx_t_7 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_inf); if (unlikely(__pyx_t_7 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 206, __pyx_L1_error)
-      __pyx_t_8 = PyFloat_FromDouble(__pyx_t_7); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 206, __pyx_L1_error)
+      __pyx_t_7 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_inf); if (unlikely(__pyx_t_7 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 207, __pyx_L1_error)
+      __pyx_t_8 = PyFloat_FromDouble(__pyx_t_7); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 207, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_8);
-      __pyx_t_3 = PyTuple_New(5); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 206, __pyx_L1_error)
+      __pyx_t_3 = PyTuple_New(5); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 207, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
       __Pyx_INCREF(Py_False);
       __Pyx_GIVEREF(Py_False);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, Py_False)) __PYX_ERR(0, 206, __pyx_L1_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, Py_False)) __PYX_ERR(0, 207, __pyx_L1_error);
       __Pyx_GIVEREF(__pyx_t_9);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 1, __pyx_t_9)) __PYX_ERR(0, 206, __pyx_L1_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 1, __pyx_t_9)) __PYX_ERR(0, 207, __pyx_L1_error);
       __Pyx_GIVEREF(__pyx_t_8);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 2, __pyx_t_8)) __PYX_ERR(0, 206, __pyx_L1_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 2, __pyx_t_8)) __PYX_ERR(0, 207, __pyx_L1_error);
       __Pyx_INCREF(Py_True);
       __Pyx_GIVEREF(Py_True);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 3, Py_True)) __PYX_ERR(0, 206, __pyx_L1_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 3, Py_True)) __PYX_ERR(0, 207, __pyx_L1_error);
       __Pyx_INCREF(Py_False);
       __Pyx_GIVEREF(Py_False);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 4, Py_False)) __PYX_ERR(0, 206, __pyx_L1_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 4, Py_False)) __PYX_ERR(0, 207, __pyx_L1_error);
       __pyx_t_9 = 0;
       __pyx_t_8 = 0;
-      __pyx_t_10 = __Pyx_PyList_Append(__pyx_v_results, __pyx_t_3); if (unlikely(__pyx_t_10 == ((int)-1))) __PYX_ERR(0, 206, __pyx_L1_error)
+      __pyx_t_10 = __Pyx_PyList_Append(__pyx_v_results, __pyx_t_3); if (unlikely(__pyx_t_10 == ((int)-1))) __PYX_ERR(0, 207, __pyx_L1_error)
       __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
 
-      /* "candidate_kernels.pyx":207
+      /* "candidate_kernels.pyx":208
  *         if is_const:
  *             results.append((False, float("nan"), float("inf"), True, False))
  *             continue             # <<<<<<<<<<<<<<
@@ -22183,7 +22183,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       goto __pyx_L6_continue;
 
-      /* "candidate_kernels.pyx":205
+      /* "candidate_kernels.pyx":206
  * 
  *         is_const = (var_x <= (std_thresh * std_thresh) * n) or (var_y <= (std_thresh * std_thresh) * n)
  *         if is_const:             # <<<<<<<<<<<<<<
@@ -22192,7 +22192,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     }
 
-    /* "candidate_kernels.pyx":209
+    /* "candidate_kernels.pyx":210
  *             continue
  * 
  *         is_spiked = False             # <<<<<<<<<<<<<<
@@ -22201,7 +22201,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     __pyx_v_is_spiked = 0;
 
-    /* "candidate_kernels.pyx":210
+    /* "candidate_kernels.pyx":211
  * 
  *         is_spiked = False
  *         if n >= 4:             # <<<<<<<<<<<<<<
@@ -22211,7 +22211,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
     __pyx_t_1 = (__pyx_v_n >= 4);
     if (__pyx_t_1) {
 
-      /* "candidate_kernels.pyx":211
+      /* "candidate_kernels.pyx":212
  *         is_spiked = False
  *         if n >= 4:
  *             varx = var_x / n             # <<<<<<<<<<<<<<
@@ -22220,7 +22220,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       __pyx_v_varx = (__pyx_v_var_x / ((double)__pyx_v_n));
 
-      /* "candidate_kernels.pyx":212
+      /* "candidate_kernels.pyx":213
  *         if n >= 4:
  *             varx = var_x / n
  *             if varx > 0.0:             # <<<<<<<<<<<<<<
@@ -22230,7 +22230,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
       __pyx_t_1 = (__pyx_v_varx > 0.0);
       if (__pyx_t_1) {
 
-        /* "candidate_kernels.pyx":218
+        /* "candidate_kernels.pyx":219
  *                     + 6.0 * (mean_x * mean_x) * sum_xx
  *                     - 4.0 * (mean_x * mean_x * mean_x) * sx
  *                     + n * (mean_x * mean_x * mean_x * mean_x)             # <<<<<<<<<<<<<<
@@ -22239,7 +22239,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
         __pyx_v_mu4_x = ((((__pyx_v_sum_xxxx - ((4.0 * __pyx_v_mean_x) * __pyx_v_sum_xxx)) + ((6.0 * (__pyx_v_mean_x * __pyx_v_mean_x)) * __pyx_v_sum_xx)) - ((4.0 * ((__pyx_v_mean_x * __pyx_v_mean_x) * __pyx_v_mean_x)) * __pyx_v_sx)) + (__pyx_v_n * (((__pyx_v_mean_x * __pyx_v_mean_x) * __pyx_v_mean_x) * __pyx_v_mean_x)));
 
-        /* "candidate_kernels.pyx":220
+        /* "candidate_kernels.pyx":221
  *                     + n * (mean_x * mean_x * mean_x * mean_x)
  *                 )
  *                 kurt_x = (mu4_x / n) / (varx * varx) - 3.0             # <<<<<<<<<<<<<<
@@ -22248,7 +22248,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
         __pyx_v_kurt_x = (((__pyx_v_mu4_x / ((double)__pyx_v_n)) / (__pyx_v_varx * __pyx_v_varx)) - 3.0);
 
-        /* "candidate_kernels.pyx":221
+        /* "candidate_kernels.pyx":222
  *                 )
  *                 kurt_x = (mu4_x / n) / (varx * varx) - 3.0
  *                 if kurt_x > kurt_thresh:             # <<<<<<<<<<<<<<
@@ -22258,7 +22258,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
         __pyx_t_1 = (__pyx_v_kurt_x > __pyx_v_kurt_thresh);
         if (__pyx_t_1) {
 
-          /* "candidate_kernels.pyx":222
+          /* "candidate_kernels.pyx":223
  *                 kurt_x = (mu4_x / n) / (varx * varx) - 3.0
  *                 if kurt_x > kurt_thresh:
  *                     is_spiked = True             # <<<<<<<<<<<<<<
@@ -22267,7 +22267,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
           __pyx_v_is_spiked = 1;
 
-          /* "candidate_kernels.pyx":221
+          /* "candidate_kernels.pyx":222
  *                 )
  *                 kurt_x = (mu4_x / n) / (varx * varx) - 3.0
  *                 if kurt_x > kurt_thresh:             # <<<<<<<<<<<<<<
@@ -22276,7 +22276,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
         }
 
-        /* "candidate_kernels.pyx":212
+        /* "candidate_kernels.pyx":213
  *         if n >= 4:
  *             varx = var_x / n
  *             if varx > 0.0:             # <<<<<<<<<<<<<<
@@ -22285,7 +22285,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       }
 
-      /* "candidate_kernels.pyx":223
+      /* "candidate_kernels.pyx":224
  *                 if kurt_x > kurt_thresh:
  *                     is_spiked = True
  *             vary = var_y / n             # <<<<<<<<<<<<<<
@@ -22294,7 +22294,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       __pyx_v_vary = (__pyx_v_var_y / ((double)__pyx_v_n));
 
-      /* "candidate_kernels.pyx":224
+      /* "candidate_kernels.pyx":225
  *                     is_spiked = True
  *             vary = var_y / n
  *             if not is_spiked and vary > 0.0:             # <<<<<<<<<<<<<<
@@ -22312,7 +22312,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
       __pyx_L20_bool_binop_done:;
       if (__pyx_t_1) {
 
-        /* "candidate_kernels.pyx":230
+        /* "candidate_kernels.pyx":231
  *                     + 6.0 * (mean_y * mean_y) * sum_yy
  *                     - 4.0 * (mean_y * mean_y * mean_y) * sy
  *                     + n * (mean_y * mean_y * mean_y * mean_y)             # <<<<<<<<<<<<<<
@@ -22321,7 +22321,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
         __pyx_v_mu4_y = ((((__pyx_v_sum_yyyy - ((4.0 * __pyx_v_mean_y) * __pyx_v_sum_yyy)) + ((6.0 * (__pyx_v_mean_y * __pyx_v_mean_y)) * __pyx_v_sum_yy)) - ((4.0 * ((__pyx_v_mean_y * __pyx_v_mean_y) * __pyx_v_mean_y)) * __pyx_v_sy)) + (__pyx_v_n * (((__pyx_v_mean_y * __pyx_v_mean_y) * __pyx_v_mean_y) * __pyx_v_mean_y)));
 
-        /* "candidate_kernels.pyx":232
+        /* "candidate_kernels.pyx":233
  *                     + n * (mean_y * mean_y * mean_y * mean_y)
  *                 )
  *                 kurt_y = (mu4_y / n) / (vary * vary) - 3.0             # <<<<<<<<<<<<<<
@@ -22330,7 +22330,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
         __pyx_v_kurt_y = (((__pyx_v_mu4_y / ((double)__pyx_v_n)) / (__pyx_v_vary * __pyx_v_vary)) - 3.0);
 
-        /* "candidate_kernels.pyx":233
+        /* "candidate_kernels.pyx":234
  *                 )
  *                 kurt_y = (mu4_y / n) / (vary * vary) - 3.0
  *                 if kurt_y > kurt_thresh:             # <<<<<<<<<<<<<<
@@ -22340,7 +22340,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
         __pyx_t_1 = (__pyx_v_kurt_y > __pyx_v_kurt_thresh);
         if (__pyx_t_1) {
 
-          /* "candidate_kernels.pyx":234
+          /* "candidate_kernels.pyx":235
  *                 kurt_y = (mu4_y / n) / (vary * vary) - 3.0
  *                 if kurt_y > kurt_thresh:
  *                     is_spiked = True             # <<<<<<<<<<<<<<
@@ -22349,7 +22349,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
           __pyx_v_is_spiked = 1;
 
-          /* "candidate_kernels.pyx":233
+          /* "candidate_kernels.pyx":234
  *                 )
  *                 kurt_y = (mu4_y / n) / (vary * vary) - 3.0
  *                 if kurt_y > kurt_thresh:             # <<<<<<<<<<<<<<
@@ -22358,7 +22358,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
         }
 
-        /* "candidate_kernels.pyx":224
+        /* "candidate_kernels.pyx":225
  *                     is_spiked = True
  *             vary = var_y / n
  *             if not is_spiked and vary > 0.0:             # <<<<<<<<<<<<<<
@@ -22367,7 +22367,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       }
 
-      /* "candidate_kernels.pyx":210
+      /* "candidate_kernels.pyx":211
  * 
  *         is_spiked = False
  *         if n >= 4:             # <<<<<<<<<<<<<<
@@ -22376,7 +22376,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     }
 
-    /* "candidate_kernels.pyx":236
+    /* "candidate_kernels.pyx":237
  *                     is_spiked = True
  * 
  *         if is_spiked:             # <<<<<<<<<<<<<<
@@ -22385,40 +22385,40 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     if (__pyx_v_is_spiked) {
 
-      /* "candidate_kernels.pyx":237
+      /* "candidate_kernels.pyx":238
  * 
  *         if is_spiked:
  *             results.append((False, float("nan"), float("inf"), False, True))             # <<<<<<<<<<<<<<
  *             continue
  * 
  */
-      __pyx_t_7 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_nan); if (unlikely(__pyx_t_7 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 237, __pyx_L1_error)
-      __pyx_t_3 = PyFloat_FromDouble(__pyx_t_7); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 237, __pyx_L1_error)
+      __pyx_t_7 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_nan); if (unlikely(__pyx_t_7 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 238, __pyx_L1_error)
+      __pyx_t_3 = PyFloat_FromDouble(__pyx_t_7); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 238, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
-      __pyx_t_7 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_inf); if (unlikely(__pyx_t_7 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 237, __pyx_L1_error)
-      __pyx_t_8 = PyFloat_FromDouble(__pyx_t_7); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 237, __pyx_L1_error)
+      __pyx_t_7 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_inf); if (unlikely(__pyx_t_7 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 238, __pyx_L1_error)
+      __pyx_t_8 = PyFloat_FromDouble(__pyx_t_7); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 238, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_8);
-      __pyx_t_9 = PyTuple_New(5); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 237, __pyx_L1_error)
+      __pyx_t_9 = PyTuple_New(5); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 238, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_9);
       __Pyx_INCREF(Py_False);
       __Pyx_GIVEREF(Py_False);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 0, Py_False)) __PYX_ERR(0, 237, __pyx_L1_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 0, Py_False)) __PYX_ERR(0, 238, __pyx_L1_error);
       __Pyx_GIVEREF(__pyx_t_3);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 1, __pyx_t_3)) __PYX_ERR(0, 237, __pyx_L1_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 1, __pyx_t_3)) __PYX_ERR(0, 238, __pyx_L1_error);
       __Pyx_GIVEREF(__pyx_t_8);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 2, __pyx_t_8)) __PYX_ERR(0, 237, __pyx_L1_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 2, __pyx_t_8)) __PYX_ERR(0, 238, __pyx_L1_error);
       __Pyx_INCREF(Py_False);
       __Pyx_GIVEREF(Py_False);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 3, Py_False)) __PYX_ERR(0, 237, __pyx_L1_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 3, Py_False)) __PYX_ERR(0, 238, __pyx_L1_error);
       __Pyx_INCREF(Py_True);
       __Pyx_GIVEREF(Py_True);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 4, Py_True)) __PYX_ERR(0, 237, __pyx_L1_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_9, 4, Py_True)) __PYX_ERR(0, 238, __pyx_L1_error);
       __pyx_t_3 = 0;
       __pyx_t_8 = 0;
-      __pyx_t_10 = __Pyx_PyList_Append(__pyx_v_results, __pyx_t_9); if (unlikely(__pyx_t_10 == ((int)-1))) __PYX_ERR(0, 237, __pyx_L1_error)
+      __pyx_t_10 = __Pyx_PyList_Append(__pyx_v_results, __pyx_t_9); if (unlikely(__pyx_t_10 == ((int)-1))) __PYX_ERR(0, 238, __pyx_L1_error)
       __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
 
-      /* "candidate_kernels.pyx":238
+      /* "candidate_kernels.pyx":239
  *         if is_spiked:
  *             results.append((False, float("nan"), float("inf"), False, True))
  *             continue             # <<<<<<<<<<<<<<
@@ -22427,7 +22427,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       goto __pyx_L6_continue;
 
-      /* "candidate_kernels.pyx":236
+      /* "candidate_kernels.pyx":237
  *                     is_spiked = True
  * 
  *         if is_spiked:             # <<<<<<<<<<<<<<
@@ -22436,7 +22436,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     }
 
-    /* "candidate_kernels.pyx":240
+    /* "candidate_kernels.pyx":241
  *             continue
  * 
  *         denom = sqrt(var_x * var_y)             # <<<<<<<<<<<<<<
@@ -22445,7 +22445,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     __pyx_v_denom = sqrt((__pyx_v_var_x * __pyx_v_var_y));
 
-    /* "candidate_kernels.pyx":241
+    /* "candidate_kernels.pyx":242
  * 
  *         denom = sqrt(var_x * var_y)
  *         if denom == 0.0:             # <<<<<<<<<<<<<<
@@ -22455,17 +22455,17 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
     __pyx_t_1 = (__pyx_v_denom == 0.0);
     if (__pyx_t_1) {
 
-      /* "candidate_kernels.pyx":242
+      /* "candidate_kernels.pyx":243
  *         denom = sqrt(var_x * var_y)
  *         if denom == 0.0:
  *             corr = float("nan")             # <<<<<<<<<<<<<<
  *         else:
  *             corr = (sum_xy - (sx * sy) / n) / denom
  */
-      __pyx_t_7 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_nan); if (unlikely(__pyx_t_7 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 242, __pyx_L1_error)
+      __pyx_t_7 = __Pyx_PyUnicode_AsDouble(__pyx_n_u_nan); if (unlikely(__pyx_t_7 == ((double)((double)-1)) && PyErr_Occurred())) __PYX_ERR(0, 243, __pyx_L1_error)
       __pyx_v_corr = __pyx_t_7;
 
-      /* "candidate_kernels.pyx":241
+      /* "candidate_kernels.pyx":242
  * 
  *         denom = sqrt(var_x * var_y)
  *         if denom == 0.0:             # <<<<<<<<<<<<<<
@@ -22475,7 +22475,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
       goto __pyx_L24;
     }
 
-    /* "candidate_kernels.pyx":244
+    /* "candidate_kernels.pyx":245
  *             corr = float("nan")
  *         else:
  *             corr = (sum_xy - (sx * sy) / n) / denom             # <<<<<<<<<<<<<<
@@ -22485,7 +22485,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
     /*else*/ {
       __pyx_v_corr = ((__pyx_v_sum_xy - ((__pyx_v_sx * __pyx_v_sy) / ((double)__pyx_v_n))) / __pyx_v_denom);
 
-      /* "candidate_kernels.pyx":245
+      /* "candidate_kernels.pyx":246
  *         else:
  *             corr = (sum_xy - (sx * sy) / n) / denom
  *             if corr > 1.0:             # <<<<<<<<<<<<<<
@@ -22495,7 +22495,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
       __pyx_t_1 = (__pyx_v_corr > 1.0);
       if (__pyx_t_1) {
 
-        /* "candidate_kernels.pyx":246
+        /* "candidate_kernels.pyx":247
  *             corr = (sum_xy - (sx * sy) / n) / denom
  *             if corr > 1.0:
  *                 corr = 1.0             # <<<<<<<<<<<<<<
@@ -22504,7 +22504,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
         __pyx_v_corr = 1.0;
 
-        /* "candidate_kernels.pyx":245
+        /* "candidate_kernels.pyx":246
  *         else:
  *             corr = (sum_xy - (sx * sy) / n) / denom
  *             if corr > 1.0:             # <<<<<<<<<<<<<<
@@ -22514,7 +22514,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
         goto __pyx_L25;
       }
 
-      /* "candidate_kernels.pyx":247
+      /* "candidate_kernels.pyx":248
  *             if corr > 1.0:
  *                 corr = 1.0
  *             elif corr < -1.0:             # <<<<<<<<<<<<<<
@@ -22524,7 +22524,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
       __pyx_t_1 = (__pyx_v_corr < -1.0);
       if (__pyx_t_1) {
 
-        /* "candidate_kernels.pyx":248
+        /* "candidate_kernels.pyx":249
  *                 corr = 1.0
  *             elif corr < -1.0:
  *                 corr = -1.0             # <<<<<<<<<<<<<<
@@ -22533,7 +22533,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
         __pyx_v_corr = -1.0;
 
-        /* "candidate_kernels.pyx":247
+        /* "candidate_kernels.pyx":248
  *             if corr > 1.0:
  *                 corr = 1.0
  *             elif corr < -1.0:             # <<<<<<<<<<<<<<
@@ -22545,7 +22545,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
     }
     __pyx_L24:;
 
-    /* "candidate_kernels.pyx":250
+    /* "candidate_kernels.pyx":251
  *                 corr = -1.0
  * 
  *         dist_sq = sum_xx + sum_yy - 2.0 * sum_xy             # <<<<<<<<<<<<<<
@@ -22554,7 +22554,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     __pyx_v_dist_sq = ((__pyx_v_sum_xx + __pyx_v_sum_yy) - (2.0 * __pyx_v_sum_xy));
 
-    /* "candidate_kernels.pyx":251
+    /* "candidate_kernels.pyx":252
  * 
  *         dist_sq = sum_xx + sum_yy - 2.0 * sum_xy
  *         if dist_sq < 0.0:             # <<<<<<<<<<<<<<
@@ -22564,7 +22564,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
     __pyx_t_1 = (__pyx_v_dist_sq < 0.0);
     if (__pyx_t_1) {
 
-      /* "candidate_kernels.pyx":252
+      /* "candidate_kernels.pyx":253
  *         dist_sq = sum_xx + sum_yy - 2.0 * sum_xy
  *         if dist_sq < 0.0:
  *             dist_sq = 0.0             # <<<<<<<<<<<<<<
@@ -22573,7 +22573,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       __pyx_v_dist_sq = 0.0;
 
-      /* "candidate_kernels.pyx":251
+      /* "candidate_kernels.pyx":252
  * 
  *         dist_sq = sum_xx + sum_yy - 2.0 * sum_xy
  *         if dist_sq < 0.0:             # <<<<<<<<<<<<<<
@@ -22582,7 +22582,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     }
 
-    /* "candidate_kernels.pyx":253
+    /* "candidate_kernels.pyx":254
  *         if dist_sq < 0.0:
  *             dist_sq = 0.0
  *         dist = sqrt(dist_sq)             # <<<<<<<<<<<<<<
@@ -22591,7 +22591,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     __pyx_v_dist = sqrt(__pyx_v_dist_sq);
 
-    /* "candidate_kernels.pyx":255
+    /* "candidate_kernels.pyx":256
  *         dist = sqrt(dist_sq)
  * 
  *         is_corr = False             # <<<<<<<<<<<<<<
@@ -22600,7 +22600,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     __pyx_v_is_corr = 0;
 
-    /* "candidate_kernels.pyx":256
+    /* "candidate_kernels.pyx":257
  * 
  *         is_corr = False
  *         if corr == corr:             # <<<<<<<<<<<<<<
@@ -22610,7 +22610,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
     __pyx_t_1 = (__pyx_v_corr == __pyx_v_corr);
     if (__pyx_t_1) {
 
-      /* "candidate_kernels.pyx":257
+      /* "candidate_kernels.pyx":258
  *         is_corr = False
  *         if corr == corr:
  *             if neg_corr:             # <<<<<<<<<<<<<<
@@ -22619,7 +22619,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
       if (__pyx_v_neg_corr) {
 
-        /* "candidate_kernels.pyx":258
+        /* "candidate_kernels.pyx":259
  *         if corr == corr:
  *             if neg_corr:
  *                 is_corr = fabs(corr) >= corr_threshold             # <<<<<<<<<<<<<<
@@ -22628,7 +22628,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
         __pyx_v_is_corr = (fabs(__pyx_v_corr) >= __pyx_v_corr_threshold);
 
-        /* "candidate_kernels.pyx":257
+        /* "candidate_kernels.pyx":258
  *         is_corr = False
  *         if corr == corr:
  *             if neg_corr:             # <<<<<<<<<<<<<<
@@ -22638,7 +22638,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
         goto __pyx_L28;
       }
 
-      /* "candidate_kernels.pyx":260
+      /* "candidate_kernels.pyx":261
  *                 is_corr = fabs(corr) >= corr_threshold
  *             else:
  *                 is_corr = corr >= corr_threshold             # <<<<<<<<<<<<<<
@@ -22650,7 +22650,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
       }
       __pyx_L28:;
 
-      /* "candidate_kernels.pyx":256
+      /* "candidate_kernels.pyx":257
  * 
  *         is_corr = False
  *         if corr == corr:             # <<<<<<<<<<<<<<
@@ -22659,42 +22659,42 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
  */
     }
 
-    /* "candidate_kernels.pyx":262
+    /* "candidate_kernels.pyx":263
  *                 is_corr = corr >= corr_threshold
  * 
  *         results.append((is_corr, corr, dist, False, False))             # <<<<<<<<<<<<<<
  * 
  *     return results
  */
-    __pyx_t_9 = __Pyx_PyBool_FromLong(__pyx_v_is_corr); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 262, __pyx_L1_error)
+    __pyx_t_9 = __Pyx_PyBool_FromLong(__pyx_v_is_corr); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 263, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_9);
-    __pyx_t_8 = PyFloat_FromDouble(__pyx_v_corr); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 262, __pyx_L1_error)
+    __pyx_t_8 = PyFloat_FromDouble(__pyx_v_corr); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 263, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_8);
-    __pyx_t_3 = PyFloat_FromDouble(__pyx_v_dist); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 262, __pyx_L1_error)
+    __pyx_t_3 = PyFloat_FromDouble(__pyx_v_dist); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 263, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
-    __pyx_t_16 = PyTuple_New(5); if (unlikely(!__pyx_t_16)) __PYX_ERR(0, 262, __pyx_L1_error)
+    __pyx_t_16 = PyTuple_New(5); if (unlikely(!__pyx_t_16)) __PYX_ERR(0, 263, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_16);
     __Pyx_GIVEREF(__pyx_t_9);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_16, 0, __pyx_t_9)) __PYX_ERR(0, 262, __pyx_L1_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_16, 0, __pyx_t_9)) __PYX_ERR(0, 263, __pyx_L1_error);
     __Pyx_GIVEREF(__pyx_t_8);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_16, 1, __pyx_t_8)) __PYX_ERR(0, 262, __pyx_L1_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_16, 1, __pyx_t_8)) __PYX_ERR(0, 263, __pyx_L1_error);
     __Pyx_GIVEREF(__pyx_t_3);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_16, 2, __pyx_t_3)) __PYX_ERR(0, 262, __pyx_L1_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_16, 2, __pyx_t_3)) __PYX_ERR(0, 263, __pyx_L1_error);
     __Pyx_INCREF(Py_False);
     __Pyx_GIVEREF(Py_False);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_16, 3, Py_False)) __PYX_ERR(0, 262, __pyx_L1_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_16, 3, Py_False)) __PYX_ERR(0, 263, __pyx_L1_error);
     __Pyx_INCREF(Py_False);
     __Pyx_GIVEREF(Py_False);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_16, 4, Py_False)) __PYX_ERR(0, 262, __pyx_L1_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_16, 4, Py_False)) __PYX_ERR(0, 263, __pyx_L1_error);
     __pyx_t_9 = 0;
     __pyx_t_8 = 0;
     __pyx_t_3 = 0;
-    __pyx_t_10 = __Pyx_PyList_Append(__pyx_v_results, __pyx_t_16); if (unlikely(__pyx_t_10 == ((int)-1))) __PYX_ERR(0, 262, __pyx_L1_error)
+    __pyx_t_10 = __Pyx_PyList_Append(__pyx_v_results, __pyx_t_16); if (unlikely(__pyx_t_10 == ((int)-1))) __PYX_ERR(0, 263, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_16); __pyx_t_16 = 0;
     __pyx_L6_continue:;
   }
 
-  /* "candidate_kernels.pyx":264
+  /* "candidate_kernels.pyx":265
  *         results.append((is_corr, corr, dist, False, False))
  * 
  *     return results             # <<<<<<<<<<<<<<
@@ -22704,7 +22704,7 @@ static PyObject *__pyx_pf_17candidate_kernels_4validate_corr_batch(CYTHON_UNUSED
   __pyx_r = __pyx_v_results;
   goto __pyx_L0;
 
-  /* "candidate_kernels.pyx":151
+  /* "candidate_kernels.pyx":152
  * 
  * 
  * def validate_corr_batch(double[:, :] x,             # <<<<<<<<<<<<<<
@@ -23890,7 +23890,7 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
 static CYTHON_SMALL_CODE int __Pyx_InitCachedBuiltins(void) {
   __pyx_builtin_MemoryError = __Pyx_GetBuiltinName(__pyx_n_s_MemoryError); if (!__pyx_builtin_MemoryError) __PYX_ERR(0, 61, __pyx_L1_error)
   __pyx_builtin_range = __Pyx_GetBuiltinName(__pyx_n_s_range); if (!__pyx_builtin_range) __PYX_ERR(0, 68, __pyx_L1_error)
-  __pyx_builtin_ValueError = __Pyx_GetBuiltinName(__pyx_n_s_ValueError); if (!__pyx_builtin_ValueError) __PYX_ERR(0, 161, __pyx_L1_error)
+  __pyx_builtin_ValueError = __Pyx_GetBuiltinName(__pyx_n_s_ValueError); if (!__pyx_builtin_ValueError) __PYX_ERR(0, 162, __pyx_L1_error)
   __pyx_builtin___import__ = __Pyx_GetBuiltinName(__pyx_n_s_import); if (!__pyx_builtin___import__) __PYX_ERR(1, 100, __pyx_L1_error)
   __pyx_builtin_enumerate = __Pyx_GetBuiltinName(__pyx_n_s_enumerate); if (!__pyx_builtin_enumerate) __PYX_ERR(1, 159, __pyx_L1_error)
   __pyx_builtin_TypeError = __Pyx_GetBuiltinName(__pyx_n_s_TypeError); if (!__pyx_builtin_TypeError) __PYX_ERR(1, 2, __pyx_L1_error)
@@ -23967,25 +23967,25 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
   __Pyx_GOTREF(__pyx_tuple__10);
   __Pyx_GIVEREF(__pyx_tuple__10);
 
-  /* "candidate_kernels.pyx":110
+  /* "candidate_kernels.pyx":111
  *     cdef Py_ssize_t n = x.shape[0]
  *     if n == 0:
  *         return float("nan"), float("inf"), (0, 0.0, 0.0, 0.0, 0.0)             # <<<<<<<<<<<<<<
  *     cdef Py_ssize_t i
  *     cdef double sx = 0.0
  */
-  __pyx_tuple__11 = PyTuple_Pack(5, __pyx_int_0, __pyx_float_0_0, __pyx_float_0_0, __pyx_float_0_0, __pyx_float_0_0); if (unlikely(!__pyx_tuple__11)) __PYX_ERR(0, 110, __pyx_L1_error)
+  __pyx_tuple__11 = PyTuple_Pack(5, __pyx_int_0, __pyx_float_0_0, __pyx_float_0_0, __pyx_float_0_0, __pyx_float_0_0); if (unlikely(!__pyx_tuple__11)) __PYX_ERR(0, 111, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__11);
   __Pyx_GIVEREF(__pyx_tuple__11);
 
-  /* "candidate_kernels.pyx":161
+  /* "candidate_kernels.pyx":162
  *     cdef Py_ssize_t n = x.shape[1]
  *     if y.shape[0] != n_items or y.shape[1] != n:
  *         raise ValueError("x and y must have the same shape")             # <<<<<<<<<<<<<<
  * 
  *     cdef Py_ssize_t i, j
  */
-  __pyx_tuple__12 = PyTuple_Pack(1, __pyx_kp_u_x_and_y_must_have_the_same_shape); if (unlikely(!__pyx_tuple__12)) __PYX_ERR(0, 161, __pyx_L1_error)
+  __pyx_tuple__12 = PyTuple_Pack(1, __pyx_kp_u_x_and_y_must_have_the_same_shape); if (unlikely(!__pyx_tuple__12)) __PYX_ERR(0, 162, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__12);
   __Pyx_GIVEREF(__pyx_tuple__12);
 
@@ -24102,29 +24102,29 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
   __Pyx_GIVEREF(__pyx_tuple__24);
   __pyx_codeobj__25 = (PyObject*)__Pyx_PyCode_New(7, 0, 0, 28, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__24, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_candidate_kernels_pyx, __pyx_n_s_find_candidate_pairs, 42, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__25)) __PYX_ERR(0, 42, __pyx_L1_error)
 
-  /* "candidate_kernels.pyx":106
+  /* "candidate_kernels.pyx":107
  * 
  * 
  * def fast_corr_and_dist(double[:] x, double[:] y):             # <<<<<<<<<<<<<<
  *     """Compute Pearson correlation and Euclidean distance for two vectors."""
  *     cdef Py_ssize_t n = x.shape[0]
  */
-  __pyx_tuple__26 = PyTuple_Pack(19, __pyx_n_s_x, __pyx_n_s_y, __pyx_n_s_n, __pyx_n_s_i, __pyx_n_s_sx, __pyx_n_s_sy, __pyx_n_s_sum_xy, __pyx_n_s_sum_xx, __pyx_n_s_sum_yy, __pyx_n_s_xi, __pyx_n_s_yi, __pyx_n_s_mean_x, __pyx_n_s_mean_y, __pyx_n_s_var_x, __pyx_n_s_var_y, __pyx_n_s_denom, __pyx_n_s_corr, __pyx_n_s_dist_sq, __pyx_n_s_dist); if (unlikely(!__pyx_tuple__26)) __PYX_ERR(0, 106, __pyx_L1_error)
+  __pyx_tuple__26 = PyTuple_Pack(19, __pyx_n_s_x, __pyx_n_s_y, __pyx_n_s_n, __pyx_n_s_i, __pyx_n_s_sx, __pyx_n_s_sy, __pyx_n_s_sum_xy, __pyx_n_s_sum_xx, __pyx_n_s_sum_yy, __pyx_n_s_xi, __pyx_n_s_yi, __pyx_n_s_mean_x, __pyx_n_s_mean_y, __pyx_n_s_var_x, __pyx_n_s_var_y, __pyx_n_s_denom, __pyx_n_s_corr, __pyx_n_s_dist_sq, __pyx_n_s_dist); if (unlikely(!__pyx_tuple__26)) __PYX_ERR(0, 107, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__26);
   __Pyx_GIVEREF(__pyx_tuple__26);
-  __pyx_codeobj__27 = (PyObject*)__Pyx_PyCode_New(2, 0, 0, 19, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_candidate_kernels_pyx, __pyx_n_s_fast_corr_and_dist, 106, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__27)) __PYX_ERR(0, 106, __pyx_L1_error)
+  __pyx_codeobj__27 = (PyObject*)__Pyx_PyCode_New(2, 0, 0, 19, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_candidate_kernels_pyx, __pyx_n_s_fast_corr_and_dist, 107, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__27)) __PYX_ERR(0, 107, __pyx_L1_error)
 
-  /* "candidate_kernels.pyx":151
+  /* "candidate_kernels.pyx":152
  * 
  * 
  * def validate_corr_batch(double[:, :] x,             # <<<<<<<<<<<<<<
  *                         double[:, :] y,
  *                         double corr_threshold,
  */
-  __pyx_tuple__28 = PyTuple_Pack(39, __pyx_n_s_x, __pyx_n_s_y, __pyx_n_s_corr_threshold, __pyx_n_s_neg_corr, __pyx_n_s_std_thresh, __pyx_n_s_kurt_thresh, __pyx_n_s_n_items, __pyx_n_s_n, __pyx_n_s_i, __pyx_n_s_j, __pyx_n_s_sx, __pyx_n_s_sy, __pyx_n_s_sum_xy, __pyx_n_s_sum_xx, __pyx_n_s_sum_yy, __pyx_n_s_sum_xxx, __pyx_n_s_sum_yyy, __pyx_n_s_sum_xxxx, __pyx_n_s_sum_yyyy, __pyx_n_s_xi, __pyx_n_s_yi, __pyx_n_s_mean_x, __pyx_n_s_mean_y, __pyx_n_s_var_x, __pyx_n_s_var_y, __pyx_n_s_denom, __pyx_n_s_corr, __pyx_n_s_dist_sq, __pyx_n_s_dist, __pyx_n_s_mu4_x, __pyx_n_s_mu4_y, __pyx_n_s_varx, __pyx_n_s_vary, __pyx_n_s_kurt_x, __pyx_n_s_kurt_y, __pyx_n_s_is_const, __pyx_n_s_is_spiked, __pyx_n_s_is_corr, __pyx_n_s_results); if (unlikely(!__pyx_tuple__28)) __PYX_ERR(0, 151, __pyx_L1_error)
+  __pyx_tuple__28 = PyTuple_Pack(39, __pyx_n_s_x, __pyx_n_s_y, __pyx_n_s_corr_threshold, __pyx_n_s_neg_corr, __pyx_n_s_std_thresh, __pyx_n_s_kurt_thresh, __pyx_n_s_n_items, __pyx_n_s_n, __pyx_n_s_i, __pyx_n_s_j, __pyx_n_s_sx, __pyx_n_s_sy, __pyx_n_s_sum_xy, __pyx_n_s_sum_xx, __pyx_n_s_sum_yy, __pyx_n_s_sum_xxx, __pyx_n_s_sum_yyy, __pyx_n_s_sum_xxxx, __pyx_n_s_sum_yyyy, __pyx_n_s_xi, __pyx_n_s_yi, __pyx_n_s_mean_x, __pyx_n_s_mean_y, __pyx_n_s_var_x, __pyx_n_s_var_y, __pyx_n_s_denom, __pyx_n_s_corr, __pyx_n_s_dist_sq, __pyx_n_s_dist, __pyx_n_s_mu4_x, __pyx_n_s_mu4_y, __pyx_n_s_varx, __pyx_n_s_vary, __pyx_n_s_kurt_x, __pyx_n_s_kurt_y, __pyx_n_s_is_const, __pyx_n_s_is_spiked, __pyx_n_s_is_corr, __pyx_n_s_results); if (unlikely(!__pyx_tuple__28)) __PYX_ERR(0, 152, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__28);
   __Pyx_GIVEREF(__pyx_tuple__28);
-  __pyx_codeobj__29 = (PyObject*)__Pyx_PyCode_New(6, 0, 0, 39, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__28, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_candidate_kernels_pyx, __pyx_n_s_validate_corr_batch, 151, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__29)) __PYX_ERR(0, 151, __pyx_L1_error)
+  __pyx_codeobj__29 = (PyObject*)__Pyx_PyCode_New(6, 0, 0, 39, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__28, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_candidate_kernels_pyx, __pyx_n_s_validate_corr_batch, 152, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__29)) __PYX_ERR(0, 152, __pyx_L1_error)
   __Pyx_RefNannyFinishContext();
   return 0;
   __pyx_L1_error:;
@@ -25248,58 +25248,58 @@ if (!__Pyx_RefNanny) {
   if (PyDict_SetItem(__pyx_d, __pyx_n_s_find_candidate_pairs, __pyx_t_7) < 0) __PYX_ERR(0, 42, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
 
-  /* "candidate_kernels.pyx":106
+  /* "candidate_kernels.pyx":107
  * 
  * 
  * def fast_corr_and_dist(double[:] x, double[:] y):             # <<<<<<<<<<<<<<
  *     """Compute Pearson correlation and Euclidean distance for two vectors."""
  *     cdef Py_ssize_t n = x.shape[0]
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_17candidate_kernels_3fast_corr_and_dist, 0, __pyx_n_s_fast_corr_and_dist, NULL, __pyx_n_s_candidate_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__27)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 106, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_17candidate_kernels_3fast_corr_and_dist, 0, __pyx_n_s_fast_corr_and_dist, NULL, __pyx_n_s_candidate_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__27)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 107, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_fast_corr_and_dist, __pyx_t_7) < 0) __PYX_ERR(0, 106, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_fast_corr_and_dist, __pyx_t_7) < 0) __PYX_ERR(0, 107, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
 
-  /* "candidate_kernels.pyx":155
+  /* "candidate_kernels.pyx":156
  *                         double corr_threshold,
  *                         bint neg_corr,
  *                         double std_thresh=1e-3,             # <<<<<<<<<<<<<<
  *                         double kurt_thresh=5.0):
  *     """Validate batches of x/y vectors; return list of tuples."""
  */
-  __pyx_t_7 = PyFloat_FromDouble(((double)1e-3)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 155, __pyx_L1_error)
+  __pyx_t_7 = PyFloat_FromDouble(((double)1e-3)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 156, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
 
-  /* "candidate_kernels.pyx":156
+  /* "candidate_kernels.pyx":157
  *                         bint neg_corr,
  *                         double std_thresh=1e-3,
  *                         double kurt_thresh=5.0):             # <<<<<<<<<<<<<<
  *     """Validate batches of x/y vectors; return list of tuples."""
  *     cdef Py_ssize_t n_items = x.shape[0]
  */
-  __pyx_t_4 = PyFloat_FromDouble(((double)5.0)); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 156, __pyx_L1_error)
+  __pyx_t_4 = PyFloat_FromDouble(((double)5.0)); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 157, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
 
-  /* "candidate_kernels.pyx":151
+  /* "candidate_kernels.pyx":152
  * 
  * 
  * def validate_corr_batch(double[:, :] x,             # <<<<<<<<<<<<<<
  *                         double[:, :] y,
  *                         double corr_threshold,
  */
-  __pyx_t_5 = PyTuple_New(2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 151, __pyx_L1_error)
+  __pyx_t_5 = PyTuple_New(2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 152, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_GIVEREF(__pyx_t_7);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_7)) __PYX_ERR(0, 151, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_7)) __PYX_ERR(0, 152, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_4);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 1, __pyx_t_4)) __PYX_ERR(0, 151, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 1, __pyx_t_4)) __PYX_ERR(0, 152, __pyx_L1_error);
   __pyx_t_7 = 0;
   __pyx_t_4 = 0;
-  __pyx_t_4 = __Pyx_CyFunction_New(&__pyx_mdef_17candidate_kernels_5validate_corr_batch, 0, __pyx_n_s_validate_corr_batch, NULL, __pyx_n_s_candidate_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__29)); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 151, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_CyFunction_New(&__pyx_mdef_17candidate_kernels_5validate_corr_batch, 0, __pyx_n_s_validate_corr_batch, NULL, __pyx_n_s_candidate_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__29)); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 152, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_CyFunction_SetDefaultsTuple(__pyx_t_4, __pyx_t_5);
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_validate_corr_batch, __pyx_t_4) < 0) __PYX_ERR(0, 151, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_validate_corr_batch, __pyx_t_4) < 0) __PYX_ERR(0, 152, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
 
   /* "candidate_kernels.pyx":1

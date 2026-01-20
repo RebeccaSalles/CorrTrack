@@ -20,6 +20,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Iterable, Optional, Sequence
 import traceback
 
+CSV_DELIMITER = ";"
+
 try:
     from dask import delayed, compute
     from dask.threaded import get as dask_threaded_get
@@ -29,27 +31,34 @@ except ImportError:  # pragma: no cover
     _HAS_DASK = False
 
 try:
-    from candidate_kernels import (
-        find_candidate_pairs as _cy_find_candidate_pairs,
-        fast_corr_and_dist as _cy_fast_corr_and_dist,
-        validate_corr_batch as _cy_validate_corr_batch,
-    )
+    import candidate_kernels as _cand_kernels
+    _cy_find_candidate_pairs = _cand_kernels.find_candidate_pairs
+    _cy_find_candidate_pairs_unique = getattr(_cand_kernels, "find_candidate_pairs_unique", None)
+    _cy_fast_corr_and_dist = _cand_kernels.fast_corr_and_dist
+    _cy_validate_corr_batch = _cand_kernels.validate_corr_batch
     _HAS_CYTHON_KERNELS = True
 except Exception:  # pragma: no cover
     _cy_find_candidate_pairs = None
+    _cy_find_candidate_pairs_unique = None
     _cy_fast_corr_and_dist = None
     _cy_validate_corr_batch = None
     _HAS_CYTHON_KERNELS = False
 
 try:
-    from partition_kernels import build_partitions as _cy_build_partitions
-except Exception:  # pragma: no cover
-    _cy_build_partitions = None
-
-try:
     from sketch_kernels import compute_series_dots as _cy_compute_series_dots
+    from sketch_kernels import build_sketch_matrix as _cy_build_sketch_matrix
+    from sketch_kernels import apply_orth_and_normalize as _cy_apply_orth_and_normalize
+    from sketch_kernels import compute_constant_flags as _cy_compute_constant_flags
 except Exception:  # pragma: no cover
     _cy_compute_series_dots = None
+    _cy_build_sketch_matrix = None
+    _cy_apply_orth_and_normalize = None
+    _cy_compute_constant_flags = None
+
+try:
+    from partition_kernels import build_partition_values as _cy_build_partition_values
+except Exception:  # pragma: no cover
+    _cy_build_partition_values = None
 
 
 RUN_RESULT_COLUMNS: Sequence[str] = (
@@ -63,6 +72,14 @@ RUN_RESULT_COLUMNS: Sequence[str] = (
     "total_w",
     "mem_w",
     "nodes",
+    "exec_mode",
+    "parallel_sketch",
+    "parallel_candidates",
+    "parallel_validation",
+    "workers_total",
+    "workers_sketch",
+    "workers_candidates",
+    "workers_validation",
     "window_size",
     "window_step",
     "basic_window",
@@ -101,6 +118,14 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     "total_w",
     "mem_w",
     "nodes",
+    "exec_mode",
+    "parallel_sketch",
+    "parallel_candidates",
+    "parallel_validation",
+    "workers_total",
+    "workers_sketch",
+    "workers_candidates",
+    "workers_validation",
     "window_size",
     "window_step",
     "basic_window",
@@ -162,6 +187,14 @@ COMPARISON_COLUMNS: Sequence[str] = (
     "total_w",
     "mem_w",
     "nodes",
+    "exec_mode",
+    "parallel_sketch",
+    "parallel_candidates",
+    "parallel_validation",
+    "workers_total",
+    "workers_sketch",
+    "workers_candidates",
+    "workers_validation",
     "window_size",
     "window_step",
     "basic_window",
@@ -224,48 +257,11 @@ class CSVStreamWriter:
         self.path = path
         self.columns = tuple(columns)
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-
-        file_exists = os.path.exists(path)
-        needs_header = True
-        if file_exists and os.path.getsize(path) > 0:
-            existing_header: Optional[Sequence[str]] = None
-            try:
-                with open(path, newline="") as existing_file:
-                    reader = csv.reader(existing_file)
-                    existing_header = next(reader, None)
-            except Exception:
-                existing_header = None
-
-            if existing_header:
-                if len(existing_header) != len(self.columns) or tuple(existing_header) != self.columns:
-                    tmp_path = f"{path}.tmp"
-                    with open(path, newline="") as existing_file, open(tmp_path, "w", newline="") as tmp_file:
-                        reader = csv.reader(existing_file)
-                        writer = csv.writer(tmp_file)
-                        writer.writerow(self.columns)
-                        first_row = True
-                        for row in reader:
-                            if first_row:
-                                first_row = False
-                                continue
-                            adjusted = list(row)
-                            if len(adjusted) < len(self.columns):
-                                adjusted.extend([""] * (len(self.columns) - len(adjusted)))
-                            elif len(adjusted) > len(self.columns):
-                                adjusted = adjusted[: len(self.columns)]
-                            writer.writerow(adjusted)
-                    os.replace(tmp_path, path)
-                    needs_header = False
-                else:
-                    needs_header = False
-            else:
-                needs_header = True
-
-        self._fh = open(path, "a", newline="")
-        self._writer = csv.writer(self._fh)
-        if needs_header:
-            self._writer.writerow(self.columns)
-            self._fh.flush()
+        self._delimiter = CSV_DELIMITER
+        self._fh = open(path, "w", newline="")
+        self._writer = csv.writer(self._fh, delimiter=self._delimiter)
+        self._writer.writerow(self.columns)
+        self._fh.flush()
 
     def write_row(self, values: Sequence[object]) -> None:
         if len(values) != len(self.columns):
@@ -295,6 +291,36 @@ def _row_from_mapping(columns: Sequence[str], data: dict) -> list:
 def _run_batch_static(func, batch):
     """Top-level batch helper to avoid bound-method pickling issues."""
     return [func(item) for item in batch]
+
+def _detect_csv_delimiter(path: str, default: str = CSV_DELIMITER) -> str:
+    try:
+        with open(path, "r", encoding="utf-8", newline="") as handle:
+            header = ""
+            for line in handle:
+                header = line.strip()
+                if header:
+                    break
+            if header:
+                has_semicolon = ";" in header
+                has_comma = "," in header
+                if has_semicolon and not has_comma:
+                    return ";"
+                if has_comma and not has_semicolon:
+                    return ","
+            sample = header + handle.read(4096)
+    except Exception:
+        return default
+    if not sample:
+        return default
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;")
+        if dialect.delimiter:
+            return dialect.delimiter
+    except Exception:
+        pass
+    if ";" in sample and sample.count(";") >= sample.count(","):
+        return ";"
+    return default
 
 
 def execute_corrtrack_pass(
@@ -347,6 +373,17 @@ def execute_corrtrack_pass(
     record["n_vectors"] = getattr(corrtrack, "n_vectors", None)
     record["grid_dimension"] = getattr(corrtrack, "grid_dimension", None)
     record["freq_threshold"] = getattr(corrtrack, "freq_threshold", None)
+    record["exec_mode"] = getattr(corrtrack, "exec", None)
+    record["parallel_sketch"] = getattr(corrtrack, "parallel_sketch", None)
+    record["parallel_candidates"] = getattr(corrtrack, "parallel_candidates", None)
+    record["parallel_validation"] = getattr(corrtrack, "parallel_validation", None)
+    record["workers_total"] = getattr(corrtrack, "n_nodes", None)
+    record["workers_sketch"] = getattr(corrtrack, "n_sketch_nodes", None)
+    record["workers_candidates"] = getattr(corrtrack, "n_candidate_nodes", None)
+    if getattr(corrtrack, "parallel_validation", False):
+        record["workers_validation"] = getattr(corrtrack, "n_nodes", None)
+    else:
+        record["workers_validation"] = 1
 
     artifact_active = bool(artifact_prefix)
     if artifact_active:
@@ -468,6 +505,9 @@ def run_and_log_bruteforce(
         extra_filter=False,
         exec=base_config.get("exec", "thread"),
         max_workers=base_config.get("max_workers", 0),
+        parallel_sketch=base_config.get("parallel_sketch"),
+        parallel_candidates=base_config.get("parallel_candidates"),
+        parallel_validation=base_config.get("parallel_validation"),
     )
 
     record, runtime_parts, corr_flags = execute_corrtrack_pass(
@@ -584,6 +624,9 @@ def run_and_log_corrtrack(
         extra_filter=extra_filter,
         exec=base_config.get("exec", "thread"),
         max_workers=base_config.get("max_workers", 0),
+        parallel_sketch=base_config.get("parallel_sketch"),
+        parallel_candidates=base_config.get("parallel_candidates"),
+        parallel_validation=base_config.get("parallel_validation"),
         **feature_kwargs,
     )
 
@@ -624,6 +667,10 @@ def _coerce_to_bool(value, default=False):
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "t", "yes", "y"}
     return bool(value)
+
+
+def _resolve_parallel_flag(value, default=False) -> bool:
+    return _coerce_to_bool(value, default=bool(default))
 
 
 def _normalize_exec_mode(value, default="thread"):
@@ -821,6 +868,7 @@ def _sketch_worker(payload):
     """Execute a sketch node update."""
     corrtrack, node_index, node_new, ids_subset, verbose, testing = payload
     sketch_node = corrtrack.sketch_nodes[node_index]
+    sketch_node._sid_lookup = corrtrack.series_ids
     sketches, partitions = sketch_node.run(
         node_new,
         ids_subset,
@@ -1036,7 +1084,7 @@ _os_parallel_guard.environ.setdefault("MKL_DEBUG_CPU_TYPE", "5")
 # ================================================================
 
 class CorrTrack:
-    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,grid_dimension,cell_size,warmup_data,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,extra_filter=False,exec="parallel",max_workers=0,sketch_norm="z"):
+    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,grid_dimension,cell_size,warmup_data,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,extra_filter=False,exec="parallel",max_workers=0,sketch_norm="z",parallel_sketch=None,parallel_candidates=None,parallel_validation=None):
         
         if basic_window is not None and window_size % basic_window != 0:
             raise TypeError("Window size (",window_size,") is not divisable by basic window size (",basic_window,")")
@@ -1093,12 +1141,19 @@ class CorrTrack:
         self.n_vectors = n_vectors
         # Parameters nodes
         self.exec = _normalize_exec_mode(exec, default="thread")
+        parallel_default = self.exec == "thread"
+        self.parallel_sketch = _resolve_parallel_flag(parallel_sketch, parallel_default)
+        self.parallel_candidates = _resolve_parallel_flag(parallel_candidates, parallel_default)
+        self.parallel_validation = _resolve_parallel_flag(parallel_validation, parallel_default)
+        self.parallel_any = self.parallel_sketch or self.parallel_candidates or self.parallel_validation
+
         self.n_nodes = max_workers
-        if self.exec not in ("thread",):
+        if not self.parallel_any:
             self.n_nodes = 1
         elif max_workers == 0:
             self.n_nodes = max(1, (os.cpu_count() or 1))
-        self.n_sketch_nodes = self.n_nodes
+        self.n_sketch_nodes = self.n_nodes if self.parallel_sketch else 1
+        self.n_candidate_nodes = self.n_nodes if self.parallel_candidates else 1
         self.sketch_nodes = []
         self.grid_nodes = []
         self.brute_force_nodes = []
@@ -1316,6 +1371,54 @@ class CorrTrack:
         if not self.profile_silent:
             print(message)
 
+    def _log_parallel_diag(
+        self,
+        label,
+        mode,
+        items_len,
+        requested_workers,
+        effective_workers,
+        chunk_size=None,
+    ):
+        if not self.profile_enabled:
+            return
+        logged = getattr(self, "_parallel_diag_logged", None)
+        if logged is None:
+            logged = set()
+            self._parallel_diag_logged = logged
+        key = (label, mode)
+        if key in logged:
+            return
+        logged.add(key)
+        parts = [
+            f"{label}: mode={mode}",
+            f"items={items_len}",
+            f"requested_workers={requested_workers}",
+            f"effective_workers={effective_workers}",
+        ]
+        if chunk_size is not None:
+            parts.append(f"chunk={chunk_size}")
+        parts.extend(
+            [
+                f"n_nodes={getattr(self, 'n_nodes', None)}",
+                f"n_sketch_nodes={getattr(self, 'n_sketch_nodes', None)}",
+                f"n_candidate_nodes={getattr(self, 'n_candidate_nodes', None)}",
+                f"n_grids={getattr(self, 'n_grids', None)}",
+                f"map_ids={len(getattr(self, 'map_ids', []) or [])}",
+                f"series={len(getattr(self, 'series_ids', {}) or {})}",
+            ]
+        )
+        message = "[CorrTrack parallel] " + " | ".join(parts)
+        if self.profile_path:
+            try:
+                os.makedirs(os.path.dirname(self.profile_path) or ".", exist_ok=True)
+                with open(self.profile_path, "a", encoding="utf-8") as handle:
+                    handle.write(message + "\n")
+            except Exception:
+                pass
+        if not self.profile_silent:
+            print(message)
+
 
     @staticmethod
     def _run_batch(func, batch):
@@ -1331,14 +1434,31 @@ class CorrTrack:
         if mode not in {"thread", "sequential"}:
             mode = "thread"
 
+        items_len = len(items)
+
         if mode == "sequential":
+            self._log_parallel_diag(
+                getattr(func, "__name__", "callable"),
+                mode,
+                items_len,
+                max_workers,
+                1,
+            )
             return [func(x) for x in items]
 
+        requested_workers = max_workers
         if max_workers is None or max_workers <= 0:
             max_workers = max(1, (os.cpu_count() or 1))
-        max_workers = max(1, min(max_workers, len(items)))
+        max_workers = max(1, min(max_workers, items_len))
 
         if max_workers <= 1:
+            self._log_parallel_diag(
+                getattr(func, "__name__", "callable"),
+                mode,
+                items_len,
+                requested_workers,
+                max_workers,
+            )
             return [func(x) for x in items]
 
         if chunksize is None:
@@ -1354,6 +1474,14 @@ class CorrTrack:
             chunk_size = 1 if auto <= 1 else min(auto, 64)
 
         chunk_size = max(1, min(chunk_size, len(items)))
+        self._log_parallel_diag(
+            getattr(func, "__name__", "callable"),
+            mode,
+            items_len,
+            requested_workers,
+            max_workers,
+            chunk_size=chunk_size,
+        )
 
         use_dask = _HAS_DASK and delayed is not None
 
@@ -1586,21 +1714,20 @@ class CorrTrack:
     def _map_series_to_nodes(self):
         ids = list(self.series_ids.keys())
         n_ids = len(ids)
-        if self.exec == "sequential":
-            self.n_nodes = 1
+        if not self.parallel_sketch:
             self.n_sketch_nodes = 1
             self.map_ids = [ids]
             return
 
         self.n_sketch_nodes = min(self.n_nodes, n_ids) if n_ids > 0 else 0
         if not getattr(self, "_parallel_warned", False):
-            if n_ids > 1 and self.n_sketch_nodes < 2:
+            if self.parallel_sketch and n_ids > 1 and self.n_sketch_nodes < 2:
                 warnings.warn(
                     "Parallel mode requested but only one sketch node is available; "
                     "increase max_workers or provide more series to enable sketch parallelism.",
                     RuntimeWarning,
                 )
-            if self.n_grids < 2:
+            if self.parallel_candidates and self.n_grids < 2:
                 warnings.warn(
                     "Parallel mode requested but n_grids=1; reduce grid_dimension or "
                     "increase n_vectors to enable grid parallelism.",
@@ -1877,7 +2004,7 @@ class CorrTrack:
             # Count every evaluated item as total_seen; your outer loop also updates tested/total elsewhere
             self.total_candidates += counts.get("seen", 0)
 
-    def _train_distances(self):
+    def _train_distances(self, worker_mode=None):
         """
         Parallel training pass over self.candidates.items().
         Defaults to threads (NumPy releases the GIL; also avoids pickling issues).
@@ -1886,7 +2013,7 @@ class CorrTrack:
             return
 
         items = list(self.candidates.items())
-        worker_mode = self.exec
+        worker_mode = worker_mode if worker_mode else self.exec
 
         shard_payloads = self._parallel_map(
             self._train_distance_item,
@@ -2089,7 +2216,7 @@ class CorrTrack:
         self.validated_candidates += validated
         self.min_dist, self.pair_min_dist = min_dist, min_pair
 
-    def _monitor_corr(self):
+    def _monitor_corr(self, worker_mode=None):
         """
         Hybrid monitoring:
         • 'In' updates: sequential (preserves per-key chain logic in _in_corr).
@@ -2112,7 +2239,7 @@ class CorrTrack:
         # parallel 'out' (independent across keys)
         if len(self.previous_correlations) > 0:
             items = list(self.previous_correlations.items())
-            worker_mode = self.exec
+            worker_mode = worker_mode if worker_mode else self.exec
             # compute anomaly records in parallel
             t0 = time.perf_counter() if self.profile_enabled else None
             out_records = self._parallel_map(
@@ -2199,7 +2326,7 @@ class CorrTrack:
         )
 
         with open(output_csv, mode='w', newline='') as file:
-            writer = csv.writer(file)
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
             writer.writerow(["id1", "id2", "time1", "time2", "corr"])
             for pair,corr in sorted_items:
                 id1, id2, t1, t2, _ = pair
@@ -2270,7 +2397,7 @@ class CorrTrack:
             return
 
         with open(output_csv, mode='w', newline='') as file:
-            writer = csv.writer(file)
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
             writer.writerow(["id1", "id2", "t1_index", "time1", "max_corr", "lag"])
 
             for pair_ids in sorted(max_corr_by_pair):
@@ -2310,7 +2437,7 @@ class CorrTrack:
         if len(self.corr_lengths)>0:
             os.makedirs(os.path.dirname(output_csv), exist_ok=True)
             with open(output_csv, mode='w', newline='') as file:
-                writer = csv.writer(file)
+                writer = csv.writer(file, delimiter=CSV_DELIMITER)
                 writer.writerow(["id1", "id2", "lag", "start_time_id1", "start_time_id2", "duration", "corr_sign"])
                 for key,value in self.corr_lengths.items():
                     ids = (key[0],key[1])
@@ -2351,7 +2478,7 @@ class CorrTrack:
     def _save_candidates(self, output_csv):
         os.makedirs(os.path.dirname(output_csv), exist_ok=True)
         with open(output_csv, mode='w', newline='') as file:
-            writer = csv.writer(file)
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
             writer.writerow(['id1', 'id2', 'time1', 'time2', 'window', 'freq'])
             for pair, freq in sorted(self.freq_pairs.items()):
                 id1, id2, t1, t2, w = pair
@@ -2362,7 +2489,7 @@ class CorrTrack:
     def _save_negative_pairs(self, output_csv):
         os.makedirs(os.path.dirname(output_csv), exist_ok=True)
         with open(output_csv, mode='w', newline='') as file:
-            writer = csv.writer(file)
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
             writer.writerow(['id1', 'id2', 'time1', 'time2', 'corr'])
             for (id1, id2, t1, t2, _), corr in self.correlated.items():
                 if corr <= -self.corr_threshold:
@@ -2374,7 +2501,7 @@ class CorrTrack:
         if len(self.corr_lengths)>0:
             os.makedirs(os.path.dirname(output_csv), exist_ok=True)
             with open(output_csv, mode='w', newline='') as file:
-                writer = csv.writer(file)
+                writer = csv.writer(file, delimiter=CSV_DELIMITER)
                 writer.writerow(["id1", "id2", "lag", "time", "anomaly"])
                 for key,value in self.corr_anomalies.items():
                     ids = (key[0],key[1])
@@ -2398,7 +2525,7 @@ class CorrTrack:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         write_header = path not in state["headers"] or not os.path.exists(path)
         with open(path, "a", newline="") as file:
-            writer = csv.writer(file)
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
             if write_header:
                 writer.writerow(header)
                 state["headers"].add(path)
@@ -2410,8 +2537,9 @@ class CorrTrack:
             return
 
         def _load_correlated(path):
+            delimiter = _detect_csv_delimiter(path, default=CSV_DELIMITER)
             with open(path, newline="") as file:
-                reader = csv.reader(file)
+                reader = csv.reader(file, delimiter=delimiter)
                 next(reader, None)
                 for row in reader:
                     if len(row) < 4:
@@ -2420,8 +2548,9 @@ class CorrTrack:
                     state["correlated"].add(key)
 
         def _load_neg_pairs(path):
+            delimiter = _detect_csv_delimiter(path, default=CSV_DELIMITER)
             with open(path, newline="") as file:
-                reader = csv.reader(file)
+                reader = csv.reader(file, delimiter=delimiter)
                 next(reader, None)
                 for row in reader:
                     if len(row) < 4:
@@ -2430,8 +2559,9 @@ class CorrTrack:
                     state["neg_pairs"].add(key)
 
         def _load_candidates(path):
+            delimiter = _detect_csv_delimiter(path, default=CSV_DELIMITER)
             with open(path, newline="") as file:
-                reader = csv.reader(file)
+                reader = csv.reader(file, delimiter=delimiter)
                 next(reader, None)
                 for row in reader:
                     if len(row) < 6:
@@ -2444,8 +2574,9 @@ class CorrTrack:
                     state["candidates"][key] = freq
 
         def _load_status(path):
+            delimiter = _detect_csv_delimiter(path, default=CSV_DELIMITER)
             with open(path, newline="") as file:
-                reader = csv.reader(file)
+                reader = csv.reader(file, delimiter=delimiter)
                 next(reader, None)
                 for row in reader:
                     if len(row) < 7:
@@ -2459,8 +2590,9 @@ class CorrTrack:
                     state["status"][key] = (duration, corr_sign)
 
         def _load_anomalies(path):
+            delimiter = _detect_csv_delimiter(path, default=CSV_DELIMITER)
             with open(path, newline="") as file:
-                reader = csv.reader(file)
+                reader = csv.reader(file, delimiter=delimiter)
                 next(reader, None)
                 for row in reader:
                     if len(row) < 5:
@@ -2496,10 +2628,7 @@ class CorrTrack:
             }
             return
 
-        state = getattr(self, "_artifact_state", None)
-        if state and state.get("prefix") == prefix:
-            return
-
+        self._reset_artifact_files(prefix)
         self._artifact_state = {
             "prefix": prefix,
             "headers": set(),
@@ -2509,7 +2638,25 @@ class CorrTrack:
             "status": {},
             "anomalies": set(),
         }
-        self._load_existing_artifacts(prefix)
+
+    def _reset_artifact_files(self, prefix):
+        if not prefix:
+            return
+        suffixes = (
+            "_correlated.csv",
+            "_neg_pairs.csv",
+            "_candidates.csv",
+            "_status.csv",
+            "_anomalies.csv",
+            "_max_lag_correlated.csv",
+        )
+        for suffix in suffixes:
+            path = f"{prefix}{suffix}"
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
     def _append_artifacts(self):
         state = getattr(self, "_artifact_state", None)
@@ -2713,7 +2860,7 @@ class CorrTrack:
 
         # Merge sketches from all nodes
         merged_sketches = {}
-        per_grid_partition = [dict() for _ in range(self.n_grids)]
+        per_grid_partition = [[] for _ in range(self.n_grids)]
         iter_results = results
 
         t0 = time.perf_counter() if self.profile_enabled else None
@@ -2724,14 +2871,38 @@ class CorrTrack:
             for g, partition in enumerate(parts):
                 if g >= self.n_grids:
                     break
-                per_grid_partition[g].update(partition)
+                if partition is None:
+                    continue
+                per_grid_partition[g].append(partition)
         if t0 is not None:
             self._profile_add("sketch.merge", time.perf_counter() - t0)
 
         curr_time = self._curr_startTime()
         t0 = time.perf_counter() if self.profile_enabled else None
+        sid_list = [sid for sid, idx in sorted(self.series_ids.items(), key=lambda item: item[1])]
         for g in range(self.n_grids):
-            self.grid_nodes[g].append_partition(curr_time, per_grid_partition[g])
+            parts = per_grid_partition[g]
+            if not parts:
+                continue
+            if isinstance(parts[0], dict):
+                merged_partition = {}
+                for part in parts:
+                    merged_partition.update(part)
+            else:
+                if len(parts) == 1:
+                    merged_partition = parts[0]
+                else:
+                    sid_list_parts = [p[0] for p in parts if p is not None and p[0].size > 0]
+                    if not sid_list_parts:
+                        continue
+                    sid_idx = np.concatenate(sid_list_parts, axis=0)
+                    time_arr = np.concatenate([p[1] for p in parts if p is not None and p[1].size > 0], axis=0)
+                    w_arr = np.concatenate([p[2] for p in parts if p is not None and p[2].size > 0], axis=0)
+                    value_arr = np.concatenate([p[3] for p in parts if p is not None and p[3].size > 0], axis=0)
+                    is_const = np.concatenate([p[4] for p in parts if p is not None and p[4].size > 0], axis=0)
+                    merged_partition = (sid_idx, time_arr, w_arr, value_arr, is_const)
+                self.grid_nodes[g].set_sid_list(sid_list)
+            self.grid_nodes[g].append_partition(curr_time, merged_partition)
         if t0 is not None:
             self._profile_add("sketch.distribute", time.perf_counter() - t0)
 
@@ -3234,13 +3405,14 @@ class CorrTrack:
         self.verbose = verbose
         self.testing = testing
 
-        use_parallel = self.exec in ("thread",)
-        worker_mode = self.exec
+        sketch_mode = "thread" if self.parallel_sketch else "sequential"
+        cand_mode = "thread" if self.parallel_candidates else "sequential"
+        val_mode = "thread" if self.parallel_validation else "sequential"
 
         self._update_curr_data(new_data_step,ids)
 
         start_time = time.time()
-        sketches = self._get_sketches(self._curr_window_step(), verbose, testing, worker_mode=worker_mode)
+        sketches = self._get_sketches(self._curr_window_step(), verbose, testing, worker_mode=sketch_mode)
         end_time = time.time()
         self.sketch_time += end_time - start_time
         #self._update_hist_sketches()
@@ -3251,8 +3423,8 @@ class CorrTrack:
         start_time = time.time()
         if not self.brute_force_nodes:
             self.brute_force_nodes.append(Candidates_BF(self.window_size,self.window_step,self.n_lags,self.corr_threshold))
-        if use_parallel:
-            self.candidates = self._run_bf_parallel(self._curr_window_step(), self.ids, worker_mode=worker_mode)
+        if self.parallel_candidates:
+            self.candidates = self._run_bf_parallel(self._curr_window_step(), self.ids, worker_mode=cand_mode)
         else:
             # original single-thread path
             self.candidates = self.brute_force_nodes[0].run(self._curr_window_step(), self.ids, verbose, testing, ref_indices=None)
@@ -3260,7 +3432,7 @@ class CorrTrack:
         self.candidate_time += end_time - start_time
 
         start_time = time.time()
-        self._train_distances()
+        self._train_distances(worker_mode=val_mode)
         end_time = time.time()
         self.train_dist_time += end_time - start_time
     
@@ -3271,15 +3443,31 @@ class CorrTrack:
         - Each worker calls Candidates_BF.run(...) on its shard.
         - Results are merged on the main thread.
         """
-        while len(self.brute_force_nodes) < self.n_sketch_nodes:
+        ids_list = list(ids) if ids is not None else []
+        n_ids = len(ids_list)
+        n_nodes = min(self.n_candidate_nodes, n_ids) if n_ids > 0 else 0
+        if n_nodes <= 0:
+            return {}
+
+        while len(self.brute_force_nodes) < n_nodes:
             self.brute_force_nodes.append(Candidates_BF(self.window_size,self.window_step,self.n_lags,self.corr_threshold))
-        if len(self.brute_force_nodes) > self.n_sketch_nodes:
-            self.brute_force_nodes = self.brute_force_nodes[:self.n_sketch_nodes]
+        if len(self.brute_force_nodes) > n_nodes:
+            self.brute_force_nodes = self.brute_force_nodes[:n_nodes]
+
+        if n_nodes <= 1:
+            id_groups = [ids_list]
+        else:
+            n_series_node = math.ceil(n_ids / n_nodes)
+            id_groups = [
+                ids_list[i * n_series_node:(i + 1) * n_series_node]
+                for i in range(n_nodes)
+            ]
 
         node_inputs = []
-        max_nodes = min(self.n_sketch_nodes, len(self.map_ids))
-        for s in range(max_nodes):
-            ref_ids = [id_ for id_ in self.map_ids[s] if id_ in self.series_ids]
+        for s, shard_ids in enumerate(id_groups):
+            if not shard_ids:
+                continue
+            ref_ids = [id_ for id_ in shard_ids if id_ in self.series_ids]
             if not ref_ids:
                 continue
             node_inputs.append((s, curr_window_step, ref_ids))
@@ -3323,8 +3511,8 @@ class CorrTrack:
         self.verbose = verbose
         self.testing = testing
 
-        use_parallel = self.exec in ("thread",)
-        worker_mode = self.exec
+        cand_mode = "thread" if self.parallel_candidates else "sequential"
+        val_mode = "thread" if self.parallel_validation else "sequential"
 
         self._update_curr_data(new_data_step, ids)
 
@@ -3332,13 +3520,13 @@ class CorrTrack:
         self.candidates = {}
         start_time = time.time()
         
-        if use_parallel:
+        if self.parallel_candidates:
             self.candidates = self._run_bf_parallel(
                 self._curr_window_step(),
                 self.ids,
                 verbose=verbose,
                 testing=testing,
-                worker_mode=worker_mode,
+                worker_mode=cand_mode,
             )
         else:
             if not self.brute_force_nodes:
@@ -3350,13 +3538,13 @@ class CorrTrack:
 
         # validation
         start_time = time.time()
-        self._get_validated_corr(corr_val, force_mode=worker_mode)
+        self._get_validated_corr(corr_val, force_mode=val_mode)
         end_time = time.time()
         self.validation_time += end_time - start_time
 
         # monitoring
         start_time = time.time()
-        self._monitor_corr()
+        self._monitor_corr(worker_mode=val_mode)
         end_time = time.time()
         self.monitor_time += end_time - start_time
 
@@ -3380,30 +3568,32 @@ class CorrTrack:
         self.testing = testing
 
         self._update_curr_data(new_data_step, ids)
-        worker_mode = self.exec
+        sketch_mode = "thread" if self.parallel_sketch else "sequential"
+        cand_mode = "thread" if self.parallel_candidates else "sequential"
+        val_mode = "thread" if self.parallel_validation else "sequential"
 
         # 1) sketches
         start_time = time.time()
-        sketches = self._get_sketches(self._curr_window_step(), verbose, testing, worker_mode=worker_mode)
+        sketches = self._get_sketches(self._curr_window_step(), verbose, testing, worker_mode=sketch_mode)
         end_time = time.time()
         self.sketch_time += end_time - start_time
         self._update_curr_sketches(sketches)
 
         # 2) candidates via grids
         start_time = time.time()
-        self._run_grids(verbose, testing, worker_mode=worker_mode)
+        self._run_grids(verbose, testing, worker_mode=cand_mode)
         end_time = time.time()
         self.candidate_time += end_time - start_time
 
         # 3) validation (parallel)
         start_time = time.time()
-        self._get_validated_corr(corr_val, force_mode=worker_mode)
+        self._get_validated_corr(corr_val, force_mode=val_mode)
         end_time = time.time()
         self.validation_time += end_time - start_time
 
         # 4) monitoring (parallel 'out', sequential 'in')
         start_time = time.time()
-        self._monitor_corr()
+        self._monitor_corr(worker_mode=val_mode)
         end_time = time.time()
         self.monitor_time += end_time - start_time
 
@@ -3443,6 +3633,10 @@ class Sketches:
         self._raw_window_sums_sq = None
         self._raw_window_sums_cu = None
         self._raw_window_sums_qu = None
+        self._sid_lookup = None
+        self._const_flags = None
+        self._spiked_flags = None
+        self.is_spiked = {}
         # Parameters sketches
         self._debug_raw_sketches = {}
         self.seed = seed
@@ -3594,15 +3788,56 @@ class Sketches:
         self._update_window_raw_stats(force_recompute=reset_raw_stats)
 
         if self.curr_window_size >= self.window_size:
-            for idx, series_id in enumerate(self.series_ids):
-                stats = self._raw_stats_for_series(idx)
-                if stats is None:
-                    self.is_constant[series_id] = True
-                    continue
-                self.is_constant[series_id] = CorrTrack.is_near_constant(
-                    var_sum=stats["var_sum"],
-                    n=stats["n"],
+            self._const_flags = None
+            self._spiked_flags = None
+            if (
+                _cy_compute_constant_flags is not None
+                and self._raw_window_sums is not None
+                and self._raw_window_sums_sq is not None
+                and self._raw_window_sums_cu is not None
+                and self._raw_window_sums_qu is not None
+            ):
+                const_flags, spiked_flags = _cy_compute_constant_flags(
+                    np.asarray(self._raw_window_sums, dtype=np.float64),
+                    np.asarray(self._raw_window_sums_sq, dtype=np.float64),
+                    np.asarray(self._raw_window_sums_cu, dtype=np.float64),
+                    np.asarray(self._raw_window_sums_qu, dtype=np.float64),
+                    int(self.curr_window_size),
                 )
+                self._const_flags = np.asarray(const_flags, dtype=np.uint8)
+                self._spiked_flags = np.asarray(spiked_flags, dtype=np.uint8)
+                self.is_constant = {}
+                self.is_spiked = {}
+                for idx, series_id in enumerate(self.series_ids):
+                    if series_id is None:
+                        continue
+                    self.is_constant[series_id] = bool(self._const_flags[idx])
+                    self.is_spiked[series_id] = bool(self._spiked_flags[idx])
+            else:
+                const_flags = []
+                spiked_flags = []
+                for idx, series_id in enumerate(self.series_ids):
+                    stats = self._raw_stats_for_series(idx)
+                    if stats is None:
+                        flag = True
+                        spiked = False
+                    else:
+                        flag = CorrTrack.is_near_constant(
+                            var_sum=stats["var_sum"],
+                            n=stats["n"],
+                        )
+                        spiked = CorrTrack.is_structurally_spiked(
+                            var_sum=stats["var_sum"],
+                            n=stats["n"],
+                            mu4_sum=stats["mu4_sum"],
+                        )
+                    if series_id is not None:
+                        self.is_constant[series_id] = flag
+                        self.is_spiked[series_id] = spiked
+                    const_flags.append(flag)
+                    spiked_flags.append(spiked)
+                self._const_flags = np.asarray(const_flags, dtype=np.uint8)
+                self._spiked_flags = np.asarray(spiked_flags, dtype=np.uint8)
             
     def _preprocess_data(self, data):
         t = np.asarray(data, dtype=np.float64)
@@ -3915,22 +4150,36 @@ class Sketches:
         window_blocks = current_window.reshape(n_series, self.n_basic_windows, self.basic_window)
         weights = np.array(self._toggle_weights, dtype=np.float64, copy=False)
 
-        series_dots = _compute_series_dots(window_blocks, weights)
-        sketch_vectors = series_dots.sum(axis=1)
+        self._ensure_orth_transform()
+        perm = self._orth_perm
+        signs = self._orth_signs
+        norm_mode = 1 if (self.sketch_norm or "z").lower() == "mean_l2" else 0
+
+        if _cy_build_sketch_matrix is not None:
+            perm_arr = np.asarray(perm, dtype=np.int64) if perm is not None else np.empty(0, dtype=np.int64)
+            signs_arr = np.asarray(signs, dtype=np.float64) if signs is not None else np.empty(0, dtype=np.float64)
+            series_dots, raw_matrix, norm_matrix = _cy_build_sketch_matrix(
+                np.ascontiguousarray(window_blocks, dtype=np.float64),
+                np.ascontiguousarray(weights, dtype=np.float64),
+                perm_arr,
+                signs_arr,
+                int(norm_mode),
+            )
+        else:
+            series_dots = _compute_series_dots(window_blocks, weights)
+            sketch_vectors = series_dots.sum(axis=1)
+            raw_matrix = np.array(sketch_vectors, dtype=np.float64, copy=False)
+            if perm is not None and signs is not None and raw_matrix.shape[1] == perm.shape[0]:
+                raw_matrix = raw_matrix[:, perm] * signs
+            norm_matrix = self._normalize_sketch_matrix(raw_matrix)
         curr_start = self._curr_startTime()
         window_size = self.window_size
 
-        self.basicDots.append(series_dots.copy())
+        self.basicDots.append(np.array(series_dots, dtype=np.float64, copy=True))
         self.sketches = {}
         if n_series == 0:
             self._sketch_matrix = None
             return
-        self._ensure_orth_transform()
-        perm = self._orth_perm
-        signs = self._orth_signs
-        raw_matrix = np.array(sketch_vectors, dtype=np.float64, copy=False)
-        if perm is not None and signs is not None and raw_matrix.shape[1] == perm.shape[0]:
-            raw_matrix = raw_matrix[:, perm] * signs
         if self._debug_sketches or self.testing:
             for s in range(n_series):
                 try:
@@ -3939,7 +4188,6 @@ class Sketches:
                     )
                 except Exception:
                     pass
-        norm_matrix = self._normalize_sketch_matrix(raw_matrix)
         self._sketch_matrix = norm_matrix
         series_ids = list(self.series_ids)
         if len(series_ids) < n_series:
@@ -4000,8 +4248,20 @@ class Sketches:
                 self._ensure_orth_transform()
                 perm = self._orth_perm
                 signs = self._orth_signs
-                if perm is not None and signs is not None and raw_matrix.shape[1] == perm.shape[0]:
-                    raw_matrix = raw_matrix[:, perm] * signs
+                norm_mode = 1 if (self.sketch_norm or "z").lower() == "mean_l2" else 0
+                if _cy_apply_orth_and_normalize is not None:
+                    perm_arr = np.asarray(perm, dtype=np.int64) if perm is not None else np.empty(0, dtype=np.int64)
+                    signs_arr = np.asarray(signs, dtype=np.float64) if signs is not None else np.empty(0, dtype=np.float64)
+                    raw_matrix, norm_matrix = _cy_apply_orth_and_normalize(
+                        np.ascontiguousarray(raw_matrix, dtype=np.float64),
+                        perm_arr,
+                        signs_arr,
+                        int(norm_mode),
+                    )
+                else:
+                    if perm is not None and signs is not None and raw_matrix.shape[1] == perm.shape[0]:
+                        raw_matrix = raw_matrix[:, perm] * signs
+                    norm_matrix = self._normalize_sketch_matrix(raw_matrix)
 
                 if self._debug_sketches or self.testing:
                     for s in range(n_series):
@@ -4011,7 +4271,6 @@ class Sketches:
                             )
                         except Exception:
                             pass
-                norm_matrix = self._normalize_sketch_matrix(raw_matrix)
                 self._sketch_matrix = norm_matrix
                 series_ids = list(self.series_ids)
                 if len(series_ids) < n_series:
@@ -4099,8 +4358,20 @@ class Sketches:
         self._ensure_orth_transform()
         perm = self._orth_perm
         signs = self._orth_signs
-        if perm is not None and signs is not None and raw_matrix.shape[1] == perm.shape[0]:
-            raw_matrix = raw_matrix[:, perm] * signs
+        norm_mode = 1 if (self.sketch_norm or "z").lower() == "mean_l2" else 0
+        if _cy_apply_orth_and_normalize is not None:
+            perm_arr = np.asarray(perm, dtype=np.int64) if perm is not None else np.empty(0, dtype=np.int64)
+            signs_arr = np.asarray(signs, dtype=np.float64) if signs is not None else np.empty(0, dtype=np.float64)
+            raw_matrix, norm_matrix = _cy_apply_orth_and_normalize(
+                np.ascontiguousarray(raw_matrix, dtype=np.float64),
+                perm_arr,
+                signs_arr,
+                int(norm_mode),
+            )
+        else:
+            if perm is not None and signs is not None and raw_matrix.shape[1] == perm.shape[0]:
+                raw_matrix = raw_matrix[:, perm] * signs
+            norm_matrix = self._normalize_sketch_matrix(raw_matrix)
 
         if self._debug_sketches or self.testing:
             for s in range(n_series):
@@ -4110,8 +4381,6 @@ class Sketches:
                     )
                 except Exception:
                     pass
-
-        norm_matrix = self._normalize_sketch_matrix(raw_matrix)
         self._sketch_matrix = norm_matrix
         series_ids = list(self.series_ids)
         if len(series_ids) < n_series:
@@ -4262,7 +4531,6 @@ class Sketches:
         if len(self.sketches) == 0 and not self._sketch_keys:
             return
 
-        self.partitions = [dict() for _ in range(self.n_grids)]
         total_dim = self.n_grids * self.grid_dimensions
         if total_dim <= 0:
             return
@@ -4293,57 +4561,87 @@ class Sketches:
         if n_rows == 0 or n_dim == 0:
             return
 
-        const_flags = np.array(
-            [bool(self.is_constant.get(k[0], False)) for k in keys],
-            dtype=np.uint8,
-        )
+        sid_lookup = self._sid_lookup
+        if sid_lookup is None:
+            sid_lookup = {sid: i for i, sid in enumerate(self.series_ids)}
+        sid_idx = np.fromiter((sid_lookup.get(k[0], -1) for k in keys), dtype=np.int64, count=len(keys))
+        time_arr = np.fromiter((int(k[1]) for k in keys), dtype=np.int64, count=len(keys))
+        w_arr = np.fromiter((int(k[2]) for k in keys), dtype=np.int64, count=len(keys))
+        if self._const_flags is not None and self._const_flags.size >= len(keys):
+            const_flags = np.asarray(self._const_flags[: len(keys)], dtype=np.uint8)
+        else:
+            const_flags = np.array(
+                [bool(self.is_constant.get(k[0], False)) for k in keys],
+                dtype=np.uint8,
+            )
 
-        chunks = norms = is_const = None
-        if _cy_build_partitions is not None:
-            try:
-                matrix_c = np.ascontiguousarray(matrix, dtype=np.float64)
-                const_c = np.ascontiguousarray(const_flags, dtype=np.uint8)
-                chunks, norms, is_const = _cy_build_partitions(
-                    matrix_c,
-                    int(self.grid_dimensions),
-                    const_c,
+        valid_mask = sid_idx >= 0
+        if not np.all(valid_mask):
+            matrix = matrix[valid_mask]
+            sid_idx = sid_idx[valid_mask]
+            time_arr = time_arr[valid_mask]
+            w_arr = w_arr[valid_mask]
+            const_flags = const_flags[valid_mask]
+            keys = [k for k, keep in zip(keys, valid_mask) if keep]
+            if sid_idx.size == 0:
+                return
+
+        n_grids = min(self.n_grids, n_dim // self.grid_dimensions)
+        self.partitions = [None for _ in range(self.n_grids)]
+        sid_idx_arr = np.ascontiguousarray(sid_idx, dtype=np.int64)
+        time_arr = np.ascontiguousarray(time_arr, dtype=np.int64)
+        w_arr = np.ascontiguousarray(w_arr, dtype=np.int64)
+
+        if _cy_build_partition_values is not None:
+            values, is_const = _cy_build_partition_values(
+                np.ascontiguousarray(matrix, dtype=np.float64),
+                int(self.grid_dimensions),
+                np.ascontiguousarray(const_flags, dtype=np.uint8),
+            )
+            n_grids = min(n_grids, values.shape[0])
+            for grid in range(n_grids):
+                self.partitions[grid] = (
+                    sid_idx_arr,
+                    time_arr,
+                    w_arr,
+                    np.ascontiguousarray(values[grid], dtype=np.float64),
+                    np.ascontiguousarray(is_const[grid], dtype=np.uint8),
                 )
-            except Exception:
-                chunks = norms = is_const = None
-
-        if chunks is None:
-            n_grids = min(self.n_grids, n_dim // self.grid_dimensions)
-            chunks = np.empty((n_grids, n_rows, self.grid_dimensions), dtype=np.float64)
-            norms = np.empty((n_grids, n_rows), dtype=np.float64)
-            is_const = np.empty((n_grids, n_rows), dtype=np.uint8)
+        else:
             for grid in range(n_grids):
                 start = grid * self.grid_dimensions
                 end = start + self.grid_dimensions
                 chunk = matrix[:, start:end]
-                chunks[grid] = chunk
-                grid_norms = np.linalg.norm(chunk, axis=1)
-                grid_norms = np.where(np.isfinite(grid_norms), grid_norms, 0.0)
-                norms[grid] = grid_norms
-                is_const[grid] = np.logical_or(const_flags != 0, grid_norms == 0.0).astype(np.uint8)
-
-        n_grids = min(self.n_grids, chunks.shape[0])
-        for grid in range(n_grids):
-            part = {}
-            chunk = chunks[grid]
-            grid_norms = norms[grid]
-            grid_const = is_const[grid]
-            for i, k in enumerate(keys):
-                part[k] = (
-                    np.array(chunk[i], dtype=np.float64, copy=True),
-                    bool(grid_const[i]),
-                    float(grid_norms[i]),
+                if chunk.size == 0:
+                    value_arr = np.empty((chunk.shape[0],), dtype=np.float64)
+                    is_const = const_flags.copy()
+                else:
+                    value_arr = np.ascontiguousarray(chunk[:, 0], dtype=np.float64)
+                    grid_norms = np.linalg.norm(chunk, axis=1)
+                    grid_norms = np.where(np.isfinite(grid_norms), grid_norms, 0.0)
+                    is_const = np.logical_or(const_flags != 0, grid_norms == 0.0).astype(np.uint8)
+                self.partitions[grid] = (
+                    sid_idx_arr,
+                    time_arr,
+                    w_arr,
+                    value_arr,
+                    is_const,
                 )
-            self.partitions[grid] = part
 
     def distribute_partitions(self):
         if len(self.partitions)>0:
+            sid_list = None
+            if isinstance(self._sid_lookup, dict) and self._sid_lookup:
+                sid_list = [sid for sid, idx in sorted(self._sid_lookup.items(), key=lambda item: item[1])]
+            elif self.series_ids:
+                sid_list = list(self.series_ids)
             for grid in range(self.n_grids):
-                self.grid_nodes[grid].append_partition(self._curr_startTime(),self.partitions[grid])
+                part = self.partitions[grid]
+                if part is None:
+                    continue
+                if isinstance(part, tuple) and sid_list is not None:
+                    self.grid_nodes[grid].set_sid_list(sid_list)
+                self.grid_nodes[grid].append_partition(self._curr_startTime(), part)
             return True
         else:
             return False
@@ -4362,7 +4660,8 @@ class Sketches:
         if(testing and sketches):
             self._print_state()
 
-        return dict(self.sketches), [dict(p) for p in self.partitions]
+        # Return copies so the caller can safely merge
+        return dict(self.sketches), list(self.partitions)
 
 class Candidates_BF:
     def __init__(self,window_size,window_step,n_lags,corr_threshold):       
@@ -4526,20 +4825,12 @@ class Candidates:
         self.cell_size = cell_size
         self.grid_max = grid_max
         self.sketches = {}
-        # Sorted index over scalar sketch values
-        self._values = []
-        self._entry_window_idx = []
-        self._window_ids = []
-        self._window_id_to_idx = {}
-        self._win_sid_idx = []
-        self._win_time = []
-        self._sid_to_idx = {}
+        # BST-like storage over scalar sketch values
+        self._entries = []  # (value, window_id_key, window_id)
+        self._values = []   # parallel list of values for bisect
+        self._reverse_index = defaultdict(list)  # window_id -> list of inserted values (includes neg when needed)
+        self._recent_window_ids = set()
         self._sid_list = []
-        self._reverse_index = []
-        self._recent_window_idx = []
-        self._recent_window_set = set()
-        self._free_window_idx = []
-        self._bin_index = defaultdict(set)
         # Parameters thresholds
         self.freq_threshold = freq_threshold
         self.corr_threshold = corr_threshold
@@ -4558,38 +4849,13 @@ class Candidates:
     def from_state(cls, state):
         obj = cls.__new__(cls)
         obj.__dict__.update(state)
-        reverse_index = getattr(obj, "_reverse_index", [])
-        if isinstance(reverse_index, dict):
-            window_ids = getattr(obj, "_window_ids", [])
-            obj._reverse_index = [reverse_index.get(wid, []) for wid in window_ids]
-        elif isinstance(reverse_index, list):
-            obj._reverse_index = reverse_index
-        else:
-            obj._reverse_index = []
-        obj._recent_window_set = set(getattr(obj, "_recent_window_set", set()))
-        obj._recent_window_idx = list(getattr(obj, "_recent_window_idx", []))
-        obj._free_window_idx = list(getattr(obj, "_free_window_idx", []))
-        obj._window_id_to_idx = dict(getattr(obj, "_window_id_to_idx", {}))
-        obj._bin_index = defaultdict(set, getattr(obj, "_bin_index", {}))
         return obj
 
     def load_state(self, state):
         self.__dict__.update(state)
-        reverse_index = getattr(self, "_reverse_index", [])
-        if isinstance(reverse_index, dict):
-            window_ids = getattr(self, "_window_ids", [])
-            self._reverse_index = [reverse_index.get(wid, []) for wid in window_ids]
-        elif isinstance(reverse_index, list):
-            self._reverse_index = reverse_index
-        else:
-            self._reverse_index = []
-        self._recent_window_set = set(getattr(self, "_recent_window_set", set()))
-        self._recent_window_idx = list(getattr(self, "_recent_window_idx", []))
-        self._free_window_idx = list(getattr(self, "_free_window_idx", []))
-        self._window_id_to_idx = dict(getattr(self, "_window_id_to_idx", {}))
-        self._bin_index = defaultdict(set, getattr(self, "_bin_index", {}))
 
     def append_partition(self,curr_time,new_partition):
+        new_partition = self._partition_to_dict(new_partition)
         if new_partition is None:
             return
         if self.curr_time != curr_time:
@@ -4597,81 +4863,59 @@ class Candidates:
             self.partition.append(new_partition)
         else:
             self.partition[-1].update(new_partition)
-        self._recent_window_set.clear()
-        self._recent_window_idx = []
+        self._recent_window_ids = set()
 
-    def _bin_id(self, value):
-        if self.cell_size is None:
+    def set_sid_list(self, sid_list):
+        if not sid_list:
+            return
+        if self._sid_list == list(sid_list):
+            return
+        self._sid_list = list(sid_list)
+
+    def _partition_to_dict(self, partition):
+        if partition is None:
             return None
-        tau = float(self.cell_size)
-        if tau <= 0.0:
-            return None
-        return int(math.floor(value / tau))
+        if isinstance(partition, dict):
+            return partition if partition else None
+        if isinstance(partition, tuple) and len(partition) == 5:
+            sid_idx, time_arr, w_arr, value_arr, is_const = partition
+            if sid_idx is None or len(sid_idx) == 0:
+                return None
+            out = {}
+            sid_list = self._sid_list
+            for i in range(len(sid_idx)):
+                idx = int(sid_idx[i])
+                sid = sid_list[idx] if sid_list and idx < len(sid_list) else str(idx)
+                key = (sid, int(time_arr[i]), int(w_arr[i]))
+                out[key] = (float(value_arr[i]), bool(is_const[i]), 0.0)
+            return out
+        return None
 
-    def _bin_add(self, value, window_idx):
-        bin_id = self._bin_id(value)
-        if bin_id is None:
-            return
-        self._bin_index[bin_id].add(window_idx)
-
-    def _bin_remove(self, value, window_idx):
-        bin_id = self._bin_id(value)
-        if bin_id is None:
-            return
-        bucket = self._bin_index.get(bin_id)
-        if not bucket:
-            return
-        bucket.discard(window_idx)
-        if not bucket:
-            self._bin_index.pop(bin_id, None)
-
-    def _sid_index(self, sid):
-        key = str(sid)
-        idx = self._sid_to_idx.get(key)
-        if idx is None:
-            idx = len(self._sid_list)
-            self._sid_list.append(key)
-            self._sid_to_idx[key] = idx
-        return idx
-
-    def _ensure_window_index(self, window_id):
-        idx = self._window_id_to_idx.get(window_id)
-        if idx is not None:
-            return idx
+    def _window_id_key(self, window_id):
         sid, start_time, window_size = window_id
-        if self._free_window_idx:
-            idx = self._free_window_idx.pop()
-            self._window_ids[idx] = window_id
-            self._win_sid_idx[idx] = self._sid_index(sid)
-            self._win_time[idx] = int(start_time)
-            self._reverse_index[idx] = []
-        else:
-            idx = len(self._window_ids)
-            self._window_ids.append(window_id)
-            self._win_sid_idx.append(self._sid_index(sid))
-            self._win_time.append(int(start_time))
-            self._reverse_index.append([])
-        self._window_id_to_idx[window_id] = idx
-        return idx
+        return (str(sid), int(start_time), int(window_size))
 
-    def _insert_entry(self, value, window_idx):
+    def _insert_entry(self, value, window_id):
+        key = self._window_id_key(window_id)
         start = bisect.bisect_left(self._values, value)
         end = bisect.bisect_right(self._values, value)
         if start == end:
             idx = start
         else:
-            subkeys = self._entry_window_idx[start:end]
-            offset = bisect.bisect_left(subkeys, window_idx)
+            subkeys = [self._entries[i][1] for i in range(start, end)]
+            offset = bisect.bisect_left(subkeys, key)
             idx = start + offset
         self._values.insert(idx, value)
-        self._entry_window_idx.insert(idx, window_idx)
+        self._entries.insert(idx, (value, key, window_id))
 
-    def _remove_entry(self, value, window_idx):
+    def _remove_entry(self, value, window_id):
+        key = self._window_id_key(window_id)
         idx = bisect.bisect_left(self._values, value)
         while idx < len(self._values) and self._values[idx] == value:
-            if self._entry_window_idx[idx] == window_idx:
+            _, entry_key, entry_id = self._entries[idx]
+            if entry_key == key and entry_id == window_id:
                 self._values.pop(idx)
-                self._entry_window_idx.pop(idx)
+                self._entries.pop(idx)
                 return True
             idx += 1
         return False
@@ -4680,15 +4924,14 @@ class Candidates:
         idx = bisect.bisect_left(self._values, lower)
         n = len(self._values)
         while idx < n and self._values[idx] <= upper:
-            yield self._entry_window_idx[idx]
+            yield self._entries[idx][2]
             idx += 1
 
     def _input_tree(self):
         if not self.partition:
             return
         last_partition = self.partition[-1]
-        self._recent_window_set.clear()
-        self._recent_window_idx = []
+        self._recent_window_ids = set()
         for k, v in last_partition.items():
             if len(v) >= 3:
                 sketch, is_constant, _norm = v[:3]
@@ -4700,19 +4943,14 @@ class Candidates:
             if vec.size == 0:
                 continue
             value = float(vec[0])
-            window_idx = self._ensure_window_index(k)
-            self._insert_entry(value, window_idx)
-            self._reverse_index[window_idx].append(value)
-            self._bin_add(value, window_idx)
+            self._insert_entry(value, k)
+            self._reverse_index[k].append(value)
             if self.neg_corr:
                 neg_value = -value
-                self._insert_entry(neg_value, window_idx)
-                self._reverse_index[window_idx].append(neg_value)
-                self._bin_add(neg_value, window_idx)
+                self._insert_entry(neg_value, k)
+                self._reverse_index[k].append(neg_value)
             self.sketches[k] = value
-            if window_idx not in self._recent_window_set:
-                self._recent_window_set.add(window_idx)
-                self._recent_window_idx.append(window_idx)
+            self._recent_window_ids.add(k)
 
     def _clean_old_sketches(self):
         if len(self.partition) > self.n_lagged_windows:
@@ -4722,20 +4960,13 @@ class Candidates:
                     _sketch, is_constant, _norm = v[:3]
                 else:
                     continue
-                window_idx = self._window_id_to_idx.pop(k, None)
-                if window_idx is None:
+                values = self._reverse_index.pop(k, [])
+                if is_constant:
+                    self.sketches.pop(k, None)
                     continue
-                values = self._reverse_index[window_idx]
-                if not is_constant:
-                    for val in values:
-                        self._remove_entry(val, window_idx)
-                        self._bin_remove(val, window_idx)
+                for val in values:
+                    self._remove_entry(val, k)
                 self.sketches.pop(k, None)
-                self._reverse_index[window_idx] = []
-                self._window_ids[window_idx] = None
-                self._win_sid_idx[window_idx] = -1
-                self._win_time[window_idx] = 0
-                self._free_window_idx.append(window_idx)
 
     def _update_grid(self, n_ids):
         if self.partition and len(self.partition[-1]) >= n_ids:
@@ -4762,16 +4993,8 @@ class Candidates:
     def update_n_lagged_windows(self,n_lagged_windows):
         self.n_lagged_windows = n_lagged_windows
 
-    def _values_within_range(self, value, other_idx, tau):
-        if other_idx >= len(self._reverse_index):
-            return False
-        for other_value in set(self._reverse_index[other_idx]):
-            if abs(other_value - value) <= tau:
-                return True
-        return False
-
     def _increment_candidates(self, freq_pairs, candidates):
-        if not self._recent_window_idx:
+        if not self._recent_window_ids:
             return
         if self.cell_size is None:
             return
@@ -4779,91 +5002,13 @@ class Candidates:
         if tau < 0.0:
             return
         seen_pairs = set()
-        if _cy_find_candidate_pairs is not None and self._values:
-            recent_values = []
-            recent_idx = []
-            for window_idx in self._recent_window_idx:
-                if window_idx >= len(self._reverse_index):
-                    continue
-                values = self._reverse_index[window_idx]
-                for value in set(values):
-                    recent_values.append(float(value))
-                    recent_idx.append(int(window_idx))
-            if recent_values:
-                values_arr = np.asarray(self._values, dtype=np.float64)
-                value_idx_arr = np.asarray(self._entry_window_idx, dtype=np.int64)
-                recent_vals_arr = np.asarray(recent_values, dtype=np.float64)
-                recent_idx_arr = np.asarray(recent_idx, dtype=np.int64)
-                win_sid_arr = np.asarray(self._win_sid_idx, dtype=np.int64)
-                win_time_arr = np.asarray(self._win_time, dtype=np.int64)
-                pairs = _cy_find_candidate_pairs(
-                    values_arr,
-                    value_idx_arr,
-                    recent_vals_arr,
-                    recent_idx_arr,
-                    win_sid_arr,
-                    win_time_arr,
-                    tau,
-                )
-                for window_idx, other_idx in pairs:
-                    window_id = self._window_ids[window_idx] if window_idx < len(self._window_ids) else None
-                    other_id = self._window_ids[other_idx] if other_idx < len(self._window_ids) else None
-                    if window_id is None or other_id is None:
-                        continue
-                    pair_id = self._normalize_key((window_id[0], other_id[0], window_id[1], other_id[1], window_id[2]))
-                    if pair_id in seen_pairs:
-                        continue
-                    seen_pairs.add(pair_id)
-                    freq_pairs[pair_id] = freq_pairs.get(pair_id, 0.0) + 1.0
-                    if freq_pairs[pair_id] >= self.freq_threshold:
-                        candidates[pair_id] = 1
-                return
-        if self._bin_index:
-            for window_idx in self._recent_window_idx:
-                if window_idx >= len(self._reverse_index):
-                    continue
-                window_id = self._window_ids[window_idx] if window_idx < len(self._window_ids) else None
-                if window_id is None:
-                    continue
-                values = self._reverse_index[window_idx]
-                for value in set(values):
-                    bin_id = self._bin_id(value)
-                    if bin_id is None:
-                        continue
-                    for cand_bin in (bin_id - 1, bin_id, bin_id + 1):
-                        for other_idx in self._bin_index.get(cand_bin, ()):
-                            if other_idx == window_idx:
-                                continue
-                            other_id = self._window_ids[other_idx] if other_idx < len(self._window_ids) else None
-                            if other_id is None:
-                                continue
-                            if window_id[0] == other_id[0] and window_id[1] == other_id[1]:
-                                continue
-                            if not self._values_within_range(value, other_idx, tau):
-                                continue
-                            pair_id = self._normalize_key((window_id[0], other_id[0], window_id[1], other_id[1], window_id[2]))
-                            if pair_id in seen_pairs:
-                                continue
-                            seen_pairs.add(pair_id)
-                            freq_pairs[pair_id] = freq_pairs.get(pair_id, 0.0) + 1.0
-                            if freq_pairs[pair_id] >= self.freq_threshold:
-                                candidates[pair_id] = 1
-            return
-        for window_idx in self._recent_window_idx:
-            if window_idx >= len(self._reverse_index):
-                continue
-            window_id = self._window_ids[window_idx] if window_idx < len(self._window_ids) else None
-            if window_id is None:
-                continue
-            values = self._reverse_index[window_idx]
+        for window_id in self._recent_window_ids:
+            values = self._reverse_index.get(window_id, ())
             for value in set(values):
                 lower = value - tau
                 upper = value + tau
-                for other_idx in self._range_search_ids(lower, upper):
-                    other_id = self._window_ids[other_idx] if other_idx < len(self._window_ids) else None
-                    if other_id is None:
-                        continue
-                    if other_idx == window_idx:
+                for other_id in self._range_search_ids(lower, upper):
+                    if other_id == window_id:
                         continue
                     if window_id[0] == other_id[0] and window_id[1] == other_id[1]:
                         continue
@@ -4890,8 +5035,9 @@ class Candidates:
 
         return freq_pairs, candidates, uncorrelated
 
+
 class CorrTrack_optimize:
-    def __init__(self,train_data,ids,window_size,window_step,n_lags,corr_threshold,recall_by_window,alg,neg_corr,corr_val, extra_filter=False, exec="parallel",max_workers=0, sketch_norm="z"):
+    def __init__(self,train_data,ids,window_size,window_step,n_lags,corr_threshold,recall_by_window,alg,neg_corr,corr_val, extra_filter=False, exec="parallel",max_workers=0, sketch_norm="z", parallel_sketch=None, parallel_candidates=None, parallel_validation=None):
 
         self.neg_corr = neg_corr
         self.corr_val = corr_val
@@ -4914,11 +5060,15 @@ class CorrTrack_optimize:
         # (use your globals by default)
         self.exec = _normalize_exec_mode(exec, default="thread")
         self.max_workers = max_workers
+        parallel_default = self.exec == "thread"
+        self.parallel_sketch = _resolve_parallel_flag(parallel_sketch, parallel_default)
+        self.parallel_candidates = _resolve_parallel_flag(parallel_candidates, parallel_default)
+        self.parallel_validation = _resolve_parallel_flag(parallel_validation, parallel_default)
         
         self.corrtrack_bf = CorrTrack(window_size=self.window_size,basic_window=None,window_step=window_step,n_vectors=1,n_lags=self.n_lags,
                                     grid_dimension=1,cell_size=1,warmup_data=None,seed=None,seed_toggle=None,corr_threshold=self.corr_threshold,
                                     neg_corr=self.neg_corr,preprocess=False,extra_filter=self.extra_filter,exec=self.exec,max_workers=self.max_workers,
-                                    sketch_norm=self.sketch_norm)
+                                    sketch_norm=self.sketch_norm,parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation)
         
         self.window_step = self.corrtrack_bf.window_step
         self.basic_window = self.corrtrack_bf.basic_window
@@ -5210,6 +5360,7 @@ class CorrTrack_optimize:
             corrtrack = CorrTrack(window_size=window_size,basic_window=basic_window,window_step=window_step,n_vectors=n_vectors,n_lags=n_lags,
                                 grid_dimension=1,cell_size=1,warmup_data=warmup_data,seed=seed,seed_toggle=seed_toggle,
                                 freq_threshold=0,corr_threshold=corr_threshold,neg_corr=self.neg_corr,preprocess=preprocess,extra_filter=extra_filter,exec=self.exec,max_workers=self.max_workers,
+                                parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation,
                                 **feature_kwargs)
 
             for start in range(0, length_data - self.window_step + 1, self.window_step):
@@ -5247,6 +5398,14 @@ class CorrTrack_optimize:
         record["mem_w"] = None
 
         record["nodes"] = param_combo.get("nodes")
+        record["exec_mode"] = self.exec
+        record["parallel_sketch"] = self.parallel_sketch
+        record["parallel_candidates"] = self.parallel_candidates
+        record["parallel_validation"] = self.parallel_validation
+        record["workers_total"] = None
+        record["workers_sketch"] = None
+        record["workers_candidates"] = None
+        record["workers_validation"] = None
         record["window_size"] = self.window_size
         record["window_step"] = self.window_step
         record["basic_window"] = self.basic_window
@@ -5371,6 +5530,9 @@ class CorrTrack_optimize:
                 extra_filter=extra_filter,
                 exec=self.exec,
                 max_workers=self.max_workers,
+                parallel_sketch=self.parallel_sketch,
+                parallel_candidates=self.parallel_candidates,
+                parallel_validation=self.parallel_validation,
                 **feature_kwargs,
             )
 
@@ -5379,6 +5541,14 @@ class CorrTrack_optimize:
             record["n_lags"] = corrtrack.n_lags
             record["basic_window"] = corrtrack.basic_window
             record["grid_dimension"] = corrtrack.grid_dimension
+            record["exec_mode"] = corrtrack.exec
+            record["parallel_sketch"] = corrtrack.parallel_sketch
+            record["parallel_candidates"] = corrtrack.parallel_candidates
+            record["parallel_validation"] = corrtrack.parallel_validation
+            record["workers_total"] = corrtrack.n_nodes
+            record["workers_sketch"] = corrtrack.n_sketch_nodes
+            record["workers_candidates"] = corrtrack.n_candidate_nodes
+            record["workers_validation"] = corrtrack.n_nodes if corrtrack.parallel_validation else 1
 
             start_time = time.time()
             for start in range(0, length_data - self.window_step + 1, self.window_step):
@@ -5489,7 +5659,8 @@ class CorrTrack_optimize:
         if run:
             self._run_options(param_grid, output_csv, dataset_id)
 
-        metrics = pd.read_csv(output_csv)
+        delimiter = _detect_csv_delimiter(output_csv, default=",")
+        metrics = pd.read_csv(output_csv, sep=delimiter)
         if "status" in metrics.columns:
             metrics = metrics[metrics["status"] == "success"]
         if metrics.empty:
@@ -5509,7 +5680,7 @@ class CorrTrack_optimize:
         #return self.ground_truth, self.runtime_bf, CorrTrack_HyperOptim._skyline_query(metrics, ref_metrics) 
 
 class CorrTrack_compare:
-    def __init__(self,train_data,test_data,ids,window_size,window_step,basic_window,n_lags,corr_threshold,param_grid,recall_by_window,neg_corr,corr_val,algs=None, exec="parallel", max_workers=0, extra_filter=False, sketch_norm="z"):
+    def __init__(self,train_data,test_data,ids,window_size,window_step,basic_window,n_lags,corr_threshold,param_grid,recall_by_window,neg_corr,corr_val,algs=None, exec="parallel", max_workers=0, extra_filter=False, sketch_norm="z", parallel_sketch=None, parallel_candidates=None, parallel_validation=None):
         
         self.neg_corr = neg_corr
         self.corr_val = corr_val
@@ -5533,12 +5704,16 @@ class CorrTrack_compare:
         self.algs = algs or ["nD"]
         self.exec = _normalize_exec_mode(exec, default="thread")
         self.max_workers = max_workers
+        parallel_default = self.exec == "thread"
+        self.parallel_sketch = _resolve_parallel_flag(parallel_sketch, parallel_default)
+        self.parallel_candidates = _resolve_parallel_flag(parallel_candidates, parallel_default)
+        self.parallel_validation = _resolve_parallel_flag(parallel_validation, parallel_default)
 
         self.corrtrack_bf = CorrTrack(window_size=self.window_size,basic_window=basic_window,window_step=window_step,n_vectors=1,n_lags=self.n_lags,
                                     grid_dimension=1,cell_size=1,warmup_data=None,seed=None,seed_toggle=None,
                                     corr_threshold=self.corr_threshold,neg_corr=self.neg_corr,preprocess=False,
                                     extra_filter=self.extra_filter,exec=self.exec,max_workers=self.max_workers,
-                                    sketch_norm=self.sketch_norm)
+                                    sketch_norm=self.sketch_norm,parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation)
         
         self.window_step = self.corrtrack_bf.window_step
         self.basic_window = self.corrtrack_bf.basic_window
@@ -5595,7 +5770,8 @@ class CorrTrack_compare:
         os.makedirs(output_folder, exist_ok=True)
 
         # Load the correlation metadata
-        df_corr = pd.read_csv(corr_csv)
+        delimiter = _detect_csv_delimiter(corr_csv, default=",")
+        df_corr = pd.read_csv(corr_csv, sep=delimiter)
         df_corr['start_time_id1'] = pd.to_datetime(df_corr['start_time_id1'])
         df_corr['start_time_id2'] = pd.to_datetime(df_corr['start_time_id2'])
 
@@ -5684,7 +5860,9 @@ class CorrTrack_compare:
         corrtrack = CorrTrack(window_size=self.window_size,basic_window=self.basic_window,window_step=self.window_step,n_vectors=n_vectors,n_lags=self.n_lags,
                             grid_dimension=grid_dimension,cell_size=cell_size,warmup_data=warmup_data,seed=seed,seed_toggle=seed_toggle,
                             freq_threshold=freq_threshold,corr_threshold=self.corr_threshold,neg_corr=self.neg_corr,preprocess=preprocess,
-                            extra_filter=extra_filter_flag,exec=self.exec,max_workers=nodes,**overrides)
+                            extra_filter=extra_filter_flag,exec=self.exec,max_workers=nodes,
+                            parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation,
+                            **overrides)
         if mode == "main":
             #Running
             start_time = time.time()
@@ -5943,7 +6121,8 @@ class CorrTrack_compare:
         records = {}
         try:
             with open(csv_path, newline="") as file:
-                reader = csv.DictReader(file)
+                delimiter = _detect_csv_delimiter(csv_path, default=CSV_DELIMITER)
+                reader = csv.DictReader(file, delimiter=delimiter)
                 for row in reader:
                     id1 = row.get("id1")
                     id2 = row.get("id2")
@@ -5967,7 +6146,8 @@ class CorrTrack_compare:
         if not csv_path or not os.path.exists(csv_path):
             raise FileNotFoundError(f"Missing run record: {csv_path}")
 
-        df = pd.read_csv(csv_path)
+        delimiter = _detect_csv_delimiter(csv_path, default=CSV_DELIMITER)
+        df = pd.read_csv(csv_path, sep=delimiter)
         subset = df[df["dataset_id"] == dataset_id] if "dataset_id" in df.columns else df
         if run_kind and "run_kind" in subset.columns:
             subset = subset[subset["run_kind"] == run_kind]
@@ -6061,6 +6241,14 @@ class CorrTrack_compare:
             as_int_str(record.get("total_w")),
             as_optional_int(record.get("mem_w")),
             as_optional_int(record.get("nodes")),
+            str(record.get("exec_mode", "")),
+            str(record.get("parallel_sketch", "")),
+            str(record.get("parallel_candidates", "")),
+            str(record.get("parallel_validation", "")),
+            as_optional_int(record.get("workers_total")),
+            as_optional_int(record.get("workers_sketch")),
+            as_optional_int(record.get("workers_candidates")),
+            as_optional_int(record.get("workers_validation")),
             as_optional_int(record.get("window_size")),
             as_optional_int(record.get("window_step")),
             as_optional_int(record.get("basic_window")),
@@ -6069,6 +6257,7 @@ class CorrTrack_compare:
             as_optional_int(record.get("seed")),
             as_optional_int(record.get("seed_toggle")),
             str(record.get("preprocess")),
+            str(record.get("sketch_norm")),
             str(record.get("extra_filters")),
             fmt(record.get("corr_threshold")),
             fmt(record.get("grid_max")),
@@ -6253,7 +6442,7 @@ class CorrTrack_compare:
 
         os.makedirs(os.path.dirname(os.path.abspath(output_csv)), exist_ok=True)
         with open(output_csv, "w", newline="") as file:
-            writer = csv.writer(file)
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
             writer.writerow(COMPARISON_COLUMNS)
             writer.writerows(results)
 
@@ -6315,14 +6504,62 @@ class CorrTrack_compare:
         mem_w = self.n_lags//self.window_step
 
         param_keys = [
-            "nodes","window_size","window_step","basic_window","n_lags","warmup_size",
-            "seed","seed_toggle","preprocess","sketch_norm","extra_filters","corr_threshold",
-            "grid_max","cell_stretch","cell_size","n_vectors","grid_dimension","freq_threshold",
+            "nodes",
+            "exec_mode",
+            "parallel_sketch",
+            "parallel_candidates",
+            "parallel_validation",
+            "workers_total",
+            "workers_sketch",
+            "workers_candidates",
+            "workers_validation",
+            "window_size",
+            "window_step",
+            "basic_window",
+            "n_lags",
+            "warmup_size",
+            "seed",
+            "seed_toggle",
+            "preprocess",
+            "sketch_norm",
+            "extra_filters",
+            "corr_threshold",
+            "grid_max",
+            "cell_stretch",
+            "cell_size",
+            "n_vectors",
+            "grid_dimension",
+            "freq_threshold",
         ]
+        effective_nodes = 1
+        if self.exec != "sequential":
+            if nodes in (None, 0):
+                effective_nodes = max(1, (os.cpu_count() or 1))
+            else:
+                effective_nodes = max(1, int(nodes))
         param_values = []
         for key in param_keys:
             if key == "extra_filters":
                 param_values.append(extra_filter_flag)
+            elif key == "exec_mode":
+                param_values.append(self.exec)
+            elif key == "parallel_sketch":
+                param_values.append(self.parallel_sketch)
+            elif key == "parallel_candidates":
+                param_values.append(self.parallel_candidates)
+            elif key == "parallel_validation":
+                param_values.append(self.parallel_validation)
+            elif key == "workers_total":
+                param_values.append(effective_nodes)
+            elif key == "workers_sketch":
+                if self.parallel_sketch:
+                    param_values.append(min(effective_nodes, len(self.ids)))
+                else:
+                    param_values.append(1)
+            elif key == "workers_candidates":
+                param_values.append(effective_nodes if self.parallel_candidates else 1)
+            elif key == "workers_validation":
+                param_values.append(effective_nodes if self.parallel_validation else 1)
             else:
                 param_values.append(bst.get(key))
 
@@ -6388,7 +6625,7 @@ class CorrTrack_compare:
         results = list(self._outer_iter(args_list, self._parallel_mode_run, unordered=False))
 
         with open(output_csv, mode='w', newline='') as file:
-            writer = csv.writer(file)
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
             writer.writerow(COMPARISON_COLUMNS)
             writer.writerows(results)
 

@@ -18,6 +18,7 @@ SYNTH_PARAMS = {
     "num_templates": 4,
     "threshold": 0.75,
     "corr_sign": "pos",
+    
     #"base_proc": {"type": "ar1", "phi": 0.6, "sigma": 1.0},
     #"base_proc": {"type": "wn", "sigma": 1.3},
     #"base_proc": {"type": "lagged_seasonal_ar", "phi_short": 0.2, "phi_long": 0.6, "season_lag": 36, "sigma": 1.3},
@@ -40,3 +41,8 @@ DATA_LOADER = partial(
     generator_params=SYNTH_PARAMS,
     refresh=True,
 )
+
+# Optional per-phase parallel defaults (set to True/False to override CLI defaults).
+PARALLEL_SKETCH = None
+PARALLEL_CANDIDATES = None
+PARALLEL_VALIDATION = None

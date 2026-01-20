@@ -3215,7 +3215,7 @@ static const char __pyx_k__7[] = ")";
 static const char __pyx_k_gc[] = "gc";
 static const char __pyx_k_id[] = "id";
 static const char __pyx_k_np[] = "np";
-static const char __pyx_k__29[] = "?";
+static const char __pyx_k__31[] = "?";
 static const char __pyx_k_abc[] = "abc";
 static const char __pyx_k_acc[] = "acc";
 static const char __pyx_k_and[] = " and ";
@@ -3265,6 +3265,7 @@ static const char __pyx_k_reduce[] = "__reduce__";
 static const char __pyx_k_struct[] = "struct";
 static const char __pyx_k_unpack[] = "unpack";
 static const char __pyx_k_update[] = "update";
+static const char __pyx_k_values[] = "values";
 static const char __pyx_k_disable[] = "disable";
 static const char __pyx_k_float64[] = "float64";
 static const char __pyx_k_fortran[] = "fortran";
@@ -3286,6 +3287,7 @@ static const char __pyx_k_enumerate[] = "enumerate";
 static const char __pyx_k_isenabled[] = "isenabled";
 static const char __pyx_k_pyx_state[] = "__pyx_state";
 static const char __pyx_k_reduce_ex[] = "__reduce_ex__";
+static const char __pyx_k_values_mv[] = "values_mv";
 static const char __pyx_k_IndexError[] = "IndexError";
 static const char __pyx_k_ValueError[] = "ValueError";
 static const char __pyx_k_pyx_result[] = "__pyx_result";
@@ -3322,6 +3324,7 @@ static const char __pyx_k_contiguous_and_direct[] = "<contiguous and direct>";
 static const char __pyx_k_partition_kernels_pyx[] = "partition_kernels.pyx";
 static const char __pyx_k_Cannot_index_with_type[] = "Cannot index with type '";
 static const char __pyx_k_MemoryView_of_r_object[] = "<MemoryView of %r object>";
+static const char __pyx_k_build_partition_values[] = "build_partition_values";
 static const char __pyx_k_MemoryView_of_r_at_0x_x[] = "<MemoryView of %r at 0x%x>";
 static const char __pyx_k_contiguous_and_indirect[] = "<contiguous and indirect>";
 static const char __pyx_k_Dimension_d_is_not_direct[] = "Dimension %d is not direct";
@@ -3391,6 +3394,7 @@ static PyObject *__pyx_pf___pyx_memoryviewslice___reduce_cython__(CYTHON_UNUSED 
 static PyObject *__pyx_pf___pyx_memoryviewslice_2__setstate_cython__(CYTHON_UNUSED struct __pyx_memoryviewslice_obj *__pyx_v_self, CYTHON_UNUSED PyObject *__pyx_v___pyx_state); /* proto */
 static PyObject *__pyx_pf_15View_dot_MemoryView___pyx_unpickle_Enum(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v___pyx_type, long __pyx_v___pyx_checksum, PyObject *__pyx_v___pyx_state); /* proto */
 static PyObject *__pyx_pf_17partition_kernels_build_partitions(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_matrix, int __pyx_v_grid_dimension, __Pyx_memviewslice __pyx_v_const_flags); /* proto */
+static PyObject *__pyx_pf_17partition_kernels_2build_partition_values(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_matrix, int __pyx_v_grid_dimension, __Pyx_memviewslice __pyx_v_const_flags); /* proto */
 static PyObject *__pyx_tp_new_array(PyTypeObject *t, PyObject *a, PyObject *k); /*proto*/
 static PyObject *__pyx_tp_new_Enum(PyTypeObject *t, PyObject *a, PyObject *k); /*proto*/
 static PyObject *__pyx_tp_new_memoryview(PyTypeObject *t, PyObject *a, PyObject *k); /*proto*/
@@ -3501,8 +3505,8 @@ typedef struct {
   PyObject *__pyx_n_s_ValueError;
   PyObject *__pyx_n_s_View_MemoryView;
   PyObject *__pyx_kp_u__2;
-  PyObject *__pyx_n_s__29;
   PyObject *__pyx_n_s__3;
+  PyObject *__pyx_n_s__31;
   PyObject *__pyx_kp_u__6;
   PyObject *__pyx_kp_u__7;
   PyObject *__pyx_n_s_abc;
@@ -3511,6 +3515,7 @@ typedef struct {
   PyObject *__pyx_kp_u_and;
   PyObject *__pyx_n_s_asyncio_coroutines;
   PyObject *__pyx_n_s_base;
+  PyObject *__pyx_n_s_build_partition_values;
   PyObject *__pyx_n_s_build_partitions;
   PyObject *__pyx_n_s_c;
   PyObject *__pyx_n_u_c;
@@ -3615,6 +3620,8 @@ typedef struct {
   PyObject *__pyx_n_s_unpack;
   PyObject *__pyx_n_s_update;
   PyObject *__pyx_n_s_val;
+  PyObject *__pyx_n_s_values;
+  PyObject *__pyx_n_s_values_mv;
   PyObject *__pyx_n_s_version_info;
   PyObject *__pyx_int_0;
   PyObject *__pyx_int_1;
@@ -3644,8 +3651,10 @@ typedef struct {
   PyObject *__pyx_tuple__24;
   PyObject *__pyx_tuple__25;
   PyObject *__pyx_tuple__27;
+  PyObject *__pyx_tuple__29;
   PyObject *__pyx_codeobj__26;
   PyObject *__pyx_codeobj__28;
+  PyObject *__pyx_codeobj__30;
 } __pyx_mstate;
 
 #if CYTHON_USE_MODULE_STATE
@@ -3745,8 +3754,8 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_ValueError);
   Py_CLEAR(clear_module_state->__pyx_n_s_View_MemoryView);
   Py_CLEAR(clear_module_state->__pyx_kp_u__2);
-  Py_CLEAR(clear_module_state->__pyx_n_s__29);
   Py_CLEAR(clear_module_state->__pyx_n_s__3);
+  Py_CLEAR(clear_module_state->__pyx_n_s__31);
   Py_CLEAR(clear_module_state->__pyx_kp_u__6);
   Py_CLEAR(clear_module_state->__pyx_kp_u__7);
   Py_CLEAR(clear_module_state->__pyx_n_s_abc);
@@ -3755,6 +3764,7 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_kp_u_and);
   Py_CLEAR(clear_module_state->__pyx_n_s_asyncio_coroutines);
   Py_CLEAR(clear_module_state->__pyx_n_s_base);
+  Py_CLEAR(clear_module_state->__pyx_n_s_build_partition_values);
   Py_CLEAR(clear_module_state->__pyx_n_s_build_partitions);
   Py_CLEAR(clear_module_state->__pyx_n_s_c);
   Py_CLEAR(clear_module_state->__pyx_n_u_c);
@@ -3859,6 +3869,8 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_unpack);
   Py_CLEAR(clear_module_state->__pyx_n_s_update);
   Py_CLEAR(clear_module_state->__pyx_n_s_val);
+  Py_CLEAR(clear_module_state->__pyx_n_s_values);
+  Py_CLEAR(clear_module_state->__pyx_n_s_values_mv);
   Py_CLEAR(clear_module_state->__pyx_n_s_version_info);
   Py_CLEAR(clear_module_state->__pyx_int_0);
   Py_CLEAR(clear_module_state->__pyx_int_1);
@@ -3888,8 +3900,10 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_tuple__24);
   Py_CLEAR(clear_module_state->__pyx_tuple__25);
   Py_CLEAR(clear_module_state->__pyx_tuple__27);
+  Py_CLEAR(clear_module_state->__pyx_tuple__29);
   Py_CLEAR(clear_module_state->__pyx_codeobj__26);
   Py_CLEAR(clear_module_state->__pyx_codeobj__28);
+  Py_CLEAR(clear_module_state->__pyx_codeobj__30);
   return 0;
 }
 #endif
@@ -3967,8 +3981,8 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_ValueError);
   Py_VISIT(traverse_module_state->__pyx_n_s_View_MemoryView);
   Py_VISIT(traverse_module_state->__pyx_kp_u__2);
-  Py_VISIT(traverse_module_state->__pyx_n_s__29);
   Py_VISIT(traverse_module_state->__pyx_n_s__3);
+  Py_VISIT(traverse_module_state->__pyx_n_s__31);
   Py_VISIT(traverse_module_state->__pyx_kp_u__6);
   Py_VISIT(traverse_module_state->__pyx_kp_u__7);
   Py_VISIT(traverse_module_state->__pyx_n_s_abc);
@@ -3977,6 +3991,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_kp_u_and);
   Py_VISIT(traverse_module_state->__pyx_n_s_asyncio_coroutines);
   Py_VISIT(traverse_module_state->__pyx_n_s_base);
+  Py_VISIT(traverse_module_state->__pyx_n_s_build_partition_values);
   Py_VISIT(traverse_module_state->__pyx_n_s_build_partitions);
   Py_VISIT(traverse_module_state->__pyx_n_s_c);
   Py_VISIT(traverse_module_state->__pyx_n_u_c);
@@ -4081,6 +4096,8 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_unpack);
   Py_VISIT(traverse_module_state->__pyx_n_s_update);
   Py_VISIT(traverse_module_state->__pyx_n_s_val);
+  Py_VISIT(traverse_module_state->__pyx_n_s_values);
+  Py_VISIT(traverse_module_state->__pyx_n_s_values_mv);
   Py_VISIT(traverse_module_state->__pyx_n_s_version_info);
   Py_VISIT(traverse_module_state->__pyx_int_0);
   Py_VISIT(traverse_module_state->__pyx_int_1);
@@ -4110,8 +4127,10 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_tuple__24);
   Py_VISIT(traverse_module_state->__pyx_tuple__25);
   Py_VISIT(traverse_module_state->__pyx_tuple__27);
+  Py_VISIT(traverse_module_state->__pyx_tuple__29);
   Py_VISIT(traverse_module_state->__pyx_codeobj__26);
   Py_VISIT(traverse_module_state->__pyx_codeobj__28);
+  Py_VISIT(traverse_module_state->__pyx_codeobj__30);
   return 0;
 }
 #endif
@@ -4219,8 +4238,8 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_ValueError __pyx_mstate_global->__pyx_n_s_ValueError
 #define __pyx_n_s_View_MemoryView __pyx_mstate_global->__pyx_n_s_View_MemoryView
 #define __pyx_kp_u__2 __pyx_mstate_global->__pyx_kp_u__2
-#define __pyx_n_s__29 __pyx_mstate_global->__pyx_n_s__29
 #define __pyx_n_s__3 __pyx_mstate_global->__pyx_n_s__3
+#define __pyx_n_s__31 __pyx_mstate_global->__pyx_n_s__31
 #define __pyx_kp_u__6 __pyx_mstate_global->__pyx_kp_u__6
 #define __pyx_kp_u__7 __pyx_mstate_global->__pyx_kp_u__7
 #define __pyx_n_s_abc __pyx_mstate_global->__pyx_n_s_abc
@@ -4229,6 +4248,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_kp_u_and __pyx_mstate_global->__pyx_kp_u_and
 #define __pyx_n_s_asyncio_coroutines __pyx_mstate_global->__pyx_n_s_asyncio_coroutines
 #define __pyx_n_s_base __pyx_mstate_global->__pyx_n_s_base
+#define __pyx_n_s_build_partition_values __pyx_mstate_global->__pyx_n_s_build_partition_values
 #define __pyx_n_s_build_partitions __pyx_mstate_global->__pyx_n_s_build_partitions
 #define __pyx_n_s_c __pyx_mstate_global->__pyx_n_s_c
 #define __pyx_n_u_c __pyx_mstate_global->__pyx_n_u_c
@@ -4333,6 +4353,8 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_unpack __pyx_mstate_global->__pyx_n_s_unpack
 #define __pyx_n_s_update __pyx_mstate_global->__pyx_n_s_update
 #define __pyx_n_s_val __pyx_mstate_global->__pyx_n_s_val
+#define __pyx_n_s_values __pyx_mstate_global->__pyx_n_s_values
+#define __pyx_n_s_values_mv __pyx_mstate_global->__pyx_n_s_values_mv
 #define __pyx_n_s_version_info __pyx_mstate_global->__pyx_n_s_version_info
 #define __pyx_int_0 __pyx_mstate_global->__pyx_int_0
 #define __pyx_int_1 __pyx_mstate_global->__pyx_int_1
@@ -4362,8 +4384,10 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_tuple__24 __pyx_mstate_global->__pyx_tuple__24
 #define __pyx_tuple__25 __pyx_mstate_global->__pyx_tuple__25
 #define __pyx_tuple__27 __pyx_mstate_global->__pyx_tuple__27
+#define __pyx_tuple__29 __pyx_mstate_global->__pyx_tuple__29
 #define __pyx_codeobj__26 __pyx_mstate_global->__pyx_codeobj__26
 #define __pyx_codeobj__28 __pyx_mstate_global->__pyx_codeobj__28
+#define __pyx_codeobj__30 __pyx_mstate_global->__pyx_codeobj__30
 /* #### Code section: module_code ### */
 
 /* "View.MemoryView":131
@@ -20167,6 +20191,8 @@ static PyObject *__pyx_pf_17partition_kernels_build_partitions(CYTHON_UNUSED PyO
  *                     const_mv[g, r] = 0
  * 
  *     return chunks, norms, is_const             # <<<<<<<<<<<<<<
+ * 
+ * 
  */
   __Pyx_XDECREF(__pyx_r);
   __pyx_t_2 = PyTuple_New(3); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 62, __pyx_L1_error)
@@ -20224,6 +20250,833 @@ static PyObject *__pyx_pf_17partition_kernels_build_partitions(CYTHON_UNUSED PyO
   __Pyx_XDECREF((PyObject *)__pyx_v_is_const);
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_chunks_mv, 1);
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_norms_mv, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_const_mv, 1);
+  __Pyx_XGIVEREF(__pyx_r);
+  __Pyx_RefNannyFinishContext();
+  return __pyx_r;
+}
+
+/* "partition_kernels.pyx":65
+ * 
+ * 
+ * def build_partition_values(double[:, ::1] matrix,             # <<<<<<<<<<<<<<
+ *                            int grid_dimension,
+ *                            unsigned char[:] const_flags):
+ */
+
+/* Python wrapper */
+static PyObject *__pyx_pw_17partition_kernels_3build_partition_values(PyObject *__pyx_self, 
+#if CYTHON_METH_FASTCALL
+PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
+#else
+PyObject *__pyx_args, PyObject *__pyx_kwds
+#endif
+); /*proto*/
+PyDoc_STRVAR(__pyx_doc_17partition_kernels_2build_partition_values, "Build per-grid value/is_const arrays from the sketch matrix.");
+static PyMethodDef __pyx_mdef_17partition_kernels_3build_partition_values = {"build_partition_values", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_17partition_kernels_3build_partition_values, __Pyx_METH_FASTCALL|METH_KEYWORDS, __pyx_doc_17partition_kernels_2build_partition_values};
+static PyObject *__pyx_pw_17partition_kernels_3build_partition_values(PyObject *__pyx_self, 
+#if CYTHON_METH_FASTCALL
+PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
+#else
+PyObject *__pyx_args, PyObject *__pyx_kwds
+#endif
+) {
+  __Pyx_memviewslice __pyx_v_matrix = { 0, 0, { 0 }, { 0 }, { 0 } };
+  int __pyx_v_grid_dimension;
+  __Pyx_memviewslice __pyx_v_const_flags = { 0, 0, { 0 }, { 0 }, { 0 } };
+  #if !CYTHON_METH_FASTCALL
+  CYTHON_UNUSED Py_ssize_t __pyx_nargs;
+  #endif
+  CYTHON_UNUSED PyObject *const *__pyx_kwvalues;
+  PyObject* values[3] = {0,0,0};
+  int __pyx_lineno = 0;
+  const char *__pyx_filename = NULL;
+  int __pyx_clineno = 0;
+  PyObject *__pyx_r = 0;
+  __Pyx_RefNannyDeclarations
+  __Pyx_RefNannySetupContext("build_partition_values (wrapper)", 0);
+  #if !CYTHON_METH_FASTCALL
+  #if CYTHON_ASSUME_SAFE_MACROS
+  __pyx_nargs = PyTuple_GET_SIZE(__pyx_args);
+  #else
+  __pyx_nargs = PyTuple_Size(__pyx_args); if (unlikely(__pyx_nargs < 0)) return NULL;
+  #endif
+  #endif
+  __pyx_kwvalues = __Pyx_KwValues_FASTCALL(__pyx_args, __pyx_nargs);
+  {
+    PyObject **__pyx_pyargnames[] = {&__pyx_n_s_matrix,&__pyx_n_s_grid_dimension,&__pyx_n_s_const_flags,0};
+    if (__pyx_kwds) {
+      Py_ssize_t kw_args;
+      switch (__pyx_nargs) {
+        case  3: values[2] = __Pyx_Arg_FASTCALL(__pyx_args, 2);
+        CYTHON_FALLTHROUGH;
+        case  2: values[1] = __Pyx_Arg_FASTCALL(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
+        case  1: values[0] = __Pyx_Arg_FASTCALL(__pyx_args, 0);
+        CYTHON_FALLTHROUGH;
+        case  0: break;
+        default: goto __pyx_L5_argtuple_error;
+      }
+      kw_args = __Pyx_NumKwargs_FASTCALL(__pyx_kwds);
+      switch (__pyx_nargs) {
+        case  0:
+        if (likely((values[0] = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_matrix)) != 0)) {
+          (void)__Pyx_Arg_NewRef_FASTCALL(values[0]);
+          kw_args--;
+        }
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 65, __pyx_L3_error)
+        else goto __pyx_L5_argtuple_error;
+        CYTHON_FALLTHROUGH;
+        case  1:
+        if (likely((values[1] = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_grid_dimension)) != 0)) {
+          (void)__Pyx_Arg_NewRef_FASTCALL(values[1]);
+          kw_args--;
+        }
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 65, __pyx_L3_error)
+        else {
+          __Pyx_RaiseArgtupleInvalid("build_partition_values", 1, 3, 3, 1); __PYX_ERR(0, 65, __pyx_L3_error)
+        }
+        CYTHON_FALLTHROUGH;
+        case  2:
+        if (likely((values[2] = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_const_flags)) != 0)) {
+          (void)__Pyx_Arg_NewRef_FASTCALL(values[2]);
+          kw_args--;
+        }
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 65, __pyx_L3_error)
+        else {
+          __Pyx_RaiseArgtupleInvalid("build_partition_values", 1, 3, 3, 2); __PYX_ERR(0, 65, __pyx_L3_error)
+        }
+      }
+      if (unlikely(kw_args > 0)) {
+        const Py_ssize_t kwd_pos_args = __pyx_nargs;
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "build_partition_values") < 0)) __PYX_ERR(0, 65, __pyx_L3_error)
+      }
+    } else if (unlikely(__pyx_nargs != 3)) {
+      goto __pyx_L5_argtuple_error;
+    } else {
+      values[0] = __Pyx_Arg_FASTCALL(__pyx_args, 0);
+      values[1] = __Pyx_Arg_FASTCALL(__pyx_args, 1);
+      values[2] = __Pyx_Arg_FASTCALL(__pyx_args, 2);
+    }
+    __pyx_v_matrix = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_matrix.memview)) __PYX_ERR(0, 65, __pyx_L3_error)
+    __pyx_v_grid_dimension = __Pyx_PyInt_As_int(values[1]); if (unlikely((__pyx_v_grid_dimension == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 66, __pyx_L3_error)
+    __pyx_v_const_flags = __Pyx_PyObject_to_MemoryviewSlice_ds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_const_flags.memview)) __PYX_ERR(0, 67, __pyx_L3_error)
+  }
+  goto __pyx_L6_skip;
+  __pyx_L5_argtuple_error:;
+  __Pyx_RaiseArgtupleInvalid("build_partition_values", 1, 3, 3, __pyx_nargs); __PYX_ERR(0, 65, __pyx_L3_error)
+  __pyx_L6_skip:;
+  goto __pyx_L4_argument_unpacking_done;
+  __pyx_L3_error:;
+  {
+    Py_ssize_t __pyx_temp;
+    for (__pyx_temp=0; __pyx_temp < (Py_ssize_t)(sizeof(values)/sizeof(values[0])); ++__pyx_temp) {
+      __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
+    }
+  }
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_matrix, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_const_flags, 1);
+  __Pyx_AddTraceback("partition_kernels.build_partition_values", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_RefNannyFinishContext();
+  return NULL;
+  __pyx_L4_argument_unpacking_done:;
+  __pyx_r = __pyx_pf_17partition_kernels_2build_partition_values(__pyx_self, __pyx_v_matrix, __pyx_v_grid_dimension, __pyx_v_const_flags);
+
+  /* function exit code */
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_matrix, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_const_flags, 1);
+  {
+    Py_ssize_t __pyx_temp;
+    for (__pyx_temp=0; __pyx_temp < (Py_ssize_t)(sizeof(values)/sizeof(values[0])); ++__pyx_temp) {
+      __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
+    }
+  }
+  __Pyx_RefNannyFinishContext();
+  return __pyx_r;
+}
+
+static PyObject *__pyx_pf_17partition_kernels_2build_partition_values(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_matrix, int __pyx_v_grid_dimension, __Pyx_memviewslice __pyx_v_const_flags) {
+  Py_ssize_t __pyx_v_n_rows;
+  Py_ssize_t __pyx_v_n_dim;
+  Py_ssize_t __pyx_v_n_grids;
+  PyArrayObject *__pyx_v_values = 0;
+  PyArrayObject *__pyx_v_is_const = 0;
+  __Pyx_memviewslice __pyx_v_values_mv = { 0, 0, { 0 }, { 0 }, { 0 } };
+  __Pyx_memviewslice __pyx_v_const_mv = { 0, 0, { 0 }, { 0 }, { 0 } };
+  Py_ssize_t __pyx_v_g;
+  Py_ssize_t __pyx_v_r;
+  Py_ssize_t __pyx_v_d;
+  Py_ssize_t __pyx_v_base;
+  double __pyx_v_acc;
+  double __pyx_v_val;
+  double __pyx_v_norm;
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_is_const;
+  __Pyx_Buffer __pyx_pybuffer_is_const;
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_values;
+  __Pyx_Buffer __pyx_pybuffer_values;
+  PyObject *__pyx_r = NULL;
+  __Pyx_RefNannyDeclarations
+  int __pyx_t_1;
+  PyObject *__pyx_t_2 = NULL;
+  int __pyx_t_3;
+  PyObject *__pyx_t_4 = NULL;
+  PyObject *__pyx_t_5 = NULL;
+  PyObject *__pyx_t_6 = NULL;
+  PyObject *__pyx_t_7 = NULL;
+  PyArrayObject *__pyx_t_8 = NULL;
+  PyArrayObject *__pyx_t_9 = NULL;
+  __Pyx_memviewslice __pyx_t_10 = { 0, 0, { 0 }, { 0 }, { 0 } };
+  __Pyx_memviewslice __pyx_t_11 = { 0, 0, { 0 }, { 0 }, { 0 } };
+  Py_ssize_t __pyx_t_12;
+  Py_ssize_t __pyx_t_13;
+  Py_ssize_t __pyx_t_14;
+  Py_ssize_t __pyx_t_15;
+  Py_ssize_t __pyx_t_16;
+  Py_ssize_t __pyx_t_17;
+  int __pyx_t_18;
+  int __pyx_t_19;
+  Py_ssize_t __pyx_t_20;
+  Py_ssize_t __pyx_t_21;
+  Py_ssize_t __pyx_t_22;
+  int __pyx_lineno = 0;
+  const char *__pyx_filename = NULL;
+  int __pyx_clineno = 0;
+  __Pyx_RefNannySetupContext("build_partition_values", 1);
+  __pyx_pybuffer_values.pybuffer.buf = NULL;
+  __pyx_pybuffer_values.refcount = 0;
+  __pyx_pybuffernd_values.data = NULL;
+  __pyx_pybuffernd_values.rcbuffer = &__pyx_pybuffer_values;
+  __pyx_pybuffer_is_const.pybuffer.buf = NULL;
+  __pyx_pybuffer_is_const.refcount = 0;
+  __pyx_pybuffernd_is_const.data = NULL;
+  __pyx_pybuffernd_is_const.rcbuffer = &__pyx_pybuffer_is_const;
+
+  /* "partition_kernels.pyx":69
+ *                            unsigned char[:] const_flags):
+ *     """Build per-grid value/is_const arrays from the sketch matrix."""
+ *     cdef Py_ssize_t n_rows = matrix.shape[0]             # <<<<<<<<<<<<<<
+ *     cdef Py_ssize_t n_dim = matrix.shape[1]
+ *     cdef Py_ssize_t n_grids
+ */
+  __pyx_v_n_rows = (__pyx_v_matrix.shape[0]);
+
+  /* "partition_kernels.pyx":70
+ *     """Build per-grid value/is_const arrays from the sketch matrix."""
+ *     cdef Py_ssize_t n_rows = matrix.shape[0]
+ *     cdef Py_ssize_t n_dim = matrix.shape[1]             # <<<<<<<<<<<<<<
+ *     cdef Py_ssize_t n_grids
+ *     if grid_dimension <= 0:
+ */
+  __pyx_v_n_dim = (__pyx_v_matrix.shape[1]);
+
+  /* "partition_kernels.pyx":72
+ *     cdef Py_ssize_t n_dim = matrix.shape[1]
+ *     cdef Py_ssize_t n_grids
+ *     if grid_dimension <= 0:             # <<<<<<<<<<<<<<
+ *         raise ValueError("grid_dimension must be positive")
+ *     n_grids = n_dim // grid_dimension
+ */
+  __pyx_t_1 = (__pyx_v_grid_dimension <= 0);
+  if (unlikely(__pyx_t_1)) {
+
+    /* "partition_kernels.pyx":73
+ *     cdef Py_ssize_t n_grids
+ *     if grid_dimension <= 0:
+ *         raise ValueError("grid_dimension must be positive")             # <<<<<<<<<<<<<<
+ *     n_grids = n_dim // grid_dimension
+ *     if n_grids <= 0 or n_rows == 0:
+ */
+    __pyx_t_2 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__11, NULL); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 73, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_2);
+    __Pyx_Raise(__pyx_t_2, 0, 0, 0);
+    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+    __PYX_ERR(0, 73, __pyx_L1_error)
+
+    /* "partition_kernels.pyx":72
+ *     cdef Py_ssize_t n_dim = matrix.shape[1]
+ *     cdef Py_ssize_t n_grids
+ *     if grid_dimension <= 0:             # <<<<<<<<<<<<<<
+ *         raise ValueError("grid_dimension must be positive")
+ *     n_grids = n_dim // grid_dimension
+ */
+  }
+
+  /* "partition_kernels.pyx":74
+ *     if grid_dimension <= 0:
+ *         raise ValueError("grid_dimension must be positive")
+ *     n_grids = n_dim // grid_dimension             # <<<<<<<<<<<<<<
+ *     if n_grids <= 0 or n_rows == 0:
+ *         return (
+ */
+  __pyx_v_n_grids = (__pyx_v_n_dim / __pyx_v_grid_dimension);
+
+  /* "partition_kernels.pyx":75
+ *         raise ValueError("grid_dimension must be positive")
+ *     n_grids = n_dim // grid_dimension
+ *     if n_grids <= 0 or n_rows == 0:             # <<<<<<<<<<<<<<
+ *         return (
+ *             np.empty((0, 0), dtype=np.float64),
+ */
+  __pyx_t_3 = (__pyx_v_n_grids <= 0);
+  if (!__pyx_t_3) {
+  } else {
+    __pyx_t_1 = __pyx_t_3;
+    goto __pyx_L5_bool_binop_done;
+  }
+  __pyx_t_3 = (__pyx_v_n_rows == 0);
+  __pyx_t_1 = __pyx_t_3;
+  __pyx_L5_bool_binop_done:;
+  if (__pyx_t_1) {
+
+    /* "partition_kernels.pyx":76
+ *     n_grids = n_dim // grid_dimension
+ *     if n_grids <= 0 or n_rows == 0:
+ *         return (             # <<<<<<<<<<<<<<
+ *             np.empty((0, 0), dtype=np.float64),
+ *             np.empty((0, 0), dtype=np.uint8),
+ */
+    __Pyx_XDECREF(__pyx_r);
+
+    /* "partition_kernels.pyx":77
+ *     if n_grids <= 0 or n_rows == 0:
+ *         return (
+ *             np.empty((0, 0), dtype=np.float64),             # <<<<<<<<<<<<<<
+ *             np.empty((0, 0), dtype=np.uint8),
+ *         )
+ */
+    __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 77, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_2);
+    __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 77, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_4);
+    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+    __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 77, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_2);
+    __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 77, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_5);
+    __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_float64); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 77, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_6);
+    __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+    if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 77, __pyx_L1_error)
+    __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+    __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_tuple__15, __pyx_t_2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 77, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_6);
+    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+
+    /* "partition_kernels.pyx":78
+ *         return (
+ *             np.empty((0, 0), dtype=np.float64),
+ *             np.empty((0, 0), dtype=np.uint8),             # <<<<<<<<<<<<<<
+ *         )
+ * 
+ */
+    __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 78, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_2);
+    __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 78, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_4);
+    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+    __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 78, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_2);
+    __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 78, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_5);
+    __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_uint8); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 78, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_7);
+    __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+    if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 78, __pyx_L1_error)
+    __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+    __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_tuple__15, __pyx_t_2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 78, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_7);
+    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+
+    /* "partition_kernels.pyx":77
+ *     if n_grids <= 0 or n_rows == 0:
+ *         return (
+ *             np.empty((0, 0), dtype=np.float64),             # <<<<<<<<<<<<<<
+ *             np.empty((0, 0), dtype=np.uint8),
+ *         )
+ */
+    __pyx_t_2 = PyTuple_New(2); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 77, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_2);
+    __Pyx_GIVEREF(__pyx_t_6);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 0, __pyx_t_6)) __PYX_ERR(0, 77, __pyx_L1_error);
+    __Pyx_GIVEREF(__pyx_t_7);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 1, __pyx_t_7)) __PYX_ERR(0, 77, __pyx_L1_error);
+    __pyx_t_6 = 0;
+    __pyx_t_7 = 0;
+    __pyx_r = __pyx_t_2;
+    __pyx_t_2 = 0;
+    goto __pyx_L0;
+
+    /* "partition_kernels.pyx":75
+ *         raise ValueError("grid_dimension must be positive")
+ *     n_grids = n_dim // grid_dimension
+ *     if n_grids <= 0 or n_rows == 0:             # <<<<<<<<<<<<<<
+ *         return (
+ *             np.empty((0, 0), dtype=np.float64),
+ */
+  }
+
+  /* "partition_kernels.pyx":81
+ *         )
+ * 
+ *     cdef np.ndarray[np.float64_t, ndim=2] values = np.empty(             # <<<<<<<<<<<<<<
+ *         (n_grids, n_rows),
+ *         dtype=np.float64,
+ */
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 81, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_empty); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 81, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+
+  /* "partition_kernels.pyx":82
+ * 
+ *     cdef np.ndarray[np.float64_t, ndim=2] values = np.empty(
+ *         (n_grids, n_rows),             # <<<<<<<<<<<<<<
+ *         dtype=np.float64,
+ *     )
+ */
+  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_n_grids); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 82, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_n_rows); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 82, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
+  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 82, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __Pyx_GIVEREF(__pyx_t_2);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 82, __pyx_L1_error);
+  __Pyx_GIVEREF(__pyx_t_6);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_t_6)) __PYX_ERR(0, 82, __pyx_L1_error);
+  __pyx_t_2 = 0;
+  __pyx_t_6 = 0;
+
+  /* "partition_kernels.pyx":81
+ *         )
+ * 
+ *     cdef np.ndarray[np.float64_t, ndim=2] values = np.empty(             # <<<<<<<<<<<<<<
+ *         (n_grids, n_rows),
+ *         dtype=np.float64,
+ */
+  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 81, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
+  __Pyx_GIVEREF(__pyx_t_4);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_4)) __PYX_ERR(0, 81, __pyx_L1_error);
+  __pyx_t_4 = 0;
+
+  /* "partition_kernels.pyx":83
+ *     cdef np.ndarray[np.float64_t, ndim=2] values = np.empty(
+ *         (n_grids, n_rows),
+ *         dtype=np.float64,             # <<<<<<<<<<<<<<
+ *     )
+ *     cdef np.ndarray[np.uint8_t, ndim=2] is_const = np.empty(
+ */
+  __pyx_t_4 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 83, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 83, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_float64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 83, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  if (PyDict_SetItem(__pyx_t_4, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 83, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+
+  /* "partition_kernels.pyx":81
+ *         )
+ * 
+ *     cdef np.ndarray[np.float64_t, ndim=2] values = np.empty(             # <<<<<<<<<<<<<<
+ *         (n_grids, n_rows),
+ *         dtype=np.float64,
+ */
+  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_7, __pyx_t_6, __pyx_t_4); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 81, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  if (!(likely(((__pyx_t_5) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_5, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 81, __pyx_L1_error)
+  __pyx_t_8 = ((PyArrayObject *)__pyx_t_5);
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_values.rcbuffer->pybuffer, (PyObject*)__pyx_t_8, &__Pyx_TypeInfo_nn___pyx_t_5numpy_float64_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
+      __pyx_v_values = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_values.rcbuffer->pybuffer.buf = NULL;
+      __PYX_ERR(0, 81, __pyx_L1_error)
+    } else {__pyx_pybuffernd_values.diminfo[0].strides = __pyx_pybuffernd_values.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_values.diminfo[0].shape = __pyx_pybuffernd_values.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_values.diminfo[1].strides = __pyx_pybuffernd_values.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_values.diminfo[1].shape = __pyx_pybuffernd_values.rcbuffer->pybuffer.shape[1];
+    }
+  }
+  __pyx_t_8 = 0;
+  __pyx_v_values = ((PyArrayObject *)__pyx_t_5);
+  __pyx_t_5 = 0;
+
+  /* "partition_kernels.pyx":85
+ *         dtype=np.float64,
+ *     )
+ *     cdef np.ndarray[np.uint8_t, ndim=2] is_const = np.empty(             # <<<<<<<<<<<<<<
+ *         (n_grids, n_rows),
+ *         dtype=np.uint8,
+ */
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 85, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 85, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+
+  /* "partition_kernels.pyx":86
+ *     )
+ *     cdef np.ndarray[np.uint8_t, ndim=2] is_const = np.empty(
+ *         (n_grids, n_rows),             # <<<<<<<<<<<<<<
+ *         dtype=np.uint8,
+ *     )
+ */
+  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_n_grids); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 86, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_n_rows); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 86, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
+  __pyx_t_7 = PyTuple_New(2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 86, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __Pyx_GIVEREF(__pyx_t_5);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_5)) __PYX_ERR(0, 86, __pyx_L1_error);
+  __Pyx_GIVEREF(__pyx_t_6);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 1, __pyx_t_6)) __PYX_ERR(0, 86, __pyx_L1_error);
+  __pyx_t_5 = 0;
+  __pyx_t_6 = 0;
+
+  /* "partition_kernels.pyx":85
+ *         dtype=np.float64,
+ *     )
+ *     cdef np.ndarray[np.uint8_t, ndim=2] is_const = np.empty(             # <<<<<<<<<<<<<<
+ *         (n_grids, n_rows),
+ *         dtype=np.uint8,
+ */
+  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 85, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
+  __Pyx_GIVEREF(__pyx_t_7);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_7)) __PYX_ERR(0, 85, __pyx_L1_error);
+  __pyx_t_7 = 0;
+
+  /* "partition_kernels.pyx":87
+ *     cdef np.ndarray[np.uint8_t, ndim=2] is_const = np.empty(
+ *         (n_grids, n_rows),
+ *         dtype=np.uint8,             # <<<<<<<<<<<<<<
+ *     )
+ * 
+ */
+  __pyx_t_7 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 87, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 87, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_uint8); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 87, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  if (PyDict_SetItem(__pyx_t_7, __pyx_n_s_dtype, __pyx_t_2) < 0) __PYX_ERR(0, 87, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+
+  /* "partition_kernels.pyx":85
+ *         dtype=np.float64,
+ *     )
+ *     cdef np.ndarray[np.uint8_t, ndim=2] is_const = np.empty(             # <<<<<<<<<<<<<<
+ *         (n_grids, n_rows),
+ *         dtype=np.uint8,
+ */
+  __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_6, __pyx_t_7); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 85, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+  if (!(likely(((__pyx_t_2) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_2, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 85, __pyx_L1_error)
+  __pyx_t_9 = ((PyArrayObject *)__pyx_t_2);
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_is_const.rcbuffer->pybuffer, (PyObject*)__pyx_t_9, &__Pyx_TypeInfo_nn___pyx_t_5numpy_uint8_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
+      __pyx_v_is_const = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_is_const.rcbuffer->pybuffer.buf = NULL;
+      __PYX_ERR(0, 85, __pyx_L1_error)
+    } else {__pyx_pybuffernd_is_const.diminfo[0].strides = __pyx_pybuffernd_is_const.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_is_const.diminfo[0].shape = __pyx_pybuffernd_is_const.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_is_const.diminfo[1].strides = __pyx_pybuffernd_is_const.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_is_const.diminfo[1].shape = __pyx_pybuffernd_is_const.rcbuffer->pybuffer.shape[1];
+    }
+  }
+  __pyx_t_9 = 0;
+  __pyx_v_is_const = ((PyArrayObject *)__pyx_t_2);
+  __pyx_t_2 = 0;
+
+  /* "partition_kernels.pyx":90
+ *     )
+ * 
+ *     cdef double[:, ::1] values_mv = values             # <<<<<<<<<<<<<<
+ *     cdef unsigned char[:, ::1] const_mv = is_const
+ *     cdef Py_ssize_t g, r, d, base
+ */
+  __pyx_t_10 = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(((PyObject *)__pyx_v_values), PyBUF_WRITABLE); if (unlikely(!__pyx_t_10.memview)) __PYX_ERR(0, 90, __pyx_L1_error)
+  __pyx_v_values_mv = __pyx_t_10;
+  __pyx_t_10.memview = NULL;
+  __pyx_t_10.data = NULL;
+
+  /* "partition_kernels.pyx":91
+ * 
+ *     cdef double[:, ::1] values_mv = values
+ *     cdef unsigned char[:, ::1] const_mv = is_const             # <<<<<<<<<<<<<<
+ *     cdef Py_ssize_t g, r, d, base
+ *     cdef double acc, val, norm
+ */
+  __pyx_t_11 = __Pyx_PyObject_to_MemoryviewSlice_d_dc_unsigned_char(((PyObject *)__pyx_v_is_const), PyBUF_WRITABLE); if (unlikely(!__pyx_t_11.memview)) __PYX_ERR(0, 91, __pyx_L1_error)
+  __pyx_v_const_mv = __pyx_t_11;
+  __pyx_t_11.memview = NULL;
+  __pyx_t_11.data = NULL;
+
+  /* "partition_kernels.pyx":95
+ *     cdef double acc, val, norm
+ * 
+ *     with nogil:             # <<<<<<<<<<<<<<
+ *         for g in range(n_grids):
+ *             base = g * grid_dimension
+ */
+  {
+      #ifdef WITH_THREAD
+      PyThreadState *_save;
+      _save = NULL;
+      Py_UNBLOCK_THREADS
+      __Pyx_FastGIL_Remember();
+      #endif
+      /*try:*/ {
+
+        /* "partition_kernels.pyx":96
+ * 
+ *     with nogil:
+ *         for g in range(n_grids):             # <<<<<<<<<<<<<<
+ *             base = g * grid_dimension
+ *             for r in range(n_rows):
+ */
+        __pyx_t_12 = __pyx_v_n_grids;
+        __pyx_t_13 = __pyx_t_12;
+        for (__pyx_t_14 = 0; __pyx_t_14 < __pyx_t_13; __pyx_t_14+=1) {
+          __pyx_v_g = __pyx_t_14;
+
+          /* "partition_kernels.pyx":97
+ *     with nogil:
+ *         for g in range(n_grids):
+ *             base = g * grid_dimension             # <<<<<<<<<<<<<<
+ *             for r in range(n_rows):
+ *                 acc = 0.0
+ */
+          __pyx_v_base = (__pyx_v_g * __pyx_v_grid_dimension);
+
+          /* "partition_kernels.pyx":98
+ *         for g in range(n_grids):
+ *             base = g * grid_dimension
+ *             for r in range(n_rows):             # <<<<<<<<<<<<<<
+ *                 acc = 0.0
+ *                 for d in range(grid_dimension):
+ */
+          __pyx_t_15 = __pyx_v_n_rows;
+          __pyx_t_16 = __pyx_t_15;
+          for (__pyx_t_17 = 0; __pyx_t_17 < __pyx_t_16; __pyx_t_17+=1) {
+            __pyx_v_r = __pyx_t_17;
+
+            /* "partition_kernels.pyx":99
+ *             base = g * grid_dimension
+ *             for r in range(n_rows):
+ *                 acc = 0.0             # <<<<<<<<<<<<<<
+ *                 for d in range(grid_dimension):
+ *                     val = matrix[r, base + d]
+ */
+            __pyx_v_acc = 0.0;
+
+            /* "partition_kernels.pyx":100
+ *             for r in range(n_rows):
+ *                 acc = 0.0
+ *                 for d in range(grid_dimension):             # <<<<<<<<<<<<<<
+ *                     val = matrix[r, base + d]
+ *                     if d == 0:
+ */
+            __pyx_t_18 = __pyx_v_grid_dimension;
+            __pyx_t_19 = __pyx_t_18;
+            for (__pyx_t_20 = 0; __pyx_t_20 < __pyx_t_19; __pyx_t_20+=1) {
+              __pyx_v_d = __pyx_t_20;
+
+              /* "partition_kernels.pyx":101
+ *                 acc = 0.0
+ *                 for d in range(grid_dimension):
+ *                     val = matrix[r, base + d]             # <<<<<<<<<<<<<<
+ *                     if d == 0:
+ *                         values_mv[g, r] = val
+ */
+              __pyx_t_21 = __pyx_v_r;
+              __pyx_t_22 = (__pyx_v_base + __pyx_v_d);
+              __pyx_v_val = (*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_matrix.data + __pyx_t_21 * __pyx_v_matrix.strides[0]) )) + __pyx_t_22)) )));
+
+              /* "partition_kernels.pyx":102
+ *                 for d in range(grid_dimension):
+ *                     val = matrix[r, base + d]
+ *                     if d == 0:             # <<<<<<<<<<<<<<
+ *                         values_mv[g, r] = val
+ *                     acc += val * val
+ */
+              __pyx_t_1 = (__pyx_v_d == 0);
+              if (__pyx_t_1) {
+
+                /* "partition_kernels.pyx":103
+ *                     val = matrix[r, base + d]
+ *                     if d == 0:
+ *                         values_mv[g, r] = val             # <<<<<<<<<<<<<<
+ *                     acc += val * val
+ *                 norm = sqrt(acc)
+ */
+                __pyx_t_22 = __pyx_v_g;
+                __pyx_t_21 = __pyx_v_r;
+                *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_values_mv.data + __pyx_t_22 * __pyx_v_values_mv.strides[0]) )) + __pyx_t_21)) )) = __pyx_v_val;
+
+                /* "partition_kernels.pyx":102
+ *                 for d in range(grid_dimension):
+ *                     val = matrix[r, base + d]
+ *                     if d == 0:             # <<<<<<<<<<<<<<
+ *                         values_mv[g, r] = val
+ *                     acc += val * val
+ */
+              }
+
+              /* "partition_kernels.pyx":104
+ *                     if d == 0:
+ *                         values_mv[g, r] = val
+ *                     acc += val * val             # <<<<<<<<<<<<<<
+ *                 norm = sqrt(acc)
+ *                 if const_flags[r] != 0 or norm == 0.0:
+ */
+              __pyx_v_acc = (__pyx_v_acc + (__pyx_v_val * __pyx_v_val));
+            }
+
+            /* "partition_kernels.pyx":105
+ *                         values_mv[g, r] = val
+ *                     acc += val * val
+ *                 norm = sqrt(acc)             # <<<<<<<<<<<<<<
+ *                 if const_flags[r] != 0 or norm == 0.0:
+ *                     const_mv[g, r] = 1
+ */
+            __pyx_v_norm = sqrt(__pyx_v_acc);
+
+            /* "partition_kernels.pyx":106
+ *                     acc += val * val
+ *                 norm = sqrt(acc)
+ *                 if const_flags[r] != 0 or norm == 0.0:             # <<<<<<<<<<<<<<
+ *                     const_mv[g, r] = 1
+ *                 else:
+ */
+            __pyx_t_21 = __pyx_v_r;
+            __pyx_t_3 = ((*((unsigned char *) ( /* dim=0 */ (__pyx_v_const_flags.data + __pyx_t_21 * __pyx_v_const_flags.strides[0]) ))) != 0);
+            if (!__pyx_t_3) {
+            } else {
+              __pyx_t_1 = __pyx_t_3;
+              goto __pyx_L18_bool_binop_done;
+            }
+            __pyx_t_3 = (__pyx_v_norm == 0.0);
+            __pyx_t_1 = __pyx_t_3;
+            __pyx_L18_bool_binop_done:;
+            if (__pyx_t_1) {
+
+              /* "partition_kernels.pyx":107
+ *                 norm = sqrt(acc)
+ *                 if const_flags[r] != 0 or norm == 0.0:
+ *                     const_mv[g, r] = 1             # <<<<<<<<<<<<<<
+ *                 else:
+ *                     const_mv[g, r] = 0
+ */
+              __pyx_t_21 = __pyx_v_g;
+              __pyx_t_22 = __pyx_v_r;
+              *((unsigned char *) ( /* dim=1 */ ((char *) (((unsigned char *) ( /* dim=0 */ (__pyx_v_const_mv.data + __pyx_t_21 * __pyx_v_const_mv.strides[0]) )) + __pyx_t_22)) )) = 1;
+
+              /* "partition_kernels.pyx":106
+ *                     acc += val * val
+ *                 norm = sqrt(acc)
+ *                 if const_flags[r] != 0 or norm == 0.0:             # <<<<<<<<<<<<<<
+ *                     const_mv[g, r] = 1
+ *                 else:
+ */
+              goto __pyx_L17;
+            }
+
+            /* "partition_kernels.pyx":109
+ *                     const_mv[g, r] = 1
+ *                 else:
+ *                     const_mv[g, r] = 0             # <<<<<<<<<<<<<<
+ * 
+ *     return values, is_const
+ */
+            /*else*/ {
+              __pyx_t_22 = __pyx_v_g;
+              __pyx_t_21 = __pyx_v_r;
+              *((unsigned char *) ( /* dim=1 */ ((char *) (((unsigned char *) ( /* dim=0 */ (__pyx_v_const_mv.data + __pyx_t_22 * __pyx_v_const_mv.strides[0]) )) + __pyx_t_21)) )) = 0;
+            }
+            __pyx_L17:;
+          }
+        }
+      }
+
+      /* "partition_kernels.pyx":95
+ *     cdef double acc, val, norm
+ * 
+ *     with nogil:             # <<<<<<<<<<<<<<
+ *         for g in range(n_grids):
+ *             base = g * grid_dimension
+ */
+      /*finally:*/ {
+        /*normal exit:*/{
+          #ifdef WITH_THREAD
+          __Pyx_FastGIL_Forget();
+          Py_BLOCK_THREADS
+          #endif
+          goto __pyx_L9;
+        }
+        __pyx_L9:;
+      }
+  }
+
+  /* "partition_kernels.pyx":111
+ *                     const_mv[g, r] = 0
+ * 
+ *     return values, is_const             # <<<<<<<<<<<<<<
+ */
+  __Pyx_XDECREF(__pyx_r);
+  __pyx_t_2 = PyTuple_New(2); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 111, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __Pyx_INCREF((PyObject *)__pyx_v_values);
+  __Pyx_GIVEREF((PyObject *)__pyx_v_values);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 0, ((PyObject *)__pyx_v_values))) __PYX_ERR(0, 111, __pyx_L1_error);
+  __Pyx_INCREF((PyObject *)__pyx_v_is_const);
+  __Pyx_GIVEREF((PyObject *)__pyx_v_is_const);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 1, ((PyObject *)__pyx_v_is_const))) __PYX_ERR(0, 111, __pyx_L1_error);
+  __pyx_r = __pyx_t_2;
+  __pyx_t_2 = 0;
+  goto __pyx_L0;
+
+  /* "partition_kernels.pyx":65
+ * 
+ * 
+ * def build_partition_values(double[:, ::1] matrix,             # <<<<<<<<<<<<<<
+ *                            int grid_dimension,
+ *                            unsigned char[:] const_flags):
+ */
+
+  /* function exit code */
+  __pyx_L1_error:;
+  __Pyx_XDECREF(__pyx_t_2);
+  __Pyx_XDECREF(__pyx_t_4);
+  __Pyx_XDECREF(__pyx_t_5);
+  __Pyx_XDECREF(__pyx_t_6);
+  __Pyx_XDECREF(__pyx_t_7);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_t_10, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_t_11, 1);
+  { PyObject *__pyx_type, *__pyx_value, *__pyx_tb;
+    __Pyx_PyThreadState_declare
+    __Pyx_PyThreadState_assign
+    __Pyx_ErrFetch(&__pyx_type, &__pyx_value, &__pyx_tb);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_is_const.rcbuffer->pybuffer);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_values.rcbuffer->pybuffer);
+  __Pyx_ErrRestore(__pyx_type, __pyx_value, __pyx_tb);}
+  __Pyx_AddTraceback("partition_kernels.build_partition_values", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __pyx_r = NULL;
+  goto __pyx_L2;
+  __pyx_L0:;
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_is_const.rcbuffer->pybuffer);
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_values.rcbuffer->pybuffer);
+  __pyx_L2:;
+  __Pyx_XDECREF((PyObject *)__pyx_v_values);
+  __Pyx_XDECREF((PyObject *)__pyx_v_is_const);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_values_mv, 1);
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_const_mv, 1);
   __Pyx_XGIVEREF(__pyx_r);
   __Pyx_RefNannyFinishContext();
@@ -21225,8 +22078,8 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_ValueError, __pyx_k_ValueError, sizeof(__pyx_k_ValueError), 0, 0, 1, 1},
     {&__pyx_n_s_View_MemoryView, __pyx_k_View_MemoryView, sizeof(__pyx_k_View_MemoryView), 0, 0, 1, 1},
     {&__pyx_kp_u__2, __pyx_k__2, sizeof(__pyx_k__2), 0, 1, 0, 0},
-    {&__pyx_n_s__29, __pyx_k__29, sizeof(__pyx_k__29), 0, 0, 1, 1},
     {&__pyx_n_s__3, __pyx_k__3, sizeof(__pyx_k__3), 0, 0, 1, 1},
+    {&__pyx_n_s__31, __pyx_k__31, sizeof(__pyx_k__31), 0, 0, 1, 1},
     {&__pyx_kp_u__6, __pyx_k__6, sizeof(__pyx_k__6), 0, 1, 0, 0},
     {&__pyx_kp_u__7, __pyx_k__7, sizeof(__pyx_k__7), 0, 1, 0, 0},
     {&__pyx_n_s_abc, __pyx_k_abc, sizeof(__pyx_k_abc), 0, 0, 1, 1},
@@ -21235,6 +22088,7 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_kp_u_and, __pyx_k_and, sizeof(__pyx_k_and), 0, 1, 0, 0},
     {&__pyx_n_s_asyncio_coroutines, __pyx_k_asyncio_coroutines, sizeof(__pyx_k_asyncio_coroutines), 0, 0, 1, 1},
     {&__pyx_n_s_base, __pyx_k_base, sizeof(__pyx_k_base), 0, 0, 1, 1},
+    {&__pyx_n_s_build_partition_values, __pyx_k_build_partition_values, sizeof(__pyx_k_build_partition_values), 0, 0, 1, 1},
     {&__pyx_n_s_build_partitions, __pyx_k_build_partitions, sizeof(__pyx_k_build_partitions), 0, 0, 1, 1},
     {&__pyx_n_s_c, __pyx_k_c, sizeof(__pyx_k_c), 0, 0, 1, 1},
     {&__pyx_n_u_c, __pyx_k_c, sizeof(__pyx_k_c), 0, 1, 0, 1},
@@ -21339,6 +22193,8 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_unpack, __pyx_k_unpack, sizeof(__pyx_k_unpack), 0, 0, 1, 1},
     {&__pyx_n_s_update, __pyx_k_update, sizeof(__pyx_k_update), 0, 0, 1, 1},
     {&__pyx_n_s_val, __pyx_k_val, sizeof(__pyx_k_val), 0, 0, 1, 1},
+    {&__pyx_n_s_values, __pyx_k_values, sizeof(__pyx_k_values), 0, 0, 1, 1},
+    {&__pyx_n_s_values_mv, __pyx_k_values_mv, sizeof(__pyx_k_values_mv), 0, 0, 1, 1},
     {&__pyx_n_s_version_info, __pyx_k_version_info, sizeof(__pyx_k_version_info), 0, 0, 1, 1},
     {0, 0, 0, 0, 0, 0, 0}
   };
@@ -21576,6 +22432,18 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
   __Pyx_GOTREF(__pyx_tuple__27);
   __Pyx_GIVEREF(__pyx_tuple__27);
   __pyx_codeobj__28 = (PyObject*)__Pyx_PyCode_New(3, 0, 0, 19, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__27, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_partition_kernels_pyx, __pyx_n_s_build_partitions, 10, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__28)) __PYX_ERR(0, 10, __pyx_L1_error)
+
+  /* "partition_kernels.pyx":65
+ * 
+ * 
+ * def build_partition_values(double[:, ::1] matrix,             # <<<<<<<<<<<<<<
+ *                            int grid_dimension,
+ *                            unsigned char[:] const_flags):
+ */
+  __pyx_tuple__29 = PyTuple_Pack(17, __pyx_n_s_matrix, __pyx_n_s_grid_dimension, __pyx_n_s_const_flags, __pyx_n_s_n_rows, __pyx_n_s_n_dim, __pyx_n_s_n_grids, __pyx_n_s_values, __pyx_n_s_is_const, __pyx_n_s_values_mv, __pyx_n_s_const_mv, __pyx_n_s_g, __pyx_n_s_r, __pyx_n_s_d, __pyx_n_s_base, __pyx_n_s_acc, __pyx_n_s_val, __pyx_n_s_norm); if (unlikely(!__pyx_tuple__29)) __PYX_ERR(0, 65, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__29);
+  __Pyx_GIVEREF(__pyx_tuple__29);
+  __pyx_codeobj__30 = (PyObject*)__Pyx_PyCode_New(3, 0, 0, 17, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__29, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_partition_kernels_pyx, __pyx_n_s_build_partition_values, 65, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__30)) __PYX_ERR(0, 65, __pyx_L1_error)
   __Pyx_RefNannyFinishContext();
   return 0;
   __pyx_L1_error:;
@@ -22696,6 +23564,18 @@ if (!__Pyx_RefNanny) {
   __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_17partition_kernels_1build_partitions, 0, __pyx_n_s_build_partitions, NULL, __pyx_n_s_partition_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__28)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 10, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   if (PyDict_SetItem(__pyx_d, __pyx_n_s_build_partitions, __pyx_t_7) < 0) __PYX_ERR(0, 10, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+
+  /* "partition_kernels.pyx":65
+ * 
+ * 
+ * def build_partition_values(double[:, ::1] matrix,             # <<<<<<<<<<<<<<
+ *                            int grid_dimension,
+ *                            unsigned char[:] const_flags):
+ */
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_17partition_kernels_3build_partition_values, 0, __pyx_n_s_build_partition_values, NULL, __pyx_n_s_partition_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__30)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 65, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_build_partition_values, __pyx_t_7) < 0) __PYX_ERR(0, 65, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
 
   /* "partition_kernels.pyx":1
@@ -29842,7 +30722,7 @@ __Pyx_PyType_GetName(PyTypeObject* tp)
     if (unlikely(name == NULL) || unlikely(!PyUnicode_Check(name))) {
         PyErr_Clear();
         Py_XDECREF(name);
-        name = __Pyx_NewRef(__pyx_n_s__29);
+        name = __Pyx_NewRef(__pyx_n_s__31);
     }
     return name;
 }

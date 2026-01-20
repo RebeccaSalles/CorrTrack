@@ -103,6 +103,7 @@ def find_candidate_pairs(double[:] values,
     return pairs
 
 
+
 def fast_corr_and_dist(double[:] x, double[:] y):
     """Compute Pearson correlation and Euclidean distance for two vectors."""
     cdef Py_ssize_t n = x.shape[0]

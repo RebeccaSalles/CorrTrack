@@ -841,6 +841,8 @@ class DatasetContext:
 def discover_datasets(args: argparse.Namespace) -> List[DatasetContext]:
     cfg_dataset = corrtrack_main._load_dataset_config(args.dataset_config)
     corrtrack_main._apply_dataset_config(cfg_dataset)
+    if hasattr(corrtrack_main, "_apply_parallel_defaults_from_cfg"):
+        corrtrack_main._apply_parallel_defaults_from_cfg(cfg_dataset, args)
     if args.loader:
         corrtrack_main.DATA_LOADER = corrtrack_main._load_loader(args.loader)
     _set_loader_refresh(getattr(args, "refresh_artifacts", False))
@@ -850,8 +852,19 @@ def discover_datasets(args: argparse.Namespace) -> List[DatasetContext]:
     corrtrack_main.BASIC_WINDOW = args.basic_window
     corrtrack_main.N_LAGS = args.n_lags
     corrtrack_main.CORR_THRESHOLD = args.corr_threshold
-    corrtrack_main.PARALLEL = bool(args.parallel)
-    corrtrack_main.EXEC_MODE = "thread" if args.parallel else "sequential"
+    effective_parallel = bool(args.parallel) or any(
+        flag is True
+        for flag in (args.parallel_sketch, args.parallel_candidates, args.parallel_validation)
+    )
+    corrtrack_main.PARALLEL = effective_parallel
+    corrtrack_main.PARALLEL_SKETCH = args.parallel_sketch
+    corrtrack_main.PARALLEL_CANDIDATES = args.parallel_candidates
+    corrtrack_main.PARALLEL_VALIDATION = args.parallel_validation
+    parallel_any = bool(args.parallel) or any(
+        flag is True
+        for flag in (args.parallel_sketch, args.parallel_candidates, args.parallel_validation)
+    )
+    corrtrack_main.EXEC_MODE = "thread" if parallel_any else "sequential"
     corrtrack_main.NEG_CORR = args.neg_corr
     corrtrack_main.EXTRA_FILTER = args.extra_filter
     corrtrack_main.RECALL_BY_WINDOW = args.recall_by_window
@@ -889,6 +902,11 @@ def run_full_pipeline(args: argparse.Namespace, passthrough: List[str]) -> None:
         str(args.param_grid_config),
     ]
     # Propagate core overrides so the reproducible rerun matches.
+    effective_parallel = bool(args.parallel) or any(
+        flag is True
+        for flag in (args.parallel_sketch, args.parallel_candidates, args.parallel_validation)
+    )
+
     cmd.extend([
         "--window-size",
         str(args.window_size),
@@ -898,8 +916,14 @@ def run_full_pipeline(args: argparse.Namespace, passthrough: List[str]) -> None:
         str(args.n_lags),
         "--corr-threshold",
         str(args.corr_threshold),
-        "--parallel" if args.parallel else "--sequential",
+        "--parallel" if effective_parallel else "--sequential",
     ])
+    if args.parallel_sketch is not None:
+        cmd.append("--parallel-sketch" if args.parallel_sketch else "--sequential-sketch")
+    if args.parallel_candidates is not None:
+        cmd.append("--parallel-candidates" if args.parallel_candidates else "--sequential-candidates")
+    if args.parallel_validation is not None:
+        cmd.append("--parallel-validation" if args.parallel_validation else "--sequential-validation")
     if args.neg_corr:
         cmd.append("--neg-corr")
     else:
@@ -945,6 +969,9 @@ def _run_bruteforce_pairs(
         extra_filter=False,
         exec=base_config.get("exec", "thread"),
         max_workers=base_config.get("max_workers", 0),
+        parallel_sketch=base_config.get("parallel_sketch"),
+        parallel_candidates=base_config.get("parallel_candidates"),
+        parallel_validation=base_config.get("parallel_validation"),
     )
     metadata = {"alg": "bf", "mode": "bf", "optim": "debug"}
     execute_corrtrack_pass(
@@ -1156,6 +1183,9 @@ def build_corrtrack_instance(
         extra_filter=extra_filter,
         exec=base_config.get("exec", "thread"),
         max_workers=base_config.get("max_workers", 0),
+        parallel_sketch=base_config.get("parallel_sketch"),
+        parallel_candidates=base_config.get("parallel_candidates"),
+        parallel_validation=base_config.get("parallel_validation"),
         debugger=debugger,
         **feature_kwargs,
     )
@@ -1492,6 +1522,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--corr-threshold", type=float, default=corrtrack_main.DEFAULT_CORR_THRESHOLD)
     parser.add_argument("--parallel", dest="parallel", action="store_true")
     parser.add_argument("--sequential", dest="parallel", action="store_false")
+    parser.add_argument("--parallel-sketch", dest="parallel_sketch", action="store_true")
+    parser.add_argument("--sequential-sketch", dest="parallel_sketch", action="store_false")
+    parser.add_argument("--parallel-candidates", dest="parallel_candidates", action="store_true")
+    parser.add_argument("--sequential-candidates", dest="parallel_candidates", action="store_false")
+    parser.add_argument("--parallel-validation", dest="parallel_validation", action="store_true")
+    parser.add_argument("--sequential-validation", dest="parallel_validation", action="store_false")
     parser.add_argument("--neg-corr", dest="neg_corr", action="store_true")
     parser.add_argument("--no-neg-corr", dest="neg_corr", action="store_false")
     parser.add_argument("--extra-filter", dest="extra_filter", action="store_true")
@@ -1500,6 +1536,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-recall-by-window", dest="recall_by_window", action="store_false")
     parser.set_defaults(
         parallel=corrtrack_main.DEFAULT_PARALLEL,
+        parallel_sketch=None,
+        parallel_candidates=None,
+        parallel_validation=None,
         neg_corr=corrtrack_main.DEFAULT_NEG_CORR,
         extra_filter=corrtrack_main.DEFAULT_EXTRA_FILTER,
         recall_by_window=corrtrack_main.DEFAULT_RECALL_BY_WINDOW,

@@ -23,6 +23,7 @@ from correlation.load_data_asos import load_csvs_asos
 
 ID_CODE_PATTERN = re.compile(r"^[A-Z0-9]{4}$")
 DEFAULT_RECENT_YEARS = (1, 2, 5, 10)
+CSV_DELIMITER = ";"
 
 
 def _consume_station_id(tokens: List[str]) -> str:
@@ -67,7 +68,7 @@ def iter_filcorr_rows(
 ) -> Iterable[Tuple[str, str, int, np.datetime64, float]]:
     for file_path, id1, id2 in sorted(files, key=lambda item: item[0].name):
         with file_path.open("r", newline="") as fh:
-            reader = csv.reader(fh)
+            reader = csv.reader(fh, delimiter=CSV_DELIMITER)
             for idx, row in enumerate(reader, start=1):
                 if len(row) < 2:
                     continue
@@ -105,7 +106,7 @@ def write_max_lag_csv(
         rows = sorted(rows, key=lambda item: (item[0], item[1], item[2]))
     count = 0
     with output_path.open("w", newline="") as fh:
-        writer = csv.writer(fh)
+        writer = csv.writer(fh, delimiter=CSV_DELIMITER)
         writer.writerow(["id1", "id2", "t1_index", "time1", "max_corr", "lag"])
         for id1, id2, t1_index, time1, max_corr in rows:
             count += 1

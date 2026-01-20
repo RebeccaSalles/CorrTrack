@@ -19,6 +19,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Iterable, Optional, Sequence
 import traceback
 
+CSV_DELIMITER = ";"
+
 try:
     from dask import delayed, compute
     from dask.threaded import get as dask_threaded_get
@@ -207,7 +209,7 @@ class CSVStreamWriter:
             existing_header: Optional[Sequence[str]] = None
             try:
                 with open(path, newline="") as existing_file:
-                    reader = csv.reader(existing_file)
+                    reader = csv.reader(existing_file, delimiter=CSV_DELIMITER)
                     existing_header = next(reader, None)
             except Exception:
                 existing_header = None
@@ -216,8 +218,8 @@ class CSVStreamWriter:
                 if len(existing_header) != len(self.columns) or tuple(existing_header) != self.columns:
                     tmp_path = f"{path}.tmp"
                     with open(path, newline="") as existing_file, open(tmp_path, "w", newline="") as tmp_file:
-                        reader = csv.reader(existing_file)
-                        writer = csv.writer(tmp_file)
+                        reader = csv.reader(existing_file, delimiter=CSV_DELIMITER)
+                        writer = csv.writer(tmp_file, delimiter=CSV_DELIMITER)
                         writer.writerow(self.columns)
                         first_row = True
                         for row in reader:
@@ -238,7 +240,7 @@ class CSVStreamWriter:
                 needs_header = True
 
         self._fh = open(path, "a", newline="")
-        self._writer = csv.writer(self._fh)
+        self._writer = csv.writer(self._fh, delimiter=CSV_DELIMITER)
         if needs_header:
             self._writer.writerow(self.columns)
             self._fh.flush()
@@ -2097,7 +2099,7 @@ class CorrTrack:
         )
 
         with open(output_csv, mode='w', newline='') as file:
-            writer = csv.writer(file)
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
             writer.writerow(["id1", "id2", "time1", "time2", "corr"])
             for pair,corr in sorted_items:
                 id1, id2, t1, t2, _ = pair
@@ -2168,7 +2170,7 @@ class CorrTrack:
             return
 
         with open(output_csv, mode='w', newline='') as file:
-            writer = csv.writer(file)
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
             writer.writerow(["id1", "id2", "t1_index", "time1", "max_corr", "lag"])
 
             for pair_ids in sorted(max_corr_by_pair):
@@ -2208,7 +2210,7 @@ class CorrTrack:
         if len(self.corr_lengths)>0:
             os.makedirs(os.path.dirname(output_csv), exist_ok=True)
             with open(output_csv, mode='w', newline='') as file:
-                writer = csv.writer(file)
+                writer = csv.writer(file, delimiter=CSV_DELIMITER)
                 writer.writerow(["id1", "id2", "lag", "start_time_id1", "start_time_id2", "duration", "corr_sign"])
                 for key,value in self.corr_lengths.items():
                     ids = (key[0],key[1])
@@ -2249,7 +2251,7 @@ class CorrTrack:
     def _save_candidates(self, output_csv):
         os.makedirs(os.path.dirname(output_csv), exist_ok=True)
         with open(output_csv, mode='w', newline='') as file:
-            writer = csv.writer(file)
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
             writer.writerow(['id1', 'id2', 'time1', 'time2', 'window', 'freq'])
             for pair, freq in sorted(self.freq_pairs.items()):
                 id1, id2, t1, t2, w = pair
@@ -2260,7 +2262,7 @@ class CorrTrack:
     def _save_negative_pairs(self, output_csv):
         os.makedirs(os.path.dirname(output_csv), exist_ok=True)
         with open(output_csv, mode='w', newline='') as file:
-            writer = csv.writer(file)
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
             writer.writerow(['id1', 'id2', 'time1', 'time2', 'corr'])
             for (id1, id2, t1, t2, _), corr in self.correlated.items():
                 if corr <= -self.corr_threshold:
@@ -2272,7 +2274,7 @@ class CorrTrack:
         if len(self.corr_lengths)>0:
             os.makedirs(os.path.dirname(output_csv), exist_ok=True)
             with open(output_csv, mode='w', newline='') as file:
-                writer = csv.writer(file)
+                writer = csv.writer(file, delimiter=CSV_DELIMITER)
                 writer.writerow(["id1", "id2", "lag", "time", "anomaly"])
                 for key,value in self.corr_anomalies.items():
                     ids = (key[0],key[1])
@@ -2296,7 +2298,7 @@ class CorrTrack:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         write_header = path not in state["headers"] or not os.path.exists(path)
         with open(path, "a", newline="") as file:
-            writer = csv.writer(file)
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
             if write_header:
                 writer.writerow(header)
                 state["headers"].add(path)
@@ -2309,7 +2311,7 @@ class CorrTrack:
 
         def _load_correlated(path):
             with open(path, newline="") as file:
-                reader = csv.reader(file)
+                reader = csv.reader(file, delimiter=CSV_DELIMITER)
                 next(reader, None)
                 for row in reader:
                     if len(row) < 4:
@@ -2319,7 +2321,7 @@ class CorrTrack:
 
         def _load_neg_pairs(path):
             with open(path, newline="") as file:
-                reader = csv.reader(file)
+                reader = csv.reader(file, delimiter=CSV_DELIMITER)
                 next(reader, None)
                 for row in reader:
                     if len(row) < 4:
@@ -2329,7 +2331,7 @@ class CorrTrack:
 
         def _load_candidates(path):
             with open(path, newline="") as file:
-                reader = csv.reader(file)
+                reader = csv.reader(file, delimiter=CSV_DELIMITER)
                 next(reader, None)
                 for row in reader:
                     if len(row) < 6:
@@ -2343,7 +2345,7 @@ class CorrTrack:
 
         def _load_status(path):
             with open(path, newline="") as file:
-                reader = csv.reader(file)
+                reader = csv.reader(file, delimiter=CSV_DELIMITER)
                 next(reader, None)
                 for row in reader:
                     if len(row) < 7:
@@ -2358,7 +2360,7 @@ class CorrTrack:
 
         def _load_anomalies(path):
             with open(path, newline="") as file:
-                reader = csv.reader(file)
+                reader = csv.reader(file, delimiter=CSV_DELIMITER)
                 next(reader, None)
                 for row in reader:
                     if len(row) < 5:
@@ -5832,7 +5834,7 @@ class CorrTrack_compare:
 
         os.makedirs(os.path.dirname(os.path.abspath(output_csv)), exist_ok=True)
         with open(output_csv, "w", newline="") as file:
-            writer = csv.writer(file)
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
             writer.writerow(COMPARISON_COLUMNS)
             writer.writerows(results)
 
@@ -5967,7 +5969,7 @@ class CorrTrack_compare:
         results = list(self._outer_iter(args_list, self._parallel_mode_run, unordered=False))
 
         with open(output_csv, mode='w', newline='') as file:
-            writer = csv.writer(file)
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
             writer.writerow(COMPARISON_COLUMNS)
             writer.writerows(results)
 

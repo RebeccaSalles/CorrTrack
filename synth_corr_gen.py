@@ -6,6 +6,7 @@ from typing import Dict, List, Tuple, Optional, Any
 
 import numpy as np
 
+CSV_DELIMITER = ";"
 
 def _format_rate(z: float) -> str:
     return f"{z:.2f}".replace(".", "p")
@@ -436,7 +437,7 @@ def make_corr_dataset(
     # Correlated pairs CSV
     corr_csv_path = os.path.join(save_dir, f"{stem}_correlated.csv")
     with open(corr_csv_path, "w", newline="") as f:
-        writer = csv.writer(f)
+        writer = csv.writer(f, delimiter=CSV_DELIMITER)
         writer.writerow(["id1", "id2", "time1", "time2", "corr"])
         for row in correlated_rows:
             writer.writerow(row)
