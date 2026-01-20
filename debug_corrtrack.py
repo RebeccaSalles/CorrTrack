@@ -1536,9 +1536,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-recall-by-window", dest="recall_by_window", action="store_false")
     parser.set_defaults(
         parallel=corrtrack_main.DEFAULT_PARALLEL,
-        parallel_sketch=None,
-        parallel_candidates=None,
-        parallel_validation=None,
+        parallel_sketch=corrtrack_main.DEFAULT_PARALLEL_SKETCH,
+        parallel_candidates=corrtrack_main.DEFAULT_PARALLEL_CANDIDATES,
+        parallel_validation=corrtrack_main.DEFAULT_PARALLEL_VALIDATION,
         neg_corr=corrtrack_main.DEFAULT_NEG_CORR,
         extra_filter=corrtrack_main.DEFAULT_EXTRA_FILTER,
         recall_by_window=corrtrack_main.DEFAULT_RECALL_BY_WINDOW,

@@ -598,6 +598,10 @@ def run_and_log_corrtrack(
         base_config["corr_threshold"],
         n_vectors,
         grid_dimension,
+        full_vector_candidates=not _resolve_parallel_flag(
+            base_config.get("parallel_candidates"),
+            False,
+        ),
     )
     if cell_stretch is None or cell_stretch <= 0.0:
         cell_stretch = 1.0
@@ -737,6 +741,7 @@ def _resolve_cell_stretch(
     n_vectors,
     grid_dimension,
     default=1.0,
+    full_vector_candidates=False,
 ):
     stretch = _to_float_safe(stretch_value)
     if stretch is not None and stretch > 0.0:
@@ -750,10 +755,13 @@ def _resolve_cell_stretch(
     grid_dim = _to_float_safe(grid_dimension)
     if grid_dim is None or grid_dim <= 0.0:
         grid_dim = 1.0
-    try:
-        grid_adjust = grid_dim ** 0.25
-    except ValueError:
+    if full_vector_candidates:
         grid_adjust = 1.0
+    else:
+        try:
+            grid_adjust = grid_dim ** 0.25
+        except ValueError:
+            grid_adjust = 1.0
 
     if base is None or base <= 0.0 or grid_adjust <= 0.0:
         return default
@@ -1092,10 +1100,16 @@ class CorrTrack:
             raise TypeError("Basic window size (",basic_window,") is not divisable by window step (",window_step,")")
         #if window_step > 0 and n_lags % window_step != 0:
         #    raise TypeError("Number of lags (",n_lags,") is not divisable by window step (",window_step,")")
+        exec_mode = _normalize_exec_mode(exec, default="thread")
+        parallel_default = exec_mode == "thread"
+        parallel_sketch_flag = _resolve_parallel_flag(parallel_sketch, False)
+        parallel_candidates_flag = _resolve_parallel_flag(parallel_candidates, False)
+        parallel_validation_flag = _resolve_parallel_flag(parallel_validation, parallel_default)
+
         grid_dimension = 1 if grid_dimension is None or grid_dimension <= 0 else int(grid_dimension)
         if n_vectors is None or n_vectors <= 0:
             raise ValueError("n_vectors must be a positive integer.")
-        if n_vectors % grid_dimension != 0:
+        if parallel_candidates_flag and n_vectors % grid_dimension != 0:
             raise TypeError("Number of random vectors (",n_vectors,") is not divisable by the grid dimension (",grid_dimension,")")
         
         # Parameters features
@@ -1140,11 +1154,10 @@ class CorrTrack:
         self.seed_toggle = seed_toggle
         self.n_vectors = n_vectors
         # Parameters nodes
-        self.exec = _normalize_exec_mode(exec, default="thread")
-        parallel_default = self.exec == "thread"
-        self.parallel_sketch = _resolve_parallel_flag(parallel_sketch, parallel_default)
-        self.parallel_candidates = _resolve_parallel_flag(parallel_candidates, parallel_default)
-        self.parallel_validation = _resolve_parallel_flag(parallel_validation, parallel_default)
+        self.exec = exec_mode
+        self.parallel_sketch = parallel_sketch_flag
+        self.parallel_candidates = parallel_candidates_flag
+        self.parallel_validation = parallel_validation_flag
         self.parallel_any = self.parallel_sketch or self.parallel_candidates or self.parallel_validation
 
         self.n_nodes = max_workers
@@ -1160,11 +1173,16 @@ class CorrTrack:
         self._thread_pool = None
         self._thread_pool_workers = None
         # Parameters grids
-        self.grid_dimension = grid_dimension
-        if self.n_vectors is not None:
-            self.n_grids = int(self.n_vectors//self.grid_dimension)
-        else:
+        self.full_vector_candidates = not self.parallel_candidates
+        if self.full_vector_candidates:
+            self.grid_dimension = int(self.n_vectors)
             self.n_grids = 1
+        else:
+            self.grid_dimension = grid_dimension
+            if self.n_vectors is not None:
+                self.n_grids = int(self.n_vectors // self.grid_dimension)
+            else:
+                self.n_grids = 1
         self.freq_pairs = {}
         self.candidates = {}
         self.validated = {}
@@ -1184,10 +1202,13 @@ class CorrTrack:
         grid_dim = _to_float_safe(self.grid_dimension)
         if grid_dim is None or grid_dim <= 0.0:
             grid_dim = 1.0
-        try:
-            grid_adjust = grid_dim ** 0.25
-        except ValueError:
+        if self.full_vector_candidates:
             grid_adjust = 1.0
+        else:
+            try:
+                grid_adjust = grid_dim ** 0.25
+            except ValueError:
+                grid_adjust = 1.0
 
         stretch = cell_size if cell_size is not None else 1.0
         try:
@@ -1199,12 +1220,17 @@ class CorrTrack:
 
         self.cell_stretch = stretch
         self.cell_size = base * stretch * grid_adjust
-        self.cell_size = min(self.cell_size, 0.5)
+        if self.full_vector_candidates:
+            self.cell_size *= math.sqrt(self.n_vectors)
+        else:
+            self.cell_size = min(self.cell_size, 0.5)
         self.grid_max = min(1.0, 3.0/np.sqrt(self.n_vectors))
 
         # Parameters thresholds
-        if freq_threshold is not None:
-            self.freq_threshold = freq_threshold*self.n_vectors
+        if self.full_vector_candidates:
+            self.freq_threshold = 0
+        elif freq_threshold is not None:
+            self.freq_threshold = freq_threshold * self.n_vectors
         else:
             self.freq_threshold = 0
 
@@ -1283,6 +1309,7 @@ class CorrTrack:
                 self.sketch_std,
                 self.n_grids,
                 self.neg_corr,
+                full_vector=self.full_vector_candidates,
                 sign_prefilter_scale=self.sign_prefilter_scale,
                 sign_prefilter_extra=self.sign_prefilter_extra,
                 extra_filter=self.extra_filter,
@@ -2820,6 +2847,7 @@ class CorrTrack:
                         self.preprocess,
                         self.neg_corr,
                         self.sketch_norm,
+                        full_vector_candidates=self.full_vector_candidates,
                     )
                 )
         if len(self.sketch_nodes) > self.n_sketch_nodes:
@@ -3604,7 +3632,7 @@ class CorrTrack:
 
     
 class Sketches:
-    def __init__(self,window_size,basic_window,window_step,seed,seed_toggle,n_vectors,grid_dimension,grid_nodes,warmup_mean_map,warmup_std_map,preprocess,neg_corr=False,sketch_norm="z"):
+    def __init__(self,window_size,basic_window,window_step,seed,seed_toggle,n_vectors,grid_dimension,grid_nodes,warmup_mean_map,warmup_std_map,preprocess,neg_corr=False,sketch_norm="z",full_vector_candidates=False):
         self.verbose = None
         # Parameters windows
         self.window_size = window_size
@@ -3626,6 +3654,7 @@ class Sketches:
         self._series_warmup_stds = []
         self.preprocess = preprocess
         self.sketch_norm = str(sketch_norm) if sketch_norm is not None else "z"
+        self.full_vector_candidates = bool(full_vector_candidates)
         self.neg_corr = bool(neg_corr)
         self._series_window_sums = None
         self._series_window_means = None
@@ -4586,6 +4615,15 @@ class Sketches:
             if sid_idx.size == 0:
                 return
 
+        if self.full_vector_candidates:
+            partition = {}
+            for i, key in enumerate(keys):
+                vec = np.asarray(matrix[i], dtype=np.float64)
+                is_const = bool(const_flags[i]) or np.linalg.norm(vec) == 0.0
+                partition[key] = (vec, is_const, 0.0)
+            self.partitions = [partition]
+            return
+
         n_grids = min(self.n_grids, n_dim // self.grid_dimensions)
         self.partitions = [None for _ in range(self.n_grids)]
         sid_idx_arr = np.ascontiguousarray(sid_idx, dtype=np.int64)
@@ -4814,7 +4852,7 @@ class Candidates_BF:
 
 class Candidates:
     def __init__(self,n_lagged_windows,grid_dimension,cell_size,grid_max,freq_threshold,corr_threshold,n_vectors,sketch_std,n_grids,neg_corr,
-                 sign_prefilter_scale=1.3,sign_prefilter_extra=1,extra_filter=False, seed=None):
+                 sign_prefilter_scale=1.3,sign_prefilter_extra=1,extra_filter=False, seed=None, full_vector=False):
         self.verbose = None
         self.neg_corr = neg_corr
         # Parameters grids (grid_dimension is fixed to 1 semantics)
@@ -4825,10 +4863,12 @@ class Candidates:
         self.cell_size = cell_size
         self.grid_max = grid_max
         self.sketches = {}
+        self.full_vector = bool(full_vector)
         # BST-like storage over scalar sketch values
-        self._entries = []  # (value, window_id_key, window_id)
+        self._entries = []  # (value, window_id_key, window_id[, vector])
         self._values = []   # parallel list of values for bisect
         self._reverse_index = defaultdict(list)  # window_id -> list of inserted values (includes neg when needed)
+        self._reverse_vectors = defaultdict(list)  # window_id -> list of vectors (parallel to _reverse_index)
         self._recent_window_ids = set()
         self._sid_list = []
         # Parameters thresholds
@@ -4849,10 +4889,14 @@ class Candidates:
     def from_state(cls, state):
         obj = cls.__new__(cls)
         obj.__dict__.update(state)
+        obj._reverse_index = defaultdict(list, getattr(obj, "_reverse_index", {}))
+        obj._reverse_vectors = defaultdict(list, getattr(obj, "_reverse_vectors", {}))
         return obj
 
     def load_state(self, state):
         self.__dict__.update(state)
+        self._reverse_index = defaultdict(list, getattr(self, "_reverse_index", {}))
+        self._reverse_vectors = defaultdict(list, getattr(self, "_reverse_vectors", {}))
 
     def append_partition(self,curr_time,new_partition):
         new_partition = self._partition_to_dict(new_partition)
@@ -4895,7 +4939,7 @@ class Candidates:
         sid, start_time, window_size = window_id
         return (str(sid), int(start_time), int(window_size))
 
-    def _insert_entry(self, value, window_id):
+    def _insert_entry(self, value, window_id, vector=None):
         key = self._window_id_key(window_id)
         start = bisect.bisect_left(self._values, value)
         end = bisect.bisect_right(self._values, value)
@@ -4906,13 +4950,15 @@ class Candidates:
             offset = bisect.bisect_left(subkeys, key)
             idx = start + offset
         self._values.insert(idx, value)
-        self._entries.insert(idx, (value, key, window_id))
+        self._entries.insert(idx, (value, key, window_id, vector))
 
     def _remove_entry(self, value, window_id):
         key = self._window_id_key(window_id)
         idx = bisect.bisect_left(self._values, value)
         while idx < len(self._values) and self._values[idx] == value:
-            _, entry_key, entry_id = self._entries[idx]
+            entry = self._entries[idx]
+            entry_key = entry[1]
+            entry_id = entry[2]
             if entry_key == key and entry_id == window_id:
                 self._values.pop(idx)
                 self._entries.pop(idx)
@@ -4925,6 +4971,14 @@ class Candidates:
         n = len(self._values)
         while idx < n and self._values[idx] <= upper:
             yield self._entries[idx][2]
+            idx += 1
+
+    def _range_search_entries(self, lower, upper):
+        idx = bisect.bisect_left(self._values, lower)
+        n = len(self._values)
+        while idx < n and self._values[idx] <= upper:
+            entry = self._entries[idx]
+            yield entry[2], entry[3]
             idx += 1
 
     def _input_tree(self):
@@ -4942,14 +4996,27 @@ class Candidates:
             vec = np.asarray(sketch, dtype=np.float64).ravel()
             if vec.size == 0:
                 continue
-            value = float(vec[0])
-            self._insert_entry(value, k)
-            self._reverse_index[k].append(value)
-            if self.neg_corr:
-                neg_value = -value
-                self._insert_entry(neg_value, k)
-                self._reverse_index[k].append(neg_value)
-            self.sketches[k] = value
+            if self.full_vector:
+                value = float(vec[0])
+                self._insert_entry(value, k, vec)
+                self._reverse_index[k].append(value)
+                self._reverse_vectors[k].append(vec)
+                if self.neg_corr:
+                    neg_vec = -vec
+                    neg_value = -value
+                    self._insert_entry(neg_value, k, neg_vec)
+                    self._reverse_index[k].append(neg_value)
+                    self._reverse_vectors[k].append(neg_vec)
+                self.sketches[k] = vec
+            else:
+                value = float(vec[0])
+                self._insert_entry(value, k)
+                self._reverse_index[k].append(value)
+                if self.neg_corr:
+                    neg_value = -value
+                    self._insert_entry(neg_value, k)
+                    self._reverse_index[k].append(neg_value)
+                self.sketches[k] = value
             self._recent_window_ids.add(k)
 
     def _clean_old_sketches(self):
@@ -4961,6 +5028,7 @@ class Candidates:
                 else:
                     continue
                 values = self._reverse_index.pop(k, [])
+                self._reverse_vectors.pop(k, [])
                 if is_constant:
                     self.sketches.pop(k, None)
                     continue
@@ -5001,24 +5069,52 @@ class Candidates:
         tau = float(self.cell_size)
         if tau < 0.0:
             return
+        tau_sq = tau * tau
         seen_pairs = set()
         for window_id in self._recent_window_ids:
             values = self._reverse_index.get(window_id, ())
-            for value in set(values):
-                lower = value - tau
-                upper = value + tau
-                for other_id in self._range_search_ids(lower, upper):
-                    if other_id == window_id:
+            if self.full_vector:
+                vectors = self._reverse_vectors.get(window_id, ())
+                if len(vectors) != len(values):
+                    vectors = [None] * len(values)
+                for value, vec in zip(values, vectors):
+                    if vec is None:
                         continue
-                    if window_id[0] == other_id[0] and window_id[1] == other_id[1]:
-                        continue
-                    pair_id = self._normalize_key((window_id[0], other_id[0], window_id[1], other_id[1], window_id[2]))
-                    if pair_id in seen_pairs:
-                        continue
-                    seen_pairs.add(pair_id)
-                    freq_pairs[pair_id] = freq_pairs.get(pair_id, 0.0) + 1.0
-                    if freq_pairs[pair_id] >= self.freq_threshold:
-                        candidates[pair_id] = 1
+                    lower = value - tau
+                    upper = value + tau
+                    for other_id, other_vec in self._range_search_entries(lower, upper):
+                        if other_id == window_id:
+                            continue
+                        if window_id[0] == other_id[0] and window_id[1] == other_id[1]:
+                            continue
+                        if other_vec is None:
+                            continue
+                        diff = vec - other_vec
+                        if np.dot(diff, diff) > tau_sq:
+                            continue
+                        pair_id = self._normalize_key((window_id[0], other_id[0], window_id[1], other_id[1], window_id[2]))
+                        if pair_id in seen_pairs:
+                            continue
+                        seen_pairs.add(pair_id)
+                        freq_pairs[pair_id] = freq_pairs.get(pair_id, 0.0) + 1.0
+                        if freq_pairs[pair_id] >= self.freq_threshold:
+                            candidates[pair_id] = 1
+            else:
+                for value in set(values):
+                    lower = value - tau
+                    upper = value + tau
+                    for other_id in self._range_search_ids(lower, upper):
+                        if other_id == window_id:
+                            continue
+                        if window_id[0] == other_id[0] and window_id[1] == other_id[1]:
+                            continue
+                        pair_id = self._normalize_key((window_id[0], other_id[0], window_id[1], other_id[1], window_id[2]))
+                        if pair_id in seen_pairs:
+                            continue
+                        seen_pairs.add(pair_id)
+                        freq_pairs[pair_id] = freq_pairs.get(pair_id, 0.0) + 1.0
+                        if freq_pairs[pair_id] >= self.freq_threshold:
+                            candidates[pair_id] = 1
 
     def run(self, n_ids, verbose=True, testing=False):
         self.verbose = verbose
@@ -5061,8 +5157,8 @@ class CorrTrack_optimize:
         self.exec = _normalize_exec_mode(exec, default="thread")
         self.max_workers = max_workers
         parallel_default = self.exec == "thread"
-        self.parallel_sketch = _resolve_parallel_flag(parallel_sketch, parallel_default)
-        self.parallel_candidates = _resolve_parallel_flag(parallel_candidates, parallel_default)
+        self.parallel_sketch = _resolve_parallel_flag(parallel_sketch, False)
+        self.parallel_candidates = _resolve_parallel_flag(parallel_candidates, False)
         self.parallel_validation = _resolve_parallel_flag(parallel_validation, parallel_default)
         
         self.corrtrack_bf = CorrTrack(window_size=self.window_size,basic_window=None,window_step=window_step,n_vectors=1,n_lags=self.n_lags,
@@ -5705,8 +5801,8 @@ class CorrTrack_compare:
         self.exec = _normalize_exec_mode(exec, default="thread")
         self.max_workers = max_workers
         parallel_default = self.exec == "thread"
-        self.parallel_sketch = _resolve_parallel_flag(parallel_sketch, parallel_default)
-        self.parallel_candidates = _resolve_parallel_flag(parallel_candidates, parallel_default)
+        self.parallel_sketch = _resolve_parallel_flag(parallel_sketch, False)
+        self.parallel_candidates = _resolve_parallel_flag(parallel_candidates, False)
         self.parallel_validation = _resolve_parallel_flag(parallel_validation, parallel_default)
 
         self.corrtrack_bf = CorrTrack(window_size=self.window_size,basic_window=basic_window,window_step=window_step,n_vectors=1,n_lags=self.n_lags,
@@ -6211,6 +6307,10 @@ class CorrTrack_compare:
                 record.get("n_vectors"),
                 record.get("grid_dimension"),
                 default=None,
+                full_vector_candidates=not _resolve_parallel_flag(
+                    record.get("parallel_candidates"),
+                    False,
+                ),
             )
 
         def as_int_str(value, default="0"):
@@ -6459,6 +6559,7 @@ class CorrTrack_compare:
             self.corr_threshold,
             n_vectors,
             grid_dimension,
+            full_vector_candidates=not self.parallel_candidates,
         )
         if cell_stretch is None or cell_stretch <= 0.0:
             cell_stretch = 1.0
