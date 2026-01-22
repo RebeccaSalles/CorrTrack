@@ -61,6 +61,129 @@ def find_candidate_pairs(values, value_window_idx, recent_values, recent_window_
     return pairs
 
 
+def find_candidate_pairs_full(
+    values,
+    value_window_idx,
+    recent_values,
+    recent_window_idx,
+    win_sid_idx,
+    win_time,
+    entry_vectors,
+    recent_vectors,
+    tau,
+):
+    pairs = []
+    values = np.asarray(values, dtype=np.float64)
+    value_window_idx = np.asarray(value_window_idx, dtype=np.int64)
+    recent_values = np.asarray(recent_values, dtype=np.float64)
+    recent_window_idx = np.asarray(recent_window_idx, dtype=np.int64)
+    win_sid_idx = np.asarray(win_sid_idx, dtype=np.int64)
+    win_time = np.asarray(win_time, dtype=np.int64)
+    entry_vectors = np.asarray(entry_vectors, dtype=np.float64)
+    recent_vectors = np.asarray(recent_vectors, dtype=np.float64)
+    if values.size == 0 or recent_values.size == 0 or tau < 0.0:
+        return pairs
+    tau_sq = float(tau) * float(tau)
+    for i, (val, ridx) in enumerate(zip(recent_values, recent_window_idx)):
+        lower = val - tau
+        upper = val + tau
+        left = bisect_left(values, lower)
+        right = bisect_right(values, upper)
+        sid_r = win_sid_idx[ridx]
+        time_r = win_time[ridx]
+        vec_r = recent_vectors[i]
+        for j in range(left, right):
+            other_idx = value_window_idx[j]
+            if other_idx == ridx:
+                continue
+            if win_sid_idx[other_idx] == sid_r and win_time[other_idx] == time_r:
+                continue
+            diff = vec_r - entry_vectors[j]
+            if float(np.dot(diff, diff)) > tau_sq:
+                continue
+            pairs.append((int(ridx), int(other_idx)))
+    return pairs
+
+
+def enumerate_candidate_rows(
+    data,
+    window_index,
+    ref_indices,
+    window_size,
+    window_step,
+    std_thresh=1e-3,
+    shard_start=-1,
+    shard_end=-1,
+):
+    data = np.asarray(data)
+    n_series, n_cols = data.shape
+    window_count = n_cols - window_size + 1
+    if window_count <= 0:
+        return None
+
+    working_mask = _compute_nonconst_mask(
+        data.astype(np.float64, copy=False),
+        window_size,
+        std_thresh=std_thresh,
+    )
+    if working_mask.size == 0:
+        return None
+
+    step = window_step if window_step > 0 else 1
+    step_mask = (np.arange(window_count) % step) == 0
+    valid_mask = working_mask & step_mask
+    last_idx = window_count - 1
+    seeds_mask = valid_mask[:, last_idx]
+    if not np.any(seeds_mask):
+        return None
+
+    valid_k_all, valid_j_all = np.nonzero(valid_mask)
+    if valid_k_all.size == 0:
+        return None
+
+    j_start_times = np.asarray(window_index, dtype=np.int64)[valid_j_all]
+    curr_start = int(np.asarray(window_index, dtype=np.int64)[last_idx])
+    rows_accum = []
+
+    ref_indices = np.asarray(list(ref_indices), dtype=np.int64)
+    for s_idx in ref_indices:
+        if s_idx >= n_series or not seeds_mask[s_idx]:
+            continue
+
+        mask_sel = np.ones(valid_k_all.shape[0], dtype=bool)
+        mask_sel &= ~((valid_k_all <= s_idx) & (valid_j_all == last_idx))
+        if not mask_sel.any():
+            continue
+
+        indices = np.nonzero(mask_sel)[0]
+        k_sel = valid_k_all[indices]
+        if shard_start >= 0 and shard_end >= 0:
+            shard_mask = (k_sel >= shard_start) & (k_sel < shard_end)
+            if not shard_mask.any():
+                continue
+            indices = indices[shard_mask]
+            k_sel = k_sel[shard_mask]
+        if indices.size == 0:
+            continue
+
+        rows_accum.append(
+            np.column_stack(
+                [
+                    np.full(indices.size, s_idx, dtype=np.int64),
+                    valid_k_all[indices].astype(np.int64, copy=False),
+                    np.full(indices.size, curr_start, dtype=np.int64),
+                    j_start_times[indices],
+                    np.full(indices.size, window_size, dtype=np.int64),
+                ]
+            )
+        )
+
+    if not rows_accum:
+        return None
+
+    return np.vstack(rows_accum)
+
+
 
 def fast_corr_and_dist(x, y):
 

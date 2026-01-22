@@ -32,6 +32,8 @@ DEFAULT_NEG_CORR = False
 DEFAULT_CORR_VAL = True
 DEFAULT_EXTRA_FILTER = False
 DEFAULT_RECALL_BY_WINDOW = True
+DEFAULT_USE_CONST_STD_PERCENTILE = False
+DEFAULT_CONST_STD_PERCENTILE = 0.01
 DEFAULT_TARGET_RECALL = 0.95
 DEFAULT_TRAIN_RATIO = 0.3
 
@@ -51,6 +53,8 @@ BASIC_WINDOW = DEFAULT_BASIC_WINDOW
 N_LAGS = DEFAULT_N_LAGS
 CORR_THRESHOLD = DEFAULT_CORR_THRESHOLD
 TRAIN_RATIO = DEFAULT_TRAIN_RATIO
+USE_CONST_STD_PERCENTILE = DEFAULT_USE_CONST_STD_PERCENTILE
+CONST_STD_PERCENTILE = DEFAULT_CONST_STD_PERCENTILE
 
 RESULT_FOLDER = None
 COUNTRIES = VARIABLES = N_VARS = N_YEARS = MODES = None
@@ -117,6 +121,7 @@ def _effective_variable(country: str, var: str | None) -> str:
 
 def _apply_dataset_config(cfg):
     global RESULT_FOLDER, COUNTRIES, VARIABLES, N_VARS, N_YEARS, MODES, DATA_LOADER, OBS_MODE
+    global USE_CONST_STD_PERCENTILE, CONST_STD_PERCENTILE
 
     RESULT_FOLDER = cfg.RESULT_FOLDER
     COUNTRIES = _as_list(_get_cfg_attr(cfg, "COUNTRIES", "DATASET"))
@@ -130,6 +135,8 @@ def _apply_dataset_config(cfg):
         raise RuntimeError("Dataset configuration must define DATA_LOADER")
     DATA_LOADER = loader
     OBS_MODE = getattr(cfg, "OBS_MODE", DEFAULT_OBS_MODE)
+    USE_CONST_STD_PERCENTILE = _coerce_optional_bool(getattr(cfg, "USE_CONST_STD_PERCENTILE", DEFAULT_USE_CONST_STD_PERCENTILE))
+    CONST_STD_PERCENTILE = float(getattr(cfg, "CONST_STD_PERCENTILE", DEFAULT_CONST_STD_PERCENTILE))
 
 
 def _load_loader(loader_spec: str) -> Callable[[str, str], tuple[np.ndarray, np.ndarray]]:
@@ -309,6 +316,8 @@ def main():
                         parallel_sketch=PARALLEL_SKETCH,
                         parallel_candidates=PARALLEL_CANDIDATES,
                         parallel_validation=PARALLEL_VALIDATION,
+                        const_std_percentile=CONST_STD_PERCENTILE,
+                        use_const_std_percentile=USE_CONST_STD_PERCENTILE,
                     )
 
                     output_prefix = os.path.join(output_dir, f"corrtrack_optim_{dataset_id}")

@@ -103,6 +103,237 @@ def find_candidate_pairs(double[:] values,
     return pairs
 
 
+def find_candidate_pairs_full(double[:] values,
+                              long[:] value_window_idx,
+                              double[:] recent_values,
+                              long[:] recent_window_idx,
+                              long[:] win_sid_idx,
+                              long[:] win_time,
+                              double[:, :] entry_vectors,
+                              double[:, :] recent_vectors,
+                              double tau):
+    """Return list of (window_idx, other_idx) pairs within +/- tau and L2 check."""
+    cdef Py_ssize_t n_recent = recent_values.shape[0]
+    cdef Py_ssize_t n_values = values.shape[0]
+    cdef Py_ssize_t n_dim = entry_vectors.shape[1]
+    if entry_vectors.shape[0] != n_values:
+        raise ValueError("entry_vectors must align with values")
+    if recent_vectors.shape[0] != n_recent or recent_vectors.shape[1] != n_dim:
+        raise ValueError("recent_vectors must align with recent_values")
+    cdef Py_ssize_t i, j, d, left, right
+    cdef double val, lower, upper
+    cdef Py_ssize_t ridx, other_idx
+    cdef long sid_r, sid_o, time_r, time_o
+    cdef double tau_sq = tau * tau
+    cdef double diff, acc
+    cdef Py_ssize_t count = 0
+    cdef Py_ssize_t cap = 1024
+    cdef int64_t *buf = <int64_t *>malloc(cap * 2 * sizeof(int64_t))
+    cdef bint failed = False
+    if buf == NULL:
+        raise MemoryError()
+
+    if n_recent == 0 or n_values == 0 or n_dim == 0 or tau < 0.0:
+        free(buf)
+        return []
+
+    with nogil:
+        for i in range(n_recent):
+            val = recent_values[i]
+            ridx = <Py_ssize_t>recent_window_idx[i]
+            lower = val - tau
+            upper = val + tau
+            left = _bisect_left(values, lower)
+            right = _bisect_right(values, upper)
+            sid_r = win_sid_idx[ridx]
+            time_r = win_time[ridx]
+            for j in range(left, right):
+                other_idx = <Py_ssize_t>value_window_idx[j]
+                if other_idx == ridx:
+                    continue
+                sid_o = win_sid_idx[other_idx]
+                time_o = win_time[other_idx]
+                if sid_o == sid_r and time_o == time_r:
+                    continue
+                acc = 0.0
+                for d in range(n_dim):
+                    diff = recent_vectors[i, d] - entry_vectors[j, d]
+                    acc += diff * diff
+                    if acc > tau_sq:
+                        break
+                if acc > tau_sq:
+                    continue
+                if count >= cap:
+                    cap = cap * 2
+                    buf = <int64_t *>realloc(buf, cap * 2 * sizeof(int64_t))
+                    if buf == NULL:
+                        failed = True
+                        break
+                buf[2 * count] = <int64_t>ridx
+                buf[2 * count + 1] = <int64_t>other_idx
+                count += 1
+            if failed:
+                break
+
+    if failed:
+        free(buf)
+        raise MemoryError()
+
+    pairs = [(int(buf[2 * i]), int(buf[2 * i + 1])) for i in range(count)]
+    free(buf)
+    return pairs
+
+
+def enumerate_candidate_rows(double[:, ::1] data,
+                             long[:] window_index,
+                             long[:] ref_indices,
+                             int window_size,
+                             int window_step,
+                             double std_thresh=1e-3,
+                             long shard_start=-1,
+                             long shard_end=-1):
+    cdef Py_ssize_t n_series = data.shape[0]
+    cdef Py_ssize_t n_cols = data.shape[1]
+    cdef Py_ssize_t window_count = n_cols - window_size + 1
+    if window_size <= 0 or window_count <= 0:
+        return None
+    if ref_indices.shape[0] == 0:
+        return None
+
+    cdef int step = window_step if window_step > 0 else 1
+    cdef Py_ssize_t last_idx = window_count - 1
+    if last_idx % step != 0:
+        return None
+
+    cdef double threshold = (std_thresh * std_thresh) * window_size
+    cdef Py_ssize_t step_count = (window_count + step - 1) // step
+    cdef Py_ssize_t cap = n_series * step_count
+    if cap <= 0:
+        return None
+
+    cdef int64_t *valid_k = <int64_t *>malloc(cap * sizeof(int64_t))
+    cdef int64_t *valid_j = <int64_t *>malloc(cap * sizeof(int64_t))
+    cdef unsigned char *seeds = <unsigned char *>malloc(n_series * sizeof(unsigned char))
+    if valid_k == NULL or valid_j == NULL or seeds == NULL:
+        if valid_k != NULL:
+            free(valid_k)
+        if valid_j != NULL:
+            free(valid_j)
+        if seeds != NULL:
+            free(seeds)
+        raise MemoryError()
+
+    cdef Py_ssize_t s, j
+    cdef double sum_val, sum_sq, val, outgoing, incoming, var_sum
+    cdef Py_ssize_t count = 0
+    for s in range(n_series):
+        seeds[s] = 0
+        sum_val = 0.0
+        sum_sq = 0.0
+        for j in range(window_size):
+            val = data[s, j]
+            sum_val += val
+            sum_sq += val * val
+        for j in range(window_count):
+            if j > 0:
+                outgoing = data[s, j - 1]
+                incoming = data[s, j + window_size - 1]
+                sum_val += incoming - outgoing
+                sum_sq += incoming * incoming - outgoing * outgoing
+            var_sum = sum_sq - (sum_val * sum_val) / window_size
+            if var_sum < 0.0:
+                var_sum = 0.0
+            if (j % step) == 0 and var_sum > threshold:
+                if count < cap:
+                    valid_k[count] = <int64_t>s
+                    valid_j[count] = <int64_t>j
+                    count += 1
+            if j == last_idx and var_sum > threshold:
+                seeds[s] = 1
+
+    if count == 0:
+        free(valid_k)
+        free(valid_j)
+        free(seeds)
+        return None
+
+    cdef bint has_seed = False
+    cdef long s_idx
+    for j in range(ref_indices.shape[0]):
+        s_idx = ref_indices[j]
+        if s_idx < 0 or s_idx >= n_series:
+            continue
+        if seeds[s_idx] != 0:
+            has_seed = True
+            break
+    if not has_seed:
+        free(valid_k)
+        free(valid_j)
+        free(seeds)
+        return None
+
+    cdef Py_ssize_t out_cap = 1024
+    if out_cap < count:
+        out_cap = count
+    cdef int64_t *out_buf = <int64_t *>malloc(out_cap * 5 * sizeof(int64_t))
+    if out_buf == NULL:
+        free(valid_k)
+        free(valid_j)
+        free(seeds)
+        raise MemoryError()
+
+    cdef Py_ssize_t out_count = 0
+    cdef long curr_start = window_index[last_idx]
+    cdef int64_t k_idx, j_idx
+    cdef bint apply_shard = shard_start >= 0 and shard_end >= 0
+    for j in range(ref_indices.shape[0]):
+        s_idx = ref_indices[j]
+        if s_idx < 0 or s_idx >= n_series:
+            continue
+        if seeds[s_idx] == 0:
+            continue
+        for j_idx in range(count):
+            k_idx = valid_k[j_idx]
+            if valid_j[j_idx] == last_idx and k_idx <= s_idx:
+                continue
+            if apply_shard:
+                if k_idx < shard_start or k_idx >= shard_end:
+                    continue
+            if out_count >= out_cap:
+                out_cap = out_cap * 2
+                out_buf = <int64_t *>realloc(out_buf, out_cap * 5 * sizeof(int64_t))
+                if out_buf == NULL:
+                    free(valid_k)
+                    free(valid_j)
+                    free(seeds)
+                    raise MemoryError()
+            out_buf[5 * out_count] = <int64_t>s_idx
+            out_buf[5 * out_count + 1] = k_idx
+            out_buf[5 * out_count + 2] = <int64_t>curr_start
+            out_buf[5 * out_count + 3] = <int64_t>window_index[valid_j[j_idx]]
+            out_buf[5 * out_count + 4] = <int64_t>window_size
+            out_count += 1
+
+    free(valid_k)
+    free(valid_j)
+    free(seeds)
+
+    if out_count == 0:
+        free(out_buf)
+        return None
+
+    cdef np.ndarray[np.int64_t, ndim=2] out = np.empty((out_count, 5), dtype=np.int64)
+    for j in range(out_count):
+        out[j, 0] = out_buf[5 * j]
+        out[j, 1] = out_buf[5 * j + 1]
+        out[j, 2] = out_buf[5 * j + 2]
+        out[j, 3] = out_buf[5 * j + 3]
+        out[j, 4] = out_buf[5 * j + 4]
+
+    free(out_buf)
+    return out
+
+
 
 def fast_corr_and_dist(double[:] x, double[:] y):
     """Compute Pearson correlation and Euclidean distance for two vectors."""

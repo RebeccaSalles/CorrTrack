@@ -25,6 +25,8 @@ DEFAULT_CORR_VAL = True
 DEFAULT_EXTRA_FILTER = False
 DEFAULT_RECALL_BY_WINDOW = True
 DEFAULT_ARTIFACT_MODE = "iterative"
+DEFAULT_USE_CONST_STD_PERCENTILE = False
+DEFAULT_CONST_STD_PERCENTILE = 0.01
 
 DEFAULT_DATASET_CONFIG = Path(__file__).with_name(
     "experiment_dataset_fr_air_temperature_7_1.py"
@@ -46,6 +48,8 @@ CORR_VAL = DEFAULT_CORR_VAL
 EXTRA_FILTER = DEFAULT_EXTRA_FILTER
 RECALL_BY_WINDOW = DEFAULT_RECALL_BY_WINDOW
 ARTIFACT_MODE = DEFAULT_ARTIFACT_MODE
+USE_CONST_STD_PERCENTILE = DEFAULT_USE_CONST_STD_PERCENTILE
+CONST_STD_PERCENTILE = DEFAULT_CONST_STD_PERCENTILE
 RESULT_FOLDER = None
 COUNTRIES = VARIABLES = N_VARS = N_YEARS = MODES = None
 DATA_LOADER: Callable[..., tuple[np.ndarray, np.ndarray]] | None = None
@@ -101,6 +105,7 @@ def _apply_run_config(cfg):
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
     global EXEC_MODE, NEG_CORR, CORR_VAL, EXTRA_FILTER, RECALL_BY_WINDOW
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
+    global USE_CONST_STD_PERCENTILE, CONST_STD_PERCENTILE
 
     PARALLEL = _resolve_parallel(cfg)
     PARALLEL_SKETCH = _coerce_optional_bool(getattr(cfg, "PARALLEL_SKETCH", None))
@@ -116,6 +121,8 @@ def _apply_run_config(cfg):
     BASIC_WINDOW = getattr(cfg, "BASIC_WINDOW", None)
     N_LAGS = cfg.N_LAGS
     CORR_THRESHOLD = cfg.CORR_THRESHOLD
+    USE_CONST_STD_PERCENTILE = _coerce_optional_bool(getattr(cfg, "USE_CONST_STD_PERCENTILE", DEFAULT_USE_CONST_STD_PERCENTILE))
+    CONST_STD_PERCENTILE = float(getattr(cfg, "CONST_STD_PERCENTILE", DEFAULT_CONST_STD_PERCENTILE))
 
 
 def _get_cfg_attr(cfg, *names):
@@ -143,6 +150,7 @@ def _effective_variable(country: str, var: str | None) -> str:
 
 def _apply_dataset_config(cfg):
     global RESULT_FOLDER, COUNTRIES, VARIABLES, N_VARS, N_YEARS, MODES, DATA_LOADER, OBS_MODE
+    global USE_CONST_STD_PERCENTILE, CONST_STD_PERCENTILE
 
     RESULT_FOLDER = cfg.RESULT_FOLDER
     COUNTRIES = _as_list(_get_cfg_attr(cfg, "COUNTRIES", "DATASET"))
@@ -153,6 +161,8 @@ def _apply_dataset_config(cfg):
     MODES = cfg.MODES
     DATA_LOADER = getattr(cfg, "DATA_LOADER", None)
     OBS_MODE = getattr(cfg, "OBS_MODE", DEFAULT_OBS_MODE)
+    USE_CONST_STD_PERCENTILE = _coerce_optional_bool(getattr(cfg, "USE_CONST_STD_PERCENTILE", DEFAULT_USE_CONST_STD_PERCENTILE))
+    CONST_STD_PERCENTILE = float(getattr(cfg, "CONST_STD_PERCENTILE", DEFAULT_CONST_STD_PERCENTILE))
 
 
 def _load_loader(loader_spec: str) -> Callable[[str, str], tuple[np.ndarray, np.ndarray]]:
@@ -222,6 +232,8 @@ def build_base_config():
         "parallel_validation": PARALLEL_VALIDATION,
         "max_workers": 0,
         "artifact_mode": ARTIFACT_MODE,
+        "use_const_std_percentile": USE_CONST_STD_PERCENTILE,
+        "const_std_percentile": CONST_STD_PERCENTILE,
     }
 
 

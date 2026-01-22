@@ -17,3 +17,5 @@ DATA_LOADER = partial(load_dataset, root="datasets/asos-airports")
 PARALLEL_SKETCH = None
 PARALLEL_CANDIDATES = None
 PARALLEL_VALIDATION = None
+USE_CONST_STD_PERCENTILE = False
+CONST_STD_PERCENTILE = 0.01

@@ -23,6 +23,8 @@ DEFAULT_NEG_CORR = False
 DEFAULT_EXTRA_FILTER = False
 DEFAULT_RECALL_BY_WINDOW = True
 DEFAULT_ARTIFACT_MODE = "iterative"
+DEFAULT_USE_CONST_STD_PERCENTILE = False
+DEFAULT_CONST_STD_PERCENTILE = 0.01
 
 DEFAULT_DATASET_CONFIG = Path(__file__).with_name(
     "experiment_dataset_fr_air_temperature_7_1.py"
@@ -43,6 +45,8 @@ NEG_CORR = DEFAULT_NEG_CORR
 EXTRA_FILTER = DEFAULT_EXTRA_FILTER
 RECALL_BY_WINDOW = DEFAULT_RECALL_BY_WINDOW
 ARTIFACT_MODE = DEFAULT_ARTIFACT_MODE
+USE_CONST_STD_PERCENTILE = DEFAULT_USE_CONST_STD_PERCENTILE
+CONST_STD_PERCENTILE = DEFAULT_CONST_STD_PERCENTILE
 RESULT_FOLDER = None
 COUNTRIES = VARIABLES = N_VARS = N_YEARS = None
 DATA_LOADER: Callable[..., tuple[np.ndarray, np.ndarray]] | None = None
@@ -102,6 +106,7 @@ def _effective_variable(country: str, var: str | None) -> str:
 
 def _apply_dataset_config(cfg):
     global RESULT_FOLDER, COUNTRIES, VARIABLES, N_VARS, N_YEARS, DATA_LOADER, OBS_MODE
+    global USE_CONST_STD_PERCENTILE, CONST_STD_PERCENTILE
 
     RESULT_FOLDER = cfg.RESULT_FOLDER
     COUNTRIES = _as_list(_get_cfg_attr(cfg, "COUNTRIES", "DATASET"))
@@ -111,6 +116,8 @@ def _apply_dataset_config(cfg):
     N_YEARS = _get_cfg_attr(cfg, "N_YEARS", "N_OBS")
     DATA_LOADER = getattr(cfg, "DATA_LOADER", None)
     OBS_MODE = getattr(cfg, "OBS_MODE", DEFAULT_OBS_MODE)
+    USE_CONST_STD_PERCENTILE = _coerce_optional_bool(getattr(cfg, "USE_CONST_STD_PERCENTILE", DEFAULT_USE_CONST_STD_PERCENTILE))
+    CONST_STD_PERCENTILE = float(getattr(cfg, "CONST_STD_PERCENTILE", DEFAULT_CONST_STD_PERCENTILE))
 
 
 def _load_loader(loader_spec: str) -> Callable[[str, str], tuple[np.ndarray, np.ndarray]]:
@@ -138,6 +145,8 @@ def build_base_config():
         "parallel_validation": PARALLEL_VALIDATION,
         "max_workers": 0,
         "artifact_mode": ARTIFACT_MODE,
+        "use_const_std_percentile": USE_CONST_STD_PERCENTILE,
+        "const_std_percentile": CONST_STD_PERCENTILE,
     }
 
 
