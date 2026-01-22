@@ -88,7 +88,6 @@ RUN_RESULT_COLUMNS: Sequence[str] = (
     "window_step",
     "basic_window",
     "n_lags",
-    "warmup_size",
     "seed",
     "seed_toggle",
     "preprocess",
@@ -134,7 +133,6 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     "window_step",
     "basic_window",
     "n_lags",
-    "warmup_size",
     "seed",
     "seed_toggle",
     "preprocess",
@@ -203,7 +201,6 @@ COMPARISON_COLUMNS: Sequence[str] = (
     "window_step",
     "basic_window",
     "n_lags",
-    "warmup_size",
     "seed",
     "seed_toggle",
     "preprocess",
@@ -500,7 +497,6 @@ def run_and_log_bruteforce(
         n_lags=base_config["n_lags"],
         grid_dimension=1,
         cell_size=1,
-        warmup_data=None,
         seed=None,
         seed_toggle=None,
         corr_threshold=base_config["corr_threshold"],
@@ -512,8 +508,6 @@ def run_and_log_bruteforce(
         parallel_sketch=base_config.get("parallel_sketch"),
         parallel_candidates=base_config.get("parallel_candidates"),
         parallel_validation=base_config.get("parallel_validation"),
-        const_std_percentile=base_config.get("const_std_percentile", 0.01),
-        use_const_std_percentile=base_config.get("use_const_std_percentile", False),
     )
 
     record, runtime_parts, corr_flags = execute_corrtrack_pass(
@@ -534,7 +528,6 @@ def run_and_log_bruteforce(
     record["seed"] = None
     record["seed_toggle"] = None
     record["sketch_norm"] = getattr(corrtrack, "sketch_norm", None)
-    record["warmup_size"] = None
     record["nodes"] = metadata.get("nodes", base_config.get("max_workers"))
     record["freq_threshold"] = getattr(corrtrack, "freq_threshold", None)
 
@@ -559,22 +552,6 @@ def run_and_log_corrtrack(
     metadata.setdefault("mode", "main")
     metadata.setdefault("alg", metadata.get("alg"))
     metadata.setdefault("optim", metadata.get("optim", "main"))
-
-    warmup_ratio = run_params.get("warmup_size")
-    try:
-        warmup_ratio = float(warmup_ratio) if warmup_ratio is not None else None
-    except (TypeError, ValueError):
-        warmup_ratio = None
-
-    length_data = data.shape[1]
-    if warmup_ratio is not None:
-        warmup_len = round(warmup_ratio * length_data)
-        if warmup_len <= 0:
-            warmup_len = 1
-        warmup_len = min(length_data, warmup_len)
-        warmup_data = data[:, :warmup_len]
-    else:
-        warmup_data = None
 
     extra_filter = _coerce_to_bool(run_params.get("extra_filters", base_config.get("extra_filter", False)))
 
@@ -624,7 +601,6 @@ def run_and_log_corrtrack(
         n_lags=base_config["n_lags"],
         grid_dimension=grid_dimension,
         cell_size=cell_stretch,
-        warmup_data=warmup_data,
         seed=run_seed,
         seed_toggle=seed_toggle,
         freq_threshold=_to_float(run_params.get("freq_threshold")),
@@ -637,8 +613,6 @@ def run_and_log_corrtrack(
         parallel_sketch=base_config.get("parallel_sketch"),
         parallel_candidates=base_config.get("parallel_candidates"),
         parallel_validation=base_config.get("parallel_validation"),
-        const_std_percentile=base_config.get("const_std_percentile", 0.01),
-        use_const_std_percentile=base_config.get("use_const_std_percentile", False),
         **feature_kwargs,
     )
 
@@ -655,7 +629,6 @@ def run_and_log_corrtrack(
         artifact_mode=artifact_mode,
     )
 
-    record["warmup_size"] = warmup_ratio
     record["extra_filters"] = extra_filter
     record["preprocess"] = run_params.get("preprocess")
     record["seed"] = run_seed
@@ -882,136 +855,11 @@ def _is_structurally_spiked_stats(x, mean, var_sum, n, kurt_thresh=5.0, mu4_sum=
     return kurt > kurt_thresh
 
 
-class _P2Quantile:
-    """Online P^2 quantile estimator for streaming data."""
-
-    def __init__(self, prob):
-        p = float(prob) if prob is not None else 0.5
-        if not np.isfinite(p):
-            p = 0.5
-        if p <= 0.0:
-            self._mode = "min"
-            self.p = 0.0
-        elif p >= 1.0:
-            self._mode = "max"
-            self.p = 1.0
-        else:
-            self._mode = "p2"
-            self.p = p
-        self._init_samples = []
-        self._n = 0
-        self._q = None
-        self._n_i = None
-        self._n_p = None
-        self._d_n = None
-        self._min = None
-        self._max = None
-
-    def add(self, x):
-        if x is None:
-            return
-        try:
-            x = float(x)
-        except (TypeError, ValueError):
-            return
-        if not np.isfinite(x):
-            return
-
-        self._n += 1
-        if self._min is None or x < self._min:
-            self._min = x
-        if self._max is None or x > self._max:
-            self._max = x
-
-        if self._mode != "p2":
-            return
-
-        if self._q is None:
-            self._init_samples.append(x)
-            if len(self._init_samples) == 5:
-                self._init_samples.sort()
-                self._q = list(self._init_samples)
-                self._n_i = [1, 2, 3, 4, 5]
-                p = self.p
-                self._n_p = [1.0, 1.0 + 2.0 * p, 1.0 + 4.0 * p, 3.0 + 2.0 * p, 5.0]
-                self._d_n = [0.0, p / 2.0, p, (1.0 + p) / 2.0, 1.0]
-            return
-
-        q = self._q
-        if x < q[0]:
-            q[0] = x
-            k = 0
-        elif x >= q[4]:
-            q[4] = x
-            k = 3
-        else:
-            if x < q[1]:
-                k = 0
-            elif x < q[2]:
-                k = 1
-            elif x < q[3]:
-                k = 2
-            else:
-                k = 3
-
-        for i in range(k + 1, 5):
-            self._n_i[i] += 1
-        for i in range(5):
-            self._n_p[i] += self._d_n[i]
-
-        for i in range(1, 4):
-            d = self._n_p[i] - self._n_i[i]
-            if (
-                (d >= 1.0 and self._n_i[i + 1] - self._n_i[i] > 1)
-                or (d <= -1.0 and self._n_i[i - 1] - self._n_i[i] < -1)
-            ):
-                d = 1 if d >= 1.0 else -1
-                n_i = self._n_i
-                q_i = self._q
-                denom = n_i[i + 1] - n_i[i - 1]
-                if denom != 0:
-                    q_new = q_i[i] + (d / denom) * (
-                        (n_i[i] - n_i[i - 1] + d) * (q_i[i + 1] - q_i[i]) / (n_i[i + 1] - n_i[i])
-                        + (n_i[i + 1] - n_i[i] - d) * (q_i[i] - q_i[i - 1]) / (n_i[i] - n_i[i - 1])
-                    )
-                else:
-                    q_new = q_i[i]
-
-                if q_i[i - 1] < q_new < q_i[i + 1]:
-                    q_i[i] = q_new
-                else:
-                    denom_lin = n_i[i + d] - n_i[i]
-                    if denom_lin != 0:
-                        q_i[i] = q_i[i] + d * (q_i[i + d] - q_i[i]) / denom_lin
-                n_i[i] += d
-
-    def extend(self, values):
-        if values is None:
-            return
-        arr = np.asarray(values, dtype=np.float64).ravel()
-        for val in arr:
-            self.add(val)
-
-    def value(self):
-        if self._n == 0:
-            return None
-        if self._mode == "min":
-            return self._min
-        if self._mode == "max":
-            return self._max
-        if self._q is None:
-            if not self._init_samples:
-                return None
-            return float(np.percentile(self._init_samples, self.p * 100.0))
-        return float(self._q[2])
-
-
 def _sketch_worker(payload):
     """Execute a sketch node update."""
     corrtrack, node_index, node_new, ids_subset, verbose, testing = payload
     sketch_node = corrtrack.sketch_nodes[node_index]
     sketch_node._sid_lookup = corrtrack.series_ids
-    sketch_node.const_std_thresh = getattr(corrtrack, "const_std_thresh", None)
     sketches, partitions = sketch_node.run(
         node_new,
         ids_subset,
@@ -1181,7 +1029,7 @@ def _corr_validation_batch_worker(payload):
     corr_threshold = payload["corr_threshold"]
     neg_corr = payload["neg_corr"]
     corr_val = payload.get("corr_val", True)
-    std_thresh = payload.get("std_thresh")
+    std_thresh = 1e-3
 
     if not corr_val:
         return [
@@ -1255,7 +1103,7 @@ _os_parallel_guard.environ.setdefault("MKL_DEBUG_CPU_TYPE", "5")
 # ================================================================
 
 class CorrTrack:
-    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,grid_dimension,cell_size,warmup_data,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,extra_filter=False,exec="parallel",max_workers=0,sketch_norm="z",parallel_sketch=None,parallel_candidates=None,parallel_validation=None,const_std_percentile=0.01,use_const_std_percentile=False):
+    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,grid_dimension,cell_size,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,extra_filter=False,exec="parallel",max_workers=0,sketch_norm="z",parallel_sketch=None,parallel_candidates=None,parallel_validation=None):
         
         if basic_window is not None and window_size % basic_window != 0:
             raise TypeError("Window size (",window_size,") is not divisable by basic window size (",basic_window,")")
@@ -1278,19 +1126,12 @@ class CorrTrack:
         # Parameters features
         self.neg_corr = neg_corr
         # Parameters data
-        self.warmup_data = warmup_data
         self.window_data = None
         self.window_index = None
         self.window_startTimes = None
-        self._raw_window_sums = None
-        self._raw_window_sums_sq = None
         self.series_ids = {}
         self.map_ids = []
         self.ids = None
-        self.warmup_means = None
-        self.warmup_stds = None
-        self._warmup_mean_map = {}
-        self._warmup_std_map = {}
         self.datetime_index = None
         self.datetime_lookup = {} #TODO: save correlation logs to file
         self.preprocess = preprocess
@@ -1314,10 +1155,6 @@ class CorrTrack:
         self.curr_window_size = None
         self.n_lags = (n_lags // self.window_step) * self.window_step #divisible by window_step
         self.n_lagged_windows = self.n_lags//self.window_step+1
-        self.const_std_percentile = float(const_std_percentile) if const_std_percentile is not None else 0.01
-        self.use_const_std_percentile = _coerce_to_bool(use_const_std_percentile)
-        self.const_std_thresh = None
-        self._const_std_quantile = _P2Quantile(self.const_std_percentile) if self.use_const_std_percentile else None
         # Parameter sketches
         self.seed = seed if seed is not None else int(np.random.SeedSequence().entropy)
         self.seed_toggle = seed_toggle
@@ -1461,9 +1298,6 @@ class CorrTrack:
         self.sign_prefilter_extra = 1
         # Neighbor search removed; keep margin for compatibility with debug tooling.
         self.neighbor_margin = 0.0
-
-        #getting warmup stats
-        self._warmup()
 
         # Instantiating corrtrack objects
         for g in range(self.n_grids):
@@ -1833,17 +1667,6 @@ class CorrTrack:
         
         return np.array([self.datetime_lookup[int(i)] for i in index], dtype='datetime64[ns]')
     
-    def _warmup(self): #can be done in parallel
-        if self.warmup_data is not None and self.warmup_data.size > 0:
-            self.datetime_index = CorrTrack._is_datetime(self.warmup_data[0,:])
-            warmup_data = self.warmup_data[1:,:]
-            preprocessed_warmup_data = warmup_data
-            if self.preprocess:
-                diff_warmup_data = np.diff(warmup_data, axis=1).astype(float)
-                preprocessed_warmup_data = np.clip(diff_warmup_data, -3, 3)
-            self.warmup_means = [np.mean(serie) for serie in preprocessed_warmup_data]
-            self.warmup_stds = [np.std(serie) for serie in preprocessed_warmup_data]
-
     def _update_curr_data(self,new_data_step,ids):
         prev_window_data = self.window_data
         prev_curr_window_size = self.curr_window_size
@@ -1872,28 +1695,11 @@ class CorrTrack:
                 series_indexes[val]= i
             self.series_ids = series_indexes # same order of the series in new_data_step
 
-        if self.warmup_means is not None:
-            self._warmup_mean_map = {
-                id_: self.warmup_means[idx] if idx < len(self.warmup_means) else None
-                for id_, idx in self.series_ids.items()
-            }
-        else:
-            self._warmup_mean_map = {}
-
-        if self.warmup_stds is not None:
-            self._warmup_std_map = {
-                id_: self.warmup_stds[idx] if idx < len(self.warmup_stds) else None
-                for id_, idx in self.series_ids.items()
-            }
-        else:
-            self._warmup_std_map = {}
-
         self.window_startTimes = np.arange(int(self.window_index[0]), int(self.window_index[-1]) + 1, int(self.window_step))
 
         self._map_series_to_nodes()
         
         self._update_curr_window_size()
-        self._update_const_std_thresh(prev_window_data, prev_curr_window_size, new_data_step_values)
     
     def _cleanup_datetime_lookups(self):
         if not hasattr(self, "datetime_lookup") or not self.datetime_lookup:
@@ -1949,19 +1755,8 @@ class CorrTrack:
         t = np.asarray(data)
         if self.preprocess:
             diff_t = t[:, 1:] - t[:, :-1]                         # 1. Differencing
-            clipped_t = np.clip(diff_t, -3, 3)                   # 2. Linear clipping
-            t = clipped_t
-
-        # The previous implementation applied a z-normalization on the fly.
-        # We now keep the raw (preprocessed) values and compensate for mean
-        # shifts later when adjusting sketches.
-        # fallback_std = 1.0
-        # z_normalized = np.empty_like(t)
-        #
-        # i = series_index
-        # mean = self.warmup_means[i] if self.warmup_means[i] is not None else 0.0
-        # std = self.warmup_stds[i] if self.warmup_stds[i] is not None and self.warmup_stds[i] > 0 else fallback_std
-        # z_normalized = (t - mean) / std
+            #clipped_t = np.clip(diff_t, -3, 3)                   # 2. Linear clipping
+            t = diff_t
 
         return t
 
@@ -2042,8 +1837,7 @@ class CorrTrack:
         pair_corr, pair_dist, stats = _fast_corr_and_dist(x, y, return_stats=True)
         n, mean_x, mean_y, var_x, var_y = stats
 
-        std_thresh = getattr(self, "const_std_thresh", None)
-        if _is_near_constant_stats(var_x, n, std_thresh=std_thresh) or _is_near_constant_stats(var_y, n, std_thresh=std_thresh):
+        if _is_near_constant_stats(var_x, n, std_thresh=1e-3) or _is_near_constant_stats(var_y, n, std_thresh=1e-3):
             return {"counts": {"seen": 1, "skipped": 0, "constants": 1}}
 
         if (
@@ -2241,8 +2035,7 @@ class CorrTrack:
         pair_corr, pair_dist, stats = _fast_corr_and_dist(x, y, return_stats=True)
         n, mean_x, mean_y, var_x, var_y = stats
 
-        std_thresh = getattr(self, "const_std_thresh", None)
-        if _is_near_constant_stats(var_x, n, std_thresh=std_thresh) or _is_near_constant_stats(var_y, n, std_thresh=std_thresh):
+        if _is_near_constant_stats(var_x, n, std_thresh=1e-3) or _is_near_constant_stats(var_y, n, std_thresh=1e-3):
             return (pair, False, np.nan, np.inf)
 
         if (
@@ -2356,8 +2149,7 @@ class CorrTrack:
                 chunk_size = 256
                 tested = validated = 0
                 min_dist, min_pair = self.min_dist, self.pair_min_dist
-                std_thresh = self.const_std_thresh
-                eff_std_thresh = float(std_thresh) if std_thresh is not None else 1e-3
+                eff_std_thresh = 1e-3
                 for i in range(0, len(items), chunk_size):
                     payload_items = items[i:i + chunk_size]
                     x_batch = np.asarray([item["x"] for item in payload_items], dtype=np.float64)
@@ -2435,7 +2227,6 @@ class CorrTrack:
                 "corr_threshold": self.corr_threshold,
                 "neg_corr": self.neg_corr,
                 "corr_val": True,
-                "std_thresh": self.const_std_thresh,
             }
             payloads.append(payload)
 
@@ -3070,8 +2861,6 @@ class CorrTrack:
                         self.n_vectors,
                         self.grid_dimension,
                         self.grid_nodes,
-                        self._warmup_mean_map,
-                        self._warmup_std_map,
                         self.preprocess,
                         self.neg_corr,
                         self.sketch_norm,
@@ -3349,65 +3138,6 @@ class CorrTrack:
         self.curr_window_size = min(self.window_size,self.window_data.shape[1])
         return None
 
-    def _update_const_std_thresh(self, prev_window_data, prev_curr_window_size, new_values):
-        if not self.use_const_std_percentile:
-            self.const_std_thresh = None
-            self._const_std_quantile = None
-            return
-        if self._const_std_quantile is None:
-            self._const_std_quantile = _P2Quantile(self.const_std_percentile)
-        if self.curr_window_size is None or self.curr_window_size <= 0:
-            self.const_std_thresh = 1e-3
-            return
-
-        n_series = self.window_data.shape[0]
-        step_len = new_values.shape[1] if new_values is not None else 0
-        needs_recompute = (
-            self._raw_window_sums is None
-            or self._raw_window_sums_sq is None
-            or self._raw_window_sums.shape[0] != n_series
-            or prev_window_data is None
-            or prev_curr_window_size is None
-            or prev_curr_window_size < self.window_size
-            or self.curr_window_size < self.window_size
-            or step_len <= 0
-            or prev_curr_window_size < step_len
-        )
-        if needs_recompute:
-            curr = self._curr_window()
-            if curr is None or curr.size == 0:
-                self.const_std_thresh = 1e-3
-                return
-            arr = np.asarray(curr, dtype=np.float64)
-            self._raw_window_sums = np.sum(arr, axis=1, dtype=np.float64)
-            self._raw_window_sums_sq = np.sum(arr * arr, axis=1, dtype=np.float64)
-        else:
-            outgoing = prev_window_data[:, -prev_curr_window_size:-prev_curr_window_size + step_len]
-            incoming = np.asarray(new_values, dtype=np.float64)
-            if outgoing.shape[1] != incoming.shape[1]:
-                arr = np.asarray(self._curr_window(), dtype=np.float64)
-                self._raw_window_sums = np.sum(arr, axis=1, dtype=np.float64)
-                self._raw_window_sums_sq = np.sum(arr * arr, axis=1, dtype=np.float64)
-            else:
-                self._raw_window_sums += incoming.sum(axis=1, dtype=np.float64) - outgoing.sum(axis=1, dtype=np.float64)
-                self._raw_window_sums_sq += np.sum(incoming * incoming, axis=1, dtype=np.float64) - np.sum(outgoing * outgoing, axis=1, dtype=np.float64)
-
-        n = float(self.curr_window_size)
-        var_sum = self._raw_window_sums_sq - (self._raw_window_sums * self._raw_window_sums) / n
-        var_sum = np.maximum(var_sum, 0.0)
-        stds = np.sqrt(var_sum / n)
-        if stds.size == 0 or not np.isfinite(stds).any():
-            self.const_std_thresh = 1e-3
-            return
-        finite_stds = stds[np.isfinite(stds)]
-        if finite_stds.size == 0:
-            self.const_std_thresh = 1e-3
-            return
-        self._const_std_quantile.extend(finite_stds)
-        thresh = self._const_std_quantile.value()
-        if thresh is None or not np.isfinite(thresh) or thresh < 0.0:
-            thresh = 1e-3
-        self.const_std_thresh = float(thresh)
     
     def compute_metrics(predicted: np.ndarray, ground_truth: np.ndarray):
         assert predicted.shape == ground_truth.shape, "Arrays must have the same shape."
@@ -3739,8 +3469,6 @@ class CorrTrack:
         start_time = time.time()
         if not self.brute_force_nodes:
             self.brute_force_nodes.append(Candidates_BF(self.window_size,self.window_step,self.n_lags,self.corr_threshold))
-        for node in self.brute_force_nodes:
-            node.const_std_thresh = self.const_std_thresh
         if self.parallel_candidates:
             self.candidates = self._run_bf_parallel(self._curr_window_step(), self.ids, worker_mode=cand_mode)
         else:
@@ -3771,8 +3499,6 @@ class CorrTrack:
             self.brute_force_nodes.append(Candidates_BF(self.window_size,self.window_step,self.n_lags,self.corr_threshold))
         if len(self.brute_force_nodes) > n_nodes:
             self.brute_force_nodes = self.brute_force_nodes[:n_nodes]
-        for node in self.brute_force_nodes:
-            node.const_std_thresh = self.const_std_thresh
 
         if n_nodes <= 1:
             id_groups = [ids_list]
@@ -3851,8 +3577,6 @@ class CorrTrack:
         else:
             if not self.brute_force_nodes:
                 self.brute_force_nodes.append(Candidates_BF(self.window_size,self.window_step,self.n_lags,self.corr_threshold))
-            for node in self.brute_force_nodes:
-                node.const_std_thresh = self.const_std_thresh
             # original single-thread path
             self.candidates = self.brute_force_nodes[0].run(self._curr_window_step(), self.ids, verbose, testing, ref_ids=None)
         end_time = time.time()
@@ -3926,7 +3650,7 @@ class CorrTrack:
 
     
 class Sketches:
-    def __init__(self,window_size,basic_window,window_step,seed,seed_toggle,n_vectors,grid_dimension,grid_nodes,warmup_mean_map,warmup_std_map,preprocess,neg_corr=False,sketch_norm="z",full_vector_candidates=False):
+    def __init__(self,window_size,basic_window,window_step,seed,seed_toggle,n_vectors,grid_dimension,grid_nodes,preprocess,neg_corr=False,sketch_norm="z",full_vector_candidates=False):
         self.verbose = None
         # Parameters windows
         self.window_size = window_size
@@ -3942,10 +3666,6 @@ class Sketches:
         self.series_ids = []
         self.previous_startTime = None
         self.curr_window_size = window_size
-        self.warmup_mean_map = warmup_mean_map or {}
-        self.warmup_std_map = warmup_std_map or {}
-        self._series_warmup_means = []
-        self._series_warmup_stds = []
         self.preprocess = preprocess
         self.sketch_norm = str(sketch_norm) if sketch_norm is not None else "z"
         self.full_vector_candidates = bool(full_vector_candidates)
@@ -3959,7 +3679,6 @@ class Sketches:
         self._sid_lookup = None
         self._const_flags = None
         self._spiked_flags = None
-        self.const_std_thresh = None
         self.is_spiked = {}
         # Parameters sketches
         self._debug_raw_sketches = {}
@@ -4096,16 +3815,6 @@ class Sketches:
         else:
             series_list = list(ids)
         self.series_ids = series_list
-        self._series_warmup_means = []
-        self._series_warmup_stds = []
-        for i in range(n_series):
-            series_id = series_list[i] if i < len(series_list) else None
-            self._series_warmup_means.append(
-                self.warmup_mean_map.get(series_id, None) if series_id is not None else None
-            )
-            self._series_warmup_stds.append(
-                self.warmup_std_map.get(series_id, None) if series_id is not None else None
-            )
         self.window_data = self.window_data.astype(float)
         self._update_curr_window_size()
         self._update_window_mean_stats(force_recompute=reset_sums)
@@ -4114,7 +3823,6 @@ class Sketches:
         if self.curr_window_size >= self.window_size:
             self._const_flags = None
             self._spiked_flags = None
-            std_thresh = self.const_std_thresh if self.const_std_thresh is not None else 1e-3
             if (
                 _cy_compute_constant_flags is not None
                 and self._raw_window_sums is not None
@@ -4131,12 +3839,6 @@ class Sketches:
                 )
                 const_flags = np.asarray(const_flags, dtype=np.uint8)
                 spiked_flags = np.asarray(spiked_flags, dtype=np.uint8)
-                if self.const_std_thresh is not None:
-                    n = float(self.curr_window_size)
-                    var_sum = self._raw_window_sums_sq - (self._raw_window_sums * self._raw_window_sums) / n
-                    var_sum = np.maximum(var_sum, 0.0)
-                    stds = np.sqrt(var_sum / n)
-                    const_flags = (stds <= float(std_thresh)).astype(np.uint8)
                 self._const_flags = const_flags
                 self._spiked_flags = spiked_flags
                 self.is_constant = {}
@@ -4158,7 +3860,7 @@ class Sketches:
                         flag = CorrTrack.is_near_constant(
                             var_sum=stats["var_sum"],
                             n=stats["n"],
-                            std_thresh=std_thresh,
+                            std_thresh=1e-3,
                         )
                         spiked = CorrTrack.is_structurally_spiked(
                             var_sum=stats["var_sum"],
@@ -4187,21 +3889,8 @@ class Sketches:
                 diff_t = np.zeros((t.shape[0], 1)) if t.shape[1] else np.zeros((t.shape[0], 0))
             else:
                 diff_t = t[:, 1:] - t[:, :-1]                     # 1. Differencing
-            clipped_t = np.clip(diff_t, -3, 3)                   # 2. Linear clipping
-            t = clipped_t
-
-        # Z-normalization happens later on the sketch vectors themselves. We keep
-        # the raw (preprocessed) values here and project them directly when
-        # building sketches.
-        # fallback_std = 1.0
-        # z_normalized = np.empty_like(t)
-        #
-        # for i in range(len(t)):
-        #     mean = self._series_warmup_means[i] if i < len(self._series_warmup_means) else None
-        #     std = self._series_warmup_stds[i] if i < len(self._series_warmup_stds) else None
-        #     mean = mean if mean is not None else 0.0
-        #     std = std if std is not None and std > 0 else fallback_std
-        #     z_normalized[i] = (t[i] - mean) / std
+            #clipped_t = np.clip(diff_t, -3, 3)                   # 2. Linear clipping
+            t = diff_t
 
         return np.asarray(t, dtype=np.float64)
     
@@ -4356,6 +4045,7 @@ class Sketches:
             "var_sum": var_sum,
             "mu4_sum": mu4_sum,
         }
+
 
     def _refresh_toggle_weights(self):
         if self.basicRandomVector is None or self.toggleVector is None:
@@ -5022,7 +4712,6 @@ class Candidates_BF:
 
         self.brute_force_steps = 0
         self.ref_indices = None
-        self.const_std_thresh = None
 
     def dump_state(self):
         return dict(self.__dict__)
@@ -5111,7 +4800,6 @@ class Candidates_BF:
             ref_indices,
             self.window_size,
             self.window_step,
-            std_thresh=self.const_std_thresh,
         )
         if rows is None:
             return None
@@ -5601,7 +5289,7 @@ class Candidates:
 
 
 class CorrTrack_optimize:
-    def __init__(self,train_data,ids,window_size,window_step,n_lags,corr_threshold,recall_by_window,alg,neg_corr,corr_val, extra_filter=False, exec="parallel",max_workers=0, sketch_norm="z", parallel_sketch=None, parallel_candidates=None, parallel_validation=None, const_std_percentile=0.01, use_const_std_percentile=False):
+    def __init__(self,train_data,ids,window_size,window_step,n_lags,corr_threshold,recall_by_window,alg,neg_corr,corr_val, extra_filter=False, exec="parallel",max_workers=0, sketch_norm="z", parallel_sketch=None, parallel_candidates=None, parallel_validation=None):
 
         self.neg_corr = neg_corr
         self.corr_val = corr_val
@@ -5628,14 +5316,10 @@ class CorrTrack_optimize:
         self.parallel_sketch = _resolve_parallel_flag(parallel_sketch, False)
         self.parallel_candidates = _resolve_parallel_flag(parallel_candidates, False)
         self.parallel_validation = _resolve_parallel_flag(parallel_validation, parallel_default)
-        self.const_std_percentile = float(const_std_percentile) if const_std_percentile is not None else 0.01
-        self.use_const_std_percentile = _coerce_to_bool(use_const_std_percentile)
-        
         self.corrtrack_bf = CorrTrack(window_size=self.window_size,basic_window=None,window_step=window_step,n_vectors=1,n_lags=self.n_lags,
-                                    grid_dimension=1,cell_size=1,warmup_data=None,seed=None,seed_toggle=None,corr_threshold=self.corr_threshold,
+                                    grid_dimension=1,cell_size=1,seed=None,seed_toggle=None,corr_threshold=self.corr_threshold,
                                     neg_corr=self.neg_corr,preprocess=False,extra_filter=self.extra_filter,exec=self.exec,max_workers=self.max_workers,
-                                    sketch_norm=self.sketch_norm,parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation,
-                                    const_std_percentile=self.const_std_percentile,use_const_std_percentile=self.use_const_std_percentile)
+                                    sketch_norm=self.sketch_norm,parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation)
         
         self.window_step = self.corrtrack_bf.window_step
         self.basic_window = self.corrtrack_bf.basic_window
@@ -5885,16 +5569,6 @@ class CorrTrack_optimize:
         basic_window = self.basic_window
         param_combo["basic_window"] = basic_window
         
-        warmup_size = param_combo["warmup_size"]
-        try:
-            warmup_size = float(warmup_size)
-        except (TypeError, ValueError):
-            warmup_size = None
-        try:
-            warmup_size = float(warmup_size)
-        except (TypeError, ValueError):
-            warmup_size = None
-        
         # Parameters sketches
         seed = param_combo["seed"]
         seed_toggle = param_combo["seed_toggle"]
@@ -5915,20 +5589,10 @@ class CorrTrack_optimize:
 
         try:
             length_data = self.train_data.shape[1]
-            if warmup_size is not None:
-                warmup_len = round(warmup_size * length_data)
-                if warmup_len <= 0:
-                    warmup_len = 1
-                warmup_len = min(length_data, warmup_len)
-                warmup_data = self.train_data[:, :warmup_len]
-            else:
-                warmup_data = None
-
             corrtrack = CorrTrack(window_size=window_size,basic_window=basic_window,window_step=window_step,n_vectors=n_vectors,n_lags=n_lags,
-                                grid_dimension=1,cell_size=1,warmup_data=warmup_data,seed=seed,seed_toggle=seed_toggle,
+                                grid_dimension=1,cell_size=1,seed=seed,seed_toggle=seed_toggle,
                                 freq_threshold=0,corr_threshold=corr_threshold,neg_corr=self.neg_corr,preprocess=preprocess,extra_filter=extra_filter,exec=self.exec,max_workers=self.max_workers,
                                 parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation,
-                                const_std_percentile=self.const_std_percentile,use_const_std_percentile=self.use_const_std_percentile,
                                 **feature_kwargs)
 
             for start in range(0, length_data - self.window_step + 1, self.window_step):
@@ -5978,7 +5642,6 @@ class CorrTrack_optimize:
         record["window_step"] = self.window_step
         record["basic_window"] = self.basic_window
         record["n_lags"] = self.n_lags
-        record["warmup_size"] = param_combo.get("warmup_size")
         record["seed"] = param_combo.get("seed")
         record["seed_toggle"] = param_combo.get("seed_toggle")
         record["preprocess"] = param_combo.get("preprocess")
@@ -6015,11 +5678,6 @@ class CorrTrack_optimize:
             nodes = int(nodes) if nodes is not None else None
         except (TypeError, ValueError):
             nodes = None
-        warmup_size = param_combo.get("warmup_size")
-        try:
-            warmup_ratio = float(warmup_size)
-        except (TypeError, ValueError):
-            warmup_ratio = None
         seed = param_combo.get("seed")
         try:
             seed = int(seed) if seed is not None else None
@@ -6058,7 +5716,6 @@ class CorrTrack_optimize:
         feature_kwargs = _extract_feature_overrides(param_combo)
 
         record["nodes"] = nodes
-        record["warmup_size"] = warmup_ratio
         record["seed"] = seed
         record["seed_toggle"] = seed_toggle
         record["n_vectors"] = n_vectors
@@ -6071,15 +5728,6 @@ class CorrTrack_optimize:
         length_data = self.train_data.shape[1]
 
         try:
-            if warmup_ratio is not None:
-                warmup_len = round(warmup_ratio * length_data)
-                if warmup_len <= 0:
-                    warmup_len = 1
-                warmup_len = min(length_data, warmup_len)
-                warmup_data = self.train_data[:, :warmup_len]
-            else:
-                warmup_data = None
-
             corrtrack = CorrTrack(
                 window_size=self.window_size,
                 basic_window=self.basic_window,
@@ -6088,7 +5736,6 @@ class CorrTrack_optimize:
                 n_lags=self.n_lags,
                 grid_dimension=grid_dimension,
                 cell_size=cell_stretch,
-                warmup_data=warmup_data,
                 seed=seed,
                 seed_toggle=seed_toggle,
                 freq_threshold=freq_threshold,
@@ -6101,8 +5748,6 @@ class CorrTrack_optimize:
                 parallel_sketch=self.parallel_sketch,
                 parallel_candidates=self.parallel_candidates,
                 parallel_validation=self.parallel_validation,
-                const_std_percentile=self.const_std_percentile,
-                use_const_std_percentile=self.use_const_std_percentile,
                 **feature_kwargs,
             )
 
@@ -6250,7 +5895,7 @@ class CorrTrack_optimize:
         #return self.ground_truth, self.runtime_bf, CorrTrack_HyperOptim._skyline_query(metrics, ref_metrics) 
 
 class CorrTrack_compare:
-    def __init__(self,train_data,test_data,ids,window_size,window_step,basic_window,n_lags,corr_threshold,param_grid,recall_by_window,neg_corr,corr_val,algs=None, exec="parallel", max_workers=0, extra_filter=False, sketch_norm="z", parallel_sketch=None, parallel_candidates=None, parallel_validation=None, const_std_percentile=0.01, use_const_std_percentile=False):
+    def __init__(self,train_data,test_data,ids,window_size,window_step,basic_window,n_lags,corr_threshold,param_grid,recall_by_window,neg_corr,corr_val,algs=None, exec="parallel", max_workers=0, extra_filter=False, sketch_norm="z", parallel_sketch=None, parallel_candidates=None, parallel_validation=None):
         
         self.neg_corr = neg_corr
         self.corr_val = corr_val
@@ -6278,15 +5923,12 @@ class CorrTrack_compare:
         self.parallel_sketch = _resolve_parallel_flag(parallel_sketch, False)
         self.parallel_candidates = _resolve_parallel_flag(parallel_candidates, False)
         self.parallel_validation = _resolve_parallel_flag(parallel_validation, parallel_default)
-        self.const_std_percentile = float(const_std_percentile) if const_std_percentile is not None else 0.01
-        self.use_const_std_percentile = _coerce_to_bool(use_const_std_percentile)
 
         self.corrtrack_bf = CorrTrack(window_size=self.window_size,basic_window=basic_window,window_step=window_step,n_vectors=1,n_lags=self.n_lags,
-                                    grid_dimension=1,cell_size=1,warmup_data=None,seed=None,seed_toggle=None,
+                                    grid_dimension=1,cell_size=1,seed=None,seed_toggle=None,
                                     corr_threshold=self.corr_threshold,neg_corr=self.neg_corr,preprocess=False,
                                     extra_filter=self.extra_filter,exec=self.exec,max_workers=self.max_workers,
-                                    sketch_norm=self.sketch_norm,parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation,
-                                    const_std_percentile=self.const_std_percentile,use_const_std_percentile=self.use_const_std_percentile)
+                                    sketch_norm=self.sketch_norm,parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation)
         
         self.window_step = self.corrtrack_bf.window_step
         self.basic_window = self.corrtrack_bf.basic_window
@@ -6423,7 +6065,7 @@ class CorrTrack_compare:
             plt.savefig(output_csv)
             plt.close()
 
-    def _mode_run(self,mode,alg,path,prefix,nodes,seed,seed_toggle,n_vectors,grid_dimension,cell_size,grid_max,freq_threshold,warmup_data,preprocess,extra_filter,feature_overrides=None):
+    def _mode_run(self,mode,alg,path,prefix,nodes,seed,seed_toggle,n_vectors,grid_dimension,cell_size,grid_max,freq_threshold,preprocess,extra_filter,feature_overrides=None):
         length_data = self.test_data.shape[1]
         data_stream = self.test_data
         extra_filter_flag = _coerce_to_bool(extra_filter, self.extra_filter)
@@ -6431,11 +6073,10 @@ class CorrTrack_compare:
         # Instantiating corrtrack objects
         overrides = feature_overrides or {}
         corrtrack = CorrTrack(window_size=self.window_size,basic_window=self.basic_window,window_step=self.window_step,n_vectors=n_vectors,n_lags=self.n_lags,
-                            grid_dimension=grid_dimension,cell_size=cell_size,warmup_data=warmup_data,seed=seed,seed_toggle=seed_toggle,
+                            grid_dimension=grid_dimension,cell_size=cell_size,seed=seed,seed_toggle=seed_toggle,
                             freq_threshold=freq_threshold,corr_threshold=self.corr_threshold,neg_corr=self.neg_corr,preprocess=preprocess,
                             extra_filter=extra_filter_flag,exec=self.exec,max_workers=nodes,
                             parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation,
-                            const_std_percentile=self.const_std_percentile,use_const_std_percentile=self.use_const_std_percentile,
                             **overrides)
         if mode == "main":
             #Running
@@ -6505,30 +6146,9 @@ class CorrTrack_compare:
         return runtime_parts, runtime, artifact_time, corr_flags
 
     def _optim(self,hyper_param_csv,dataset_id,run,alg,target_recall=0.95):
-        corrtrack_ho = CorrTrack_optimize(self.train_data,self.ids,self.window_size,self.window_step,self.n_lags,self.corr_threshold,self.recall_by_window,alg,self.neg_corr,self.corr_val,extra_filter=self.extra_filter,exec=self.exec,
-                                          const_std_percentile=self.const_std_percentile,use_const_std_percentile=self.use_const_std_percentile)
+        corrtrack_ho = CorrTrack_optimize(self.train_data,self.ids,self.window_size,self.window_step,self.n_lags,self.corr_threshold,self.recall_by_window,alg,self.neg_corr,self.corr_val,extra_filter=self.extra_filter,exec=self.exec)
 
         return corrtrack_ho.get_optim_params(self.param_grid,hyper_param_csv,dataset_id,run,target_recall)
-
-    def _slice_warmup(self, data, warmup_ratio):
-        if warmup_ratio is None:
-            return None
-
-        try:
-            warmup_ratio = float(warmup_ratio)
-        except (TypeError, ValueError):
-            return None
-
-        if warmup_ratio <= 0:
-            warmup_ratio = 0
-
-        length = data.shape[1]
-        warmup_len = round(warmup_ratio * length)
-        if warmup_len <= 0:
-            warmup_len = 1
-
-        warmup_len = min(length, warmup_len)
-        return data[:, :warmup_len]
 
     def _load_maxlag_csv(self, csv_path):
         records = {}
@@ -6832,7 +6452,6 @@ class CorrTrack_compare:
             as_optional_int(record.get("window_step")),
             as_optional_int(record.get("basic_window")),
             as_optional_int(record.get("n_lags")),
-            fmt(record.get("warmup_size")),
             as_optional_int(record.get("seed")),
             as_optional_int(record.get("seed_toggle")),
             str(record.get("preprocess")),
@@ -7028,7 +6647,7 @@ class CorrTrack_compare:
         return results
 
     def _parallel_mode_run(self,args):
-        dataset_id, mode, alg, path, prefix, bst, runtime_bf, corr_flags_bf, warmup_data = args
+        dataset_id, mode, alg, path, prefix, bst, runtime_bf, corr_flags_bf = args
         extra_filter_flag = _coerce_to_bool(bst.get("extra_filters"), self.extra_filter)
         n_vectors = _to_int_safe(bst.get("n_vectors"))
         grid_dimension = _to_int_safe(bst.get("grid_dimension"))
@@ -7054,7 +6673,7 @@ class CorrTrack_compare:
             bst["nodes"], bst["seed"], bst["seed_toggle"],
             n_vectors, grid_dimension,
             cell_stretch, bst["grid_max"],
-            bst["freq_threshold"], warmup_data, bst["preprocess"], extra_filter_flag,
+            bst["freq_threshold"], bst["preprocess"], extra_filter_flag,
             feature_kwargs,
         )
         speedup = runtime_bf / runtime if runtime else float("inf")
@@ -7097,7 +6716,6 @@ class CorrTrack_compare:
             "window_step",
             "basic_window",
             "n_lags",
-            "warmup_size",
             "seed",
             "seed_toggle",
             "preprocess",
@@ -7190,15 +6808,38 @@ class CorrTrack_compare:
 
         data_stream = self.test_data
 
-        runtime_parts, runtime_bf, artifact_time_bf, corr_flags_bf = self._mode_run("bf", None, path, "bf", 0, None, None, 1, 1, None, None, None, None, None, self.extra_filter, None)
+        runtime_parts, runtime_bf, artifact_time_bf, corr_flags_bf = self._mode_run(
+            "bf",
+            None,
+            path,
+            "bf",
+            0,
+            None,
+            None,
+            1,
+            1,
+            None,
+            None,
+            None,
+            None,
+            self.extra_filter,
+            None,
+        )
         print("Run Brute-Force, Finished in ",runtime_bf)
 
         os.makedirs(os.path.dirname(output_csv), exist_ok=True)
 
         args_list = [
-            (dataset_id, "main", alg, path, "main_" + alg + "_recall_speedup",
-             bst[alg], runtime_bf, corr_flags_bf,
-             self._slice_warmup(self.train_data, bst[alg].get("warmup_size")))
+            (
+                dataset_id,
+                "main",
+                alg,
+                path,
+                "main_" + alg + "_recall_speedup",
+                bst[alg],
+                runtime_bf,
+                corr_flags_bf,
+            )
             for alg in self.algs
         ]
 
@@ -7237,7 +6878,6 @@ class CorrTrack_compare:
 #ARCHIVED: incremental min and max update
 #ARCHIVED: get upper/lower bounds of the grid from min and max
 #DONE: histogram of sketches
-#DONE: warmup within
 #DONE: incremental update of grids
 #ARCHIVED: test stationarity for performing 2nd order diff
 

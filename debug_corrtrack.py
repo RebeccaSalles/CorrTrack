@@ -317,6 +317,14 @@ def _set_loader_refresh(enable: bool) -> None:
 
     corrtrack_main.DATA_LOADER = wrapper
 
+
+def _resolve_cfg_value(value, cfg, attr, default):
+    if value is not None:
+        return value
+    if hasattr(cfg, attr):
+        return getattr(cfg, attr)
+    return default
+
 # ---------------------------------------------------------------------------
 # Debug monitor that observes CorrTrack internals
 # ---------------------------------------------------------------------------
@@ -422,14 +430,10 @@ class DebugMonitor:
                     {
                         "series_id": sel.id1,
                         "values": norm_a.tolist(),
-                        "mean": self._warmup_mean(corrtrack, sel.id1),
-                        "std": self._warmup_std(corrtrack, sel.id1),
                     },
                     {
                         "series_id": sel.id2,
                         "values": norm_b.tolist(),
-                        "mean": self._warmup_mean(corrtrack, sel.id2),
-                        "std": self._warmup_std(corrtrack, sel.id2),
                     },
                 ],
                 "pearson": norm_corr,
@@ -446,22 +450,6 @@ class DebugMonitor:
         if normalized.ndim == 2 and normalized.shape[0] == 1:
             return normalized[0]
         return np.asarray(normalized, dtype=np.float64)
-
-    def _warmup_mean(self, corrtrack: CorrTrack, series_id: str) -> Optional[float]:
-        idx = corrtrack.series_ids.get(series_id)
-        if idx is None or corrtrack.warmup_means is None:
-            return None
-        if idx >= len(corrtrack.warmup_means):
-            return None
-        return corrtrack.warmup_means[idx]
-
-    def _warmup_std(self, corrtrack: CorrTrack, series_id: str) -> Optional[float]:
-        idx = corrtrack.series_ids.get(series_id)
-        if idx is None or corrtrack.warmup_stds is None:
-            return None
-        if idx >= len(corrtrack.warmup_stds):
-            return None
-        return corrtrack.warmup_stds[idx]
 
     def _pair_stats(self, values_a: np.ndarray, values_b: np.ndarray) -> Tuple[float, float]:
         if values_a.size == 0 or values_b.size == 0:
@@ -847,11 +835,21 @@ def discover_datasets(args: argparse.Namespace) -> List[DatasetContext]:
         corrtrack_main.DATA_LOADER = corrtrack_main._load_loader(args.loader)
     _set_loader_refresh(getattr(args, "refresh_artifacts", False))
 
-    corrtrack_main.WINDOW_SIZE = args.window_size
-    corrtrack_main.WINDOW_STEP = args.window_step
-    corrtrack_main.BASIC_WINDOW = args.basic_window
-    corrtrack_main.N_LAGS = args.n_lags
-    corrtrack_main.CORR_THRESHOLD = args.corr_threshold
+    corrtrack_main.WINDOW_SIZE = _resolve_cfg_value(
+        args.window_size, cfg_dataset, "WINDOW_SIZE", corrtrack_main.DEFAULT_WINDOW_SIZE
+    )
+    corrtrack_main.WINDOW_STEP = _resolve_cfg_value(
+        args.window_step, cfg_dataset, "WINDOW_STEP", corrtrack_main.DEFAULT_WINDOW_STEP
+    )
+    corrtrack_main.BASIC_WINDOW = _resolve_cfg_value(
+        args.basic_window, cfg_dataset, "BASIC_WINDOW", corrtrack_main.DEFAULT_BASIC_WINDOW
+    )
+    corrtrack_main.N_LAGS = _resolve_cfg_value(
+        args.n_lags, cfg_dataset, "N_LAGS", corrtrack_main.DEFAULT_N_LAGS
+    )
+    corrtrack_main.CORR_THRESHOLD = _resolve_cfg_value(
+        args.corr_threshold, cfg_dataset, "CORR_THRESHOLD", corrtrack_main.DEFAULT_CORR_THRESHOLD
+    )
     effective_parallel = bool(args.parallel) or any(
         flag is True
         for flag in (args.parallel_sketch, args.parallel_candidates, args.parallel_validation)
@@ -865,7 +863,9 @@ def discover_datasets(args: argparse.Namespace) -> List[DatasetContext]:
         for flag in (args.parallel_sketch, args.parallel_candidates, args.parallel_validation)
     )
     corrtrack_main.EXEC_MODE = "thread" if parallel_any else "sequential"
-    corrtrack_main.NEG_CORR = args.neg_corr
+    corrtrack_main.NEG_CORR = _resolve_cfg_value(
+        args.neg_corr, cfg_dataset, "NEG_CORR", corrtrack_main.DEFAULT_NEG_CORR
+    )
     corrtrack_main.EXTRA_FILTER = args.extra_filter
     corrtrack_main.RECALL_BY_WINDOW = args.recall_by_window
 
@@ -907,26 +907,24 @@ def run_full_pipeline(args: argparse.Namespace, passthrough: List[str]) -> None:
         for flag in (args.parallel_sketch, args.parallel_candidates, args.parallel_validation)
     )
 
-    cmd.extend([
-        "--window-size",
-        str(args.window_size),
-        "--window-step",
-        str(args.window_step),
-        "--n-lags",
-        str(args.n_lags),
-        "--corr-threshold",
-        str(args.corr_threshold),
-        "--parallel" if effective_parallel else "--sequential",
-    ])
+    if args.window_size is not None:
+        cmd.extend(["--window-size", str(args.window_size)])
+    if args.window_step is not None:
+        cmd.extend(["--window-step", str(args.window_step)])
+    if args.n_lags is not None:
+        cmd.extend(["--n-lags", str(args.n_lags)])
+    if args.corr_threshold is not None:
+        cmd.extend(["--corr-threshold", str(args.corr_threshold)])
+    cmd.append("--parallel" if effective_parallel else "--sequential")
     if args.parallel_sketch is not None:
         cmd.append("--parallel-sketch" if args.parallel_sketch else "--sequential-sketch")
     if args.parallel_candidates is not None:
         cmd.append("--parallel-candidates" if args.parallel_candidates else "--sequential-candidates")
     if args.parallel_validation is not None:
         cmd.append("--parallel-validation" if args.parallel_validation else "--sequential-validation")
-    if args.neg_corr:
+    if args.neg_corr is True:
         cmd.append("--neg-corr")
-    else:
+    elif args.neg_corr is False:
         cmd.append("--no-neg-corr")
     if args.extra_filter:
         cmd.append("--extra-filter")
@@ -959,7 +957,6 @@ def _run_bruteforce_pairs(
         n_lags=base_config["n_lags"],
         grid_dimension=1,
         cell_size=1,
-        warmup_data=None,
         seed=None,
         seed_toggle=None,
         freq_threshold=0.0,
@@ -1123,20 +1120,6 @@ def build_corrtrack_instance(
     params: dict,
     debugger: Optional[DebugMonitor] = None,
 ) -> DebugCorrTrack:
-    warmup_ratio = params.get("warmup_size")
-    try:
-        warmup_ratio = float(warmup_ratio) if warmup_ratio is not None else None
-    except (TypeError, ValueError):
-        warmup_ratio = None
-
-    length_data = ctx.test_data.shape[1]
-    if warmup_ratio is not None:
-        warmup_len = round(warmup_ratio * length_data)
-        warmup_len = max(1, min(length_data, warmup_len))
-        warmup_data = ctx.test_data[:, :warmup_len]
-    else:
-        warmup_data = None
-
     extra_filter = _coerce_to_bool(params.get("extra_filters", base_config.get("extra_filter", False)))
 
     def _to_int(value):
@@ -1173,7 +1156,6 @@ def build_corrtrack_instance(
         n_lags=base_config["n_lags"],
         grid_dimension=grid_dimension,
         cell_size=cell_stretch,
-        warmup_data=warmup_data,
         seed=_to_int(params.get("seed")),
         seed_toggle=_to_int(params.get("seed_toggle")),
         freq_threshold=_to_float(params.get("freq_threshold")),
@@ -1515,11 +1497,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="CorrTrack debugging helper")
     parser.add_argument("--dataset-config", type=Path, required=True)
     parser.add_argument("--param-grid-config", type=Path, required=True)
-    parser.add_argument("--window-size", type=int, default=corrtrack_main.DEFAULT_WINDOW_SIZE)
-    parser.add_argument("--window-step", type=int, default=corrtrack_main.DEFAULT_WINDOW_STEP)
-    parser.add_argument("--basic-window", type=int, default=corrtrack_main.DEFAULT_BASIC_WINDOW)
-    parser.add_argument("--n-lags", type=int, default=corrtrack_main.DEFAULT_N_LAGS)
-    parser.add_argument("--corr-threshold", type=float, default=corrtrack_main.DEFAULT_CORR_THRESHOLD)
+    parser.add_argument("--window-size", type=int, default=None)
+    parser.add_argument("--window-step", type=int, default=None)
+    parser.add_argument("--basic-window", type=int, default=None)
+    parser.add_argument("--n-lags", type=int, default=None)
+    parser.add_argument("--corr-threshold", type=float, default=None)
     parser.add_argument("--parallel", dest="parallel", action="store_true")
     parser.add_argument("--sequential", dest="parallel", action="store_false")
     parser.add_argument("--parallel-sketch", dest="parallel_sketch", action="store_true")
@@ -1539,7 +1521,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         parallel_sketch=corrtrack_main.DEFAULT_PARALLEL_SKETCH,
         parallel_candidates=corrtrack_main.DEFAULT_PARALLEL_CANDIDATES,
         parallel_validation=corrtrack_main.DEFAULT_PARALLEL_VALIDATION,
-        neg_corr=corrtrack_main.DEFAULT_NEG_CORR,
+        neg_corr=None,
         extra_filter=corrtrack_main.DEFAULT_EXTRA_FILTER,
         recall_by_window=corrtrack_main.DEFAULT_RECALL_BY_WINDOW,
     )

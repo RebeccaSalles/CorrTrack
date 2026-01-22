@@ -23,8 +23,6 @@ DEFAULT_NEG_CORR = False
 DEFAULT_EXTRA_FILTER = False
 DEFAULT_RECALL_BY_WINDOW = True
 DEFAULT_ARTIFACT_MODE = "iterative"
-DEFAULT_USE_CONST_STD_PERCENTILE = False
-DEFAULT_CONST_STD_PERCENTILE = 0.01
 
 DEFAULT_DATASET_CONFIG = Path(__file__).with_name(
     "experiment_dataset_fr_air_temperature_7_1.py"
@@ -45,8 +43,6 @@ NEG_CORR = DEFAULT_NEG_CORR
 EXTRA_FILTER = DEFAULT_EXTRA_FILTER
 RECALL_BY_WINDOW = DEFAULT_RECALL_BY_WINDOW
 ARTIFACT_MODE = DEFAULT_ARTIFACT_MODE
-USE_CONST_STD_PERCENTILE = DEFAULT_USE_CONST_STD_PERCENTILE
-CONST_STD_PERCENTILE = DEFAULT_CONST_STD_PERCENTILE
 RESULT_FOLDER = None
 COUNTRIES = VARIABLES = N_VARS = N_YEARS = None
 DATA_LOADER: Callable[..., tuple[np.ndarray, np.ndarray]] | None = None
@@ -70,6 +66,14 @@ def _coerce_optional_bool(value):
 
 def _any_parallel(*values) -> bool:
     return any(val is True for val in values)
+
+
+def _resolve_cfg_value(value, cfg, attr, default):
+    if value is not None:
+        return value
+    if hasattr(cfg, attr):
+        return getattr(cfg, attr)
+    return default
 
 
 def _apply_parallel_defaults_from_cfg(cfg, args):
@@ -106,7 +110,6 @@ def _effective_variable(country: str, var: str | None) -> str:
 
 def _apply_dataset_config(cfg):
     global RESULT_FOLDER, COUNTRIES, VARIABLES, N_VARS, N_YEARS, DATA_LOADER, OBS_MODE
-    global USE_CONST_STD_PERCENTILE, CONST_STD_PERCENTILE
 
     RESULT_FOLDER = cfg.RESULT_FOLDER
     COUNTRIES = _as_list(_get_cfg_attr(cfg, "COUNTRIES", "DATASET"))
@@ -116,8 +119,6 @@ def _apply_dataset_config(cfg):
     N_YEARS = _get_cfg_attr(cfg, "N_YEARS", "N_OBS")
     DATA_LOADER = getattr(cfg, "DATA_LOADER", None)
     OBS_MODE = getattr(cfg, "OBS_MODE", DEFAULT_OBS_MODE)
-    USE_CONST_STD_PERCENTILE = _coerce_optional_bool(getattr(cfg, "USE_CONST_STD_PERCENTILE", DEFAULT_USE_CONST_STD_PERCENTILE))
-    CONST_STD_PERCENTILE = float(getattr(cfg, "CONST_STD_PERCENTILE", DEFAULT_CONST_STD_PERCENTILE))
 
 
 def _load_loader(loader_spec: str) -> Callable[[str, str], tuple[np.ndarray, np.ndarray]]:
@@ -145,8 +146,6 @@ def build_base_config():
         "parallel_validation": PARALLEL_VALIDATION,
         "max_workers": 0,
         "artifact_mode": ARTIFACT_MODE,
-        "use_const_std_percentile": USE_CONST_STD_PERCENTILE,
-        "const_std_percentile": CONST_STD_PERCENTILE,
     }
 
 
@@ -200,11 +199,11 @@ def parse_args():
         default=None,
         help="Python path to dataset loader function (module:callable). Overrides config DATA_LOADER.",
     )
-    parser.add_argument("--window-size", type=int, default=DEFAULT_WINDOW_SIZE)
-    parser.add_argument("--window-step", type=int, default=DEFAULT_WINDOW_STEP)
-    parser.add_argument("--basic-window", type=int, default=DEFAULT_BASIC_WINDOW)
-    parser.add_argument("--n-lags", type=int, default=DEFAULT_N_LAGS)
-    parser.add_argument("--corr-threshold", type=float, default=DEFAULT_CORR_THRESHOLD)
+    parser.add_argument("--window-size", type=int, default=None)
+    parser.add_argument("--window-step", type=int, default=None)
+    parser.add_argument("--basic-window", type=int, default=None)
+    parser.add_argument("--n-lags", type=int, default=None)
+    parser.add_argument("--corr-threshold", type=float, default=None)
     parser.add_argument("--parallel", dest="parallel", action="store_true")
     parser.add_argument("--sequential", dest="parallel", action="store_false")
     parser.add_argument("--parallel-sketch", dest="parallel_sketch", action="store_true")
@@ -235,7 +234,7 @@ def parse_args():
         parallel_sketch=DEFAULT_PARALLEL_SKETCH,
         parallel_candidates=DEFAULT_PARALLEL_CANDIDATES,
         parallel_validation=DEFAULT_PARALLEL_VALIDATION,
-        neg_corr=DEFAULT_NEG_CORR,
+        neg_corr=None,
         extra_filter=DEFAULT_EXTRA_FILTER,
         recall_by_window=DEFAULT_RECALL_BY_WINDOW,
     )
@@ -253,17 +252,17 @@ def main():
     global EXEC_MODE, NEG_CORR, EXTRA_FILTER, RECALL_BY_WINDOW, ARTIFACT_MODE
     global DATA_LOADER
 
-    WINDOW_SIZE = args.window_size
-    WINDOW_STEP = args.window_step
-    BASIC_WINDOW = args.basic_window
-    N_LAGS = args.n_lags
-    CORR_THRESHOLD = args.corr_threshold
+    WINDOW_SIZE = _resolve_cfg_value(args.window_size, cfg_dataset, "WINDOW_SIZE", DEFAULT_WINDOW_SIZE)
+    WINDOW_STEP = _resolve_cfg_value(args.window_step, cfg_dataset, "WINDOW_STEP", DEFAULT_WINDOW_STEP)
+    BASIC_WINDOW = _resolve_cfg_value(args.basic_window, cfg_dataset, "BASIC_WINDOW", DEFAULT_BASIC_WINDOW)
+    N_LAGS = _resolve_cfg_value(args.n_lags, cfg_dataset, "N_LAGS", DEFAULT_N_LAGS)
+    CORR_THRESHOLD = _resolve_cfg_value(args.corr_threshold, cfg_dataset, "CORR_THRESHOLD", DEFAULT_CORR_THRESHOLD)
     PARALLEL = args.parallel
     PARALLEL_SKETCH = args.parallel_sketch
     PARALLEL_CANDIDATES = args.parallel_candidates
     PARALLEL_VALIDATION = args.parallel_validation
     EXEC_MODE = "thread" if _any_parallel(PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION) else "sequential"
-    NEG_CORR = args.neg_corr
+    NEG_CORR = _resolve_cfg_value(args.neg_corr, cfg_dataset, "NEG_CORR", DEFAULT_NEG_CORR)
     EXTRA_FILTER = args.extra_filter
     RECALL_BY_WINDOW = args.recall_by_window
     ARTIFACT_MODE = args.artifact_mode

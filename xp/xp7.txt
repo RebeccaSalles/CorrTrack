@@ -38,7 +38,6 @@ Hyperparemater search:
 		"n_vectors": [4,8,16,32,64],
 		"cell_size": [1,1.2,1.5,2,2.2,2.5,3], #strech rate
 		"freq_threshold": [0.0,0.3,0.5,0.7,1.0],
-		"warmup_size": [1], #use all training to get mean and std
 
 		"preprocess": [True,False], #differencing?
 		"nodes": [0], #automatic cores-1

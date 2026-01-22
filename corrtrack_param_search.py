@@ -32,8 +32,6 @@ DEFAULT_NEG_CORR = False
 DEFAULT_CORR_VAL = True
 DEFAULT_EXTRA_FILTER = False
 DEFAULT_RECALL_BY_WINDOW = True
-DEFAULT_USE_CONST_STD_PERCENTILE = False
-DEFAULT_CONST_STD_PERCENTILE = 0.01
 DEFAULT_TARGET_RECALL = 0.95
 DEFAULT_TRAIN_RATIO = 0.3
 
@@ -53,8 +51,6 @@ BASIC_WINDOW = DEFAULT_BASIC_WINDOW
 N_LAGS = DEFAULT_N_LAGS
 CORR_THRESHOLD = DEFAULT_CORR_THRESHOLD
 TRAIN_RATIO = DEFAULT_TRAIN_RATIO
-USE_CONST_STD_PERCENTILE = DEFAULT_USE_CONST_STD_PERCENTILE
-CONST_STD_PERCENTILE = DEFAULT_CONST_STD_PERCENTILE
 
 RESULT_FOLDER = None
 COUNTRIES = VARIABLES = N_VARS = N_YEARS = MODES = None
@@ -85,6 +81,14 @@ def _coerce_optional_bool(value):
 
 def _any_parallel(*values) -> bool:
     return any(val is True for val in values)
+
+
+def _resolve_cfg_value(value, cfg, attr, default):
+    if value is not None:
+        return value
+    if hasattr(cfg, attr):
+        return getattr(cfg, attr)
+    return default
 
 
 def _apply_parallel_defaults_from_cfg(cfg, args):
@@ -121,7 +125,6 @@ def _effective_variable(country: str, var: str | None) -> str:
 
 def _apply_dataset_config(cfg):
     global RESULT_FOLDER, COUNTRIES, VARIABLES, N_VARS, N_YEARS, MODES, DATA_LOADER, OBS_MODE
-    global USE_CONST_STD_PERCENTILE, CONST_STD_PERCENTILE
 
     RESULT_FOLDER = cfg.RESULT_FOLDER
     COUNTRIES = _as_list(_get_cfg_attr(cfg, "COUNTRIES", "DATASET"))
@@ -129,14 +132,13 @@ def _apply_dataset_config(cfg):
     VARIABLES = _as_list(variables_attr) if variables_attr is not None else [None]
     N_VARS = _get_cfg_attr(cfg, "N_VARS", "N_SERIES")
     N_YEARS = _get_cfg_attr(cfg, "N_YEARS", "N_OBS")
-    MODES = cfg.MODES
+    modes_attr = getattr(cfg, "MODES", None)
+    MODES = _as_list(modes_attr) if modes_attr is not None else ["corrtrack"]
     loader = getattr(cfg, "DATA_LOADER", None)
     if loader is None:
         raise RuntimeError("Dataset configuration must define DATA_LOADER")
     DATA_LOADER = loader
     OBS_MODE = getattr(cfg, "OBS_MODE", DEFAULT_OBS_MODE)
-    USE_CONST_STD_PERCENTILE = _coerce_optional_bool(getattr(cfg, "USE_CONST_STD_PERCENTILE", DEFAULT_USE_CONST_STD_PERCENTILE))
-    CONST_STD_PERCENTILE = float(getattr(cfg, "CONST_STD_PERCENTILE", DEFAULT_CONST_STD_PERCENTILE))
 
 
 def _load_loader(loader_spec: str) -> Callable[[str, str], tuple[np.ndarray, np.ndarray]]:
@@ -217,11 +219,11 @@ def main():
         default=None,
         help="Python path to dataset loader function (module:callable). Overrides config DATA_LOADER.",
     )
-    parser.add_argument("--window-size", type=int, default=DEFAULT_WINDOW_SIZE)
-    parser.add_argument("--window-step", type=int, default=DEFAULT_WINDOW_STEP)
-    parser.add_argument("--basic-window", type=int, default=DEFAULT_BASIC_WINDOW)
-    parser.add_argument("--n-lags", type=int, default=DEFAULT_N_LAGS)
-    parser.add_argument("--corr-threshold", type=float, default=DEFAULT_CORR_THRESHOLD)
+    parser.add_argument("--window-size", type=int, default=None)
+    parser.add_argument("--window-step", type=int, default=None)
+    parser.add_argument("--basic-window", type=int, default=None)
+    parser.add_argument("--n-lags", type=int, default=None)
+    parser.add_argument("--corr-threshold", type=float, default=None)
     parser.add_argument("--parallel", dest="parallel", action="store_true")
     parser.add_argument("--sequential", dest="parallel", action="store_false")
     parser.add_argument("--parallel-sketch", dest="parallel_sketch", action="store_true")
@@ -243,13 +245,13 @@ def main():
         parallel_sketch=DEFAULT_PARALLEL_SKETCH,
         parallel_candidates=DEFAULT_PARALLEL_CANDIDATES,
         parallel_validation=DEFAULT_PARALLEL_VALIDATION,
-        neg_corr=DEFAULT_NEG_CORR,
+        neg_corr=None,
         corr_val=DEFAULT_CORR_VAL,
         extra_filter=DEFAULT_EXTRA_FILTER,
         recall_by_window=DEFAULT_RECALL_BY_WINDOW,
     )
-    parser.add_argument("--target-recall", type=float, default=DEFAULT_TARGET_RECALL)
-    parser.add_argument("--train-ratio", type=float, default=DEFAULT_TRAIN_RATIO)
+    parser.add_argument("--target-recall", type=float, default=None)
+    parser.add_argument("--train-ratio", type=float, default=None)
     args = parser.parse_args()
 
     cfg_dataset = _load_module(args.dataset_config, "experiment_dataset")
@@ -261,22 +263,22 @@ def main():
     global EXEC_MODE, NEG_CORR, CORR_VAL, EXTRA_FILTER, RECALL_BY_WINDOW
     global TARGET_RECALL, TRAIN_RATIO, PARAM_GRID, DATA_LOADER
 
-    WINDOW_SIZE = args.window_size
-    WINDOW_STEP = args.window_step
-    BASIC_WINDOW = args.basic_window
-    N_LAGS = args.n_lags
-    CORR_THRESHOLD = args.corr_threshold
+    WINDOW_SIZE = _resolve_cfg_value(args.window_size, cfg_dataset, "WINDOW_SIZE", DEFAULT_WINDOW_SIZE)
+    WINDOW_STEP = _resolve_cfg_value(args.window_step, cfg_dataset, "WINDOW_STEP", DEFAULT_WINDOW_STEP)
+    BASIC_WINDOW = _resolve_cfg_value(args.basic_window, cfg_dataset, "BASIC_WINDOW", DEFAULT_BASIC_WINDOW)
+    N_LAGS = _resolve_cfg_value(args.n_lags, cfg_dataset, "N_LAGS", DEFAULT_N_LAGS)
+    CORR_THRESHOLD = _resolve_cfg_value(args.corr_threshold, cfg_dataset, "CORR_THRESHOLD", DEFAULT_CORR_THRESHOLD)
     PARALLEL = args.parallel
     PARALLEL_SKETCH = args.parallel_sketch
     PARALLEL_CANDIDATES = args.parallel_candidates
     PARALLEL_VALIDATION = args.parallel_validation
     EXEC_MODE = "thread" if _any_parallel(PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION) else "sequential"
-    NEG_CORR = args.neg_corr
+    NEG_CORR = _resolve_cfg_value(args.neg_corr, cfg_dataset, "NEG_CORR", DEFAULT_NEG_CORR)
     CORR_VAL = args.corr_val
     EXTRA_FILTER = args.extra_filter
     RECALL_BY_WINDOW = args.recall_by_window
-    TARGET_RECALL = args.target_recall
-    TRAIN_RATIO = args.train_ratio
+    TARGET_RECALL = _resolve_cfg_value(args.target_recall, cfg_dataset, "TARGET_RECALL", DEFAULT_TARGET_RECALL)
+    TRAIN_RATIO = _resolve_cfg_value(args.train_ratio, cfg_dataset, "TRAIN_RATIO", DEFAULT_TRAIN_RATIO)
     PARAM_GRID = _load_param_grid(args.param_grid_config)
     if args.loader:
         DATA_LOADER = _load_loader(args.loader)
@@ -316,8 +318,6 @@ def main():
                         parallel_sketch=PARALLEL_SKETCH,
                         parallel_candidates=PARALLEL_CANDIDATES,
                         parallel_validation=PARALLEL_VALIDATION,
-                        const_std_percentile=CONST_STD_PERCENTILE,
-                        use_const_std_percentile=USE_CONST_STD_PERCENTILE,
                     )
 
                     output_prefix = os.path.join(output_dir, f"corrtrack_optim_{dataset_id}")

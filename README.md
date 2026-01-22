@@ -92,17 +92,27 @@ CorrTrack relies on two configuration sources:
    VARIABLES = ["air_temperature"]
    N_VARS = [7]
    N_YEARS = [1]
-   MODES = ["nD"]
+   WINDOW_SIZE = 96
+   WINDOW_STEP = 12
+   N_LAGS = 48
+   CORR_THRESHOLD = 0.7
+   NEG_CORR = False
+   TRAIN_RATIO = 1.0
+   TARGET_RECALL = 0.9
 
    DATA_LOADER = partial(load_dataset, root="datasets/asos-airports")  # falls back to correlation/asos-airports if present
    ```
 
   _You can create additional dataset configs for other sources. The only requirement is that `DATA_LOADER` points to a callable that takes `(country, variable, **kwargs)` and returns `(data: np.ndarray, ids: np.ndarray)`._
 
+  _If `MODES` is omitted, CorrTrack uses a single mode name `corrtrack` for artifact naming._
+
 Place your dataset files under `datasets/asos-airports/` using the `<country>-<variable>.csv` naming pattern (the loader caches `.npz` exports beside the CSV). If you have an existing layout under `correlation/asos-airports/`, the loader will automatically fall back to it.
 
 > **Naming flexibility**  
 > Dataset configs can export either `N_VARS`/`N_YEARS` (legacy) or the synonymous `N_SERIES`/`N_OBS`. When the optional `OBS_MODE = "count"` flag is set, CorrTrack interprets the `N_OBS` entries as absolute row counts instead of calendar years, which is handy for synthetic data. Likewise, you can replace `COUNTRIES` with a simple `DATASET` list (e.g., `["synthetic"]`) and omit `VARIABLES` entirely when no secondary grouping is needed.
+
+Optional fields like `WINDOW_SIZE`, `WINDOW_STEP`, `N_LAGS`, `CORR_THRESHOLD`, `NEG_CORR`, `TRAIN_RATIO`, and `TARGET_RECALL` provide per-dataset defaults that the CLI flags override when specified.
 
 2. **Run hyper-parameter grid (`experiment_run_param_grid.py`)**
 
@@ -113,7 +123,6 @@ Place your dataset files under `datasets/asos-airports/` using the `<country>-<v
        "n_vectors": [8, 16, 32, 64],
        "cell_size": [1, 2, 3],       # stretch multiplier over the base cell size
        "freq_threshold": [0.3, 0.5, 0.7],
-       "warmup_size": [1.0],         # fraction of training rows used for warmup
        "preprocess": [False],
        "nodes": [0],                 # 0 => auto (use available cores)
        "seed": [2468],
@@ -158,7 +167,13 @@ DATASET = ["synthetic"]
 N_SERIES = [8]        # must be <= m
 N_OBS = [2000]        # number of rows to keep
 OBS_MODE = "count"    # treat N_OBS entries as absolute row counts
-MODES = ["nD"]
+WINDOW_SIZE = 96
+WINDOW_STEP = 12
+N_LAGS = 48
+CORR_THRESHOLD = 0.7
+NEG_CORR = False
+TRAIN_RATIO = 1.0
+TARGET_RECALL = 0.9
 
 SYNTH_PARAMS = {
     "m": 8,
@@ -237,25 +252,25 @@ Adjust the series list and time span to highlight other segments.
 
 ## Global Defaults & CLI Overrides
 
-Each stage script defines default CorrTrack settings (window size, lag count, correlation threshold, execution policy, etc.) and exposes them as CLI options. For example:
+Each stage script reads the dataset config defaults (window size, lag count, correlation threshold, execution policy, etc.) and exposes them as CLI options. When a flag is omitted, the dataset config value is used; if the dataset config omits a setting, the script-level fallback applies. For example:
 
 ```
---window-size           default 7*24
---window-step           default 12
---basic-window          default auto (divides window-size)
---n-lags                default 7*24
---corr-threshold        default 0.7
+--window-size           default from dataset config (fallback 7*24)
+--window-step           default from dataset config (fallback 12)
+--basic-window          default from dataset config (fallback auto; divides window-size)
+--n-lags                default from dataset config (fallback 7*24)
+--corr-threshold        default from dataset config (fallback 0.7)
 --parallel / --sequential (global default, see per-phase flags below)
 --parallel-sketch / --sequential-sketch
 --parallel-candidates / --sequential-candidates
 --parallel-validation / --sequential-validation
---neg-corr / --no-neg-corr
+--neg-corr / --no-neg-corr (default from dataset config)
 --corr-val / --no-corr-val (param search + corrtrack + compare)
 --extra-filter / --no-extra-filter
 --recall-by-window / --no-recall-by-window
 --artifact-mode         (brute-force & corrtrack runs) "iterative" | "final"
---target-recall         (hyper-param search) default 0.95
---train-ratio           (hyper-param search & comparison) default 0.3
+--target-recall         (hyper-param search) default from dataset config (fallback 0.95)
+--train-ratio           (hyper-param search & comparison) default from dataset config (fallback 0.3)
 ```
 
 Artifacts are written under `correlation/<RESULT_FOLDER>/<dataset_id>/ws…_exec<mode>/…`, so runs with different execution policies do not collide. The execution mode is `thread` if any phase runs in parallel, otherwise `sequential`.
