@@ -157,12 +157,18 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     "runtime",
     "artifact_time",
     "speedup",
+    "speedup_ceil",
+    "rel_speedup_eff",
     "corr_w_bf",
     "corr_w",
     "tested_w_bf",
     "tested_w",
     "cand_w_bf",
     "cand_w",
+    "corr_prop",
+    "waste_val_bf",
+    "waste_val",
+    "rel_waste_red",
     "precision_pos",
     "recall_pos",
     "f1_pos",
@@ -225,12 +231,18 @@ COMPARISON_COLUMNS: Sequence[str] = (
     "runtime",
     "artifact_time",
     "speedup",
+    "speedup_ceil",
+    "rel_speedup_eff",
     "corr_w_bf",
     "corr_w",
     "tested_w_bf",
     "tested_w",
     "cand_w_bf",
     "cand_w",
+    "corr_prop",
+    "waste_val_bf",
+    "waste_val",
+    "rel_waste_red",
     "precision_pos",
     "recall_pos",
     "f1_pos",
@@ -693,6 +705,61 @@ def _to_float_safe(value):
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _safe_div(numerator, denominator):
+    num = _to_float_safe(numerator)
+    den = _to_float_safe(denominator)
+    if num is None or den is None:
+        return float("nan")
+    if math.isnan(num) or math.isnan(den) or den == 0.0:
+        return float("nan")
+    return num / den
+
+
+def _compute_speedup_ceil(
+    cand_time_bf,
+    val_time_bf,
+    monit_time_bf,
+    sk_time,
+    cand_time,
+    corr_w_bf,
+    cand_w_bf,
+):
+    cand_time_bf_f = _to_float_safe(cand_time_bf)
+    val_time_bf_f = _to_float_safe(val_time_bf)
+    monit_time_bf_f = _to_float_safe(monit_time_bf)
+    sk_time_f = _to_float_safe(sk_time)
+    cand_time_f = _to_float_safe(cand_time)
+    ratio = _safe_div(corr_w_bf, cand_w_bf)
+    if any(
+        value is None
+        for value in (
+            cand_time_bf_f,
+            val_time_bf_f,
+            monit_time_bf_f,
+            sk_time_f,
+            cand_time_f,
+        )
+    ):
+        return float("nan")
+    if any(
+        math.isnan(value)
+        for value in (
+            cand_time_bf_f,
+            val_time_bf_f,
+            monit_time_bf_f,
+            sk_time_f,
+            cand_time_f,
+            ratio,
+        )
+    ):
+        return float("nan")
+    denom = sk_time_f + cand_time_f + val_time_bf_f * ratio + monit_time_bf_f
+    if denom == 0.0 or math.isnan(denom):
+        return float("nan")
+    num = cand_time_bf_f + val_time_bf_f + monit_time_bf_f
+    return num / denom
 
 
 def _extract_feature_overrides(params):
@@ -5788,6 +5855,21 @@ class CorrTrack_optimize:
             else:
                 record["speedup"] = float("inf")
 
+            record["speedup_ceil"] = _compute_speedup_ceil(
+                record.get("cand_time_bf"),
+                record.get("val_time_bf"),
+                record.get("monit_time_bf"),
+                record.get("sk_time"),
+                record.get("cand_time"),
+                record.get("corr_w_bf"),
+                record.get("cand_w_bf"),
+            )
+            record["rel_speedup_eff"] = _safe_div(record.get("speedup"), record.get("speedup_ceil"))
+            record["corr_prop"] = _safe_div(record.get("corr_w_bf"), record.get("cand_w_bf"))
+            record["waste_val_bf"] = _safe_div(record.get("cand_w_bf"), record.get("corr_w_bf"))
+            record["waste_val"] = _safe_div(record.get("cand_w"), record.get("corr_w"))
+            record["rel_waste_red"] = _safe_div(record.get("waste_val_bf"), record.get("waste_val"))
+
             if self.recall_by_window:
                 corr_flags = corrtrack.correlated
             else:
@@ -6429,6 +6511,24 @@ class CorrTrack_compare:
                 return str(value)
 
         fmt = self._format_metric
+        corr_w_bf = bf_record.get("correlated")
+        cand_w_bf = bf_record.get("total_candidates")
+        corr_w = record.get("correlated")
+        cand_w = record.get("total_candidates")
+        speedup_ceil = _compute_speedup_ceil(
+            bf_record.get("cand_time"),
+            bf_record.get("val_time"),
+            bf_record.get("monit_time"),
+            record.get("sk_time"),
+            record.get("cand_time"),
+            corr_w_bf,
+            cand_w_bf,
+        )
+        rel_speedup_eff = _safe_div(speedup, speedup_ceil)
+        corr_prop = _safe_div(corr_w_bf, cand_w_bf)
+        waste_val_bf = _safe_div(cand_w_bf, corr_w_bf)
+        waste_val = _safe_div(cand_w, corr_w)
+        rel_waste_red = _safe_div(waste_val_bf, waste_val)
 
         return [
             dataset_id,
@@ -6476,12 +6576,18 @@ class CorrTrack_compare:
             fmt(runtime),
             fmt(artifact_time),
             fmt(speedup),
-            as_int_str(bf_record.get("correlated")),
-            as_int_str(record.get("correlated")),
+            fmt(speedup_ceil),
+            fmt(rel_speedup_eff),
+            as_int_str(corr_w_bf),
+            as_int_str(corr_w),
             as_int_str(bf_record.get("tested")),
             as_int_str(record.get("tested")),
-            as_int_str(bf_record.get("total_candidates")),
-            as_int_str(record.get("total_candidates")),
+            as_int_str(cand_w_bf),
+            as_int_str(cand_w),
+            fmt(corr_prop),
+            fmt(waste_val_bf),
+            fmt(waste_val),
+            fmt(rel_waste_red),
             fmt(precision_pos),
             fmt(recall_pos),
             fmt(f1_pos),
@@ -6697,6 +6803,21 @@ class CorrTrack_compare:
                 return f"{value:.3e}"
             return f"{value:.4f}"
 
+        speedup_ceil = _compute_speedup_ceil(
+            self.candidate_time_bf,
+            self.validation_time_bf,
+            self.monitor_time_bf,
+            runtime_parts[0],
+            runtime_parts[1],
+            self.correlated_bf,
+            self.total_bf,
+        )
+        rel_speedup_eff = _safe_div(speedup, speedup_ceil)
+        corr_prop = _safe_div(self.correlated_bf, self.total_bf)
+        waste_val_bf = _safe_div(self.total_bf, self.correlated_bf)
+        waste_val = _safe_div(self.total_w, self.correlated_w)
+        rel_waste_red = _safe_div(waste_val_bf, waste_val)
+
         n_ts = self.test_data.shape[0]-1
         n_w = (np.floor((self.test_data.shape[1]-self.window_size)/self.window_step) + 1)
         total_w = n_ts*n_w
@@ -6767,9 +6888,15 @@ class CorrTrack_compare:
             f"{self.candidate_time_bf:.4f}",f"{self.validation_time_bf:.4f}",f"{self.monitor_time_bf:.4f}",f"{self.runtime_bf:.4f}",f"{bf_artifact_time:.4f}",
             f"{runtime_parts[0]:.4f}",f"{runtime_parts[1]:.4f}",f"{runtime_parts[2]:.4f}",f"{runtime_parts[3]:.4f}",
             f"{runtime:.4f}", f"{artifact_time:.4f}", f"{speedup:.4f}",
+            _format_float(speedup_ceil),
+            _format_float(rel_speedup_eff),
             int(self.correlated_bf), int(self.correlated_w),
             int(self.tested_bf), int(self.tested_w),
             int(self.total_bf), int(self.total_w),
+            _format_float(corr_prop),
+            _format_float(waste_val_bf),
+            _format_float(waste_val),
+            _format_float(rel_waste_red),
             f"{metrics['precision_pos']:.4f}",f"{metrics['recall_pos']:.4f}",f"{metrics['f1_score_pos']:.4f}",
             f"{metrics['precision_neg']:.4f}",f"{metrics['recall_neg']:.4f}",f"{metrics['f1_score_neg']:.4f}",
             f"{metrics['precision']:.4f}", f"{metrics['recall']:.4f}", f"{metrics['recall_min']:.4f}",

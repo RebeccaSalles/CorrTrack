@@ -422,6 +422,14 @@ python3 corrtrack_param_search.py \
 
 Creates `optim/<dataset_id>/corrtrack_optim_<dataset_id>.csv` with one row per combination plus `best_params_*.json` summaries.
 
+New performance diagnostics in the CSV:
+- `speedup_ceil = (cand_time_bf + val_time_bf + monit_time_bf) / (sk_time + cand_time + val_time_bf * (corr_w_bf / cand_w_bf) + monit_time_bf)`
+- `rel_speedup_eff = speedup / speedup_ceil`
+- `corr_prop = corr_w_bf / cand_w_bf`
+- `waste_val_bf = cand_w_bf / corr_w_bf`
+- `waste_val = cand_w / corr_w`
+- `rel_waste_red = waste_val_bf / waste_val`
+
 Synthetic variant:
 
 ```
@@ -482,6 +490,8 @@ python3 corrtrack_compare_runs.py \
 ```
 
 Combines brute-force and CorrTrack outputs, producing `corrtrack_metrics_<dataset_id>.csv` with accuracy and performance metrics. When `--filcorr-results` is provided, the step also filters FilCorr CSVs whose names include any brute-force time-series ids, merges them via `integrate_filcorr_results.py`, and emits `filcorr_run.csv` alongside the comparison artifacts for easier downstream analysis.
+
+The comparison CSV includes the same derived diagnostics as the optim CSV (`speedup_ceil`, `rel_speedup_eff`, `corr_prop`, `waste_val_bf`, `waste_val`, `rel_waste_red`) so the performance ratios stay aligned across stages.
 
 Synthetic variant:
 
