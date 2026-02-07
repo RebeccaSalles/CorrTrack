@@ -4159,6 +4159,16 @@ class Sketches:
         if random_sums.size == 0:
             return vector
         return vector - mu_value * random_sums
+
+    def _kernel_norm_inputs(self, n_series, norm_mode):
+        if norm_mode != 1:
+            empty = np.empty(0, dtype=np.float64)
+            return empty, empty
+        if self._series_window_means is None or self._random_vector_sums is None:
+            return None, None
+        mean_vec = np.asarray(self._series_window_means[:n_series], dtype=np.float64)
+        random_sums = np.asarray(self._random_vector_sums, dtype=np.float64)
+        return mean_vec, random_sums
     
     def _generate_randomVectors(self):
         base_rng = np.random.RandomState(self.seed_randomVector)
@@ -4241,27 +4251,24 @@ class Sketches:
         window_blocks = current_window.reshape(n_series, self.n_basic_windows, self.basic_window)
         weights = np.array(self._toggle_weights, dtype=np.float64, copy=False)
 
-        self._ensure_orth_transform()
-        perm = self._orth_perm
-        signs = self._orth_signs
         norm_mode = 1 if (self.sketch_norm or "z").lower() == "mean_l2" else 0
-
         if _cy_build_sketch_matrix is not None:
-            perm_arr = np.asarray(perm, dtype=np.int64) if perm is not None else np.empty(0, dtype=np.int64)
-            signs_arr = np.asarray(signs, dtype=np.float64) if signs is not None else np.empty(0, dtype=np.float64)
-            series_dots, raw_matrix, norm_matrix = _cy_build_sketch_matrix(
-                np.ascontiguousarray(window_blocks, dtype=np.float64),
-                np.ascontiguousarray(weights, dtype=np.float64),
-                perm_arr,
-                signs_arr,
-                int(norm_mode),
-            )
+            mean_vec, random_sums = self._kernel_norm_inputs(n_series, norm_mode)
+            if mean_vec is not None and random_sums is not None:
+                series_dots, raw_matrix, norm_matrix = _cy_build_sketch_matrix(
+                    np.ascontiguousarray(window_blocks, dtype=np.float64),
+                    np.ascontiguousarray(weights, dtype=np.float64),
+                    mean_vec,
+                    random_sums,
+                    int(norm_mode),
+                )
+            else:
+                series_dots = _compute_series_dots(window_blocks, weights)
+                raw_matrix = np.sum(series_dots, axis=1)
+                norm_matrix = self._normalize_sketch_matrix(raw_matrix)
         else:
             series_dots = _compute_series_dots(window_blocks, weights)
-            sketch_vectors = series_dots.sum(axis=1)
-            raw_matrix = np.array(sketch_vectors, dtype=np.float64, copy=False)
-            if perm is not None and signs is not None and raw_matrix.shape[1] == perm.shape[0]:
-                raw_matrix = raw_matrix[:, perm] * signs
+            raw_matrix = np.sum(series_dots, axis=1)
             norm_matrix = self._normalize_sketch_matrix(raw_matrix)
         curr_start = self._curr_startTime()
         window_size = self.window_size
@@ -4336,22 +4343,19 @@ class Sketches:
                 self.basicDots.append(series_dots)
                 raw_matrix = np.sum(series_dots, axis=1)
 
-                self._ensure_orth_transform()
-                perm = self._orth_perm
-                signs = self._orth_signs
                 norm_mode = 1 if (self.sketch_norm or "z").lower() == "mean_l2" else 0
                 if _cy_apply_orth_and_normalize is not None:
-                    perm_arr = np.asarray(perm, dtype=np.int64) if perm is not None else np.empty(0, dtype=np.int64)
-                    signs_arr = np.asarray(signs, dtype=np.float64) if signs is not None else np.empty(0, dtype=np.float64)
-                    raw_matrix, norm_matrix = _cy_apply_orth_and_normalize(
-                        np.ascontiguousarray(raw_matrix, dtype=np.float64),
-                        perm_arr,
-                        signs_arr,
-                        int(norm_mode),
-                    )
+                    mean_vec, random_sums = self._kernel_norm_inputs(n_series, norm_mode)
+                    if mean_vec is not None and random_sums is not None:
+                        raw_matrix, norm_matrix = _cy_apply_orth_and_normalize(
+                            np.ascontiguousarray(raw_matrix, dtype=np.float64),
+                            mean_vec,
+                            random_sums,
+                            int(norm_mode),
+                        )
+                    else:
+                        norm_matrix = self._normalize_sketch_matrix(raw_matrix)
                 else:
-                    if perm is not None and signs is not None and raw_matrix.shape[1] == perm.shape[0]:
-                        raw_matrix = raw_matrix[:, perm] * signs
                     norm_matrix = self._normalize_sketch_matrix(raw_matrix)
 
                 if self._debug_sketches or self.testing:
@@ -4446,22 +4450,19 @@ class Sketches:
         self.basicDots.append(updated)
         raw_matrix = np.sum(updated, axis=1)
 
-        self._ensure_orth_transform()
-        perm = self._orth_perm
-        signs = self._orth_signs
         norm_mode = 1 if (self.sketch_norm or "z").lower() == "mean_l2" else 0
         if _cy_apply_orth_and_normalize is not None:
-            perm_arr = np.asarray(perm, dtype=np.int64) if perm is not None else np.empty(0, dtype=np.int64)
-            signs_arr = np.asarray(signs, dtype=np.float64) if signs is not None else np.empty(0, dtype=np.float64)
-            raw_matrix, norm_matrix = _cy_apply_orth_and_normalize(
-                np.ascontiguousarray(raw_matrix, dtype=np.float64),
-                perm_arr,
-                signs_arr,
-                int(norm_mode),
-            )
+            mean_vec, random_sums = self._kernel_norm_inputs(n_series, norm_mode)
+            if mean_vec is not None and random_sums is not None:
+                raw_matrix, norm_matrix = _cy_apply_orth_and_normalize(
+                    np.ascontiguousarray(raw_matrix, dtype=np.float64),
+                    mean_vec,
+                    random_sums,
+                    int(norm_mode),
+                )
+            else:
+                norm_matrix = self._normalize_sketch_matrix(raw_matrix)
         else:
-            if perm is not None and signs is not None and raw_matrix.shape[1] == perm.shape[0]:
-                raw_matrix = raw_matrix[:, perm] * signs
             norm_matrix = self._normalize_sketch_matrix(raw_matrix)
 
         if self._debug_sketches or self.testing:
@@ -4538,7 +4539,7 @@ class Sketches:
             return arr
         mean = float(np.mean(arr))
         centered = arr - mean
-        std = float(np.std(centered))
+        std = float(np.std(arr))
         if not np.isfinite(std) or std <= 0.0:
             return np.zeros_like(arr)
         return centered / std
@@ -4547,11 +4548,10 @@ class Sketches:
         arr = np.array(v, dtype=np.float64, copy=False)
         if arr.size == 0:
             return arr
-        centered = arr - float(np.mean(arr))
-        norm = float(np.linalg.norm(centered))
+        norm = float(np.linalg.norm(arr))
         if not np.isfinite(norm) or norm <= 0.0:
             return np.zeros_like(arr)
-        return centered / norm
+        return arr / norm
 
     def _normalize_sketch(self, v):
         mode = (self.sketch_norm or "z").lower()
@@ -4567,18 +4567,17 @@ class Sketches:
         if arr.ndim == 1:
             arr = arr[None, :]
         mode = (self.sketch_norm or "z").lower()
-        mean = np.mean(arr, axis=1, keepdims=True)
-        centered = arr - mean
         if mode == "mean_l2":
-            norms = np.linalg.norm(centered, axis=1)
-            norms = norms.reshape(-1, 1)
-            out = np.zeros_like(centered)
+            adjusted = self._mean_adjust_matrix(arr)
+            norms = np.linalg.norm(adjusted, axis=1, keepdims=True)
+            out = np.zeros_like(adjusted)
             valid = np.isfinite(norms[:, 0]) & (norms[:, 0] > 0)
             if np.any(valid):
-                out[valid] = centered[valid] / norms[valid]
+                out[valid] = adjusted[valid] / norms[valid]
             return out
-        std = np.std(centered, axis=1)
-        std = std.reshape(-1, 1)
+        mean = np.mean(arr, axis=1, keepdims=True)
+        centered = arr - mean
+        std = np.std(arr, axis=1, keepdims=True)
         out = np.zeros_like(centered)
         valid = np.isfinite(std[:, 0]) & (std[:, 0] > 0)
         if np.any(valid):

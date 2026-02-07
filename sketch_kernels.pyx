@@ -3,7 +3,6 @@
 import numpy as np
 cimport numpy as np
 from libc.math cimport sqrt
-from libc.stdlib cimport malloc, free
 
 np.import_array()
 
@@ -36,10 +35,10 @@ def compute_series_dots(double[:, :, ::1] window_blocks,
 
 def build_sketch_matrix(double[:, :, ::1] window_blocks,
                         double[:, :, ::1] weights,
-                        long[:] perm,
-                        double[:] signs,
+                        double[:] mean_vec,
+                        double[:] random_sums,
                         int norm_mode):
-    """Compute series_dots, raw (orth-applied), and normalized sketch matrix."""
+    """Compute series_dots, raw, and normalized sketch matrix."""
     cdef Py_ssize_t n_series = window_blocks.shape[0]
     cdef Py_ssize_t n_basic = window_blocks.shape[1]
     cdef Py_ssize_t basic_window = window_blocks.shape[2]
@@ -62,19 +61,16 @@ def build_sketch_matrix(double[:, :, ::1] window_blocks,
         (n_series, n_vectors),
         dtype=np.float64,
     )
+    if norm_mode == 1:
+        if mean_vec.shape[0] != n_series or random_sums.shape[0] != n_vectors:
+            raise ValueError("mean_vec/random_sums shape mismatch")
+
     cdef double[:, :, ::1] dots_mv = dots
     cdef double[:, ::1] raw_mv = raw
     cdef double[:, ::1] norm_mv = norm
-    cdef bint use_orth = perm.shape[0] == n_vectors and signs.shape[0] == n_vectors
 
     cdef Py_ssize_t s, b, v, w
-    cdef double acc, mean, var_acc, denom, centered
-    cdef double *tmp = NULL
-
-    if n_vectors > 0:
-        tmp = <double *>malloc(n_vectors * sizeof(double))
-        if tmp == NULL:
-            raise MemoryError()
+    cdef double acc, mean, var_acc, denom, centered, mu_value, adj
 
     with nogil:
         for s in range(n_series):
@@ -90,50 +86,52 @@ def build_sketch_matrix(double[:, :, ::1] window_blocks,
                     acc += dots_mv[s, b, v]
                 raw_mv[s, v] = acc
 
-            if use_orth:
-                for v in range(n_vectors):
-                    tmp[v] = raw_mv[s, v]
-                for v in range(n_vectors):
-                    raw_mv[s, v] = tmp[perm[v]] * signs[v]
-
-            mean = 0.0
-            for v in range(n_vectors):
-                mean += raw_mv[s, v]
-            if n_vectors > 0:
-                mean /= n_vectors
-
-            var_acc = 0.0
-            for v in range(n_vectors):
-                centered = raw_mv[s, v] - mean
-                var_acc += centered * centered
-
             if norm_mode == 1:
-                denom = sqrt(var_acc)
-            else:
-                denom = sqrt(var_acc / n_vectors) if n_vectors > 0 else 0.0
-
-            if denom <= 0.0 or denom != denom:
+                mu_value = mean_vec[s]
+                denom = 0.0
                 for v in range(n_vectors):
-                    norm_mv[s, v] = 0.0
+                    adj = raw_mv[s, v] - mu_value * random_sums[v]
+                    denom += adj * adj
+                denom = sqrt(denom)
+                if denom <= 0.0 or denom != denom:
+                    for v in range(n_vectors):
+                        norm_mv[s, v] = 0.0
+                else:
+                    for v in range(n_vectors):
+                        adj = raw_mv[s, v] - mu_value * random_sums[v]
+                        norm_mv[s, v] = adj / denom
             else:
+                mean = 0.0
+                for v in range(n_vectors):
+                    mean += raw_mv[s, v]
+                if n_vectors > 0:
+                    mean /= n_vectors
+
+                var_acc = 0.0
                 for v in range(n_vectors):
                     centered = raw_mv[s, v] - mean
-                    norm_mv[s, v] = centered / denom
+                    var_acc += centered * centered
 
-    if tmp != NULL:
-        free(tmp)
+                denom = sqrt(var_acc / n_vectors) if n_vectors > 0 else 0.0
+
+                if denom <= 0.0 or denom != denom:
+                    for v in range(n_vectors):
+                        norm_mv[s, v] = 0.0
+                else:
+                    for v in range(n_vectors):
+                        centered = raw_mv[s, v] - mean
+                        norm_mv[s, v] = centered / denom
 
     return dots, raw, norm
 
 
 def apply_orth_and_normalize(double[:, ::1] raw_matrix,
-                             long[:] perm,
-                             double[:] signs,
+                             double[:] mean_vec,
+                             double[:] random_sums,
                              int norm_mode):
-    """Apply orthogonal transform (perm/signs) and normalize a raw sketch matrix."""
+    """Normalize a raw sketch matrix without orthogonal transforms."""
     cdef Py_ssize_t n_series = raw_matrix.shape[0]
     cdef Py_ssize_t n_vectors = raw_matrix.shape[1]
-    cdef bint use_orth = perm.shape[0] == n_vectors and signs.shape[0] == n_vectors
 
     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(
         (n_series, n_vectors),
@@ -146,51 +144,52 @@ def apply_orth_and_normalize(double[:, ::1] raw_matrix,
     cdef double[:, ::1] raw_mv = raw
     cdef double[:, ::1] norm_mv = norm
     cdef Py_ssize_t s, v
-    cdef double mean, var_acc, denom, centered
-    cdef double *tmp = NULL
+    cdef double mean, var_acc, denom, centered, mu_value, adj
 
-    if n_vectors > 0:
-        tmp = <double *>malloc(n_vectors * sizeof(double))
-        if tmp == NULL:
-            raise MemoryError()
+    if norm_mode == 1:
+        if mean_vec.shape[0] != n_series or random_sums.shape[0] != n_vectors:
+            raise ValueError("mean_vec/random_sums shape mismatch")
 
     with nogil:
         for s in range(n_series):
             for v in range(n_vectors):
                 raw_mv[s, v] = raw_matrix[s, v]
 
-            if use_orth:
-                for v in range(n_vectors):
-                    tmp[v] = raw_mv[s, v]
-                for v in range(n_vectors):
-                    raw_mv[s, v] = tmp[perm[v]] * signs[v]
-
-            mean = 0.0
-            for v in range(n_vectors):
-                mean += raw_mv[s, v]
-            if n_vectors > 0:
-                mean /= n_vectors
-
-            var_acc = 0.0
-            for v in range(n_vectors):
-                centered = raw_mv[s, v] - mean
-                var_acc += centered * centered
-
             if norm_mode == 1:
-                denom = sqrt(var_acc)
-            else:
-                denom = sqrt(var_acc / n_vectors) if n_vectors > 0 else 0.0
-
-            if denom <= 0.0 or denom != denom:
+                mu_value = mean_vec[s]
+                denom = 0.0
                 for v in range(n_vectors):
-                    norm_mv[s, v] = 0.0
+                    adj = raw_mv[s, v] - mu_value * random_sums[v]
+                    denom += adj * adj
+                denom = sqrt(denom)
+                if denom <= 0.0 or denom != denom:
+                    for v in range(n_vectors):
+                        norm_mv[s, v] = 0.0
+                else:
+                    for v in range(n_vectors):
+                        adj = raw_mv[s, v] - mu_value * random_sums[v]
+                        norm_mv[s, v] = adj / denom
             else:
+                mean = 0.0
+                for v in range(n_vectors):
+                    mean += raw_mv[s, v]
+                if n_vectors > 0:
+                    mean /= n_vectors
+
+                var_acc = 0.0
                 for v in range(n_vectors):
                     centered = raw_mv[s, v] - mean
-                    norm_mv[s, v] = centered / denom
+                    var_acc += centered * centered
 
-    if tmp != NULL:
-        free(tmp)
+                denom = sqrt(var_acc / n_vectors) if n_vectors > 0 else 0.0
+
+                if denom <= 0.0 or denom != denom:
+                    for v in range(n_vectors):
+                        norm_mv[s, v] = 0.0
+                else:
+                    for v in range(n_vectors):
+                        centered = raw_mv[s, v] - mean
+                        norm_mv[s, v] = centered / denom
 
     return raw, norm
 

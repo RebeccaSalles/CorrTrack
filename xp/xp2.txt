@@ -1,49 +1,137 @@
-Experiment 2 - throughput scalability (fig 2):
+Experiment - Sequential - Climatic
 
-Data: Synthetic (length = 2000)
-	name = synt_[stationarity]_corr[rate]
-	stationarity = [stat, nonstat]
-	rate = [00,5,10,15,20,25]
+Data: ASOS
+	country = ["fr","br"]
+	variable = ["air_temperature","wind_direction","wind_speed","visibility","flights","delays","delay_perc","relative_humidity","apparent_temperature","pressure","dew_point"]
+	n_years = [20] #365*24*20 = 175200
 	
-	n_series = [800]
-	sample_length = [2000]
-	
-Methods: corrtrack, brute_force, filcorr
+Methods: 
+	corrtrack
+	brute_force
+	filcorr
 
-Dynamic parameters:
-	window_step = [1,5,10,15,20]
-	n_lags = [0,100,250]
-	corr_threshold = [0.7,0.8,0.9]
+ALWAYS FIXED parameters:
 	
-Fixed parameters:
-	window_size = 500
-	
-	exec = "sequential"
+	--sequential-sketch 
+	--sequential-candidates 
+	--sequential-validation
 
-	train_ratio = 0.3
-	target-recall = 0.9
-	neg_corr = True
-	corr_val = True
-	run_optim = True
-	extra_filter = False
+	NEG_CORR = False
+	TRAIN_RATIO = 0.7
+	TARGET_RECALL = 0.9
 	
 	plot = True
 	train_distances = False
-	basic_window = None #automatic
+	basic_window = None #automatic #basic_window approx sqrt(window_size) (see: CorrTrack.get_bst_basic_window())
 	recall_by_window = True
 	verbose = False
 	testing = False
-	modes = ["nD"]
 
-Hyperparemater search:
+HYPERPARAMETER search:
 	param_grid = {
-		"n_vectors": [4,8,16,32,64],
-		"cell_size": [1,1.2,1.5,2,2.2,2.5,3], #strech rate
-		"freq_threshold": [0.0,0.3,0.5,0.7,1.0],
+		"n_vectors": [8,16,32,64],
+		"cell_size": [0.25,0.5,0.75,1,1.25,1.5,1.75,2], #strech rate
+		"freq_threshold": [0], #not needed in sequential
 
-		"preprocess": [True,False], #differencing?
+		"preprocess": [True,False], #differencing helps?
 		"nodes": [0], #automatic cores-1
 		"seed": [2468],
 		"seed_toggle": [1357],
-		"grid_dimension": [0] #automatic
+		"grid_dimension": [1] #fixed
+		"sketch_norm": ["mean_l2"] #fixed
 	}
+
+		
+
+====== XP 1 - scale n_series ======
+DYNAMIC parameters:
+	n_series = [5,25,50,75,100,128(climatic-fr)/143(climatic-br)/109({flights,delays,delay_perc}-br)]
+	
+FIXED parameters:
+	window_size = 7 * 24
+	n_lags = window_size*1000
+	window_step = basic_window
+	corr_threshold = 0.8
+	corr_val = True
+	
+	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
+	
+	
+====== XP 2 - scale window_step ======
+DYNAMIC parameters:
+	window_step = [1, 0.5*basic_window, basic_window]
+	
+FIXED parameters:
+	n_series = 100
+	window_size = 7 * 24
+	n_lags = window_size*1000
+	corr_threshold = 0.8
+	corr_val = True
+	
+	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
+	
+	
+====== XP 3 - scale n_lags ======
+DYNAMIC parameters:
+	n_lags = window_size*[1,10,100,1000]
+	
+FIXED parameters:
+	n_series = 100
+	window_size = 7 * 24
+	window_step = basic_window
+	corr_threshold = 0.8
+	corr_val = True
+	
+	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
+
+
+====== XP 4 - scale window_size ======
+DYNAMIC parameters:
+	window_size =  [7 * 24, 15 * 24, 30 * 24, 180 * 24, 365 * 24]
+	
+FIXED parameters:
+	n_series = 100
+	n_lags = window_size*1000
+	window_step = basic_window
+	corr_threshold = 0.8
+	corr_val = True
+	
+	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
+
+
+====== XP 5 - scale corr_threshold ======
+DYNAMIC parameters:
+	corr_threshold = [0.7,0.8,0.9,0.95]
+	
+FIXED parameters:
+	n_series = 100
+	n_lags = window_size*1000
+	window_step = basic_window
+	window_size = 7 * 24
+	corr_val = True
+	
+	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
+	
+	
+====== XP 6 - vary base_proc + corr_val ======
+DYNAMIC parameters:
+	SYNTH_PARAMS = {
+		"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0},
+		"base_proc": {"type": "wn", "sigma": 1.3},
+		"base_proc": {"type": "lagged_seasonal_ar", "phi_short": 0.2, "phi_long": 0.6, "season_lag": 36, "sigma": 1.3},
+		"base_proc": {"type": "ou", "theta": 0.4, "mu": 0.0, "dt": 1.0, "sigma": 1.0},
+		"base_proc": {"type": "seasonal_arima", "phi": 0.7, "theta": -0.4, "season_period": 96, "season_amplitude": 1.2, "sigma": 0.9},
+		
+		"base_proc": {"type": "rw", "sigma": 1.0}, #bad
+		"base_proc": {"type": "rw_seasonal_drift", "drift": 0.04, "season_amplitude": 0.6, "season_period": 288, "sigma": 0.8}, #bad
+		"base_proc": {"type": "trend_poly", "phi": 0.5, "sigma": 0.7}, #*special
+		"base_proc": {"type": "integrated_seasonal", "season_lag": 48, "phi": 0.4, "psi": 0.5, "sigma": 1.0}, #bad
+	}
+	corr_val = [True,False]
+	
+FIXED parameters:
+	n_series = 100
+	n_lags = window_size*1000
+	window_step = basic_window
+	window_size = 7 * 24
+	corr_threshold = 0.8

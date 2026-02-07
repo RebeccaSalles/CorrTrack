@@ -5,21 +5,28 @@ def compute_series_dots(window_blocks, weights):
     return np.einsum("sbw,bvw->sbv", window_blocks, weights, optimize=True)
 
 
-def apply_orth_and_normalize(raw_matrix, perm, signs, norm_mode):
-    raw_matrix = np.asarray(raw_matrix, dtype=np.float64)
-    raw = raw_matrix.copy()
-    if perm is not None and signs is not None:
-        perm = np.asarray(perm, dtype=np.int64)
-        signs = np.asarray(signs, dtype=np.float64)
-        if perm.size == raw.shape[1] and signs.size == raw.shape[1]:
-            raw = raw[:, perm] * signs
+def apply_orth_and_normalize(raw_matrix, mean_vec, random_sums, norm_mode):
+    """Normalize sketches without orthogonal transforms."""
+    raw = np.asarray(raw_matrix, dtype=np.float64)
+    if raw.size == 0:
+        return raw, raw
+
+    if norm_mode == 1:
+        mean_vec = np.asarray(mean_vec, dtype=np.float64)
+        random_sums = np.asarray(random_sums, dtype=np.float64)
+        if mean_vec.shape[0] != raw.shape[0] or random_sums.shape[0] != raw.shape[1]:
+            raise ValueError("mean_vec/random_sums shape mismatch")
+        adjusted = raw - mean_vec[:, None] * random_sums[None, :]
+        denom = np.linalg.norm(adjusted, axis=1, keepdims=True)
+        norm = np.zeros_like(adjusted)
+        valid = np.isfinite(denom[:, 0]) & (denom[:, 0] > 0)
+        if np.any(valid):
+            norm[valid] = adjusted[valid] / denom[valid]
+        return raw, norm
 
     mean = np.mean(raw, axis=1, keepdims=True)
     centered = raw - mean
-    if norm_mode == 1:
-        denom = np.linalg.norm(centered, axis=1, keepdims=True)
-    else:
-        denom = np.std(centered, axis=1, keepdims=True)
+    denom = np.std(raw, axis=1, keepdims=True)
     norm = np.zeros_like(centered)
     valid = np.isfinite(denom[:, 0]) & (denom[:, 0] > 0)
     if np.any(valid):
@@ -27,12 +34,12 @@ def apply_orth_and_normalize(raw_matrix, perm, signs, norm_mode):
     return raw, norm
 
 
-def build_sketch_matrix(window_blocks, weights, perm, signs, norm_mode):
+def build_sketch_matrix(window_blocks, weights, mean_vec, random_sums, norm_mode):
     window_blocks = np.asarray(window_blocks, dtype=np.float64)
     weights = np.asarray(weights, dtype=np.float64)
     series_dots = compute_series_dots(window_blocks, weights)
     raw = np.sum(series_dots, axis=1)
-    raw, norm = apply_orth_and_normalize(raw, perm, signs, norm_mode)
+    raw, norm = apply_orth_and_normalize(raw, mean_vec, random_sums, norm_mode)
     return series_dots, raw, norm
 
 
