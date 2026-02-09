@@ -827,28 +827,32 @@ class DatasetContext:
 
 
 def discover_datasets(args: argparse.Namespace) -> List[DatasetContext]:
+    cfg_exec = corrtrack_main._load_module(args.exec_param_config, "experiment_exec")
     cfg_dataset = corrtrack_main._load_dataset_config(args.dataset_config)
     corrtrack_main._apply_dataset_config(cfg_dataset)
     if hasattr(corrtrack_main, "_apply_parallel_defaults_from_cfg"):
-        corrtrack_main._apply_parallel_defaults_from_cfg(cfg_dataset, args)
+        corrtrack_main._apply_parallel_defaults_from_cfg(cfg_exec, args)
     if args.loader:
         corrtrack_main.DATA_LOADER = corrtrack_main._load_loader(args.loader)
     _set_loader_refresh(getattr(args, "refresh_artifacts", False))
 
+    corrtrack_main.RESULT_FOLDER = _resolve_cfg_value(
+        args.result_folder, cfg_dataset, "RESULT_FOLDER", corrtrack_main.DEFAULT_RESULT_FOLDER
+    )
     corrtrack_main.WINDOW_SIZE = _resolve_cfg_value(
-        args.window_size, cfg_dataset, "WINDOW_SIZE", corrtrack_main.DEFAULT_WINDOW_SIZE
+        args.window_size, cfg_exec, "WINDOW_SIZE", corrtrack_main.DEFAULT_WINDOW_SIZE
     )
     corrtrack_main.WINDOW_STEP = _resolve_cfg_value(
-        args.window_step, cfg_dataset, "WINDOW_STEP", corrtrack_main.DEFAULT_WINDOW_STEP
+        args.window_step, cfg_exec, "WINDOW_STEP", corrtrack_main.DEFAULT_WINDOW_STEP
     )
     corrtrack_main.BASIC_WINDOW = _resolve_cfg_value(
-        args.basic_window, cfg_dataset, "BASIC_WINDOW", corrtrack_main.DEFAULT_BASIC_WINDOW
+        args.basic_window, cfg_exec, "BASIC_WINDOW", corrtrack_main.DEFAULT_BASIC_WINDOW
     )
     corrtrack_main.N_LAGS = _resolve_cfg_value(
-        args.n_lags, cfg_dataset, "N_LAGS", corrtrack_main.DEFAULT_N_LAGS
+        args.n_lags, cfg_exec, "N_LAGS", corrtrack_main.DEFAULT_N_LAGS
     )
     corrtrack_main.CORR_THRESHOLD = _resolve_cfg_value(
-        args.corr_threshold, cfg_dataset, "CORR_THRESHOLD", corrtrack_main.DEFAULT_CORR_THRESHOLD
+        args.corr_threshold, cfg_exec, "CORR_THRESHOLD", corrtrack_main.DEFAULT_CORR_THRESHOLD
     )
     effective_parallel = bool(args.parallel) or any(
         flag is True
@@ -864,10 +868,25 @@ def discover_datasets(args: argparse.Namespace) -> List[DatasetContext]:
     )
     corrtrack_main.EXEC_MODE = "thread" if parallel_any else "sequential"
     corrtrack_main.NEG_CORR = _resolve_cfg_value(
-        args.neg_corr, cfg_dataset, "NEG_CORR", corrtrack_main.DEFAULT_NEG_CORR
+        args.neg_corr, cfg_exec, "NEG_CORR", corrtrack_main.DEFAULT_NEG_CORR
     )
-    corrtrack_main.EXTRA_FILTER = args.extra_filter
-    corrtrack_main.RECALL_BY_WINDOW = args.recall_by_window
+    corrtrack_main.RECALL_BY_WINDOW = _resolve_cfg_value(
+        args.recall_by_window, cfg_exec, "RECALL_BY_WINDOW", corrtrack_main.DEFAULT_RECALL_BY_WINDOW
+    )
+    corrtrack_main.ARTIFACT_MODE = _resolve_cfg_value(
+        args.artifact_mode, cfg_exec, "ARTIFACT_MODE", corrtrack_main.DEFAULT_ARTIFACT_MODE
+    )
+    corrtrack_main.VERBOSE = _resolve_cfg_value(
+        args.verbose, cfg_exec, "VERBOSE", corrtrack_main.DEFAULT_VERBOSE
+    )
+    corrtrack_main.TESTING = _resolve_cfg_value(
+        args.testing, cfg_exec, "TESTING", corrtrack_main.DEFAULT_TESTING
+    )
+    corrtrack_main.MAX_WORKERS = _resolve_cfg_value(
+        None, cfg_exec, "MAX_WORKERS", corrtrack_main.DEFAULT_MAX_WORKERS
+    )
+    if corrtrack_main.RESULT_FOLDER is None:
+        raise RuntimeError("Dataset config must define RESULT_FOLDER or provide --result-folder.")
 
     contexts: List[DatasetContext] = []
     config_folder = corrtrack_main.config_folder()
@@ -901,6 +920,10 @@ def run_full_pipeline(args: argparse.Namespace, passthrough: List[str]) -> None:
         "--param-grid-config",
         str(args.param_grid_config),
     ]
+    if args.exec_param_config:
+        cmd.extend(["--exec-param-config", str(args.exec_param_config)])
+    if args.result_folder:
+        cmd.extend(["--result-folder", args.result_folder])
     # Propagate core overrides so the reproducible rerun matches.
     effective_parallel = bool(args.parallel) or any(
         flag is True
@@ -926,12 +949,18 @@ def run_full_pipeline(args: argparse.Namespace, passthrough: List[str]) -> None:
         cmd.append("--neg-corr")
     elif args.neg_corr is False:
         cmd.append("--no-neg-corr")
-    if args.extra_filter:
-        cmd.append("--extra-filter")
     if args.recall_by_window:
         cmd.append("--recall-by-window")
     if args.artifact_mode:
         cmd.extend(["--artifact-mode", args.artifact_mode])
+    if args.verbose is True:
+        cmd.append("--verbose")
+    elif args.verbose is False:
+        cmd.append("--no-verbose")
+    if args.testing is True:
+        cmd.append("--testing")
+    elif args.testing is False:
+        cmd.append("--no-testing")
     if args.loader:
         cmd.extend(["--loader", args.loader])
     cmd.extend(passthrough)
@@ -963,7 +992,6 @@ def _run_bruteforce_pairs(
         corr_threshold=base_config["corr_threshold"],
         neg_corr=base_config.get("neg_corr", False),
         preprocess=False,
-        extra_filter=False,
         exec=base_config.get("exec", "thread"),
         max_workers=base_config.get("max_workers", 0),
         parallel_sketch=base_config.get("parallel_sketch"),
@@ -1120,8 +1148,6 @@ def build_corrtrack_instance(
     params: dict,
     debugger: Optional[DebugMonitor] = None,
 ) -> DebugCorrTrack:
-    extra_filter = _coerce_to_bool(params.get("extra_filters", base_config.get("extra_filter", False)))
-
     def _to_int(value):
         try:
             return int(value)
@@ -1162,7 +1188,6 @@ def build_corrtrack_instance(
         corr_threshold=base_config["corr_threshold"],
         neg_corr=base_config.get("neg_corr", False),
         preprocess=params.get("preprocess"),
-        extra_filter=extra_filter,
         exec=base_config.get("exec", "thread"),
         max_workers=base_config.get("max_workers", 0),
         parallel_sketch=base_config.get("parallel_sketch"),
@@ -1497,6 +1522,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="CorrTrack debugging helper")
     parser.add_argument("--dataset-config", type=Path, required=True)
     parser.add_argument("--param-grid-config", type=Path, required=True)
+    parser.add_argument(
+        "--exec-param-config",
+        type=Path,
+        default=corrtrack_main.DEFAULT_EXEC_PARAM_CONFIG,
+        help="Path to execution parameter configuration module.",
+    )
+    parser.add_argument(
+        "--result-folder",
+        type=str,
+        default=None,
+        help="Override RESULT_FOLDER from the dataset config.",
+    )
     parser.add_argument("--window-size", type=int, default=None)
     parser.add_argument("--window-step", type=int, default=None)
     parser.add_argument("--basic-window", type=int, default=None)
@@ -1512,20 +1549,23 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sequential-validation", dest="parallel_validation", action="store_false")
     parser.add_argument("--neg-corr", dest="neg_corr", action="store_true")
     parser.add_argument("--no-neg-corr", dest="neg_corr", action="store_false")
-    parser.add_argument("--extra-filter", dest="extra_filter", action="store_true")
-    parser.add_argument("--no-extra-filter", dest="extra_filter", action="store_false")
     parser.add_argument("--recall-by-window", dest="recall_by_window", action="store_true")
     parser.add_argument("--no-recall-by-window", dest="recall_by_window", action="store_false")
+    parser.add_argument("--verbose", dest="verbose", action="store_true")
+    parser.add_argument("--no-verbose", dest="verbose", action="store_false")
+    parser.add_argument("--testing", dest="testing", action="store_true")
+    parser.add_argument("--no-testing", dest="testing", action="store_false")
     parser.set_defaults(
-        parallel=corrtrack_main.DEFAULT_PARALLEL,
-        parallel_sketch=corrtrack_main.DEFAULT_PARALLEL_SKETCH,
-        parallel_candidates=corrtrack_main.DEFAULT_PARALLEL_CANDIDATES,
-        parallel_validation=corrtrack_main.DEFAULT_PARALLEL_VALIDATION,
+        parallel=None,
+        parallel_sketch=None,
+        parallel_candidates=None,
+        parallel_validation=None,
         neg_corr=None,
-        extra_filter=corrtrack_main.DEFAULT_EXTRA_FILTER,
-        recall_by_window=corrtrack_main.DEFAULT_RECALL_BY_WINDOW,
+        recall_by_window=None,
+        verbose=None,
+        testing=None,
     )
-    parser.add_argument("--artifact-mode", type=str, default=corrtrack_main.DEFAULT_ARTIFACT_MODE)
+    parser.add_argument("--artifact-mode", type=str, default=None)
     parser.add_argument("--loader", type=str, default=None)
 
     parser.add_argument("--samples-per-class", type=int, default=5)
@@ -1543,6 +1583,60 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[Sequence[str]] = None) -> None:
     parser = build_arg_parser()
     args, passthrough = parser.parse_known_args(argv)
+
+    cfg_exec = corrtrack_main._load_module(args.exec_param_config, "experiment_exec")
+    if hasattr(corrtrack_main, "_apply_parallel_defaults_from_cfg"):
+        corrtrack_main._apply_parallel_defaults_from_cfg(cfg_exec, args)
+    args.parallel_sketch = _resolve_cfg_value(
+        args.parallel_sketch,
+        cfg_exec,
+        "PARALLEL_SKETCH",
+        corrtrack_main.DEFAULT_PARALLEL_SKETCH,
+    )
+    args.parallel_candidates = _resolve_cfg_value(
+        args.parallel_candidates,
+        cfg_exec,
+        "PARALLEL_CANDIDATES",
+        corrtrack_main.DEFAULT_PARALLEL_CANDIDATES,
+    )
+    args.parallel_validation = _resolve_cfg_value(
+        args.parallel_validation,
+        cfg_exec,
+        "PARALLEL_VALIDATION",
+        corrtrack_main.DEFAULT_PARALLEL_VALIDATION,
+    )
+    if args.parallel is None:
+        args.parallel = any(
+            flag is True
+            for flag in (args.parallel_sketch, args.parallel_candidates, args.parallel_validation)
+        )
+    args.neg_corr = _resolve_cfg_value(
+        args.neg_corr, cfg_exec, "NEG_CORR", corrtrack_main.DEFAULT_NEG_CORR
+    )
+    args.recall_by_window = _resolve_cfg_value(
+        args.recall_by_window,
+        cfg_exec,
+        "RECALL_BY_WINDOW",
+        corrtrack_main.DEFAULT_RECALL_BY_WINDOW,
+    )
+    args.artifact_mode = _resolve_cfg_value(
+        args.artifact_mode,
+        cfg_exec,
+        "ARTIFACT_MODE",
+        corrtrack_main.DEFAULT_ARTIFACT_MODE,
+    )
+    args.verbose = _resolve_cfg_value(
+        args.verbose,
+        cfg_exec,
+        "VERBOSE",
+        corrtrack_main.DEFAULT_VERBOSE,
+    )
+    args.testing = _resolve_cfg_value(
+        args.testing,
+        cfg_exec,
+        "TESTING",
+        corrtrack_main.DEFAULT_TESTING,
+    )
 
     run_full_pipeline(args, passthrough)
     contexts = discover_datasets(args)

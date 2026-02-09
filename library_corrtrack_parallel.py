@@ -92,7 +92,6 @@ RUN_RESULT_COLUMNS: Sequence[str] = (
     "seed_toggle",
     "preprocess",
     "sketch_norm",
-    "extra_filters",
     "corr_threshold",
     "grid_max",
     "cell_stretch",
@@ -137,7 +136,6 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     "seed_toggle",
     "preprocess",
     "sketch_norm",
-    "extra_filters",
     "corr_threshold",
     "grid_max",
     "cell_stretch",
@@ -211,7 +209,6 @@ COMPARISON_COLUMNS: Sequence[str] = (
     "seed_toggle",
     "preprocess",
     "sketch_norm",
-    "extra_filters",
     "corr_threshold",
     "grid_max",
     "cell_stretch",
@@ -347,6 +344,8 @@ def execute_corrtrack_pass(
     recall_by_window: bool,
     artifact_prefix: Optional[str] = None,
     artifact_mode: str = "iterative",
+    verbose: bool = False,
+    testing: bool = False,
 ) -> tuple[dict, Optional[tuple], Optional[np.ndarray]]:
     """
     Execute a CorrTrack pass (brute-force or main) and collect runtime statistics.
@@ -416,9 +415,9 @@ def execute_corrtrack_pass(
     for start in range(0, data.shape[1] - window_step + 1, window_step):
         chunk = data[:, start : (start + window_step)]
         if run_kind == "bf":
-            corrtrack.run_bf(chunk, ids, verbose=False, testing=False, corr_val=True)
+            corrtrack.run_bf(chunk, ids, verbose=verbose, testing=testing, corr_val=True)
         else:
-            corrtrack.run(chunk, ids, verbose=False, testing=False, corr_val=corr_val)
+            corrtrack.run(chunk, ids, verbose=verbose, testing=testing, corr_val=corr_val)
         if artifact_active and artifact_per_iteration:
             _t0 = time.time()
             corrtrack._append_artifacts()
@@ -492,6 +491,8 @@ def run_and_log_bruteforce(
     output_csv: str,
     metadata: Optional[dict] = None,
     recall_by_window: bool = True,
+    verbose: Optional[bool] = None,
+    testing: Optional[bool] = None,
     artifact_prefix: Optional[str] = None,
 ) -> tuple[dict, tuple, Optional[np.ndarray]]:
     metadata = dict(metadata or {})
@@ -514,13 +515,17 @@ def run_and_log_bruteforce(
         corr_threshold=base_config["corr_threshold"],
         neg_corr=base_config.get("neg_corr", False),
         preprocess=False,
-        extra_filter=False,
         exec=base_config.get("exec", "thread"),
         max_workers=base_config.get("max_workers", 0),
         parallel_sketch=base_config.get("parallel_sketch"),
         parallel_candidates=base_config.get("parallel_candidates"),
         parallel_validation=base_config.get("parallel_validation"),
     )
+
+    if verbose is None:
+        verbose = _coerce_to_bool(base_config.get("verbose", False))
+    if testing is None:
+        testing = _coerce_to_bool(base_config.get("testing", False))
 
     record, runtime_parts, corr_flags = execute_corrtrack_pass(
         "bf",
@@ -533,10 +538,10 @@ def run_and_log_bruteforce(
         recall_by_window=recall_by_window,
         artifact_prefix=artifact_prefix,
         artifact_mode=artifact_mode,
+        verbose=bool(verbose),
+        testing=bool(testing),
     )
-    record["extra_filters"] = _coerce_to_bool(base_config.get("extra_filter", False))
     record["preprocess"] = False
-    record["extra_filters"] = False
     record["seed"] = None
     record["seed_toggle"] = None
     record["sketch_norm"] = getattr(corrtrack, "sketch_norm", None)
@@ -558,14 +563,14 @@ def run_and_log_corrtrack(
     metadata: Optional[dict] = None,
     recall_by_window: bool = True,
     corr_val: bool = True,
+    verbose: Optional[bool] = None,
+    testing: Optional[bool] = None,
     artifact_prefix: Optional[str] = None,
 ) -> tuple[dict, tuple, Optional[np.ndarray]]:
     metadata = dict(metadata or {})
     metadata.setdefault("mode", "main")
     metadata.setdefault("alg", metadata.get("alg"))
     metadata.setdefault("optim", metadata.get("optim", "main"))
-
-    extra_filter = _coerce_to_bool(run_params.get("extra_filters", base_config.get("extra_filter", False)))
 
     def _to_int(value):
         try:
@@ -619,7 +624,6 @@ def run_and_log_corrtrack(
         corr_threshold=base_config["corr_threshold"],
         neg_corr=base_config.get("neg_corr", False),
         preprocess=run_params.get("preprocess"),
-        extra_filter=extra_filter,
         exec=base_config.get("exec", "thread"),
         max_workers=base_config.get("max_workers", 0),
         parallel_sketch=base_config.get("parallel_sketch"),
@@ -627,6 +631,11 @@ def run_and_log_corrtrack(
         parallel_validation=base_config.get("parallel_validation"),
         **feature_kwargs,
     )
+
+    if verbose is None:
+        verbose = _coerce_to_bool(base_config.get("verbose", False))
+    if testing is None:
+        testing = _coerce_to_bool(base_config.get("testing", False))
 
     record, runtime_parts, corr_flags = execute_corrtrack_pass(
         "corrtrack",
@@ -639,9 +648,10 @@ def run_and_log_corrtrack(
         recall_by_window=recall_by_window,
         artifact_prefix=artifact_prefix,
         artifact_mode=artifact_mode,
+        verbose=bool(verbose),
+        testing=bool(testing),
     )
 
-    record["extra_filters"] = extra_filter
     record["preprocess"] = run_params.get("preprocess")
     record["seed"] = run_seed
     record["seed_toggle"] = seed_toggle
@@ -1170,7 +1180,7 @@ _os_parallel_guard.environ.setdefault("MKL_DEBUG_CPU_TYPE", "5")
 # ================================================================
 
 class CorrTrack:
-    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,grid_dimension,cell_size,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,extra_filter=False,exec="parallel",max_workers=0,sketch_norm="z",parallel_sketch=None,parallel_candidates=None,parallel_validation=None):
+    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,grid_dimension,cell_size,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,exec="parallel",max_workers=0,sketch_norm="z",parallel_sketch=None,parallel_candidates=None,parallel_validation=None):
         
         if basic_window is not None and window_size % basic_window != 0:
             raise TypeError("Window size (",window_size,") is not divisable by basic window size (",basic_window,")")
@@ -1203,7 +1213,6 @@ class CorrTrack:
         self.datetime_lookup = {} #TODO: save correlation logs to file
         self.preprocess = preprocess
         self.sketch_norm = str(sketch_norm) if sketch_norm is not None else "z"
-        self.extra_filter = _coerce_to_bool(extra_filter)
         # Parameters lags
         self.window_size = window_size
 
@@ -1382,7 +1391,6 @@ class CorrTrack:
                 full_vector=self.full_vector_candidates,
                 sign_prefilter_scale=self.sign_prefilter_scale,
                 sign_prefilter_extra=self.sign_prefilter_extra,
-                extra_filter=self.extra_filter,
                 seed=(self.seed + g) if self.seed is not None else g,
             )
             self.grid_nodes.append(node)
@@ -4913,7 +4921,7 @@ class Candidates_BF:
 
 class Candidates:
     def __init__(self,n_lagged_windows,grid_dimension,cell_size,grid_max,freq_threshold,corr_threshold,n_vectors,sketch_std,n_grids,neg_corr,
-                 sign_prefilter_scale=1.3,sign_prefilter_extra=1,extra_filter=False, seed=None, full_vector=False):
+                 sign_prefilter_scale=1.3,sign_prefilter_extra=1, seed=None, full_vector=False):
         self.verbose = None
         self.neg_corr = neg_corr
         # Parameters grids (grid_dimension is fixed to 1 semantics)
@@ -5355,12 +5363,13 @@ class Candidates:
 
 
 class CorrTrack_optimize:
-    def __init__(self,train_data,ids,window_size,window_step,n_lags,corr_threshold,recall_by_window,alg,neg_corr,corr_val, extra_filter=False, exec="parallel",max_workers=0, sketch_norm="z", parallel_sketch=None, parallel_candidates=None, parallel_validation=None):
+    def __init__(self,train_data,ids,window_size,window_step,n_lags,corr_threshold,recall_by_window,alg,neg_corr,corr_val, exec="parallel",max_workers=0, sketch_norm="z", verbose=False, testing=False, parallel_sketch=None, parallel_candidates=None, parallel_validation=None):
 
         self.neg_corr = neg_corr
         self.corr_val = corr_val
-        self.extra_filter = _coerce_to_bool(extra_filter)
         self.sketch_norm = sketch_norm or "z"
+        self.verbose = _coerce_to_bool(verbose)
+        self.testing = _coerce_to_bool(testing)
 
         # Parameters data
         self.train_data = train_data
@@ -5384,7 +5393,7 @@ class CorrTrack_optimize:
         self.parallel_validation = _resolve_parallel_flag(parallel_validation, parallel_default)
         self.corrtrack_bf = CorrTrack(window_size=self.window_size,basic_window=None,window_step=window_step,n_vectors=1,n_lags=self.n_lags,
                                     grid_dimension=1,cell_size=1,seed=None,seed_toggle=None,corr_threshold=self.corr_threshold,
-                                    neg_corr=self.neg_corr,preprocess=False,extra_filter=self.extra_filter,exec=self.exec,max_workers=self.max_workers,
+                                    neg_corr=self.neg_corr,preprocess=False,exec=self.exec,max_workers=self.max_workers,
                                     sketch_norm=self.sketch_norm,parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation)
         
         self.window_step = self.corrtrack_bf.window_step
@@ -5605,7 +5614,7 @@ class CorrTrack_optimize:
         start_time = time.time()
         for start in range(0, length_data - self.window_step + 1, self.window_step):
             chunk = self.train_data[:, start:start + self.window_step]
-            self.corrtrack_bf.run_bf(chunk, self.ids, verbose=False, testing=False, corr_val=True)
+            self.corrtrack_bf.run_bf(chunk, self.ids, verbose=self.verbose, testing=self.testing, corr_val=True)
         end_time = time.time()
         runtime = end_time - start_time
         print("Run Brute-Force, Finished in ",runtime)
@@ -5640,8 +5649,6 @@ class CorrTrack_optimize:
         seed_toggle = param_combo["seed_toggle"]
         n_vectors = param_combo["n_vectors"]
         preprocess = param_combo["preprocess"]
-        extra_filter = _coerce_to_bool(param_combo.get("extra_filters", self.extra_filter))
-        param_combo["extra_filters"] = extra_filter
         
         # Parameters lags
         n_lags = self.n_lags
@@ -5657,13 +5664,13 @@ class CorrTrack_optimize:
             length_data = self.train_data.shape[1]
             corrtrack = CorrTrack(window_size=window_size,basic_window=basic_window,window_step=window_step,n_vectors=n_vectors,n_lags=n_lags,
                                 grid_dimension=1,cell_size=1,seed=seed,seed_toggle=seed_toggle,
-                                freq_threshold=0,corr_threshold=corr_threshold,neg_corr=self.neg_corr,preprocess=preprocess,extra_filter=extra_filter,exec=self.exec,max_workers=self.max_workers,
+                                freq_threshold=0,corr_threshold=corr_threshold,neg_corr=self.neg_corr,preprocess=preprocess,exec=self.exec,max_workers=self.max_workers,
                                 parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation,
                                 **feature_kwargs)
 
             for start in range(0, length_data - self.window_step + 1, self.window_step):
                 chunk = self.train_data[:, start:(start + self.window_step)]
-                corrtrack.run_train_distances(chunk, self.ids, verbose=False, testing=False)
+                corrtrack.run_train_distances(chunk, self.ids, verbose=self.verbose, testing=self.testing)
             
             #print("Distances pos_corr",corrtrack.n_vectors,min(corrtrack.corr_dist_pos),max(corrtrack.corr_dist_pos),np.mean(corrtrack.corr_dist_pos),np.std(corrtrack.corr_dist_pos))
             #print("Distances neg_corr",corrtrack.n_vectors,min(corrtrack.corr_dist_neg),max(corrtrack.corr_dist_neg),np.mean(corrtrack.corr_dist_neg),np.std(corrtrack.corr_dist_neg))
@@ -5712,7 +5719,6 @@ class CorrTrack_optimize:
         record["seed_toggle"] = param_combo.get("seed_toggle")
         record["preprocess"] = param_combo.get("preprocess")
         record["sketch_norm"] = param_combo.get("sketch_norm")
-        record["extra_filters"] = _coerce_to_bool(param_combo.get("extra_filters", self.extra_filter))
         record["corr_threshold"] = self.corr_threshold
         record["grid_max"] = param_combo.get("grid_max")
         record["cell_stretch"] = param_combo.get("cell_size")
@@ -5760,7 +5766,6 @@ class CorrTrack_optimize:
         except (TypeError, ValueError):
             n_vectors = None
         preprocess = param_combo.get("preprocess")
-        extra_filter = _coerce_to_bool(param_combo.get("extra_filters", self.extra_filter))
         grid_dimension = param_combo.get("grid_dimension")
         try:
             grid_dimension = int(grid_dimension) if grid_dimension is not None else None
@@ -5786,7 +5791,6 @@ class CorrTrack_optimize:
         record["seed_toggle"] = seed_toggle
         record["n_vectors"] = n_vectors
         record["preprocess"] = preprocess
-        record["extra_filters"] = extra_filter
         record["grid_dimension"] = grid_dimension
         record["cell_stretch"] = cell_stretch
         record["freq_threshold"] = freq_threshold
@@ -5808,7 +5812,6 @@ class CorrTrack_optimize:
                 corr_threshold=self.corr_threshold,
                 neg_corr=self.neg_corr,
                 preprocess=preprocess,
-                extra_filter=extra_filter,
                 exec=self.exec,
                 max_workers=self.max_workers,
                 parallel_sketch=self.parallel_sketch,
@@ -5834,7 +5837,7 @@ class CorrTrack_optimize:
             start_time = time.time()
             for start in range(0, length_data - self.window_step + 1, self.window_step):
                 chunk = self.train_data[:, start : (start + self.window_step)]
-                corrtrack.run(chunk, self.ids, verbose=False, testing=False, corr_val=self.corr_val)
+                corrtrack.run(chunk, self.ids, verbose=self.verbose, testing=self.testing, corr_val=self.corr_val)
             end_time = time.time()
             runtime = end_time - start_time - corrtrack.train_dist_time
             runtime = max(runtime, 0.0)
@@ -5976,12 +5979,13 @@ class CorrTrack_optimize:
         #return self.ground_truth, self.runtime_bf, CorrTrack_HyperOptim._skyline_query(metrics, ref_metrics) 
 
 class CorrTrack_compare:
-    def __init__(self,train_data,test_data,ids,window_size,window_step,basic_window,n_lags,corr_threshold,param_grid,recall_by_window,neg_corr,corr_val,algs=None, exec="parallel", max_workers=0, extra_filter=False, sketch_norm="z", parallel_sketch=None, parallel_candidates=None, parallel_validation=None):
+    def __init__(self,train_data,test_data,ids,window_size,window_step,basic_window,n_lags,corr_threshold,param_grid,recall_by_window,neg_corr,corr_val,algs=None, exec="parallel", max_workers=0, sketch_norm="z", verbose=False, testing=False, parallel_sketch=None, parallel_candidates=None, parallel_validation=None):
         
         self.neg_corr = neg_corr
         self.corr_val = corr_val
-        self.extra_filter = _coerce_to_bool(extra_filter)
         self.sketch_norm = sketch_norm or "z"
+        self.verbose = _coerce_to_bool(verbose)
+        self.testing = _coerce_to_bool(testing)
 
         # Parameters data
         self.train_data = train_data
@@ -6008,7 +6012,7 @@ class CorrTrack_compare:
         self.corrtrack_bf = CorrTrack(window_size=self.window_size,basic_window=basic_window,window_step=window_step,n_vectors=1,n_lags=self.n_lags,
                                     grid_dimension=1,cell_size=1,seed=None,seed_toggle=None,
                                     corr_threshold=self.corr_threshold,neg_corr=self.neg_corr,preprocess=False,
-                                    extra_filter=self.extra_filter,exec=self.exec,max_workers=self.max_workers,
+                                    exec=self.exec,max_workers=self.max_workers,
                                     sketch_norm=self.sketch_norm,parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation)
         
         self.window_step = self.corrtrack_bf.window_step
@@ -6146,17 +6150,16 @@ class CorrTrack_compare:
             plt.savefig(output_csv)
             plt.close()
 
-    def _mode_run(self,mode,alg,path,prefix,nodes,seed,seed_toggle,n_vectors,grid_dimension,cell_size,grid_max,freq_threshold,preprocess,extra_filter,feature_overrides=None):
+    def _mode_run(self,mode,alg,path,prefix,nodes,seed,seed_toggle,n_vectors,grid_dimension,cell_size,grid_max,freq_threshold,preprocess,feature_overrides=None):
         length_data = self.test_data.shape[1]
         data_stream = self.test_data
-        extra_filter_flag = _coerce_to_bool(extra_filter, self.extra_filter)
 
         # Instantiating corrtrack objects
         overrides = feature_overrides or {}
         corrtrack = CorrTrack(window_size=self.window_size,basic_window=self.basic_window,window_step=self.window_step,n_vectors=n_vectors,n_lags=self.n_lags,
                             grid_dimension=grid_dimension,cell_size=cell_size,seed=seed,seed_toggle=seed_toggle,
                             freq_threshold=freq_threshold,corr_threshold=self.corr_threshold,neg_corr=self.neg_corr,preprocess=preprocess,
-                            extra_filter=extra_filter_flag,exec=self.exec,max_workers=nodes,
+                            exec=self.exec,max_workers=nodes,
                             parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation,
                             **overrides)
         if mode == "main":
@@ -6164,7 +6167,7 @@ class CorrTrack_compare:
             start_time = time.time()
             for start in range(0, length_data - self.window_step + 1, self.window_step):
                 chunk = data_stream[:, start:start + self.window_step]
-                corrtrack.run(chunk,self.ids,verbose=False,testing=False,corr_val=self.corr_val)
+                corrtrack.run(chunk,self.ids,verbose=self.verbose,testing=self.testing,corr_val=self.corr_val)
             end_time = time.time()
             runtime = end_time - start_time
             runtime -= corrtrack.train_dist_time
@@ -6176,7 +6179,7 @@ class CorrTrack_compare:
             start_time = time.time()
             for start in range(0, length_data - self.window_step + 1, self.window_step):
                 chunk = data_stream[:, start:start + self.window_step]
-                corrtrack.run_bf(chunk,self.ids,verbose=False,testing=False,corr_val=True)
+                corrtrack.run_bf(chunk,self.ids,verbose=self.verbose,testing=self.testing,corr_val=True)
             end_time = time.time()
             runtime = end_time - start_time
             runtime_parts = (0,corrtrack.candidate_time,corrtrack.validation_time,corrtrack.monitor_time)
@@ -6227,7 +6230,7 @@ class CorrTrack_compare:
         return runtime_parts, runtime, artifact_time, corr_flags
 
     def _optim(self,hyper_param_csv,dataset_id,run,alg,target_recall=0.95):
-        corrtrack_ho = CorrTrack_optimize(self.train_data,self.ids,self.window_size,self.window_step,self.n_lags,self.corr_threshold,self.recall_by_window,alg,self.neg_corr,self.corr_val,extra_filter=self.extra_filter,exec=self.exec)
+        corrtrack_ho = CorrTrack_optimize(self.train_data,self.ids,self.window_size,self.window_step,self.n_lags,self.corr_threshold,self.recall_by_window,alg,self.neg_corr,self.corr_val,exec=self.exec,verbose=self.verbose,testing=self.testing)
 
         return corrtrack_ho.get_optim_params(self.param_grid,hyper_param_csv,dataset_id,run,target_recall)
 
@@ -6555,7 +6558,6 @@ class CorrTrack_compare:
             as_optional_int(record.get("seed_toggle")),
             str(record.get("preprocess")),
             str(record.get("sketch_norm")),
-            str(record.get("extra_filters")),
             fmt(record.get("corr_threshold")),
             fmt(record.get("grid_max")),
             fmt(record.get("cell_stretch")),
@@ -6753,7 +6755,6 @@ class CorrTrack_compare:
 
     def _parallel_mode_run(self,args):
         dataset_id, mode, alg, path, prefix, bst, runtime_bf, corr_flags_bf = args
-        extra_filter_flag = _coerce_to_bool(bst.get("extra_filters"), self.extra_filter)
         n_vectors = _to_int_safe(bst.get("n_vectors"))
         grid_dimension = _to_int_safe(bst.get("grid_dimension"))
         cell_stretch = _resolve_cell_stretch(
@@ -6778,7 +6779,7 @@ class CorrTrack_compare:
             bst["nodes"], bst["seed"], bst["seed_toggle"],
             n_vectors, grid_dimension,
             cell_stretch, bst["grid_max"],
-            bst["freq_threshold"], bst["preprocess"], extra_filter_flag,
+            bst["freq_threshold"], bst["preprocess"],
             feature_kwargs,
         )
         speedup = runtime_bf / runtime if runtime else float("inf")
@@ -6840,7 +6841,6 @@ class CorrTrack_compare:
             "seed_toggle",
             "preprocess",
             "sketch_norm",
-            "extra_filters",
             "corr_threshold",
             "grid_max",
             "cell_stretch",
@@ -6857,9 +6857,7 @@ class CorrTrack_compare:
                 effective_nodes = max(1, int(nodes))
         param_values = []
         for key in param_keys:
-            if key == "extra_filters":
-                param_values.append(extra_filter_flag)
-            elif key == "exec_mode":
+            if key == "exec_mode":
                 param_values.append(self.exec)
             elif key == "parallel_sketch":
                 param_values.append(self.parallel_sketch)
@@ -6948,7 +6946,6 @@ class CorrTrack_compare:
             None,
             None,
             None,
-            self.extra_filter,
             None,
         )
         print("Run Brute-Force, Finished in ",runtime_bf)

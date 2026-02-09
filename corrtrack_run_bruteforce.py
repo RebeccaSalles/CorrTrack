@@ -8,21 +8,37 @@ from typing import Callable
 
 from library_corrtrack_parallel import run_and_log_bruteforce
 
-DEFAULT_WINDOW_SIZE = 7 * 24
-DEFAULT_WINDOW_STEP = 12
-DEFAULT_BASIC_WINDOW = None
-DEFAULT_N_LAGS = 7 * 24
-DEFAULT_CORR_THRESHOLD = 0.7
 
-DEFAULT_PARALLEL = False
-DEFAULT_PARALLEL_SKETCH = False
-DEFAULT_PARALLEL_CANDIDATES = False
-DEFAULT_PARALLEL_VALIDATION = None
+def _load_module(config_path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, str(config_path))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)  # type: ignore[attr-defined]
+    return module
+
+
+DEFAULT_EXEC_PARAM_CONFIG = Path(__file__).with_name("experiment_run_exec_param.py")
+_DEFAULT_EXEC_CFG = _load_module(DEFAULT_EXEC_PARAM_CONFIG, "experiment_exec_defaults")
+
+DEFAULT_WINDOW_SIZE = getattr(_DEFAULT_EXEC_CFG, "WINDOW_SIZE", 7 * 24)
+DEFAULT_WINDOW_STEP = getattr(_DEFAULT_EXEC_CFG, "WINDOW_STEP", 12)
+DEFAULT_BASIC_WINDOW = getattr(_DEFAULT_EXEC_CFG, "BASIC_WINDOW", None)
+DEFAULT_N_LAGS = getattr(_DEFAULT_EXEC_CFG, "N_LAGS", 7 * 24)
+DEFAULT_CORR_THRESHOLD = getattr(_DEFAULT_EXEC_CFG, "CORR_THRESHOLD", 0.7)
+
+DEFAULT_PARALLEL_SKETCH = getattr(_DEFAULT_EXEC_CFG, "PARALLEL_SKETCH", False)
+DEFAULT_PARALLEL_CANDIDATES = getattr(_DEFAULT_EXEC_CFG, "PARALLEL_CANDIDATES", False)
+DEFAULT_PARALLEL_VALIDATION = getattr(_DEFAULT_EXEC_CFG, "PARALLEL_VALIDATION", None)
+DEFAULT_PARALLEL = any(
+    val is True for val in (DEFAULT_PARALLEL_SKETCH, DEFAULT_PARALLEL_CANDIDATES, DEFAULT_PARALLEL_VALIDATION)
+)
 DEFAULT_EXEC_MODE = "thread" if DEFAULT_PARALLEL else "sequential"
-DEFAULT_NEG_CORR = False
-DEFAULT_EXTRA_FILTER = False
-DEFAULT_RECALL_BY_WINDOW = True
-DEFAULT_ARTIFACT_MODE = "iterative"
+DEFAULT_NEG_CORR = getattr(_DEFAULT_EXEC_CFG, "NEG_CORR", False)
+DEFAULT_RECALL_BY_WINDOW = getattr(_DEFAULT_EXEC_CFG, "RECALL_BY_WINDOW", True)
+DEFAULT_ARTIFACT_MODE = getattr(_DEFAULT_EXEC_CFG, "ARTIFACT_MODE", "iterative")
+DEFAULT_VERBOSE = getattr(_DEFAULT_EXEC_CFG, "VERBOSE", False)
+DEFAULT_TESTING = getattr(_DEFAULT_EXEC_CFG, "TESTING", False)
+DEFAULT_RESULT_FOLDER = None
+DEFAULT_MAX_WORKERS = getattr(_DEFAULT_EXEC_CFG, "MAX_WORKERS", 0)
 
 DEFAULT_DATASET_CONFIG = Path(__file__).with_name(
     "experiment_dataset_fr_air_temperature_7_1.py"
@@ -40,20 +56,19 @@ PARALLEL_CANDIDATES = DEFAULT_PARALLEL_CANDIDATES
 PARALLEL_VALIDATION = DEFAULT_PARALLEL_VALIDATION
 EXEC_MODE = DEFAULT_EXEC_MODE
 NEG_CORR = DEFAULT_NEG_CORR
-EXTRA_FILTER = DEFAULT_EXTRA_FILTER
 RECALL_BY_WINDOW = DEFAULT_RECALL_BY_WINDOW
 ARTIFACT_MODE = DEFAULT_ARTIFACT_MODE
-RESULT_FOLDER = None
+VERBOSE = DEFAULT_VERBOSE
+TESTING = DEFAULT_TESTING
+RESULT_FOLDER = DEFAULT_RESULT_FOLDER
+MAX_WORKERS = DEFAULT_MAX_WORKERS
 COUNTRIES = VARIABLES = N_VARS = N_YEARS = None
 DATA_LOADER: Callable[..., tuple[np.ndarray, np.ndarray]] | None = None
 OBS_MODE = DEFAULT_OBS_MODE
 
 
 def _load_dataset_config(config_path: Path):
-    spec = importlib.util.spec_from_file_location("experiment_dataset", str(config_path))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[attr-defined]
-    return module
+    return _load_module(config_path, "experiment_dataset")
 
 
 def _coerce_optional_bool(value):
@@ -109,9 +124,8 @@ def _effective_variable(country: str, var: str | None) -> str:
 
 
 def _apply_dataset_config(cfg):
-    global RESULT_FOLDER, COUNTRIES, VARIABLES, N_VARS, N_YEARS, DATA_LOADER, OBS_MODE
+    global COUNTRIES, VARIABLES, N_VARS, N_YEARS, DATA_LOADER, OBS_MODE
 
-    RESULT_FOLDER = cfg.RESULT_FOLDER
     COUNTRIES = _as_list(_get_cfg_attr(cfg, "COUNTRIES", "DATASET"))
     variables_attr = getattr(cfg, "VARIABLES", None)
     VARIABLES = _as_list(variables_attr) if variables_attr is not None else [None]
@@ -139,13 +153,14 @@ def build_base_config():
         "n_lags": N_LAGS,
         "corr_threshold": CORR_THRESHOLD,
         "neg_corr": NEG_CORR,
-        "extra_filter": EXTRA_FILTER,
         "exec": EXEC_MODE,
         "parallel_sketch": PARALLEL_SKETCH,
         "parallel_candidates": PARALLEL_CANDIDATES,
         "parallel_validation": PARALLEL_VALIDATION,
-        "max_workers": 0,
+        "max_workers": MAX_WORKERS,
         "artifact_mode": ARTIFACT_MODE,
+        "verbose": VERBOSE,
+        "testing": TESTING,
     }
 
 
@@ -194,6 +209,18 @@ def parse_args():
         help="Path to the dataset configuration module.",
     )
     parser.add_argument(
+        "--exec-param-config",
+        type=Path,
+        default=DEFAULT_EXEC_PARAM_CONFIG,
+        help="Path to execution parameter configuration module.",
+    )
+    parser.add_argument(
+        "--result-folder",
+        type=str,
+        default=None,
+        help="Override RESULT_FOLDER from the dataset config.",
+    )
+    parser.add_argument(
         "--loader",
         type=str,
         default=None,
@@ -214,15 +241,17 @@ def parse_args():
     parser.add_argument("--sequential-validation", dest="parallel_validation", action="store_false")
     parser.add_argument("--neg-corr", dest="neg_corr", action="store_true")
     parser.add_argument("--no-neg-corr", dest="neg_corr", action="store_false")
-    parser.add_argument("--extra-filter", dest="extra_filter", action="store_true")
-    parser.add_argument("--no-extra-filter", dest="extra_filter", action="store_false")
     parser.add_argument("--recall-by-window", dest="recall_by_window", action="store_true")
     parser.add_argument(
         "--artifact-mode",
         choices=("iterative", "final"),
-        default=DEFAULT_ARTIFACT_MODE,
+        default=None,
         help="Persist artifacts after each iteration (iterative) or only once after the run (final).",
     )
+    parser.add_argument("--verbose", dest="verbose", action="store_true")
+    parser.add_argument("--no-verbose", dest="verbose", action="store_false")
+    parser.add_argument("--testing", dest="testing", action="store_true")
+    parser.add_argument("--no-testing", dest="testing", action="store_false")
     parser.add_argument(
         "--no-recall-by-window",
         dest="recall_by_window",
@@ -230,47 +259,63 @@ def parse_args():
         help="Disable recall-by-window mode (enabled by default).",
     )
     parser.set_defaults(
-        parallel=DEFAULT_PARALLEL,
-        parallel_sketch=DEFAULT_PARALLEL_SKETCH,
-        parallel_candidates=DEFAULT_PARALLEL_CANDIDATES,
-        parallel_validation=DEFAULT_PARALLEL_VALIDATION,
+        parallel=None,
+        parallel_sketch=None,
+        parallel_candidates=None,
+        parallel_validation=None,
         neg_corr=None,
-        extra_filter=DEFAULT_EXTRA_FILTER,
-        recall_by_window=DEFAULT_RECALL_BY_WINDOW,
+        recall_by_window=None,
+        artifact_mode=None,
+        verbose=None,
+        testing=None,
     )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    cfg_exec = _load_module(args.exec_param_config, "experiment_exec")
     cfg_dataset = _load_dataset_config(args.dataset_config)
     _apply_dataset_config(cfg_dataset)
-    _apply_parallel_defaults_from_cfg(cfg_dataset, args)
+    _apply_parallel_defaults_from_cfg(cfg_exec, args)
 
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
-    global EXEC_MODE, NEG_CORR, EXTRA_FILTER, RECALL_BY_WINDOW, ARTIFACT_MODE
-    global DATA_LOADER
+    global EXEC_MODE, NEG_CORR, RECALL_BY_WINDOW, ARTIFACT_MODE
+    global DATA_LOADER, RESULT_FOLDER, MAX_WORKERS, VERBOSE, TESTING
 
-    WINDOW_SIZE = _resolve_cfg_value(args.window_size, cfg_dataset, "WINDOW_SIZE", DEFAULT_WINDOW_SIZE)
-    WINDOW_STEP = _resolve_cfg_value(args.window_step, cfg_dataset, "WINDOW_STEP", DEFAULT_WINDOW_STEP)
-    BASIC_WINDOW = _resolve_cfg_value(args.basic_window, cfg_dataset, "BASIC_WINDOW", DEFAULT_BASIC_WINDOW)
-    N_LAGS = _resolve_cfg_value(args.n_lags, cfg_dataset, "N_LAGS", DEFAULT_N_LAGS)
-    CORR_THRESHOLD = _resolve_cfg_value(args.corr_threshold, cfg_dataset, "CORR_THRESHOLD", DEFAULT_CORR_THRESHOLD)
+    RESULT_FOLDER = _resolve_cfg_value(args.result_folder, cfg_dataset, "RESULT_FOLDER", DEFAULT_RESULT_FOLDER)
+    WINDOW_SIZE = _resolve_cfg_value(args.window_size, cfg_exec, "WINDOW_SIZE", DEFAULT_WINDOW_SIZE)
+    WINDOW_STEP = _resolve_cfg_value(args.window_step, cfg_exec, "WINDOW_STEP", DEFAULT_WINDOW_STEP)
+    BASIC_WINDOW = _resolve_cfg_value(args.basic_window, cfg_exec, "BASIC_WINDOW", DEFAULT_BASIC_WINDOW)
+    N_LAGS = _resolve_cfg_value(args.n_lags, cfg_exec, "N_LAGS", DEFAULT_N_LAGS)
+    CORR_THRESHOLD = _resolve_cfg_value(args.corr_threshold, cfg_exec, "CORR_THRESHOLD", DEFAULT_CORR_THRESHOLD)
     PARALLEL = args.parallel
-    PARALLEL_SKETCH = args.parallel_sketch
-    PARALLEL_CANDIDATES = args.parallel_candidates
-    PARALLEL_VALIDATION = args.parallel_validation
+    PARALLEL_SKETCH = _resolve_cfg_value(args.parallel_sketch, cfg_exec, "PARALLEL_SKETCH", DEFAULT_PARALLEL_SKETCH)
+    PARALLEL_CANDIDATES = _resolve_cfg_value(
+        args.parallel_candidates, cfg_exec, "PARALLEL_CANDIDATES", DEFAULT_PARALLEL_CANDIDATES
+    )
+    PARALLEL_VALIDATION = _resolve_cfg_value(
+        args.parallel_validation, cfg_exec, "PARALLEL_VALIDATION", DEFAULT_PARALLEL_VALIDATION
+    )
+    if PARALLEL is None:
+        PARALLEL = _any_parallel(PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION)
     EXEC_MODE = "thread" if _any_parallel(PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION) else "sequential"
-    NEG_CORR = _resolve_cfg_value(args.neg_corr, cfg_dataset, "NEG_CORR", DEFAULT_NEG_CORR)
-    EXTRA_FILTER = args.extra_filter
-    RECALL_BY_WINDOW = args.recall_by_window
-    ARTIFACT_MODE = args.artifact_mode
+    NEG_CORR = _resolve_cfg_value(args.neg_corr, cfg_exec, "NEG_CORR", DEFAULT_NEG_CORR)
+    RECALL_BY_WINDOW = _resolve_cfg_value(
+        args.recall_by_window, cfg_exec, "RECALL_BY_WINDOW", DEFAULT_RECALL_BY_WINDOW
+    )
+    ARTIFACT_MODE = _resolve_cfg_value(args.artifact_mode, cfg_exec, "ARTIFACT_MODE", DEFAULT_ARTIFACT_MODE)
+    MAX_WORKERS = _resolve_cfg_value(None, cfg_exec, "MAX_WORKERS", DEFAULT_MAX_WORKERS)
+    VERBOSE = _resolve_cfg_value(args.verbose, cfg_exec, "VERBOSE", DEFAULT_VERBOSE)
+    TESTING = _resolve_cfg_value(args.testing, cfg_exec, "TESTING", DEFAULT_TESTING)
 
     if args.loader:
         DATA_LOADER = _load_loader(args.loader)
     if DATA_LOADER is None:
         raise RuntimeError("Dataset loader is not configured. Provide DATA_LOADER in config or --loader option.")
+    if RESULT_FOLDER is None:
+        raise RuntimeError("Dataset config must define RESULT_FOLDER or provide --result-folder.")
 
     base_config = build_base_config()
 
@@ -301,6 +346,8 @@ def main():
                     output_csv,
                     metadata=metadata,
                     recall_by_window=RECALL_BY_WINDOW,
+                    verbose=VERBOSE,
+                    testing=TESTING,
                     artifact_prefix=os.path.join(output_dir, "bf"),
                 )
 
