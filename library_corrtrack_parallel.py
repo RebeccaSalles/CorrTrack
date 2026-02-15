@@ -445,7 +445,6 @@ def execute_corrtrack_pass(
             record["monit_time"],
         )
     else:
-        runtime -= getattr(corrtrack, "train_dist_time", 0.0)
         runtime = max(runtime, 0.0)
         record["sk_time"] = getattr(corrtrack, "sketch_time", 0.0)
         record["cand_time"] = getattr(corrtrack, "candidate_time", 0.0)
@@ -1330,22 +1329,6 @@ class CorrTrack:
             "anomalies": set(),
         }
         self.sketches = {}
-        self.corr_dist_pos = []
-        self.corr_dist_neg = []
-        self.noncorr_dist = []
-        self.corr_norm_dist_pos = []
-        self.corr_norm_dist_neg = []
-        self.noncorr_norm_dist = []        
-        self.corr_dist_norm_sk_pos = []
-        self.corr_dist_norm_sk_neg = []
-        self.noncorr_dist_norm_sk = []        
-        self.corr_dist_sk_pos = []
-        self.corr_dist_sk_neg = []
-        self.noncorr_dist_sk = []
-        self.corr_est_pos = []
-        self.corr_est_neg = []
-        self.noncorr_est = []
-        self.corr_est_diffs = []
         self.brute_force_steps = 0
         self.constant_candidates = 0
         self.total_candidates = 0
@@ -1356,7 +1339,6 @@ class CorrTrack:
         self.candidate_time = 0
         self.validation_time = 0
         self.monitor_time = 0
-        self.train_dist_time = 0  
 
         self.profile_enabled = bool(int(os.environ.get("CORRTRACK_PROFILE", "0")))
         self.profile_print_every = max(0, int(os.environ.get("CORRTRACK_PROFILE_EVERY", "0") or 0))
@@ -1884,214 +1866,6 @@ class CorrTrack:
         mean = float(np.mean(x_arr))
         var_sum = float(np.dot(x_arr - mean, x_arr - mean))
         return _is_near_constant_stats(max(var_sum, 0.0), n, std_thresh=std_thresh)
-
-    def _train_distance_item(self, item):
-        """
-        Compute training stats for a single candidate 'item' = (pair_key, sign).
-
-        Returns a small dict of lists you can merge later:
-        - *_dist* lists (raw, z-normed, sketch-based)
-        - corr_est_* lists (cosine sim of sketches if available)
-        - corr_est_diffs (estimated - true)
-        - counts (seen, skipped, constants)
-        """
-        pair, sign = item  # sign is present in candidates dict (1 / -1)
-        try:
-            id1, id2, t1, t2, w = pair
-            ix = self.series_ids[id1]
-            iy = self.series_ids[id2]
-
-            # Locate slices relative to current window buffer
-            s1 = int(t1 - self.window_index[0])
-            s2 = int(t2 - self.window_index[0])
-            x = self.window_data[ix, s1:s1 + w].astype(np.float64, copy=False)
-            y = self.window_data[iy, s2:s2 + w].astype(np.float64, copy=False)
-        except Exception:
-            return {"counts": {"seen": 0, "skipped": 1, "constants": 0}}
-
-        pair_corr, pair_dist, stats = _fast_corr_and_dist(x, y, return_stats=True)
-        n, mean_x, mean_y, var_x, var_y = stats
-
-        if _is_near_constant_stats(var_x, n, std_thresh=1e-3) or _is_near_constant_stats(var_y, n, std_thresh=1e-3):
-            return {"counts": {"seen": 1, "skipped": 0, "constants": 1}}
-
-        if (
-            _is_structurally_spiked_stats(x, mean_x, var_x, n, kurt_thresh=5.0)
-            or _is_structurally_spiked_stats(y, mean_y, var_y, n, kurt_thresh=5.0)
-        ):
-            return {"counts": {"seen": 1, "skipped": 1, "constants": 0}}
-
-        # Truth (raw + z-normalized)
-        nx = self._preprocess_data(x, ix)
-        ny = self._preprocess_data(y, iy)
-        norm_pair_dist = float(np.sqrt(np.sum((nx - ny) ** 2)))
-
-        # Sketch-based distances (if available)
-        dist_sk = None
-        dist_norm_sk = None
-        est = None
-        est_diff = None
-
-        sk1 = None
-        sk2 = None
-        sketches_t1 = self.sketches.get(t1)
-        if isinstance(sketches_t1, dict):
-            sk1 = sketches_t1.get((id1, t1, w))
-            if sk1 is None:
-                sk1 = sketches_t1.get((id1, t1))
-        else:
-            sk1 = self.sketches.get((id1, t1, w))
-            if sk1 is None:
-                sk1 = self.sketches.get((id1, t1))
-
-        sketches_t2 = self.sketches.get(t2)
-        if isinstance(sketches_t2, dict):
-            sk2 = sketches_t2.get((id2, t2, w))
-            if sk2 is None:
-                sk2 = sketches_t2.get((id2, t2))
-        else:
-            sk2 = self.sketches.get((id2, t2, w))
-            if sk2 is None:
-                sk2 = self.sketches.get((id2, t2))
-        if sk1 is not None and sk2 is not None:
-            try:
-                sk1 = np.asarray(sk1, dtype=float)
-                sk2 = np.asarray(sk2, dtype=float)
-                dist_sk = float(np.linalg.norm(sk1 - sk2))
-                n1 = np.linalg.norm(sk1)
-                n2 = np.linalg.norm(sk2)
-                if n1 > 0 and n2 > 0:
-                    dist_norm_sk = float(np.linalg.norm(sk1 / n1 - sk2 / n2))
-                    est = float(np.dot(sk1, sk2) / (n1 * n2))  # cosine similarity
-                    est_diff = float(est - pair_corr)
-            except Exception:
-                pass
-
-        # Route to the right buckets based on true corr sign thresholds
-        pos = pair_corr >= self.corr_threshold if not np.isnan(pair_corr) else False
-        neg = pair_corr <= -self.corr_threshold if not np.isnan(pair_corr) else False
-
-        payload = {
-            "dists_pos": [], "dists_neg": [], "dists_nonc": [],
-            "dists_norm_pos": [], "dists_norm_neg": [], "dists_norm_nonc": [],
-            "dists_sk_pos": [], "dists_sk_neg": [], "dists_sk_nonc": [],
-            "dists_norm_sk_pos": [], "dists_norm_sk_neg": [], "dists_norm_sk_nonc": [],
-            "est_pos": [], "est_neg": [], "est_nonc": [],
-            "est_diffs": [],
-            "counts": {"seen": 1, "skipped": 0, "constants": 0},
-        }
-
-        # Raw / z-norm distances
-        if pos:
-            payload["dists_pos"].append(pair_dist)
-            payload["dists_norm_pos"].append(norm_pair_dist)
-        elif neg:
-            payload["dists_neg"].append(pair_dist)
-            payload["dists_norm_neg"].append(norm_pair_dist)
-        else:
-            payload["dists_nonc"].append(pair_dist)
-            payload["dists_norm_nonc"].append(norm_pair_dist)
-
-        # Sketch-based, if computed
-        if dist_sk is not None:
-            if pos:   payload["dists_sk_pos"].append(dist_sk)
-            elif neg: payload["dists_sk_neg"].append(dist_sk)
-            else:     payload["dists_sk_nonc"].append(dist_sk)
-
-        if dist_norm_sk is not None:
-            if pos:   payload["dists_norm_sk_pos"].append(dist_norm_sk)
-            elif neg: payload["dists_norm_sk_neg"].append(dist_norm_sk)
-            else:     payload["dists_norm_sk_nonc"].append(dist_norm_sk)
-
-        if est is not None:
-            if pos:   payload["est_pos"].append(est)
-            elif neg: payload["est_neg"].append(est)
-            else:     payload["est_nonc"].append(est)
-        if est_diff is not None:
-            payload["est_diffs"].append(est_diff)
-
-        return payload
-    
-    def _merge_train_distances(self, shard_payloads):
-        # Ensure accumulators exist (these match names used elsewhere in your file)
-        if not hasattr(self, "corr_dist_pos"): self.corr_dist_pos = []
-        if not hasattr(self, "corr_dist_neg"): self.corr_dist_neg = []
-        if not hasattr(self, "noncorr_dist"): self.noncorr_dist = []
-
-        if not hasattr(self, "corr_norm_dist_pos"): self.corr_norm_dist_pos = []
-        if not hasattr(self, "corr_norm_dist_neg"): self.corr_norm_dist_neg = []
-        if not hasattr(self, "noncorr_norm_dist"): self.noncorr_norm_dist = []
-
-        if not hasattr(self, "corr_dist_sk_pos"): self.corr_dist_sk_pos = []
-        if not hasattr(self, "corr_dist_sk_neg"): self.corr_dist_sk_neg = []
-        if not hasattr(self, "noncorr_dist_sk"): self.noncorr_dist_sk = []
-
-        if not hasattr(self, "corr_dist_norm_sk_pos"): self.corr_dist_norm_sk_pos = []
-        if not hasattr(self, "corr_dist_norm_sk_neg"): self.corr_dist_norm_sk_neg = []
-        if not hasattr(self, "noncorr_dist_norm_sk"): self.noncorr_dist_norm_sk = []
-
-        if not hasattr(self, "corr_est_pos"): self.corr_est_pos = []
-        if not hasattr(self, "corr_est_neg"): self.corr_est_neg = []
-        if not hasattr(self, "noncorr_est"): self.noncorr_est = []
-        if not hasattr(self, "corr_est_diffs"): self.corr_est_diffs = []
-
-        if not hasattr(self, "constant_candidates"): self.constant_candidates = 0
-        if not hasattr(self, "total_candidates"): self.total_candidates = 0
-
-        for p in shard_payloads:
-            if not p: 
-                continue
-
-            # Raw
-            self.corr_dist_pos.extend(p.get("dists_pos", []))
-            self.corr_dist_neg.extend(p.get("dists_neg", []))
-            self.noncorr_dist.extend(p.get("dists_nonc", []))
-
-            # Z-norm
-            self.corr_norm_dist_pos.extend(p.get("dists_norm_pos", []))
-            self.corr_norm_dist_neg.extend(p.get("dists_norm_neg", []))
-            self.noncorr_norm_dist.extend(p.get("dists_norm_nonc", []))
-
-            # Sketch
-            self.corr_dist_sk_pos.extend(p.get("dists_sk_pos", []))
-            self.corr_dist_sk_neg.extend(p.get("dists_sk_neg", []))
-            self.noncorr_dist_sk.extend(p.get("dists_sk_nonc", []))
-
-            # Sketch (normed)
-            self.corr_dist_norm_sk_pos.extend(p.get("dists_norm_sk_pos", []))
-            self.corr_dist_norm_sk_neg.extend(p.get("dists_norm_sk_neg", []))
-            self.noncorr_dist_norm_sk.extend(p.get("dists_norm_sk_nonc", []))
-
-            # Estimates
-            self.corr_est_pos.extend(p.get("est_pos", []))
-            self.corr_est_neg.extend(p.get("est_neg", []))
-            self.noncorr_est.extend(p.get("est_nonc", []))
-            self.corr_est_diffs.extend(p.get("est_diffs", []))
-
-            counts = p.get("counts", {})
-            self.constant_candidates += counts.get("constants", 0)
-            # Count every evaluated item as total_seen; your outer loop also updates tested/total elsewhere
-            self.total_candidates += counts.get("seen", 0)
-
-    def _train_distances(self, worker_mode=None):
-        """
-        Parallel training pass over self.candidates.items().
-        Defaults to threads (NumPy releases the GIL; also avoids pickling issues).
-        """
-        if not getattr(self, "candidates", None):
-            return
-
-        items = list(self.candidates.items())
-        worker_mode = worker_mode if worker_mode else self.exec
-
-        shard_payloads = self._parallel_map(
-            self._train_distance_item,
-            items,
-            mode=worker_mode,
-            max_workers=self.n_nodes,
-            preserve_order=False,
-        )
-        self._merge_train_distances(shard_payloads)
 
     def _validate_corr(self, pair, corr_val=True):
         if not corr_val:
@@ -3511,51 +3285,6 @@ class CorrTrack:
                     return candidate
 
             offset += 2
-    
-    def run_train_distances(self,new_data_step,ids,verbose,testing):
-        """
-        Train distribution collector:
-        1) Update buffers
-        2) Parallel sketches (like `run`)
-        3) Parallel BF enumeration for candidate pairs (like `run_bf`)
-        4) Collect sketch-distance training stats
-        Notes:
-        - No validation/monitoring here by design.
-        - Defaults to thread mode for portability.
-        """
-        self.verbose = verbose
-        self.testing = testing
-
-        sketch_mode = "thread" if self.parallel_sketch else "sequential"
-        cand_mode = "thread" if self.parallel_candidates else "sequential"
-        val_mode = "thread" if self.parallel_validation else "sequential"
-
-        self._update_curr_data(new_data_step,ids)
-
-        start_time = time.time()
-        sketches = self._get_sketches(self._curr_window_step(), verbose, testing, worker_mode=sketch_mode)
-        end_time = time.time()
-        self.sketch_time += end_time - start_time
-        #self._update_hist_sketches()
-        self._update_curr_sketches(sketches)
-
-        # candidates
-        self.candidates = {}
-        start_time = time.time()
-        if not self.brute_force_nodes:
-            self.brute_force_nodes.append(Candidates_BF(self.window_size,self.window_step,self.n_lags,self.corr_threshold))
-        if self.parallel_candidates:
-            self.candidates = self._run_bf_parallel(self._curr_window_step(), self.ids, worker_mode=cand_mode)
-        else:
-            # original single-thread path
-            self.candidates = self.brute_force_nodes[0].run(self._curr_window_step(), self.ids, verbose, testing, ref_indices=None)
-        end_time = time.time()
-        self.candidate_time += end_time - start_time
-
-        start_time = time.time()
-        self._train_distances(worker_mode=val_mode)
-        end_time = time.time()
-        self.train_dist_time += end_time - start_time
     
     def _run_bf_parallel(self, curr_window_step, ids, verbose=False, testing=False, worker_mode=None):
         """
@@ -5400,7 +5129,6 @@ class CorrTrack_optimize:
         self.basic_window = self.corrtrack_bf.basic_window
 
         self.alg = alg
-        self.path = None
 
     def _run_is_parallel(self) -> bool:
         return self.exec != "sequential"
@@ -5440,170 +5168,6 @@ class CorrTrack_optimize:
         for res in results:
             yield res
     
-    def _plot_corrtrack_histograms(self, corrtrack, save=True):
-        bins = 50
-        r = corrtrack.n_vectors
-
-        # Create subplots
-        fig, axes = plt.subplots(3, 6, figsize=(60, 10), sharex=False)
-        axes = axes.flatten()
-
-        # Determine common x-axis limits for the first 3 histograms
-        dist_all = corrtrack.corr_dist_pos + corrtrack.corr_dist_neg + corrtrack.noncorr_dist
-        x_min = min(dist_all)
-        x_max = max(dist_all)
-
-        # Plot positive correlation distances
-        axes[0].hist(corrtrack.corr_dist_pos, bins=bins, color='green', alpha=0.7)
-        axes[0].set_xlim(x_min, x_max)
-        axes[0].set_title('Distances for Positive Correlation (> 0.7)')
-        axes[0].set_ylabel('Frequency')
-        axes[0].grid(True)
-
-        # Plot negative correlation distances
-        axes[6].hist(corrtrack.corr_dist_neg, bins=bins, color='red', alpha=0.7)
-        axes[6].set_xlim(x_min, x_max)
-        axes[6].set_title('Distances for Negative Correlation (< -0.7)')
-        axes[6].set_ylabel('Frequency')
-        axes[6].grid(True)
-
-        # Plot non-correlated distances
-        axes[12].hist(corrtrack.noncorr_dist, bins=bins, color='blue', alpha=0.7)
-        axes[12].set_xlim(x_min, x_max)
-        axes[12].set_title('Distances for Non-Correlated (|ρ| < 0.7)')
-        axes[12].set_ylabel('Frequency')
-        axes[12].grid(True)
-
-        # Determine common x-axis limits for the first 3 histograms
-        dist_all = corrtrack.corr_norm_dist_pos + corrtrack.corr_norm_dist_neg + corrtrack.noncorr_norm_dist
-        x_min = min(dist_all)
-        x_max = max(dist_all)
-
-        # Plot positive correlation distances
-        axes[1].hist(corrtrack.corr_norm_dist_pos, bins=bins, color='green', alpha=0.7)
-        axes[1].set_xlim(x_min, x_max)
-        axes[1].set_title('Normalized distances for Positive Correlation (> 0.7)')
-        axes[1].set_ylabel('Frequency')
-        axes[1].grid(True)
-
-        # Plot negative correlation distances
-        axes[7].hist(corrtrack.corr_norm_dist_neg, bins=bins, color='red', alpha=0.7)
-        axes[7].set_xlim(x_min, x_max)
-        axes[7].set_title('Normalized distances for Negative Correlation (< -0.7)')
-        axes[7].set_ylabel('Frequency')
-        axes[7].grid(True)
-
-        # Plot non-correlated distances
-        axes[13].hist(corrtrack.noncorr_norm_dist, bins=bins, color='blue', alpha=0.7)
-        axes[13].set_xlim(x_min, x_max)
-        axes[13].set_title('Normalized distances for Non-Correlated (|ρ| < 0.7)')
-        axes[13].set_ylabel('Frequency')
-        axes[13].grid(True)
-
-        # Determine common x-axis limits for the first 3 histograms
-        dist_all = corrtrack.corr_dist_sk_pos + corrtrack.corr_dist_sk_neg + corrtrack.noncorr_dist_sk
-        x_min = min(dist_all)
-        x_max = max(dist_all)
-
-        # Plot positive correlation distances
-        axes[2].hist(corrtrack.corr_dist_sk_pos, bins=bins, color='green', alpha=0.7)
-        axes[2].set_xlim(x_min, x_max)
-        axes[2].set_title('Sketch Distances for Positive Correlation (> 0.7)')
-        axes[2].set_ylabel('Frequency')
-        axes[2].grid(True)
-
-        # Plot negative correlation distances
-        axes[8].hist(corrtrack.corr_dist_sk_neg, bins=bins, color='red', alpha=0.7)
-        axes[8].set_xlim(x_min, x_max)
-        axes[8].set_title('Sketch Distances for Negative Correlation (< -0.7)')
-        axes[8].set_ylabel('Frequency')
-        axes[8].grid(True)
-
-        # Plot non-correlated distances
-        axes[14].hist(corrtrack.noncorr_dist_sk, bins=bins, color='blue', alpha=0.7)
-        axes[14].set_xlim(x_min, x_max)
-        axes[14].set_title('Sketch Distances for Non-Correlated (|ρ| < 0.7)')
-        axes[14].set_ylabel('Frequency')
-        axes[14].grid(True)
-
-        # Determine common x-axis limits for the first 3 histograms
-        dist_all = corrtrack.corr_dist_norm_sk_pos + corrtrack.corr_dist_norm_sk_neg + corrtrack.noncorr_dist_norm_sk
-        x_min = min(dist_all)
-        x_max = max(dist_all)
-        
-        # Plot positive correlation distances
-        axes[3].hist(corrtrack.corr_dist_norm_sk_pos, bins=bins, color='green', alpha=0.7)
-        axes[3].set_xlim(x_min, x_max)
-        axes[3].set_title('Normalized Sketch Distances for Positive Correlation (> 0.7)')
-        axes[3].set_ylabel('Frequency')
-        axes[3].grid(True)
-
-        # Plot negative correlation distances
-        axes[9].hist(corrtrack.corr_dist_norm_sk_neg, bins=bins, color='red', alpha=0.7)
-        axes[9].set_xlim(x_min, x_max)
-        axes[9].set_title('Normalized Sketch Distances for Negative Correlation (< -0.7)')
-        axes[9].set_ylabel('Frequency')
-        axes[9].grid(True)
-
-        # Plot non-correlated distances
-        axes[15].hist(corrtrack.noncorr_dist_norm_sk, bins=bins, color='blue', alpha=0.7)
-        axes[15].set_xlim(x_min, x_max)
-        axes[15].set_title('Normalized Sketch Distances for Non-Correlated (|ρ| < 0.7)')
-        axes[15].set_ylabel('Frequency')
-        axes[15].grid(True)
-
-        # Determine common x-axis limits for the first 3 histograms
-        dist_all = corrtrack.corr_est_pos + corrtrack.corr_est_neg + corrtrack.noncorr_est
-        x_min = min(dist_all)
-        x_max = max(dist_all)
-
-        # Plot positive correlation distances
-        axes[4].hist(corrtrack.corr_est_pos, bins=bins, color='green', alpha=0.7)
-        axes[4].set_xlim(x_min, x_max)
-        axes[4].set_title('Cosine Similarity for Positive Correlation (> 0.7)')
-        axes[4].set_ylabel('Frequency')
-        axes[4].grid(True)
-
-        # Plot negative correlation distances
-        axes[10].hist(corrtrack.corr_est_neg, bins=bins, color='red', alpha=0.7)
-        axes[10].set_xlim(x_min, x_max)
-        axes[10].set_title('Cosine Similarity for Negative Correlation (< -0.7)')
-        axes[10].set_ylabel('Frequency')
-        axes[10].grid(True)
-
-        # Plot non-correlated distances
-        axes[16].hist(corrtrack.noncorr_est, bins=bins, color='blue', alpha=0.7)
-        axes[16].set_xlim(x_min, x_max)
-        axes[16].set_title('Cosine Similarity for Non-Correlated (|ρ| < 0.7)')
-        axes[16].set_ylabel('Frequency')
-        axes[16].grid(True)
-
-
-        # Plot correlation estimate differences
-        axes[5].hist(corrtrack.corr_est_diffs, bins=bins, color='purple', alpha=0.7)
-        axes[5].set_title('Correlation Estimate Differences (estimated − true)')
-        axes[5].set_xlabel('Value')
-        axes[5].set_ylabel('Frequency')
-        axes[5].grid(True)
-
-        # Super title and layout
-        fig.suptitle(f'Distances and Correlation Estimation (n_vectors = {r})', fontsize=14)
-        plt.tight_layout(rect=[0, 0, 1, 0.96])
-
-        n_ts = self.train_data.shape[0]-1
-        n_w = (np.floor((self.train_data.shape[1]-self.window_size)/self.window_step) + 1)
-        # Save or show
-        if save:
-            hist_dir = os.path.join(self.path, "hist")
-            os.makedirs(hist_dir, exist_ok=True)
-            save_path = os.path.join(hist_dir, f"corrtrack_hist_{n_ts}_{n_w}_r{r}.png")
-            plt.savefig(save_path)
-            print(f"[INFO] Histogram figure saved to: {save_path}")
-        else:
-            plt.show()
-
-        plt.close(fig)
-
     def _get_bf_ground_truth(self):
         """
         Compute brute-force ground truth with the same inner-execution policy
@@ -5628,69 +5192,6 @@ class CorrTrack_optimize:
         self.runtime_bf = runtime
         self.pair_min_dist_bf = self.corrtrack_bf.pair_min_dist
     
-    def _run_corrtrack_distances(self,args):
-        param_combo = args
-
-        # Parameters
-        nodes = param_combo["nodes"]
-
-        # Parameters windows
-        window_size = self.window_size
-        param_combo["window_size"] = window_size
-
-        window_step = self.window_step
-        param_combo["window_step"] = window_step
-
-        basic_window = self.basic_window
-        param_combo["basic_window"] = basic_window
-        
-        # Parameters sketches
-        seed = param_combo["seed"]
-        seed_toggle = param_combo["seed_toggle"]
-        n_vectors = param_combo["n_vectors"]
-        preprocess = param_combo["preprocess"]
-        
-        # Parameters lags
-        n_lags = self.n_lags
-        param_combo["n_lags"] = n_lags
-        
-        # Parameters thresholds
-        corr_threshold = self.corr_threshold
-        param_combo["corr_threshold"] = corr_threshold
-        
-        feature_kwargs = _extract_feature_overrides(param_combo)
-
-        try:
-            length_data = self.train_data.shape[1]
-            corrtrack = CorrTrack(window_size=window_size,basic_window=basic_window,window_step=window_step,n_vectors=n_vectors,n_lags=n_lags,
-                                grid_dimension=1,cell_size=1,seed=seed,seed_toggle=seed_toggle,
-                                freq_threshold=0,corr_threshold=corr_threshold,neg_corr=self.neg_corr,preprocess=preprocess,exec=self.exec,max_workers=self.max_workers,
-                                parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation,
-                                **feature_kwargs)
-
-            for start in range(0, length_data - self.window_step + 1, self.window_step):
-                chunk = self.train_data[:, start:(start + self.window_step)]
-                corrtrack.run_train_distances(chunk, self.ids, verbose=self.verbose, testing=self.testing)
-            
-            #print("Distances pos_corr",corrtrack.n_vectors,min(corrtrack.corr_dist_pos),max(corrtrack.corr_dist_pos),np.mean(corrtrack.corr_dist_pos),np.std(corrtrack.corr_dist_pos))
-            #print("Distances neg_corr",corrtrack.n_vectors,min(corrtrack.corr_dist_neg),max(corrtrack.corr_dist_neg),np.mean(corrtrack.corr_dist_neg),np.std(corrtrack.corr_dist_neg))
-            #print("Distances noncorr",corrtrack.n_vectors,min(corrtrack.noncorr_dist),max(corrtrack.noncorr_dist),np.mean(corrtrack.noncorr_dist),np.std(corrtrack.noncorr_dist))
-            #print("Corr_est ",corrtrack.n_vectors,min(corrtrack.corr_est_pos),max(corrtrack.corr_est_pos),min(corrtrack.corr_est_neg),max(corrtrack.corr_est_neg),min(corrtrack.noncorr_est),max(corrtrack.noncorr_est))
-            #print("Corr diffs ",min(corrtrack.corr_est_diffs),max(corrtrack.corr_est_diffs),np.mean(corrtrack.corr_est_diffs),np.std(corrtrack.corr_est_diffs))
-            #plt.hist(corrtrack.corr_est_diffs)
-            #plt.show()
-            self._plot_corrtrack_histograms(corrtrack)
-
-            return {n_vectors:{
-                    "corr_dist_sk_pos":np.quantile(corrtrack.corr_dist_sk_pos, 0.99),
-                    "corr_dist_norm_sk_pos":np.quantile(corrtrack.corr_dist_norm_sk_pos, 0.99),
-                    "corr_est_pos":np.quantile(corrtrack.corr_est_pos, 0.01)}}
-
-        except Exception as e:
-            print(f"Skipped params={param_combo} due to error: {e}")
-            traceback.print_exc()
-            return None
-
     def _init_optim_record(self, dataset_id, param_combo):
         record = {key: None for key in OPTIM_RESULT_COLUMNS}
 
@@ -5839,7 +5340,7 @@ class CorrTrack_optimize:
                 chunk = self.train_data[:, start : (start + self.window_step)]
                 corrtrack.run(chunk, self.ids, verbose=self.verbose, testing=self.testing, corr_val=self.corr_val)
             end_time = time.time()
-            runtime = end_time - start_time - corrtrack.train_dist_time
+            runtime = end_time - start_time
             runtime = max(runtime, 0.0)
             record["runtime"] = runtime
             record["sk_time"] = corrtrack.sketch_time
@@ -5904,31 +5405,7 @@ class CorrTrack_optimize:
 
         return record
 
-    def _train_distances(self, param_grid_all):
-        # Filter grid (unchanged)
-        param_grid = {k: v for k, v in param_grid_all.items()
-                      if k not in ["grid_dimension", "cell_size", "freq_threshold"]}
-
-        names = list(param_grid.keys())
-        tasks = [dict(zip(names, vals)) for vals in itertools.product(*param_grid.values())]
-
-        thresholds = []
-        i = 0
-        for result in self._outer_iter(tasks, self._run_corrtrack_distances, unordered=True):
-            if result:
-                n_vectors = list(result.keys())[0]
-                print("Run train distances ", i, "/", len(tasks))
-                print("[n_vectors = ", n_vectors, "] - Quantiles 99%:\n",
-                      "Dist sketch:", result[n_vectors]["corr_dist_sk_pos"],
-                      "Dist norm sketch:", result[n_vectors]["corr_dist_norm_sk_pos"],
-                      "Cosine similarity:", result[n_vectors]["corr_est_pos"])
-                thresholds.append(result)
-                i += 1
-        return thresholds
-
     def _run_options(self, param_grid, output_csv, dataset_id):
-        self.path = os.path.dirname(os.path.abspath(output_csv))
-
         names = list(param_grid.keys())
         tasks = [(dict(zip(names, vals)), dataset_id) for vals in itertools.product(*param_grid.values())]
 
@@ -5948,10 +5425,6 @@ class CorrTrack_optimize:
                 completed += 1
                 status = record.get("status", "unknown")
                 print(f"[Optim] Completed {completed}/{total_tasks} ({status})")
-    
-    def get_train_distances(self, param_grid, output_csv):
-        self.path = os.path.dirname(os.path.abspath(output_csv))
-        return self._train_distances(param_grid)
     
     def get_optim_params(self, param_grid, output_csv, dataset_id, run=True, target_recall=0.95):
         output_csv = output_csv + "_" + self.alg + ".csv"
@@ -6065,91 +5538,6 @@ class CorrTrack_compare:
         for res in results:
             yield res
     
-    def _plot_top_durations(self, corr_csv, data, output_folder):
-        # Create output folder if it doesn't exist
-        os.makedirs(output_folder, exist_ok=True)
-
-        # Load the correlation metadata
-        delimiter = _detect_csv_delimiter(corr_csv, default=",")
-        df_corr = pd.read_csv(corr_csv, sep=delimiter)
-        df_corr['start_time_id1'] = pd.to_datetime(df_corr['start_time_id1'])
-        df_corr['start_time_id2'] = pd.to_datetime(df_corr['start_time_id2'])
-
-        # Sort and get top 5 durations
-        top5 = df_corr.sort_values(by='duration', ascending=False).head(5)
-
-        # Load the time series dataset
-        times = np.array(data[0, :], dtype='datetime64[ns]')
-        data = data[1:,:].astype(float)
-
-        # Go through top 5
-        for i, row in top5.iterrows():
-            id1, id2 = row['id1'], row['id2']
-            duration = row['duration']
-            lag = row['lag']            
-            start_time_id1 = np.datetime64(row['start_time_id1'])
-            start_time_id2 = np.datetime64(row['start_time_id2'])
-            start_time = min(start_time_id1,start_time_id2)
-            max_start_time = max(start_time_id1,start_time_id2)
-
-            # Find the index of the exact start_time and end_time
-            start_idx = np.where(times == start_time)[0][0]
-            max_start_idx = np.where(times == max_start_time)[0][0]
-            start_idx_id1 = np.where(times == start_time_id1)[0][0]
-            start_idx_id2 = np.where(times == start_time_id2)[0][0]
-
-            end_time_id1 = times[min(len(times), start_idx_id1 + duration)]
-            end_time_id2 = times[min(len(times), start_idx_id2 + duration)]
-
-            # Get column indices from 'ids'
-            idx1 = np.where(self.ids==id1)[0][0]
-            idx2 = np.where(self.ids==id2)[0][0]
-
-            # Compute range using index
-            # Compute centralized ranges for each series
-            half_window = self.window_size
-            center1 = start_idx_id1 + duration // 2
-            center2 = start_idx_id2 + duration // 2
-
-            start_range_id1 = max(0, center1 - half_window)
-            end_range_id1 = min(len(times), center1 + half_window)
-            start_range_id2 = max(0, center2 - half_window)
-            end_range_id2 = min(len(times), center2 + half_window)
-
-            # Time windows for independent x-axes
-            time_window_id1 = times[start_range_id1:end_range_id1]
-            time_window_id2 = times[start_range_id2:end_range_id2]
-
-            series1 = data[idx1, start_range_id1:end_range_id1]
-            series2 = data[idx2, start_range_id2:end_range_id2]
-
-            # Plotting with independent x-axes
-            fig, axs = plt.subplots(2, 1, figsize=(12, 6), sharex=False)
-
-            # Top plot for id1
-            axs[0].plot(time_window_id1, series1, label=id1, color='blue')
-            axs[0].axvline(x=start_time_id1, color='red', linestyle='--', label='Start Time')
-            axs[0].axvline(x=end_time_id1 + np.timedelta64(duration, 's'), color='orange', linestyle='--', label='End Time')
-            axs[0].set_ylabel(id1)
-            axs[0].legend(loc='upper left')
-            axs[0].grid(True)
-
-            # Bottom plot for id2
-            axs[1].plot(time_window_id2, series2, label=id2, color='green')
-            axs[1].axvline(x=start_time_id2, color='red', linestyle='--', label='Start Time')
-            axs[1].axvline(x=end_time_id2 + np.timedelta64(duration, 's'), color='orange', linestyle='--', label='End Time')
-            axs[1].set_ylabel(id2)
-            axs[1].legend(loc='upper left')
-            axs[1].grid(True)
-
-            plt.xlabel("Time (independent axes)")
-            plt.tight_layout()
-            filename = f"{id1.replace('/', '_')}_{id2.replace('/', '_')}_{lag}.png"
-            output_csv = os.path.join(output_folder, "plots", filename)
-            os.makedirs(os.path.dirname(output_csv), exist_ok=True)
-            plt.savefig(output_csv)
-            plt.close()
-
     def _mode_run(self,mode,alg,path,prefix,nodes,seed,seed_toggle,n_vectors,grid_dimension,cell_size,grid_max,freq_threshold,preprocess,feature_overrides=None):
         length_data = self.test_data.shape[1]
         data_stream = self.test_data
@@ -6170,7 +5558,6 @@ class CorrTrack_compare:
                 corrtrack.run(chunk,self.ids,verbose=self.verbose,testing=self.testing,corr_val=self.corr_val)
             end_time = time.time()
             runtime = end_time - start_time
-            runtime -= corrtrack.train_dist_time
             runtime_parts = (corrtrack.sketch_time,corrtrack.candidate_time,corrtrack.validation_time,corrtrack.monitor_time)
             self.tested_w = corrtrack.tested_candidates
             self.correlated_w = corrtrack.validated_candidates
@@ -6907,10 +6294,6 @@ class CorrTrack_compare:
             _format_float(maxlag_diff_std),
         ]
 
-    def plot(self,status_csv):
-        path = os.path.dirname(os.path.abspath(status_csv))        
-        self._plot_top_durations(status_csv, self.test_data, path)
-        
     def compare(
         self,
         hyper_param_csv,

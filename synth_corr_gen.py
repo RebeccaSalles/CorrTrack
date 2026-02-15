@@ -231,6 +231,48 @@ def _choose_sign(corr_sign: str, rng: np.random.Generator) -> int:
     return +1 if rng.random() < 0.5 else -1
 
 
+def _target_sign_for_pair(
+    corr_sign: str,
+    pair_idx: int,
+    pair_goal: int,
+    rng: np.random.Generator,
+) -> int:
+    """
+    Pick desired sign at placement time.
+    For corr_sign="both", force one positive and one negative pair when possible.
+    """
+    c = corr_sign.lower()
+    if c == "pos":
+        return +1
+    if c == "neg":
+        return -1
+    if pair_goal >= 2 and pair_idx == 0:
+        return +1
+    if pair_goal >= 2 and pair_idx == 1:
+        return -1
+    return +1 if rng.random() < 0.5 else -1
+
+
+def _apply_sign_to_template(
+    xw: np.ndarray,
+    yw: np.ndarray,
+    r_xy: float,
+    desired_sign: int,
+) -> Tuple[np.ndarray, float]:
+    """
+    Mirror y around its mean when sign must be flipped.
+    This preserves y mean/std and approximately flips corr(x,y) sign.
+    """
+    current_sign = +1 if r_xy >= 0.0 else -1
+    if current_sign == desired_sign:
+        return yw, r_xy
+
+    mean_y = float(np.mean(yw, dtype=np.float64))
+    yw_flipped = (2.0 * mean_y - yw.astype(np.float64, copy=False)).astype(np.float32)
+    r_new = _pearson_raw(xw, yw_flipped)
+    return yw_flipped, r_new
+
+
 def _pearson_raw(x: np.ndarray, y: np.ndarray) -> float:
     """Compute Pearson correlation on raw data (no prior normalization)."""
     r = np.corrcoef(x, y)[0, 1]
@@ -403,11 +445,13 @@ def make_corr_dataset(
 
         tpl = templates[int(rng.integers(0, len(templates)))]
         xw, yw, r_tpl = tpl
+        desired_sign = _target_sign_for_pair(corr_sign, pairs_used, pair_goal, rng)
+        yw_use, r_use = _apply_sign_to_template(xw, yw, r_tpl, desired_sign)
 
         X[i1, start1 : start1 + p] = xw
-        X[i2, start2 : start2 + p] = yw
+        X[i2, start2 : start2 + p] = yw_use
 
-        correlated_rows.append((f"s{i1+1}", f"s{i2+1}", start1 + 1, start2 + 1, r_tpl))
+        correlated_rows.append((f"s{i1+1}", f"s{i2+1}", start1 + 1, start2 + 1, r_use))
         pairs_used += 1
 
     samples_correlated = pairs_used * 2 * p

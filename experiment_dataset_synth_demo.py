@@ -11,10 +11,10 @@ OBS_MODE = "count"  # interpret N_OBS as absolute number of rows
 SYNTH_PARAMS = {
     "m": 8,
     "n": 2000,
-    "z": 0.1,
+    "z": 0.001,
     "w": 256,
     "template_len": 256,
-    "num_templates": 4,
+    "num_templates": 24,
     "threshold": 0.7,
     "corr_sign": "both",
     

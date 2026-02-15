@@ -49,7 +49,7 @@ DYNAMIC parameters:
 	
 FIXED parameters:
 	window_size = 7 * 24
-	n_lags = window_size*1000
+	n_lags = window_size*100
 	window_step = basic_window
 	corr_threshold = 0.8
 	corr_val = True
@@ -64,7 +64,7 @@ DYNAMIC parameters:
 FIXED parameters:
 	n_series = 100
 	window_size = 7 * 24
-	n_lags = window_size*1000
+	n_lags = window_size*100
 	corr_threshold = 0.8
 	corr_val = True
 	
@@ -91,7 +91,7 @@ DYNAMIC parameters:
 	
 FIXED parameters:
 	n_series = 100
-	n_lags = window_size*1000
+	n_lags = window_size*100
 	window_step = basic_window
 	corr_threshold = 0.8
 	corr_val = True
@@ -105,7 +105,7 @@ DYNAMIC parameters:
 	
 FIXED parameters:
 	n_series = 100
-	n_lags = window_size*1000
+	n_lags = window_size*100
 	window_step = basic_window
 	window_size = 7 * 24
 	corr_val = True
@@ -113,25 +113,14 @@ FIXED parameters:
 	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
 	
 	
-====== XP 6 - vary base_proc + corr_val ======
+====== XP 6 - corr_val + neg_corr ======
 DYNAMIC parameters:
-	SYNTH_PARAMS = {
-		"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0},
-		"base_proc": {"type": "wn", "sigma": 1.3},
-		"base_proc": {"type": "lagged_seasonal_ar", "phi_short": 0.2, "phi_long": 0.6, "season_lag": 36, "sigma": 1.3},
-		"base_proc": {"type": "ou", "theta": 0.4, "mu": 0.0, "dt": 1.0, "sigma": 1.0},
-		"base_proc": {"type": "seasonal_arima", "phi": 0.7, "theta": -0.4, "season_period": 96, "season_amplitude": 1.2, "sigma": 0.9},
-		
-		"base_proc": {"type": "rw", "sigma": 1.0}, #bad
-		"base_proc": {"type": "rw_seasonal_drift", "drift": 0.04, "season_amplitude": 0.6, "season_period": 288, "sigma": 0.8}, #bad
-		"base_proc": {"type": "trend_poly", "phi": 0.5, "sigma": 0.7}, #*special
-		"base_proc": {"type": "integrated_seasonal", "season_lag": 48, "phi": 0.4, "psi": 0.5, "sigma": 1.0}, #bad
-	}
 	corr_val = [True,False]
+	NEG_CORR = [True,False]
 	
 FIXED parameters:
 	n_series = 100
-	n_lags = window_size*1000
+	n_lags = window_size*100
 	window_step = basic_window
 	window_size = 7 * 24
 	corr_threshold = 0.8

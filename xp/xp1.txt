@@ -4,12 +4,12 @@ Data: Synthetic
 	SYNTH_PARAMS = {
 		m = n_series
 		n = 1.024 M
-		z = 0.5
+		z = {Stationary base_proc: 0.5; Nonstationary base_proc: 0.1}
 		w = window_size
 		template_len = window_size
-		num_templates = 2
+		num_templates = {Stationary base_proc: 4; Nonstationary base_proc: 24}
 		threshold = corr_threshold
-		corr_sign = "pos"
+		corr_sign = "both"
 	}
 	
 Methods: 
@@ -56,7 +56,7 @@ DYNAMIC parameters:
 	
 FIXED parameters:
 	window_size = 1024
-	n_lags = window_size*1000
+	n_lags = window_size*100
 	window_step = basic_window
 	corr_threshold = 0.8
 	corr_val = True
@@ -71,7 +71,7 @@ DYNAMIC parameters:
 FIXED parameters:
 	n_series = 100
 	window_size = 1024
-	n_lags = window_size*1000
+	n_lags = window_size*100
 	corr_threshold = 0.8
 	corr_val = True
 	
@@ -98,7 +98,7 @@ DYNAMIC parameters:
 	
 FIXED parameters:
 	n_series = 100
-	n_lags = window_size*1000
+	n_lags = window_size*100
 	window_step = basic_window
 	corr_threshold = 0.8
 	corr_val = True
@@ -112,7 +112,7 @@ DYNAMIC parameters:
 	
 FIXED parameters:
 	n_series = 100
-	n_lags = window_size*1000
+	n_lags = window_size*100
 	window_step = basic_window
 	window_size = 1024
 	corr_val = True
@@ -120,25 +120,28 @@ FIXED parameters:
 	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
 	
 	
-====== XP 6 - vary base_proc + corr_val ======
+====== XP 6 - vary base_proc + corr_val + neg_corr ======
 DYNAMIC parameters:
 	SYNTH_PARAMS = {
+		#stationary
 		"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0},
 		"base_proc": {"type": "wn", "sigma": 1.3},
 		"base_proc": {"type": "lagged_seasonal_ar", "phi_short": 0.2, "phi_long": 0.6, "season_lag": 36, "sigma": 1.3},
 		"base_proc": {"type": "ou", "theta": 0.4, "mu": 0.0, "dt": 1.0, "sigma": 1.0},
 		"base_proc": {"type": "seasonal_arima", "phi": 0.7, "theta": -0.4, "season_period": 96, "season_amplitude": 1.2, "sigma": 0.9},
 		
+		#nonstationary
 		"base_proc": {"type": "rw", "sigma": 1.0}, #bad
 		"base_proc": {"type": "rw_seasonal_drift", "drift": 0.04, "season_amplitude": 0.6, "season_period": 288, "sigma": 0.8}, #bad
 		"base_proc": {"type": "trend_poly", "phi": 0.5, "sigma": 0.7}, #*special
 		"base_proc": {"type": "integrated_seasonal", "season_lag": 48, "phi": 0.4, "psi": 0.5, "sigma": 1.0}, #bad
 	}
 	corr_val = [True,False]
+	NEG_CORR = [True,False]
 	
 FIXED parameters:
 	n_series = 100
-	n_lags = window_size*1000
+	n_lags = window_size*100
 	window_step = basic_window
 	window_size = 1024
 	corr_threshold = 0.8
