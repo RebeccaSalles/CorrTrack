@@ -40,12 +40,12 @@ HYPERPARAMETER search:
 		"grid_dimension": [1] #fixed
 		"sketch_norm": ["mean_l2"] #fixed
 	}
-
+	
 		
 
 ====== XP 1 - scale n_series ======
 DYNAMIC parameters:
-	n_series = [5,25,50,75,100,128(climatic-fr)/143(climatic-br)/109({flights,delays,delay_perc}-br)]
+	n_series = [5,25,50,75,100, max=128(climatic-fr)/143(climatic-br)/109({flights,delays,delay_perc}-br)]
 	
 FIXED parameters:
 	window_size = 7 * 24
@@ -54,8 +54,16 @@ FIXED parameters:
 	corr_threshold = 0.8
 	corr_val = True
 	
-	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
+====== XP 1.2 - scale n_series for all var. at the same time ======
+DYNAMIC parameters:
+	n_series = [5,25,50,75,100, max=all_X_all_var)]
 	
+FIXED parameters:
+	window_size = 7 * 24
+	n_lags = window_size*100
+	window_step = basic_window
+	corr_threshold = 0.8
+	corr_val = True
 	
 ====== XP 2 - scale window_step ======
 DYNAMIC parameters:
@@ -66,10 +74,7 @@ FIXED parameters:
 	window_size = 7 * 24
 	n_lags = window_size*100
 	corr_threshold = 0.8
-	corr_val = True
-	
-	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
-	
+	corr_val = True	
 	
 ====== XP 3 - scale n_lags ======
 DYNAMIC parameters:
@@ -81,9 +86,6 @@ FIXED parameters:
 	window_step = basic_window
 	corr_threshold = 0.8
 	corr_val = True
-	
-	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
-
 
 ====== XP 4 - scale window_size ======
 DYNAMIC parameters:
@@ -95,9 +97,6 @@ FIXED parameters:
 	window_step = basic_window
 	corr_threshold = 0.8
 	corr_val = True
-	
-	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
-
 
 ====== XP 5 - scale corr_threshold ======
 DYNAMIC parameters:
@@ -108,10 +107,7 @@ FIXED parameters:
 	n_lags = window_size*100
 	window_step = basic_window
 	window_size = 7 * 24
-	corr_val = True
-	
-	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
-	
+	corr_val = True	
 	
 ====== XP 6 - corr_val + neg_corr ======
 DYNAMIC parameters:

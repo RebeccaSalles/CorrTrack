@@ -9,7 +9,6 @@ Data: Synthetic
 		template_len = window_size
 		num_templates = {Stationary base_proc: 4; Nonstationary base_proc: 24}
 		threshold = corr_threshold
-		corr_sign = "both"
 	}
 	
 Methods: 
@@ -61,7 +60,10 @@ FIXED parameters:
 	corr_threshold = 0.8
 	corr_val = True
 	
-	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
+	SYNTH_PARAMS = {
+		"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0},
+		corr_sign = "pos"
+	}
 	
 	
 ====== XP 2 - scale window_step ======
@@ -75,7 +77,10 @@ FIXED parameters:
 	corr_threshold = 0.8
 	corr_val = True
 	
-	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
+	SYNTH_PARAMS = {
+		"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0},
+		corr_sign = "pos"
+	}
 	
 	
 ====== XP 3 - scale n_lags ======
@@ -89,7 +94,10 @@ FIXED parameters:
 	corr_threshold = 0.8
 	corr_val = True
 	
-	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
+	SYNTH_PARAMS = {
+		"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0},
+		corr_sign = "pos"
+	}
 
 
 ====== XP 4 - scale window_size ======
@@ -103,7 +111,10 @@ FIXED parameters:
 	corr_threshold = 0.8
 	corr_val = True
 	
-	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
+	SYNTH_PARAMS = {
+		"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0},
+		corr_sign = "pos"
+	}
 
 
 ====== XP 5 - scale corr_threshold ======
@@ -117,7 +128,10 @@ FIXED parameters:
 	window_size = 1024
 	corr_val = True
 	
-	SYNTH_PARAMS = {"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0}}
+	SYNTH_PARAMS = {
+		"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0},
+		corr_sign = "pos"
+	}
 	
 	
 ====== XP 6 - vary base_proc + corr_val + neg_corr ======
@@ -135,6 +149,8 @@ DYNAMIC parameters:
 		"base_proc": {"type": "rw_seasonal_drift", "drift": 0.04, "season_amplitude": 0.6, "season_period": 288, "sigma": 0.8}, #bad
 		"base_proc": {"type": "trend_poly", "phi": 0.5, "sigma": 0.7}, #*special
 		"base_proc": {"type": "integrated_seasonal", "season_lag": 48, "phi": 0.4, "psi": 0.5, "sigma": 1.0}, #bad
+		
+		corr_sign = "both"
 	}
 	corr_val = [True,False]
 	NEG_CORR = [True,False]
