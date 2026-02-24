@@ -35,6 +35,7 @@ try:
     _cy_find_candidate_pairs = _cand_kernels.find_candidate_pairs
     _cy_find_candidate_pairs_unique = getattr(_cand_kernels, "find_candidate_pairs_unique", None)
     _cy_find_candidate_pairs_full = getattr(_cand_kernels, "find_candidate_pairs_full", None)
+    _cy_balanced_index_cls = getattr(_cand_kernels, "BalancedIndex", None)
     _cy_enumerate_candidate_rows = getattr(_cand_kernels, "enumerate_candidate_rows", None)
     _cy_fast_corr_and_dist = _cand_kernels.fast_corr_and_dist
     _cy_validate_corr_batch = _cand_kernels.validate_corr_batch
@@ -43,6 +44,7 @@ except Exception:  # pragma: no cover
     _cy_find_candidate_pairs = None
     _cy_find_candidate_pairs_unique = None
     _cy_find_candidate_pairs_full = None
+    _cy_balanced_index_cls = None
     _cy_enumerate_candidate_rows = None
     _cy_fast_corr_and_dist = None
     _cy_validate_corr_batch = None
@@ -60,9 +62,16 @@ except Exception:  # pragma: no cover
     _cy_compute_constant_flags = None
 
 try:
+    from partition_kernels import build_partitions as _cy_build_partitions
     from partition_kernels import build_partition_values as _cy_build_partition_values
 except Exception:  # pragma: no cover
+    _cy_build_partitions = None
     _cy_build_partition_values = None
+
+try:
+    from monitor_kernels import monitor_step as _cy_monitor_step
+except Exception:  # pragma: no cover
+    _cy_monitor_step = None
 
 
 RUN_RESULT_COLUMNS: Sequence[str] = (
@@ -92,6 +101,7 @@ RUN_RESULT_COLUMNS: Sequence[str] = (
     "seed_toggle",
     "preprocess",
     "sketch_norm",
+    "candidate_backend",
     "corr_threshold",
     "grid_max",
     "cell_stretch",
@@ -136,6 +146,7 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     "seed_toggle",
     "preprocess",
     "sketch_norm",
+    "candidate_backend",
     "corr_threshold",
     "grid_max",
     "cell_stretch",
@@ -209,6 +220,7 @@ COMPARISON_COLUMNS: Sequence[str] = (
     "seed_toggle",
     "preprocess",
     "sketch_norm",
+    "candidate_backend",
     "corr_threshold",
     "grid_max",
     "cell_stretch",
@@ -296,7 +308,13 @@ class CSVStreamWriter:
 
 
 def _row_from_mapping(columns: Sequence[str], data: dict) -> list:
-    return [data.get(column, "") for column in columns]
+    row = []
+    for column in columns:
+        value = data.get(column, "")
+        if column in {"artifact_time", "artifact_time_bf"} and value in (None, ""):
+            value = 0.0
+        row.append(value)
+    return row
 
 def _run_batch_static(func, batch):
     """Top-level batch helper to avoid bound-method pickling issues."""
@@ -346,6 +364,7 @@ def execute_corrtrack_pass(
     artifact_mode: str = "iterative",
     verbose: bool = False,
     testing: bool = False,
+    monitor: bool = True,
 ) -> tuple[dict, Optional[tuple], Optional[np.ndarray]]:
     """
     Execute a CorrTrack pass (brute-force or main) and collect runtime statistics.
@@ -385,6 +404,11 @@ def execute_corrtrack_pass(
     record["n_vectors"] = getattr(corrtrack, "n_vectors", None)
     record["grid_dimension"] = getattr(corrtrack, "grid_dimension", None)
     record["freq_threshold"] = getattr(corrtrack, "freq_threshold", None)
+    record["candidate_backend"] = getattr(
+        corrtrack,
+        "candidate_backend_effective",
+        getattr(corrtrack, "candidate_backend", None),
+    )
     record["exec_mode"] = getattr(corrtrack, "exec", None)
     record["parallel_sketch"] = getattr(corrtrack, "parallel_sketch", None)
     record["parallel_candidates"] = getattr(corrtrack, "parallel_candidates", None)
@@ -415,9 +439,9 @@ def execute_corrtrack_pass(
     for start in range(0, data.shape[1] - window_step + 1, window_step):
         chunk = data[:, start : (start + window_step)]
         if run_kind == "bf":
-            corrtrack.run_bf(chunk, ids, verbose=verbose, testing=testing, corr_val=True)
+            corrtrack.run_bf(chunk, ids, verbose=verbose, testing=testing, corr_val=True, monitor=monitor)
         else:
-            corrtrack.run(chunk, ids, verbose=verbose, testing=testing, corr_val=corr_val)
+            corrtrack.run(chunk, ids, verbose=verbose, testing=testing, corr_val=corr_val, monitor=monitor)
         if artifact_active and artifact_per_iteration:
             _t0 = time.time()
             corrtrack._append_artifacts()
@@ -500,6 +524,7 @@ def run_and_log_bruteforce(
     metadata.setdefault("optim", metadata.get("optim", "baseline"))
 
     artifact_mode = base_config.get("artifact_mode", "iterative")
+    monitor = _coerce_to_bool(base_config.get("monitor", True), default=True)
 
     corrtrack = CorrTrack(
         window_size=base_config["window_size"],
@@ -519,6 +544,7 @@ def run_and_log_bruteforce(
         parallel_sketch=base_config.get("parallel_sketch"),
         parallel_candidates=base_config.get("parallel_candidates"),
         parallel_validation=base_config.get("parallel_validation"),
+        track_min_dist=base_config.get("track_min_dist", True),
     )
 
     if verbose is None:
@@ -539,6 +565,7 @@ def run_and_log_bruteforce(
         artifact_mode=artifact_mode,
         verbose=bool(verbose),
         testing=bool(testing),
+        monitor=bool(monitor),
     )
     record["preprocess"] = False
     record["seed"] = None
@@ -562,6 +589,7 @@ def run_and_log_corrtrack(
     metadata: Optional[dict] = None,
     recall_by_window: bool = True,
     corr_val: bool = True,
+    monitor: bool = True,
     verbose: Optional[bool] = None,
     testing: Optional[bool] = None,
     artifact_prefix: Optional[str] = None,
@@ -628,6 +656,7 @@ def run_and_log_corrtrack(
         parallel_sketch=base_config.get("parallel_sketch"),
         parallel_candidates=base_config.get("parallel_candidates"),
         parallel_validation=base_config.get("parallel_validation"),
+        track_min_dist=base_config.get("track_min_dist", True),
         **feature_kwargs,
     )
 
@@ -649,12 +678,18 @@ def run_and_log_corrtrack(
         artifact_mode=artifact_mode,
         verbose=bool(verbose),
         testing=bool(testing),
+        monitor=bool(monitor),
     )
 
     record["preprocess"] = run_params.get("preprocess")
     record["seed"] = run_seed
     record["seed_toggle"] = seed_toggle
     record["sketch_norm"] = corrtrack.sketch_norm
+    record["candidate_backend"] = getattr(
+        corrtrack,
+        "candidate_backend_effective",
+        getattr(corrtrack, "candidate_backend", None),
+    )
     record["freq_threshold"] = _to_float(run_params.get("freq_threshold"))
     record["n_vectors"] = n_vectors
     record["grid_dimension"] = grid_dimension
@@ -677,6 +712,24 @@ def _coerce_to_bool(value, default=False):
 
 def _resolve_parallel_flag(value, default=False) -> bool:
     return _coerce_to_bool(value, default=bool(default))
+
+
+def _resolve_candidate_backend(value, default="auto"):
+    if value is None:
+        value = default
+    if isinstance(value, str):
+        key = value.strip().lower()
+    else:
+        key = str(value).strip().lower()
+    aliases = {
+        "tree": "bptree",
+        "bst": "bptree",
+        "balanced": "bptree",
+    }
+    key = aliases.get(key, key)
+    if key not in {"flat", "bptree", "auto"}:
+        key = default
+    return key
 
 
 def _normalize_exec_mode(value, default="thread"):
@@ -776,6 +829,9 @@ def _extract_feature_overrides(params):
     norm = params.get("sketch_norm")
     if norm is not None:
         overrides["sketch_norm"] = norm
+    backend = params.get("candidate_backend")
+    if backend is not None:
+        overrides["candidate_backend"] = _resolve_candidate_backend(backend, default="auto")
     return overrides
 
 
@@ -816,7 +872,7 @@ def _resolve_cell_stretch(
         grid_adjust = 1.0
     else:
         try:
-            grid_adjust = grid_dim ** 0.25
+            grid_adjust = math.sqrt(grid_dim)
         except ValueError:
             grid_adjust = 1.0
 
@@ -1179,7 +1235,7 @@ _os_parallel_guard.environ.setdefault("MKL_DEBUG_CPU_TYPE", "5")
 # ================================================================
 
 class CorrTrack:
-    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,grid_dimension,cell_size,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,exec="parallel",max_workers=0,sketch_norm="z",parallel_sketch=None,parallel_candidates=None,parallel_validation=None):
+    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,grid_dimension,cell_size,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,exec="parallel",max_workers=0,sketch_norm="z",candidate_backend="auto",parallel_sketch=None,parallel_candidates=None,parallel_validation=None,track_min_dist=True):
         
         if basic_window is not None and window_size % basic_window != 0:
             raise TypeError("Window size (",window_size,") is not divisable by basic window size (",basic_window,")")
@@ -1212,6 +1268,8 @@ class CorrTrack:
         self.datetime_lookup = {} #TODO: save correlation logs to file
         self.preprocess = preprocess
         self.sketch_norm = str(sketch_norm) if sketch_norm is not None else "z"
+        self.candidate_backend = _resolve_candidate_backend(candidate_backend, default="auto")
+        self.track_min_dist = _coerce_to_bool(track_min_dist, default=True)
         # Parameters lags
         self.window_size = window_size
 
@@ -1287,7 +1345,7 @@ class CorrTrack:
             grid_adjust = 1.0
         else:
             try:
-                grid_adjust = grid_dim ** 0.25
+                grid_adjust = math.sqrt(grid_dim)
             except ValueError:
                 grid_adjust = 1.0
 
@@ -1311,7 +1369,7 @@ class CorrTrack:
         if self.full_vector_candidates:
             self.freq_threshold = 0
         elif freq_threshold is not None:
-            self.freq_threshold = freq_threshold * self.n_vectors
+            self.freq_threshold = freq_threshold * self.n_grids
         else:
             self.freq_threshold = 0
 
@@ -1374,8 +1432,17 @@ class CorrTrack:
                 sign_prefilter_scale=self.sign_prefilter_scale,
                 sign_prefilter_extra=self.sign_prefilter_extra,
                 seed=(self.seed + g) if self.seed is not None else g,
+                candidate_backend=self.candidate_backend,
             )
             self.grid_nodes.append(node)
+        if self.grid_nodes:
+            self.candidate_backend_effective = getattr(
+                self.grid_nodes[0],
+                "_candidate_backend",
+                self.candidate_backend,
+            )
+        else:
+            self.candidate_backend_effective = self.candidate_backend
 
     def configure_filters(self, sign_scale=None, sign_extra=None):
         if sign_scale is not None:
@@ -1953,22 +2020,27 @@ class CorrTrack:
         if not self.candidates:
             return
 
-        existing = set(self.correlated.keys())
-        pairs = [p for p in self.candidates.keys() if p not in existing]
-
-        if not pairs:
-            return
+        candidates = self.candidates
+        n_pairs = len(candidates)
 
         # Count candidates once, for both sequential and parallel
-        self.total_candidates += len(pairs)
+        self.total_candidates += n_pairs
 
         if not corr_val:
-            for pair in pairs:
-                self.correlated[pair] = 1.0
-                self.validated[pair] = 1.0
-            self.tested_candidates += len(pairs)
-            self.validated_candidates += len(pairs)
+            # Fast path: avoid Python per-item assignment loops.
+            validated_now = dict.fromkeys(candidates, 1.0)
+            self.validated = validated_now
+            self.correlated.update(validated_now)
+            self.tested_candidates += n_pairs
+            self.validated_candidates += n_pairs
             return
+
+        track_min_dist = bool(getattr(self, "track_min_dist", True))
+        if not track_min_dist:
+            self.min_dist = np.inf
+            self.pair_min_dist = None
+
+        pairs = candidates.keys()
 
         worker_mode = force_mode if force_mode else self.exec
 
@@ -1997,7 +2069,8 @@ class CorrTrack:
 
                 chunk_size = 256
                 tested = validated = 0
-                min_dist, min_pair = self.min_dist, self.pair_min_dist
+                if track_min_dist:
+                    min_dist, min_pair = self.min_dist, self.pair_min_dist
                 eff_std_thresh = 1e-3
                 for i in range(0, len(items), chunk_size):
                     payload_items = items[i:i + chunk_size]
@@ -2014,7 +2087,7 @@ class CorrTrack:
                         pair = item["pair"]
                         is_correlated, pair_corr, pair_dist, _is_const, _is_spiked = entry
                         tested += 1
-                        if pair_dist < min_dist:
+                        if track_min_dist and pair_dist < min_dist:
                             min_dist, min_pair = pair_dist, pair
                         if is_correlated:
                             validated += 1
@@ -2022,15 +2095,17 @@ class CorrTrack:
                             self.validated[pair] = pair_corr
                 self.tested_candidates += tested
                 self.validated_candidates += validated
-                self.min_dist, self.pair_min_dist = min_dist, min_pair
+                if track_min_dist:
+                    self.min_dist, self.pair_min_dist = min_dist, min_pair
                 return
 
             tested = validated = 0
-            min_dist, min_pair = self.min_dist, self.pair_min_dist
+            if track_min_dist:
+                min_dist, min_pair = self.min_dist, self.pair_min_dist
             for pair in pairs:
                 pair, is_corr, corr, dist = self._validate_corr(pair, True)
                 tested += 1
-                if dist < min_dist:
+                if track_min_dist and dist < min_dist:
                     min_dist, min_pair = dist, pair
                 if is_corr:
                     validated += 1
@@ -2038,7 +2113,8 @@ class CorrTrack:
                     self.validated[pair] = corr
             self.tested_candidates += tested
             self.validated_candidates += validated
-            self.min_dist, self.pair_min_dist = min_dist, min_pair
+            if track_min_dist:
+                self.min_dist, self.pair_min_dist = min_dist, min_pair
             return
 
         base_index = self.window_index[0]
@@ -2091,14 +2167,15 @@ class CorrTrack:
             self._profile_add("val.dispatch", time.perf_counter() - t0)
 
         tested = validated = 0
-        min_dist, min_pair = self.min_dist, self.pair_min_dist
+        if track_min_dist:
+            min_dist, min_pair = self.min_dist, self.pair_min_dist
         t0 = time.perf_counter() if self.profile_enabled else None
         for batch in results_batches:
             for pair, is_correlated, corr, dist, is_constant, _ in batch:
                 tested += 1
                 if is_constant:
                     self.constant_candidates += 1
-                if dist < min_dist:
+                if track_min_dist and dist < min_dist:
                     min_dist, min_pair = dist, pair
                 if is_correlated:
                     validated += 1
@@ -2109,14 +2186,32 @@ class CorrTrack:
 
         self.tested_candidates += tested
         self.validated_candidates += validated
-        self.min_dist, self.pair_min_dist = min_dist, min_pair
+        if track_min_dist:
+            self.min_dist, self.pair_min_dist = min_dist, min_pair
 
     def _monitor_corr(self, worker_mode=None):
         """
-        Hybrid monitoring:
-        • 'In' updates: sequential (preserves per-key chain logic in _in_corr).
-        • 'Out' updates: parallel over previous_correlations entries.
+        Monitoring update.
+
+        Fast path: one-pass Cython kernel (when monitor_kernels is available).
+        Fallback: Python hybrid path with sequential 'in' and parallel 'out'.
         """
+        if _cy_monitor_step is not None:
+            t0 = time.perf_counter() if self.profile_enabled else None
+            validated_items = tuple(self.validated.items()) if self.validated else ()
+            new_in = _cy_monitor_step(
+                validated_items,
+                self.correlated,
+                self.corr_lengths,
+                self.corr_anomalies,
+                self.previous_correlations,
+                int(self.window_step),
+            )
+            if t0 is not None:
+                self._profile_add("monitor.kernel", time.perf_counter() - t0)
+            self.previous_correlations = new_in
+            return
+
         new_in = {}
         if len(self.validated) > 0:
             t0 = time.perf_counter() if self.profile_enabled else None
@@ -3074,13 +3169,14 @@ class CorrTrack:
         sorted_keys = sorted(all_keys)
 
         if not sorted_keys:
+            recall_min = None if pair_min_dist is None else int(pair_min_dist in pred)
             return {
                 'precision': 0.0,
                 'recall': 0.0,
                 'f1_score': 0.0,
                 'aucroc': float('nan'),
                 'pr_auc': float('nan'),
-                'recall_min': int(pair_min_dist in pred),
+                'recall_min': recall_min,
                 'precision_pos': 0.0,
                 'recall_pos': 0.0,
                 'f1_score_pos': 0.0,
@@ -3114,7 +3210,7 @@ class CorrTrack:
         #precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         #recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
 
-        recall_min = int(pair_min_dist in pred)
+        recall_min = None if pair_min_dist is None else int(pair_min_dist in pred)
 
         def _safe_prec_recall(pred_set, gt_set):
             if len(pred_set) == 0:
@@ -3357,7 +3453,7 @@ class CorrTrack:
                 merged[k] = result[k]
         return merged
     
-    def run_bf(self, new_data_step, ids, verbose, testing, corr_val=True):
+    def run_bf(self, new_data_step, ids, verbose, testing, corr_val=True, monitor=True):
         self.verbose = verbose
         self.testing = testing
 
@@ -3392,11 +3488,12 @@ class CorrTrack:
         end_time = time.time()
         self.validation_time += end_time - start_time
 
-        # monitoring
-        start_time = time.time()
-        self._monitor_corr(worker_mode=val_mode)
-        end_time = time.time()
-        self.monitor_time += end_time - start_time
+        if monitor:
+            # monitoring
+            start_time = time.time()
+            self._monitor_corr(worker_mode=val_mode)
+            end_time = time.time()
+            self.monitor_time += end_time - start_time
 
         if verbose:
             self._print_state()
@@ -3413,7 +3510,7 @@ class CorrTrack:
         self.sketches[self._curr_startTime()] = {}
         self.sketches[self._curr_startTime()].update(new_sketches)
     
-    def run(self, new_data_step, ids, verbose, testing, corr_val=True):
+    def run(self, new_data_step, ids, verbose, testing, corr_val=True, monitor=True):
         self.verbose = verbose
         self.testing = testing
 
@@ -3441,11 +3538,12 @@ class CorrTrack:
         end_time = time.time()
         self.validation_time += end_time - start_time
 
-        # 4) monitoring (parallel 'out', sequential 'in')
-        start_time = time.time()
-        self._monitor_corr(worker_mode=val_mode)
-        end_time = time.time()
-        self.monitor_time += end_time - start_time
+        if monitor:
+            # 4) monitoring (parallel 'out', sequential 'in')
+            start_time = time.time()
+            self._monitor_corr(worker_mode=val_mode)
+            end_time = time.time()
+            self.monitor_time += end_time - start_time
 
         if verbose:
             self._print_state()
@@ -4428,19 +4526,19 @@ class Sketches:
         time_arr = np.ascontiguousarray(time_arr, dtype=np.int64)
         w_arr = np.ascontiguousarray(w_arr, dtype=np.int64)
 
-        if _cy_build_partition_values is not None:
-            values, is_const = _cy_build_partition_values(
+        if _cy_build_partitions is not None:
+            chunks, _norms, is_const = _cy_build_partitions(
                 np.ascontiguousarray(matrix, dtype=np.float64),
                 int(self.grid_dimensions),
                 np.ascontiguousarray(const_flags, dtype=np.uint8),
             )
-            n_grids = min(n_grids, values.shape[0])
+            n_grids = min(n_grids, chunks.shape[0])
             for grid in range(n_grids):
                 self.partitions[grid] = (
                     sid_idx_arr,
                     time_arr,
                     w_arr,
-                    np.ascontiguousarray(values[grid], dtype=np.float64),
+                    np.ascontiguousarray(chunks[grid], dtype=np.float64),
                     np.ascontiguousarray(is_const[grid], dtype=np.uint8),
                 )
         else:
@@ -4449,10 +4547,10 @@ class Sketches:
                 end = start + self.grid_dimensions
                 chunk = matrix[:, start:end]
                 if chunk.size == 0:
-                    value_arr = np.empty((chunk.shape[0],), dtype=np.float64)
+                    chunk_arr = np.empty((chunk.shape[0], self.grid_dimensions), dtype=np.float64)
                     is_const = const_flags.copy()
                 else:
-                    value_arr = np.ascontiguousarray(chunk[:, 0], dtype=np.float64)
+                    chunk_arr = np.ascontiguousarray(chunk, dtype=np.float64)
                     grid_norms = np.linalg.norm(chunk, axis=1)
                     grid_norms = np.where(np.isfinite(grid_norms), grid_norms, 0.0)
                     is_const = np.logical_or(const_flags != 0, grid_norms == 0.0).astype(np.uint8)
@@ -4460,7 +4558,7 @@ class Sketches:
                     sid_idx_arr,
                     time_arr,
                     w_arr,
-                    value_arr,
+                    chunk_arr,
                     is_const,
                 )
 
@@ -4523,14 +4621,10 @@ class Candidates_BF:
     def from_state(cls, state):
         obj = cls.__new__(cls)
         obj.__dict__.update(state)
-        obj._reverse_index = defaultdict(list, getattr(obj, "_reverse_index", {}))
-        obj._recent_window_ids = set(getattr(obj, "_recent_window_ids", set()))
         return obj
 
     def load_state(self, state):
         self.__dict__.update(state)
-        self._reverse_index = defaultdict(list, getattr(self, "_reverse_index", {}))
-        self._recent_window_ids = set(getattr(self, "_recent_window_ids", set()))
     
     def _newStream(self,new_data_step,ids):
         new_data_step_index = new_data_step[0,:]
@@ -4650,10 +4744,10 @@ class Candidates_BF:
 
 class Candidates:
     def __init__(self,n_lagged_windows,grid_dimension,cell_size,grid_max,freq_threshold,corr_threshold,n_vectors,sketch_std,n_grids,neg_corr,
-                 sign_prefilter_scale=1.3,sign_prefilter_extra=1, seed=None, full_vector=False):
+                 sign_prefilter_scale=1.3,sign_prefilter_extra=1, seed=None, full_vector=False, candidate_backend=None):
         self.verbose = None
         self.neg_corr = neg_corr
-        # Parameters grids (grid_dimension is fixed to 1 semantics)
+        # Parameters grids
         self.n_lagged_windows = n_lagged_windows
         self.curr_time = None
         self.grid_dimensions = 1 if grid_dimension is None or grid_dimension <= 0 else int(grid_dimension)
@@ -4662,13 +4756,22 @@ class Candidates:
         self.grid_max = grid_max
         self.sketches = {}
         self.full_vector = bool(full_vector)
-        # BST-like storage over scalar sketch values
+        # Flat sorted index storage (legacy backend).
         self._entries = []  # (value, window_id_key, window_id[, vector])
         self._values = []   # parallel list of values for bisect
         self._reverse_index = defaultdict(list)  # window_id -> list of inserted values (includes neg when needed)
         self._reverse_vectors = defaultdict(list)  # window_id -> list of vectors (parallel to _reverse_index)
+        self._reverse_entry_ids = defaultdict(list)  # window_id -> list of backend entry ids
         self._recent_window_ids = set()
+        self._recent_entry_ids = []
         self._sid_list = []
+        self._window_idx = {}
+        self._sid_idx_map = {}
+        self._win_sid = []
+        self._win_sid_idx = []
+        self._win_time = []
+        self._win_w = []
+        self._tree_index = None
         # Parameters thresholds
         self.freq_threshold = freq_threshold
         self.corr_threshold = corr_threshold
@@ -4677,11 +4780,48 @@ class Candidates:
 
         self.sketch_std = sketch_std
         self.n_vectors = n_vectors
+        self._refresh_vector_mode()
         seed = _to_int_safe(seed)
         self._rng = np.random.default_rng(seed if seed is not None else 0)
 
+        backend_value = candidate_backend
+        if backend_value is None:
+            backend_value = os.environ.get("CORRTRACK_CANDIDATE_BACKEND", "auto")
+        self._requested_candidate_backend = _resolve_candidate_backend(backend_value, default="auto")
+        self._candidate_backend = "flat"
+        if self._requested_candidate_backend in {"bptree", "auto"} and _cy_balanced_index_cls is not None:
+            tree_seed = seed if seed is not None else 0
+            try:
+                tree_seed = int(tree_seed) & ((1 << 63) - 1)
+            except (TypeError, ValueError):
+                tree_seed = 0
+            vec_dim = int(self._vector_dim) if self._vector_match_enabled else 0
+            self._tree_index = _cy_balanced_index_cls(
+                n_vectors=vec_dim,
+                initial_capacity=1024,
+                seed=tree_seed,
+            )
+            self._candidate_backend = "bptree"
+        elif self._requested_candidate_backend == "flat":
+            self._candidate_backend = "flat"
+
     def dump_state(self):
         return dict(self.__dict__)
+
+    def _refresh_vector_mode(self):
+        grid_dim = _to_int_safe(getattr(self, "grid_dimensions", 1))
+        if grid_dim is None or grid_dim <= 0:
+            grid_dim = 1
+        self.grid_dimensions = int(grid_dim)
+        self.full_vector = bool(getattr(self, "full_vector", False))
+        self._vector_match_enabled = bool(self.full_vector or self.grid_dimensions > 1)
+        if self.full_vector:
+            vec_dim = _to_int_safe(getattr(self, "n_vectors", 0))
+        else:
+            vec_dim = self.grid_dimensions
+        if vec_dim is None or vec_dim <= 0:
+            vec_dim = 1
+        self._vector_dim = int(vec_dim)
 
     @classmethod
     def from_state(cls, state):
@@ -4689,12 +4829,50 @@ class Candidates:
         obj.__dict__.update(state)
         obj._reverse_index = defaultdict(list, getattr(obj, "_reverse_index", {}))
         obj._reverse_vectors = defaultdict(list, getattr(obj, "_reverse_vectors", {}))
+        obj._reverse_entry_ids = defaultdict(list, getattr(obj, "_reverse_entry_ids", {}))
+        obj._recent_entry_ids = list(getattr(obj, "_recent_entry_ids", []))
+        obj._window_idx = dict(getattr(obj, "_window_idx", {}))
+        obj._sid_idx_map = dict(getattr(obj, "_sid_idx_map", {}))
+        obj._win_sid = list(getattr(obj, "_win_sid", []))
+        obj._win_sid_idx = list(getattr(obj, "_win_sid_idx", []))
+        obj._win_time = list(getattr(obj, "_win_time", []))
+        obj._win_w = list(getattr(obj, "_win_w", []))
+        requested_backend = _resolve_candidate_backend(
+            getattr(obj, "_requested_candidate_backend", getattr(obj, "_candidate_backend", "auto")),
+            default="auto",
+        )
+        obj._requested_candidate_backend = requested_backend
+        if getattr(obj, "_candidate_backend", None) not in {"flat", "bptree"}:
+            obj._candidate_backend = "flat"
+        if obj._candidate_backend == "bptree" and _cy_balanced_index_cls is None:
+            obj._candidate_backend = "flat"
+            obj._tree_index = None
+        obj._refresh_vector_mode()
         return obj
 
     def load_state(self, state):
         self.__dict__.update(state)
         self._reverse_index = defaultdict(list, getattr(self, "_reverse_index", {}))
         self._reverse_vectors = defaultdict(list, getattr(self, "_reverse_vectors", {}))
+        self._reverse_entry_ids = defaultdict(list, getattr(self, "_reverse_entry_ids", {}))
+        self._recent_entry_ids = list(getattr(self, "_recent_entry_ids", []))
+        self._window_idx = dict(getattr(self, "_window_idx", {}))
+        self._sid_idx_map = dict(getattr(self, "_sid_idx_map", {}))
+        self._win_sid = list(getattr(self, "_win_sid", []))
+        self._win_sid_idx = list(getattr(self, "_win_sid_idx", []))
+        self._win_time = list(getattr(self, "_win_time", []))
+        self._win_w = list(getattr(self, "_win_w", []))
+        requested_backend = _resolve_candidate_backend(
+            getattr(self, "_requested_candidate_backend", getattr(self, "_candidate_backend", "auto")),
+            default="auto",
+        )
+        self._requested_candidate_backend = requested_backend
+        if getattr(self, "_candidate_backend", None) not in {"flat", "bptree"}:
+            self._candidate_backend = "flat"
+        if self._candidate_backend == "bptree" and _cy_balanced_index_cls is None:
+            self._candidate_backend = "flat"
+            self._tree_index = None
+        self._refresh_vector_mode()
 
     def append_partition(self,curr_time,new_partition):
         new_partition = self._partition_to_dict(new_partition)
@@ -4706,6 +4884,7 @@ class Candidates:
         else:
             self.partition[-1].update(new_partition)
         self._recent_window_ids = set()
+        self._recent_entry_ids = []
 
     def set_sid_list(self, sid_list):
         if not sid_list:
@@ -4720,22 +4899,44 @@ class Candidates:
         if isinstance(partition, dict):
             return partition if partition else None
         if isinstance(partition, tuple) and len(partition) == 5:
-            sid_idx, time_arr, w_arr, value_arr, is_const = partition
+            sid_idx, time_arr, w_arr, chunk_arr, is_const = partition
             if sid_idx is None or len(sid_idx) == 0:
                 return None
+            chunks = np.asarray(chunk_arr, dtype=np.float64)
             out = {}
             sid_list = self._sid_list
             for i in range(len(sid_idx)):
                 idx = int(sid_idx[i])
                 sid = sid_list[idx] if sid_list and idx < len(sid_list) else str(idx)
                 key = (sid, int(time_arr[i]), int(w_arr[i]))
-                out[key] = (float(value_arr[i]), bool(is_const[i]), 0.0)
+                if chunks.ndim == 2:
+                    sketch = np.ascontiguousarray(chunks[i], dtype=np.float64)
+                else:
+                    sketch = float(chunks[i])
+                out[key] = (sketch, bool(is_const[i]), 0.0)
             return out
         return None
 
     def _window_id_key(self, window_id):
         sid, start_time, window_size = window_id
         return (str(sid), int(start_time), int(window_size))
+
+    def _get_or_create_window_idx(self, window_id):
+        idx = self._window_idx.get(window_id)
+        if idx is not None:
+            return idx
+        sid, start_time, window_size = window_id
+        idx = len(self._win_sid)
+        sid_idx = self._sid_idx_map.get(sid)
+        if sid_idx is None:
+            sid_idx = len(self._sid_idx_map)
+            self._sid_idx_map[sid] = sid_idx
+        self._window_idx[window_id] = idx
+        self._win_sid.append(sid)
+        self._win_sid_idx.append(int(sid_idx))
+        self._win_time.append(int(start_time))
+        self._win_w.append(int(window_size))
+        return idx
 
     def _insert_entry(self, value, window_id, vector=None):
         key = self._window_id_key(window_id)
@@ -4784,6 +4985,7 @@ class Candidates:
             return
         last_partition = self.partition[-1]
         self._recent_window_ids = set()
+        self._recent_entry_ids = []
         for k, v in last_partition.items():
             if len(v) >= 3:
                 sketch, is_constant, _norm = v[:3]
@@ -4794,26 +4996,54 @@ class Candidates:
             vec = np.asarray(sketch, dtype=np.float64).ravel()
             if vec.size == 0:
                 continue
-            if self.full_vector:
+            if self._vector_match_enabled and vec.size != self._vector_dim:
+                fixed = np.zeros((self._vector_dim,), dtype=np.float64)
+                copy_n = min(vec.size, self._vector_dim)
+                if copy_n > 0:
+                    fixed[:copy_n] = vec[:copy_n]
+                vec = fixed
+            win_idx = self._get_or_create_window_idx(k)
+            if self._vector_match_enabled:
                 value = float(vec[0])
-                self._insert_entry(value, k, vec)
-                self._reverse_index[k].append(value)
-                self._reverse_vectors[k].append(vec)
-                if self.neg_corr:
-                    neg_vec = -vec
-                    neg_value = -value
-                    self._insert_entry(neg_value, k, neg_vec)
-                    self._reverse_index[k].append(neg_value)
-                    self._reverse_vectors[k].append(neg_vec)
+                if self._candidate_backend == "bptree" and self._tree_index is not None:
+                    entry_id = self._tree_index.insert(value, win_idx, vec)
+                    self._reverse_entry_ids[k].append(entry_id)
+                    self._recent_entry_ids.append(entry_id)
+                    if self.neg_corr:
+                        neg_vec = -vec
+                        neg_value = -value
+                        neg_entry_id = self._tree_index.insert(neg_value, win_idx, neg_vec)
+                        self._reverse_entry_ids[k].append(neg_entry_id)
+                        self._recent_entry_ids.append(neg_entry_id)
+                else:
+                    self._insert_entry(value, k, vec)
+                    self._reverse_index[k].append(value)
+                    self._reverse_vectors[k].append(vec)
+                    if self.neg_corr:
+                        neg_vec = -vec
+                        neg_value = -value
+                        self._insert_entry(neg_value, k, neg_vec)
+                        self._reverse_index[k].append(neg_value)
+                        self._reverse_vectors[k].append(neg_vec)
                 self.sketches[k] = vec
             else:
                 value = float(vec[0])
-                self._insert_entry(value, k)
-                self._reverse_index[k].append(value)
-                if self.neg_corr:
-                    neg_value = -value
-                    self._insert_entry(neg_value, k)
-                    self._reverse_index[k].append(neg_value)
+                if self._candidate_backend == "bptree" and self._tree_index is not None:
+                    entry_id = self._tree_index.insert(value, win_idx, None)
+                    self._reverse_entry_ids[k].append(entry_id)
+                    self._recent_entry_ids.append(entry_id)
+                    if self.neg_corr:
+                        neg_value = -value
+                        neg_entry_id = self._tree_index.insert(neg_value, win_idx, None)
+                        self._reverse_entry_ids[k].append(neg_entry_id)
+                        self._recent_entry_ids.append(neg_entry_id)
+                else:
+                    self._insert_entry(value, k)
+                    self._reverse_index[k].append(value)
+                    if self.neg_corr:
+                        neg_value = -value
+                        self._insert_entry(neg_value, k)
+                        self._reverse_index[k].append(neg_value)
                 self.sketches[k] = value
             self._recent_window_ids.add(k)
 
@@ -4827,11 +5057,16 @@ class Candidates:
                     continue
                 values = self._reverse_index.pop(k, [])
                 self._reverse_vectors.pop(k, [])
+                entry_ids = self._reverse_entry_ids.pop(k, [])
                 if is_constant:
                     self.sketches.pop(k, None)
                     continue
-                for val in values:
-                    self._remove_entry(val, k)
+                if self._candidate_backend == "bptree" and self._tree_index is not None:
+                    for entry_id in entry_ids:
+                        self._tree_index.remove(entry_id)
+                else:
+                    for val in values:
+                        self._remove_entry(val, k)
                 self.sketches.pop(k, None)
 
     def _update_grid(self, n_ids):
@@ -4860,6 +5095,8 @@ class Candidates:
         self.n_lagged_windows = n_lagged_windows
 
     def _build_candidate_arrays(self):
+        if self._candidate_backend != "flat":
+            return None
         if not self._entries or not self._values or not self._recent_window_ids:
             return None
         if len(self._entries) != len(self._values):
@@ -4892,8 +5129,8 @@ class Candidates:
         values = np.asarray(self._values, dtype=np.float64)
         value_window_idx = np.empty(n_entries, dtype=np.int64)
         entry_vectors = None
-        if self.full_vector:
-            entry_vectors = np.empty((n_entries, self.n_vectors), dtype=np.float64)
+        if self._vector_match_enabled:
+            entry_vectors = np.empty((n_entries, self._vector_dim), dtype=np.float64)
 
         for i, entry in enumerate(self._entries):
             win_idx = window_idx.get(entry[2])
@@ -4905,7 +5142,14 @@ class Candidates:
                 if vec is None:
                     entry_vectors[i, :] = 0.0
                 else:
-                    entry_vectors[i, :] = np.asarray(vec, dtype=np.float64)
+                    arr = np.asarray(vec, dtype=np.float64).ravel()
+                    if arr.size != self._vector_dim:
+                        fixed = np.zeros((self._vector_dim,), dtype=np.float64)
+                        copy_n = min(arr.size, self._vector_dim)
+                        if copy_n > 0:
+                            fixed[:copy_n] = arr[:copy_n]
+                        arr = fixed
+                    entry_vectors[i, :] = arr
 
         recent_values = []
         recent_window_idx = []
@@ -4928,9 +5172,16 @@ class Candidates:
                 for val, vec in zip(values_list, vectors):
                     if vec is None:
                         continue
+                    arr = np.asarray(vec, dtype=np.float64).ravel()
+                    if arr.size != self._vector_dim:
+                        fixed = np.zeros((self._vector_dim,), dtype=np.float64)
+                        copy_n = min(arr.size, self._vector_dim)
+                        if copy_n > 0:
+                            fixed[:copy_n] = arr[:copy_n]
+                        arr = fixed
                     recent_values.append(val)
                     recent_window_idx.append(win_idx)
-                    recent_vectors.append(np.asarray(vec, dtype=np.float64))
+                    recent_vectors.append(arr)
 
         if not recent_values:
             return None
@@ -4966,12 +5217,62 @@ class Candidates:
         if tau < 0.0:
             return
 
-        cython_ready = (
-            _cy_find_candidate_pairs is not None
-            and not self.full_vector
-        ) or (
-            _cy_find_candidate_pairs_full is not None
-            and self.full_vector
+        tree_ready = (
+            self._candidate_backend == "bptree"
+            and self._tree_index is not None
+            and self._recent_entry_ids
+            and len(self._win_sid) > 0
+            and len(self._win_time) == len(self._win_sid)
+            and len(self._win_w) == len(self._win_sid)
+            and len(self._win_sid_idx) == len(self._win_sid)
+        )
+
+        if tree_ready:
+            recent_entry_ids = np.asarray(self._recent_entry_ids, dtype=np.int64)
+            win_sid_idx = np.asarray(self._win_sid_idx, dtype=np.int64)
+            win_time = np.asarray(self._win_time, dtype=np.int64)
+            if self._vector_match_enabled:
+                pairs = self._tree_index.find_pairs_full(
+                    recent_entry_ids,
+                    win_sid_idx,
+                    win_time,
+                    float(tau),
+                )
+            else:
+                pairs = self._tree_index.find_pairs(
+                    recent_entry_ids,
+                    win_sid_idx,
+                    win_time,
+                    float(tau),
+                )
+            if pairs:
+                seen_pairs = set()
+                for ridx, other_idx in pairs:
+                    sid1 = self._win_sid[ridx]
+                    sid2 = self._win_sid[other_idx]
+                    t1 = self._win_time[ridx]
+                    t2 = self._win_time[other_idx]
+                    w = self._win_w[ridx]
+                    pair_id = self._normalize_key((sid1, sid2, int(t1), int(t2), int(w)))
+                    if pair_id in seen_pairs:
+                        continue
+                    seen_pairs.add(pair_id)
+                    freq_pairs[pair_id] = freq_pairs.get(pair_id, 0.0) + 1.0
+                    if freq_pairs[pair_id] >= self.freq_threshold:
+                        candidates[pair_id] = 1
+            return
+
+        if self._candidate_backend == "bptree":
+            return
+
+        cython_ready = self._candidate_backend == "flat" and (
+            (
+                _cy_find_candidate_pairs is not None
+                and not self._vector_match_enabled
+            ) or (
+                _cy_find_candidate_pairs_full is not None
+                and self._vector_match_enabled
+            )
         )
 
         if cython_ready:
@@ -4989,7 +5290,7 @@ class Candidates:
                     recent_vectors,
                     win_sid,
                 ) = arrays
-                if self.full_vector:
+                if self._vector_match_enabled:
                     pairs = _cy_find_candidate_pairs_full(
                         values,
                         value_window_idx,
@@ -5032,7 +5333,7 @@ class Candidates:
         seen_pairs = set()
         for window_id in self._recent_window_ids:
             values = self._reverse_index.get(window_id, ())
-            if self.full_vector:
+            if self._vector_match_enabled:
                 vectors = self._reverse_vectors.get(window_id, ())
                 if len(vectors) != len(values):
                     vectors = [None] * len(values)
@@ -5092,13 +5393,15 @@ class Candidates:
 
 
 class CorrTrack_optimize:
-    def __init__(self,train_data,ids,window_size,window_step,n_lags,corr_threshold,recall_by_window,alg,neg_corr,corr_val, exec="parallel",max_workers=0, sketch_norm="z", verbose=False, testing=False, parallel_sketch=None, parallel_candidates=None, parallel_validation=None):
+    def __init__(self,train_data,ids,window_size,window_step,n_lags,corr_threshold,recall_by_window,alg,neg_corr,corr_val, exec="parallel",max_workers=0, sketch_norm="z", verbose=False, testing=False, parallel_sketch=None, parallel_candidates=None, parallel_validation=None, track_min_dist=False):
 
         self.neg_corr = neg_corr
         self.corr_val = corr_val
         self.sketch_norm = sketch_norm or "z"
         self.verbose = _coerce_to_bool(verbose)
         self.testing = _coerce_to_bool(testing)
+        # Hyperopt always runs with min-distance tracking disabled.
+        self.track_min_dist = False
 
         # Parameters data
         self.train_data = train_data
@@ -5123,7 +5426,8 @@ class CorrTrack_optimize:
         self.corrtrack_bf = CorrTrack(window_size=self.window_size,basic_window=None,window_step=window_step,n_vectors=1,n_lags=self.n_lags,
                                     grid_dimension=1,cell_size=1,seed=None,seed_toggle=None,corr_threshold=self.corr_threshold,
                                     neg_corr=self.neg_corr,preprocess=False,exec=self.exec,max_workers=self.max_workers,
-                                    sketch_norm=self.sketch_norm,parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation)
+                                    sketch_norm=self.sketch_norm,parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation,
+                                    track_min_dist=self.track_min_dist)
         
         self.window_step = self.corrtrack_bf.window_step
         self.basic_window = self.corrtrack_bf.basic_window
@@ -5178,7 +5482,14 @@ class CorrTrack_optimize:
         start_time = time.time()
         for start in range(0, length_data - self.window_step + 1, self.window_step):
             chunk = self.train_data[:, start:start + self.window_step]
-            self.corrtrack_bf.run_bf(chunk, self.ids, verbose=self.verbose, testing=self.testing, corr_val=True)
+            self.corrtrack_bf.run_bf(
+                chunk,
+                self.ids,
+                verbose=self.verbose,
+                testing=self.testing,
+                corr_val=True,
+                monitor=False,
+            )
         end_time = time.time()
         runtime = end_time - start_time
         print("Run Brute-Force, Finished in ",runtime)
@@ -5220,6 +5531,7 @@ class CorrTrack_optimize:
         record["seed_toggle"] = param_combo.get("seed_toggle")
         record["preprocess"] = param_combo.get("preprocess")
         record["sketch_norm"] = param_combo.get("sketch_norm")
+        record["candidate_backend"] = param_combo.get("candidate_backend")
         record["corr_threshold"] = self.corr_threshold
         record["grid_max"] = param_combo.get("grid_max")
         record["cell_stretch"] = param_combo.get("cell_size")
@@ -5318,6 +5630,7 @@ class CorrTrack_optimize:
                 parallel_sketch=self.parallel_sketch,
                 parallel_candidates=self.parallel_candidates,
                 parallel_validation=self.parallel_validation,
+                track_min_dist=self.track_min_dist,
                 **feature_kwargs,
             )
 
@@ -5330,6 +5643,11 @@ class CorrTrack_optimize:
             record["parallel_sketch"] = corrtrack.parallel_sketch
             record["parallel_candidates"] = corrtrack.parallel_candidates
             record["parallel_validation"] = corrtrack.parallel_validation
+            record["candidate_backend"] = getattr(
+                corrtrack,
+                "candidate_backend_effective",
+                getattr(corrtrack, "candidate_backend", None),
+            )
             record["workers_total"] = corrtrack.n_nodes
             record["workers_sketch"] = corrtrack.n_sketch_nodes
             record["workers_candidates"] = corrtrack.n_candidate_nodes
@@ -5338,7 +5656,14 @@ class CorrTrack_optimize:
             start_time = time.time()
             for start in range(0, length_data - self.window_step + 1, self.window_step):
                 chunk = self.train_data[:, start : (start + self.window_step)]
-                corrtrack.run(chunk, self.ids, verbose=self.verbose, testing=self.testing, corr_val=self.corr_val)
+                corrtrack.run(
+                    chunk,
+                    self.ids,
+                    verbose=self.verbose,
+                    testing=self.testing,
+                    corr_val=self.corr_val,
+                    monitor=False,
+                )
             end_time = time.time()
             runtime = end_time - start_time
             runtime = max(runtime, 0.0)
@@ -5452,10 +5777,12 @@ class CorrTrack_optimize:
         #return self.ground_truth, self.runtime_bf, CorrTrack_HyperOptim._skyline_query(metrics, ref_metrics) 
 
 class CorrTrack_compare:
-    def __init__(self,train_data,test_data,ids,window_size,window_step,basic_window,n_lags,corr_threshold,param_grid,recall_by_window,neg_corr,corr_val,algs=None, exec="parallel", max_workers=0, sketch_norm="z", verbose=False, testing=False, parallel_sketch=None, parallel_candidates=None, parallel_validation=None):
+    def __init__(self,train_data,test_data,ids,window_size,window_step,basic_window,n_lags,corr_threshold,param_grid,recall_by_window,neg_corr,corr_val,algs=None, exec="parallel", max_workers=0, sketch_norm="z", verbose=False, testing=False, parallel_sketch=None, parallel_candidates=None, parallel_validation=None, monitor=True, track_min_dist=True):
         
         self.neg_corr = neg_corr
         self.corr_val = corr_val
+        self.monitor = _coerce_to_bool(monitor)
+        self.track_min_dist = _coerce_to_bool(track_min_dist, default=True)
         self.sketch_norm = sketch_norm or "z"
         self.verbose = _coerce_to_bool(verbose)
         self.testing = _coerce_to_bool(testing)
@@ -5486,7 +5813,8 @@ class CorrTrack_compare:
                                     grid_dimension=1,cell_size=1,seed=None,seed_toggle=None,
                                     corr_threshold=self.corr_threshold,neg_corr=self.neg_corr,preprocess=False,
                                     exec=self.exec,max_workers=self.max_workers,
-                                    sketch_norm=self.sketch_norm,parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation)
+                                    sketch_norm=self.sketch_norm,parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation,
+                                    track_min_dist=self.track_min_dist)
         
         self.window_step = self.corrtrack_bf.window_step
         self.basic_window = self.corrtrack_bf.basic_window
@@ -5549,13 +5877,21 @@ class CorrTrack_compare:
                             freq_threshold=freq_threshold,corr_threshold=self.corr_threshold,neg_corr=self.neg_corr,preprocess=preprocess,
                             exec=self.exec,max_workers=nodes,
                             parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation,
+                            track_min_dist=self.track_min_dist,
                             **overrides)
         if mode == "main":
             #Running
             start_time = time.time()
             for start in range(0, length_data - self.window_step + 1, self.window_step):
                 chunk = data_stream[:, start:start + self.window_step]
-                corrtrack.run(chunk,self.ids,verbose=self.verbose,testing=self.testing,corr_val=self.corr_val)
+                corrtrack.run(
+                    chunk,
+                    self.ids,
+                    verbose=self.verbose,
+                    testing=self.testing,
+                    corr_val=self.corr_val,
+                    monitor=self.monitor,
+                )
             end_time = time.time()
             runtime = end_time - start_time
             runtime_parts = (corrtrack.sketch_time,corrtrack.candidate_time,corrtrack.validation_time,corrtrack.monitor_time)
@@ -5566,7 +5902,14 @@ class CorrTrack_compare:
             start_time = time.time()
             for start in range(0, length_data - self.window_step + 1, self.window_step):
                 chunk = data_stream[:, start:start + self.window_step]
-                corrtrack.run_bf(chunk,self.ids,verbose=self.verbose,testing=self.testing,corr_val=True)
+                corrtrack.run_bf(
+                    chunk,
+                    self.ids,
+                    verbose=self.verbose,
+                    testing=self.testing,
+                    corr_val=True,
+                    monitor=self.monitor,
+                )
             end_time = time.time()
             runtime = end_time - start_time
             runtime_parts = (0,corrtrack.candidate_time,corrtrack.validation_time,corrtrack.monitor_time)
@@ -5577,7 +5920,7 @@ class CorrTrack_compare:
             self.correlated_bf = corrtrack.validated_candidates
             self.tested_bf = corrtrack.tested_candidates
             self.total_bf = corrtrack.total_candidates
-            self.pair_min_dist_bf = None
+            self.pair_min_dist_bf = corrtrack.pair_min_dist
 
         artifact_time = 0.0
 
@@ -5617,7 +5960,22 @@ class CorrTrack_compare:
         return runtime_parts, runtime, artifact_time, corr_flags
 
     def _optim(self,hyper_param_csv,dataset_id,run,alg,target_recall=0.95):
-        corrtrack_ho = CorrTrack_optimize(self.train_data,self.ids,self.window_size,self.window_step,self.n_lags,self.corr_threshold,self.recall_by_window,alg,self.neg_corr,self.corr_val,exec=self.exec,verbose=self.verbose,testing=self.testing)
+        corrtrack_ho = CorrTrack_optimize(
+            self.train_data,
+            self.ids,
+            self.window_size,
+            self.window_step,
+            self.n_lags,
+            self.corr_threshold,
+            self.recall_by_window,
+            alg,
+            self.neg_corr,
+            self.corr_val,
+            exec=self.exec,
+            verbose=self.verbose,
+            testing=self.testing,
+            track_min_dist=self.track_min_dist,
+        )
 
         return corrtrack_ho.get_optim_params(self.param_grid,hyper_param_csv,dataset_id,run,target_recall)
 
@@ -5945,6 +6303,7 @@ class CorrTrack_compare:
             as_optional_int(record.get("seed_toggle")),
             str(record.get("preprocess")),
             str(record.get("sketch_norm")),
+            str(record.get("candidate_backend")),
             fmt(record.get("corr_threshold")),
             fmt(record.get("grid_max")),
             fmt(record.get("cell_stretch")),
@@ -6190,6 +6549,11 @@ class CorrTrack_compare:
                 return f"{value:.3e}"
             return f"{value:.4f}"
 
+        def _format_optional_float(value):
+            if value in (None, ""):
+                return ""
+            return _format_float(float(value))
+
         speedup_ceil = _compute_speedup_ceil(
             self.candidate_time_bf,
             self.validation_time_bf,
@@ -6228,6 +6592,7 @@ class CorrTrack_compare:
             "seed_toggle",
             "preprocess",
             "sketch_norm",
+            "candidate_backend",
             "corr_threshold",
             "grid_max",
             "cell_stretch",
@@ -6283,7 +6648,7 @@ class CorrTrack_compare:
             _format_float(rel_waste_red),
             f"{metrics['precision_pos']:.4f}",f"{metrics['recall_pos']:.4f}",f"{metrics['f1_score_pos']:.4f}",
             f"{metrics['precision_neg']:.4f}",f"{metrics['recall_neg']:.4f}",f"{metrics['f1_score_neg']:.4f}",
-            f"{metrics['precision']:.4f}", f"{metrics['recall']:.4f}", f"{metrics['recall_min']:.4f}",
+            f"{metrics['precision']:.4f}", f"{metrics['recall']:.4f}", _format_optional_float(metrics['recall_min']),
             f"{metrics['f1_score']:.4f}", f"{metrics['aucroc']:.4f}",
             f"{metrics['pr_auc']:.4f}"
         ] + [

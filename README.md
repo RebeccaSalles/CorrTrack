@@ -61,7 +61,7 @@ pip install numpy pandas scipy scikit-learn matplotlib
 
 ## Optional Cython Kernels
 
-The repository includes optional Cython kernels for candidate search and sketch dot products (`candidate_kernels.pyx`, `sketch_kernels.pyx`). When compiled, they are imported automatically; otherwise the NumPy/Python implementations are used.
+The repository includes optional Cython kernels for candidate search, sketch routines, partition utilities, and monitoring updates (`candidate_kernels.pyx`, `sketch_kernels.pyx`, `partition_kernels.pyx`, `monitor_kernels.pyx`). When compiled, they are imported automatically; otherwise the NumPy/Python implementations are used.
 
 Build in place:
 
@@ -118,8 +118,10 @@ Place your dataset files under `datasets/asos-airports/` using the `<country>-<v
    CORR_THRESHOLD = 0.7
 
    NEG_CORR = False
-   EXTRA_FILTER = False
    CORR_VAL = True
+   CORR_VAL_OPTIM = False
+   TRACK_MIN_DIST = True
+   MONITOR = True
    RECALL_BY_WINDOW = True
    TRAIN_RATIO = 0.3
    TARGET_RECALL = 0.95
@@ -133,6 +135,10 @@ Place your dataset files under `datasets/asos-airports/` using the `<country>-<v
    VERBOSE = False
    TESTING = False
    ```
+
+   `CORR_VAL` controls validation for CorrTrack main/comparison runs, while `CORR_VAL_OPTIM` controls validation during hyper-parameter search only.
+   `TRACK_MIN_DIST` controls min-distance bookkeeping (`pair_min_dist` / `recall_min`) for brute-force/main/compare stages.
+   Hyper-parameter search always forces `TRACK_MIN_DIST=False`.
 
    Execution mode is derived from the per-phase flags above: if any of `PARALLEL_*` is `True`, the run uses threads; otherwise it is sequential. You can override these values per run with CLI flags, or swap the file via `--exec-param-config`. Output location (`RESULT_FOLDER`) lives in the dataset config and can be overridden with `--result-folder`.
 
@@ -282,8 +288,9 @@ Each stage script reads the execution defaults from `experiment_run_exec_param.p
 --parallel-candidates / --sequential-candidates
 --parallel-validation / --sequential-validation
 --neg-corr / --no-neg-corr (default from exec config)
---extra-filter / --no-extra-filter
---corr-val / --no-corr-val (param search + corrtrack + compare)
+--corr-val / --no-corr-val (corrtrack + compare)
+--corr-val-optim / --no-corr-val-optim (param search)
+--track-min-dist / --no-track-min-dist (brute-force + corrtrack + compare)
 --recall-by-window / --no-recall-by-window
 --artifact-mode         (brute-force & corrtrack runs) "iterative" | "final"
 --target-recall         (hyper-param search) default from exec config (fallback 0.95)
@@ -311,28 +318,30 @@ Stage scripts (`corrtrack_run_bruteforce.py`, `corrtrack_param_search.py`, `corr
 | `--parallel-candidates` / `--sequential-candidates` | Enable or disable parallelism for candidate generation only. |
 | `--parallel-validation` / `--sequential-validation` | Enable or disable parallelism for candidate validation only. |
 | `--neg-corr` / `--no-neg-corr` | Enable or disable mining negative correlations. |
-| `--extra-filter` / `--no-extra-filter` | Enable or disable extra filtering logic. |
+| `--track-min-dist` / `--no-track-min-dist` | Enable or disable min-distance bookkeeping (`pair_min_dist` and `recall_min` support) while keeping correlation validation on. |
 | `--recall-by-window` / `--no-recall-by-window` | Whether recall is computed per time window or globally. |
 | `--verbose` / `--no-verbose` | Enable or disable verbose logging in CorrTrack execution. |
 | `--testing` / `--no-testing` | Enable or disable CorrTrack testing paths. |
 
-CorrTrack validation options (param search, CorrTrack run, comparison):
+CorrTrack validation options:
 
 | Option | Description |
 | --- | --- |
-| `--corr-val` / `--no-corr-val` | Enable or skip correlation validation for candidates (disabling is faster but less accurate). |
+| `--corr-val` / `--no-corr-val` | Enable or skip correlation validation for CorrTrack main/comparison runs (disabling is faster but less accurate). |
+| `--corr-val-optim` / `--no-corr-val-optim` | Enable or skip correlation validation during hyper-parameter search only. |
+| `--track-min-dist` / `--no-track-min-dist` | Applies to brute-force/main/compare stages; hyper-parameter search always keeps this off. |
 
 Stage-specific parameters:
 
 | Script | Additional options |
 | --- | --- |
 | `corrtrack_run_bruteforce.py`, `corrtrack_run_corrtrack.py`, `debug_corrtrack.py` | `--artifact-mode {iterative,final}` to control when artifacts are persisted. |
-| `corrtrack_param_search.py` | `--param-grid-config PATH` (hyper-parameter grid), `--target-recall`, `--train-ratio`. |
+| `corrtrack_param_search.py` | `--param-grid-config PATH` (hyper-parameter grid), `--target-recall`, `--train-ratio`, `--corr-val-optim/--no-corr-val-optim`. |
 | `corrtrack_compare_runs.py` | `--train-ratio` for the metrics split, `--filcorr-results` to collate FilCorr CSV outputs before comparison. |
 | `run_corrtrack_experiment.py` | `--param-grid-config PATH` and `--base-dir PATH` to locate scripts. |
 | `debug_corrtrack.py` | `--param-grid-config PATH`, `--exec-param-config PATH`, `--result-folder`, `--samples-per-class`, `--output-dir`, `--skip-initial-run`, `--refresh-artifacts`, `--verbose/--no-verbose`, `--testing/--no-testing`. |
 
-Any extra flags given to `run_corrtrack_experiment.py` are filtered and forwarded only to the stages that understand them.
+Any extra flags given to `run_corrtrack_experiment.py` are filtered and forwarded only to the stages that understand them. In particular, `--corr-val` is forwarded to the CorrTrack run stage, while `--corr-val-optim` is forwarded to the hyper-parameter search stage.
 
 ### Per-phase execution control
 
@@ -399,6 +408,8 @@ python3 run_corrtrack_experiment.py \
 
 * `--corr-threshold`, `--parallel/--sequential`, etc. are applied to every stage that understands them.
 * `--target-recall` goes only to the hyper-parameter search.
+* `--corr-val-optim` goes only to the hyper-parameter search; `--corr-val` goes only to the CorrTrack run when using the orchestrator.
+* `--track-min-dist` is forwarded to brute-force, CorrTrack, and comparison stages; hyper-parameter search always keeps min-distance tracking disabled.
 * `--train-ratio` affects the parameter search and comparison steps.
 * `--artifact-mode` is forwarded to brute-force and CorrTrack runs, switching between incremental writes (“iterative”) and single final dumps (“final”).
 
@@ -475,7 +486,7 @@ python3 corrtrack_param_search.py \
   --corr-threshold 0.7 \
   --sequential \
   --neg-corr \
-  --corr-val \
+  --corr-val-optim \
   --recall-by-window \
   --target-recall 0.9 \
   --train-ratio 0.4

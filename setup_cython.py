@@ -23,6 +23,11 @@ extensions = [
         ["partition_kernels.pyx"],
         include_dirs=[np.get_include()],
     ),
+    Extension(
+        "monitor_kernels",
+        ["monitor_kernels.pyx"],
+        include_dirs=[np.get_include()],
+    ),
 ]
 
 setup(

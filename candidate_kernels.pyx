@@ -4,7 +4,7 @@ import numpy as np
 cimport numpy as np
 from libc.math cimport sqrt, fabs
 from libc.stdlib cimport malloc, realloc, free
-from libc.stdint cimport int64_t
+from libc.stdint cimport int64_t, uint64_t, uint8_t
 
 np.import_array()
 
@@ -37,6 +37,555 @@ cdef inline Py_ssize_t _bisect_right(double[:] values, double x) nogil:
         else:
             hi = mid
     return lo
+
+
+cdef inline bint _key_lt(double av, int64_t ai, double bv, int64_t bi) nogil:
+    if av < bv:
+        return True
+    if av > bv:
+        return False
+    return ai < bi
+
+
+cdef inline bint _append_pair(int64_t **buf,
+                              Py_ssize_t *count,
+                              Py_ssize_t *cap,
+                              int64_t a,
+                              int64_t b) nogil:
+    if count[0] >= cap[0]:
+        cap[0] = cap[0] * 2
+        buf[0] = <int64_t *>realloc(buf[0], cap[0] * 2 * sizeof(int64_t))
+        if buf[0] == NULL:
+            return False
+    buf[0][2 * count[0]] = a
+    buf[0][2 * count[0] + 1] = b
+    count[0] += 1
+    return True
+
+
+cdef void _scan_tree_scalar(int64_t node,
+                            int64_t[:] left,
+                            int64_t[:] right,
+                            double[:] values,
+                            int64_t[:] window_idx,
+                            uint8_t[:] active,
+                            double lower,
+                            double upper,
+                            int64_t ridx,
+                            long sid_r,
+                            long time_r,
+                            long[:] win_sid_idx,
+                            long[:] win_time,
+                            int64_t **buf,
+                            Py_ssize_t *count,
+                            Py_ssize_t *cap,
+                            bint *failed) noexcept nogil:
+    cdef double val
+    cdef int64_t other_idx
+    cdef long sid_o, time_o
+
+    if node < 0 or failed[0]:
+        return
+
+    val = values[node]
+    if val >= lower:
+        _scan_tree_scalar(left[node], left, right, values, window_idx, active, lower, upper,
+                          ridx, sid_r, time_r, win_sid_idx, win_time, buf, count, cap, failed)
+        if failed[0]:
+            return
+
+    if val >= lower and val <= upper and active[node] != 0:
+        other_idx = window_idx[node]
+        if other_idx != ridx:
+            sid_o = win_sid_idx[other_idx]
+            time_o = win_time[other_idx]
+            if not (sid_o == sid_r and time_o == time_r):
+                if not _append_pair(buf, count, cap, ridx, other_idx):
+                    failed[0] = True
+                    return
+
+    if val <= upper:
+        _scan_tree_scalar(right[node], left, right, values, window_idx, active, lower, upper,
+                          ridx, sid_r, time_r, win_sid_idx, win_time, buf, count, cap, failed)
+
+
+cdef void _scan_tree_full(int64_t node,
+                          int64_t[:] left,
+                          int64_t[:] right,
+                          double[:] values,
+                          int64_t[:] window_idx,
+                          uint8_t[:] active,
+                          uint8_t[:] has_vector,
+                          double[:, :] vectors,
+                          double lower,
+                          double upper,
+                          int64_t rnode,
+                          int64_t ridx,
+                          long sid_r,
+                          long time_r,
+                          long[:] win_sid_idx,
+                          long[:] win_time,
+                          Py_ssize_t n_dim,
+                          double tau_sq,
+                          int64_t **buf,
+                          Py_ssize_t *count,
+                          Py_ssize_t *cap,
+                          bint *failed) noexcept nogil:
+    cdef double val
+    cdef int64_t other_idx
+    cdef long sid_o, time_o
+    cdef Py_ssize_t d
+    cdef double diff, acc
+
+    if node < 0 or failed[0]:
+        return
+
+    val = values[node]
+    if val >= lower:
+        _scan_tree_full(left[node], left, right, values, window_idx, active, has_vector, vectors,
+                        lower, upper, rnode, ridx, sid_r, time_r, win_sid_idx, win_time,
+                        n_dim, tau_sq, buf, count, cap, failed)
+        if failed[0]:
+            return
+
+    if val >= lower and val <= upper and active[node] != 0 and has_vector[node] != 0:
+        other_idx = window_idx[node]
+        if other_idx != ridx:
+            sid_o = win_sid_idx[other_idx]
+            time_o = win_time[other_idx]
+            if not (sid_o == sid_r and time_o == time_r):
+                acc = 0.0
+                for d in range(n_dim):
+                    diff = vectors[rnode, d] - vectors[node, d]
+                    acc += diff * diff
+                    if acc > tau_sq:
+                        break
+                if acc <= tau_sq:
+                    if not _append_pair(buf, count, cap, ridx, other_idx):
+                        failed[0] = True
+                        return
+
+    if val <= upper:
+        _scan_tree_full(right[node], left, right, values, window_idx, active, has_vector, vectors,
+                        lower, upper, rnode, ridx, sid_r, time_r, win_sid_idx, win_time,
+                        n_dim, tau_sq, buf, count, cap, failed)
+
+
+cdef class BalancedIndex:
+    cdef object _values_arr
+    cdef object _left_arr
+    cdef object _right_arr
+    cdef object _prio_arr
+    cdef object _window_idx_arr
+    cdef object _active_arr
+    cdef object _has_vector_arr
+    cdef object _vectors_arr
+    cdef Py_ssize_t _size
+    cdef Py_ssize_t _active_count
+    cdef Py_ssize_t _capacity
+    cdef Py_ssize_t _n_vectors
+    cdef int64_t _root
+    cdef uint64_t _rng_state
+
+    def __cinit__(self, Py_ssize_t n_vectors=0, Py_ssize_t initial_capacity=1024, long seed=0):
+        if initial_capacity < 16:
+            initial_capacity = 16
+        if n_vectors < 0:
+            n_vectors = 0
+
+        self._size = 0
+        self._active_count = 0
+        self._capacity = initial_capacity
+        self._n_vectors = n_vectors
+        self._root = -1
+        self._rng_state = <uint64_t>seed
+        if self._rng_state == 0:
+            self._rng_state = <uint64_t>0x9E3779B97F4A7C15
+
+        self._values_arr = np.empty(self._capacity, dtype=np.float64)
+        self._left_arr = np.empty(self._capacity, dtype=np.int64)
+        self._right_arr = np.empty(self._capacity, dtype=np.int64)
+        self._prio_arr = np.empty(self._capacity, dtype=np.int64)
+        self._window_idx_arr = np.empty(self._capacity, dtype=np.int64)
+        self._active_arr = np.zeros(self._capacity, dtype=np.uint8)
+        self._has_vector_arr = np.zeros(self._capacity, dtype=np.uint8)
+        if self._n_vectors > 0:
+            self._vectors_arr = np.zeros((self._capacity, self._n_vectors), dtype=np.float64)
+        else:
+            self._vectors_arr = np.empty((0, 0), dtype=np.float64)
+
+    cdef void _ensure_capacity(self, Py_ssize_t need):
+        cdef Py_ssize_t new_cap
+        cdef np.ndarray[np.float64_t, ndim=1] new_values
+        cdef np.ndarray[np.int64_t, ndim=1] new_left
+        cdef np.ndarray[np.int64_t, ndim=1] new_right
+        cdef np.ndarray[np.int64_t, ndim=1] new_prio
+        cdef np.ndarray[np.int64_t, ndim=1] new_window_idx
+        cdef np.ndarray[np.uint8_t, ndim=1] new_active
+        cdef np.ndarray[np.uint8_t, ndim=1] new_has_vector
+        cdef np.ndarray[np.float64_t, ndim=2] new_vectors
+
+        if need <= self._capacity:
+            return
+
+        new_cap = self._capacity
+        while new_cap < need:
+            new_cap *= 2
+
+        new_values = np.empty(new_cap, dtype=np.float64)
+        new_left = np.empty(new_cap, dtype=np.int64)
+        new_right = np.empty(new_cap, dtype=np.int64)
+        new_prio = np.empty(new_cap, dtype=np.int64)
+        new_window_idx = np.empty(new_cap, dtype=np.int64)
+        new_active = np.zeros(new_cap, dtype=np.uint8)
+        new_has_vector = np.zeros(new_cap, dtype=np.uint8)
+
+        if self._size > 0:
+            new_values[:self._size] = self._values_arr[:self._size]
+            new_left[:self._size] = self._left_arr[:self._size]
+            new_right[:self._size] = self._right_arr[:self._size]
+            new_prio[:self._size] = self._prio_arr[:self._size]
+            new_window_idx[:self._size] = self._window_idx_arr[:self._size]
+            new_active[:self._size] = self._active_arr[:self._size]
+            new_has_vector[:self._size] = self._has_vector_arr[:self._size]
+
+        self._values_arr = new_values
+        self._left_arr = new_left
+        self._right_arr = new_right
+        self._prio_arr = new_prio
+        self._window_idx_arr = new_window_idx
+        self._active_arr = new_active
+        self._has_vector_arr = new_has_vector
+
+        if self._n_vectors > 0:
+            new_vectors = np.zeros((new_cap, self._n_vectors), dtype=np.float64)
+            if self._size > 0:
+                new_vectors[:self._size, :] = self._vectors_arr[:self._size, :]
+            self._vectors_arr = new_vectors
+
+        self._capacity = new_cap
+
+    cdef inline uint64_t _next_rand(self):
+        cdef uint64_t x = self._rng_state
+        if x == 0:
+            x = <uint64_t>0x2545F4914F6CDD1D
+        x ^= x << 13
+        x ^= x >> 7
+        x ^= x << 17
+        self._rng_state = x
+        return x
+
+    cdef inline int64_t _rotate_right(self, int64_t root):
+        cdef int64_t[:] left = self._left_arr
+        cdef int64_t[:] right = self._right_arr
+        cdef int64_t child = left[root]
+        left[root] = right[child]
+        right[child] = root
+        return child
+
+    cdef inline int64_t _rotate_left(self, int64_t root):
+        cdef int64_t[:] left = self._left_arr
+        cdef int64_t[:] right = self._right_arr
+        cdef int64_t child = right[root]
+        right[root] = left[child]
+        left[child] = root
+        return child
+
+    cdef int64_t _insert_rec(self, int64_t root, int64_t node):
+        cdef double[:] values = self._values_arr
+        cdef int64_t[:] left = self._left_arr
+        cdef int64_t[:] right = self._right_arr
+        cdef int64_t[:] prio = self._prio_arr
+        cdef int64_t child
+        if root < 0:
+            return node
+        if _key_lt(values[node], node, values[root], root):
+            left[root] = self._insert_rec(left[root], node)
+            child = left[root]
+            if child >= 0 and prio[child] > prio[root]:
+                root = self._rotate_right(root)
+        else:
+            right[root] = self._insert_rec(right[root], node)
+            child = right[root]
+            if child >= 0 and prio[child] > prio[root]:
+                root = self._rotate_left(root)
+        return root
+
+    cdef int64_t _merge(self, int64_t left_root, int64_t right_root):
+        cdef int64_t[:] left = self._left_arr
+        cdef int64_t[:] right = self._right_arr
+        cdef int64_t[:] prio = self._prio_arr
+        if left_root < 0:
+            return right_root
+        if right_root < 0:
+            return left_root
+        if prio[left_root] >= prio[right_root]:
+            right[left_root] = self._merge(right[left_root], right_root)
+            return left_root
+        left[right_root] = self._merge(left_root, left[right_root])
+        return right_root
+
+    cdef int64_t _erase_rec(self, int64_t root, double value, int64_t node_id):
+        cdef double[:] values = self._values_arr
+        cdef int64_t[:] left = self._left_arr
+        cdef int64_t[:] right = self._right_arr
+        cdef double root_value
+        if root < 0:
+            return -1
+        root_value = values[root]
+        if _key_lt(value, node_id, root_value, root):
+            left[root] = self._erase_rec(left[root], value, node_id)
+            return root
+        if _key_lt(root_value, root, value, node_id):
+            right[root] = self._erase_rec(right[root], value, node_id)
+            return root
+        return self._merge(left[root], right[root])
+
+    def insert(self, double value, long window_idx, vector=None):
+        cdef int64_t node
+        cdef np.ndarray[np.float64_t, ndim=1] vec
+        cdef Py_ssize_t d
+        cdef double[:] values
+        cdef int64_t[:] left
+        cdef int64_t[:] right
+        cdef int64_t[:] prio
+        cdef int64_t[:] window_ids
+        cdef uint8_t[:] active
+        cdef uint8_t[:] has_vector
+        cdef double[:, :] vectors
+
+        self._ensure_capacity(self._size + 1)
+        node = <int64_t>self._size
+        values = self._values_arr
+        left = self._left_arr
+        right = self._right_arr
+        prio = self._prio_arr
+        window_ids = self._window_idx_arr
+        active = self._active_arr
+        has_vector = self._has_vector_arr
+
+        values[node] = value
+        window_ids[node] = <int64_t>window_idx
+        left[node] = -1
+        right[node] = -1
+        prio[node] = <int64_t>(self._next_rand() & <uint64_t>0x7FFFFFFFFFFFFFFF)
+        active[node] = <uint8_t>1
+        has_vector[node] = <uint8_t>0
+
+        if self._n_vectors > 0:
+            vectors = self._vectors_arr
+            if vector is None:
+                for d in range(self._n_vectors):
+                    vectors[node, d] = 0.0
+            else:
+                vec = np.asarray(vector, dtype=np.float64).ravel()
+                if vec.shape[0] != self._n_vectors:
+                    raise ValueError("vector size does not match BalancedIndex dimension")
+                for d in range(self._n_vectors):
+                    vectors[node, d] = vec[d]
+                has_vector[node] = <uint8_t>1
+
+        self._root = self._insert_rec(self._root, node)
+        self._size += 1
+        self._active_count += 1
+        return int(node)
+
+    def remove(self, long entry_id):
+        cdef int64_t node = <int64_t>entry_id
+        cdef double[:] values
+        cdef uint8_t[:] active
+        if node < 0 or node >= self._size:
+            return False
+        active = self._active_arr
+        if active[node] == 0:
+            return False
+        values = self._values_arr
+        self._root = self._erase_rec(self._root, values[node], node)
+        active[node] = <uint8_t>0
+        self._active_count -= 1
+        return True
+
+    cpdef list find_pairs(self,
+                          long[:] recent_entry_ids,
+                          long[:] win_sid_idx,
+                          long[:] win_time,
+                          double tau):
+        cdef Py_ssize_t n_recent = recent_entry_ids.shape[0]
+        cdef Py_ssize_t n_win = win_sid_idx.shape[0]
+        cdef Py_ssize_t size = self._size
+        cdef Py_ssize_t i
+        cdef int64_t node, root_node, ridx
+        cdef double lower, upper, value
+        cdef long sid_r, time_r
+        cdef int64_t *buf = <int64_t *>malloc(1024 * 2 * sizeof(int64_t))
+        cdef Py_ssize_t count = 0
+        cdef Py_ssize_t cap = 1024
+        cdef bint failed = False
+
+        cdef double[:] values
+        cdef int64_t[:] left
+        cdef int64_t[:] right
+        cdef int64_t[:] window_idx
+        cdef uint8_t[:] active
+
+        if buf == NULL:
+            raise MemoryError()
+
+        if tau < 0.0 or n_recent == 0 or self._root < 0 or n_win == 0 or win_time.shape[0] != n_win:
+            free(buf)
+            return []
+
+        values = self._values_arr
+        left = self._left_arr
+        right = self._right_arr
+        window_idx = self._window_idx_arr
+        active = self._active_arr
+        root_node = self._root
+
+        with nogil:
+            for i in range(n_recent):
+                node = <int64_t>recent_entry_ids[i]
+                if node < 0 or node >= size:
+                    continue
+                if active[node] == 0:
+                    continue
+                ridx = window_idx[node]
+                if ridx < 0 or ridx >= n_win:
+                    continue
+                sid_r = win_sid_idx[ridx]
+                time_r = win_time[ridx]
+                value = values[node]
+                lower = value - tau
+                upper = value + tau
+                _scan_tree_scalar(
+                    root_node,
+                    left,
+                    right,
+                    values,
+                    window_idx,
+                    active,
+                    lower,
+                    upper,
+                    ridx,
+                    sid_r,
+                    time_r,
+                    win_sid_idx,
+                    win_time,
+                    &buf,
+                    &count,
+                    &cap,
+                    &failed,
+                )
+                if failed:
+                    break
+
+        if failed:
+            free(buf)
+            raise MemoryError()
+
+        pairs = [(int(buf[2 * i]), int(buf[2 * i + 1])) for i in range(count)]
+        free(buf)
+        return pairs
+
+    cpdef list find_pairs_full(self,
+                               long[:] recent_entry_ids,
+                               long[:] win_sid_idx,
+                               long[:] win_time,
+                               double tau):
+        cdef Py_ssize_t n_recent = recent_entry_ids.shape[0]
+        cdef Py_ssize_t n_win = win_sid_idx.shape[0]
+        cdef Py_ssize_t size = self._size
+        cdef Py_ssize_t i, n_dim
+        cdef int64_t node, root_node, ridx
+        cdef double lower, upper, value, tau_sq
+        cdef long sid_r, time_r
+        cdef int64_t *buf = <int64_t *>malloc(1024 * 2 * sizeof(int64_t))
+        cdef Py_ssize_t count = 0
+        cdef Py_ssize_t cap = 1024
+        cdef bint failed = False
+
+        cdef double[:] values
+        cdef int64_t[:] left
+        cdef int64_t[:] right
+        cdef int64_t[:] window_idx
+        cdef uint8_t[:] active
+        cdef uint8_t[:] has_vector
+        cdef double[:, :] vectors
+
+        if buf == NULL:
+            raise MemoryError()
+
+        n_dim = self._n_vectors
+        if (
+            tau < 0.0
+            or n_recent == 0
+            or self._root < 0
+            or n_dim <= 0
+            or n_win == 0
+            or win_time.shape[0] != n_win
+        ):
+            free(buf)
+            return []
+
+        values = self._values_arr
+        left = self._left_arr
+        right = self._right_arr
+        window_idx = self._window_idx_arr
+        active = self._active_arr
+        has_vector = self._has_vector_arr
+        vectors = self._vectors_arr
+        root_node = self._root
+        tau_sq = tau * tau
+
+        with nogil:
+            for i in range(n_recent):
+                node = <int64_t>recent_entry_ids[i]
+                if node < 0 or node >= size:
+                    continue
+                if active[node] == 0 or has_vector[node] == 0:
+                    continue
+                ridx = window_idx[node]
+                if ridx < 0 or ridx >= n_win:
+                    continue
+                sid_r = win_sid_idx[ridx]
+                time_r = win_time[ridx]
+                value = values[node]
+                lower = value - tau
+                upper = value + tau
+                _scan_tree_full(
+                    root_node,
+                    left,
+                    right,
+                    values,
+                    window_idx,
+                    active,
+                    has_vector,
+                    vectors,
+                    lower,
+                    upper,
+                    node,
+                    ridx,
+                    sid_r,
+                    time_r,
+                    win_sid_idx,
+                    win_time,
+                    n_dim,
+                    tau_sq,
+                    &buf,
+                    &count,
+                    &cap,
+                    &failed,
+                )
+                if failed:
+                    break
+
+        if failed:
+            free(buf)
+            raise MemoryError()
+
+        pairs = [(int(buf[2 * i]), int(buf[2 * i + 1])) for i in range(count)]
+        free(buf)
+        return pairs
 
 
 def find_candidate_pairs(double[:] values,

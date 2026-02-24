@@ -12,9 +12,10 @@ Methods:
 
 ALWAYS FIXED parameters:
 	
-	--sequential-sketch 
-	--sequential-candidates 
-	--sequential-validation
+	PARALLEL_SKETCH = False
+	PARALLEL_CANDIDATES = False
+	PARALLEL_VALIDATION = False
+	MAX_WORKERS = 0 (automatic = #CPUs)
 
 	NEG_CORR = False
 	TRAIN_RATIO = 0.7
@@ -22,10 +23,16 @@ ALWAYS FIXED parameters:
 	
 	plot = True
 	train_distances = False
-	basic_window = None #automatic #basic_window approx sqrt(window_size) (see: CorrTrack.get_bst_basic_window())
-	recall_by_window = True
-	verbose = False
-	testing = False
+	BASIC_WINDOW = None #automatic #BASIC_WINDOW approx sqrt(WINDOW_SIZE) (see: CorrTrack.get_bst_BASIC_WINDOW())
+	RECALL_BY_WINDOW = True
+	VERBOSE = False
+	TESTING = False
+	
+	MONITOR = True
+	TRACK_MIN_DIST = True
+	CORR_VAL_OPTIM = False
+	ARTIFACT_MODE = "final"
+	
 
 HYPERPARAMETER search:
 	param_grid = {
@@ -39,6 +46,7 @@ HYPERPARAMETER search:
 		"seed_toggle": [1357],
 		"grid_dimension": [1] #fixed
 		"sketch_norm": ["mean_l2"] #fixed
+		"candidate_backend": ["flat", "bptree"]
 	}
 	
 		
@@ -48,75 +56,75 @@ DYNAMIC parameters:
 	n_series = [5,25,50,75,100, max=128(climatic-fr)/143(climatic-br)/109({flights,delays,delay_perc}-br)]
 	
 FIXED parameters:
-	window_size = 7 * 24
-	n_lags = window_size*100
-	window_step = basic_window
-	corr_threshold = 0.8
-	corr_val = True
+	WINDOW_SIZE = 7 * 24
+	N_LAGS = WINDOW_SIZE*100
+	WINDOW_STEP = BASIC_WINDOW
+	CORR_THRESHOLD = 0.8
+	CORR_VAL = True
 	
 ====== XP 1.2 - scale n_series for all var. at the same time ======
 DYNAMIC parameters:
 	n_series = [5,25,50,75,100, max=all_X_all_var)]
 	
 FIXED parameters:
-	window_size = 7 * 24
-	n_lags = window_size*100
-	window_step = basic_window
-	corr_threshold = 0.8
-	corr_val = True
+	WINDOW_SIZE = 7 * 24
+	N_LAGS = WINDOW_SIZE*100
+	WINDOW_STEP = BASIC_WINDOW
+	CORR_THRESHOLD = 0.8
+	CORR_VAL = True
 	
-====== XP 2 - scale window_step ======
+====== XP 2 - scale WINDOW_STEP ======
 DYNAMIC parameters:
-	window_step = [1, 0.5*basic_window, basic_window]
+	WINDOW_STEP = [1, 0.5*BASIC_WINDOW, BASIC_WINDOW]
 	
 FIXED parameters:
 	n_series = 100
-	window_size = 7 * 24
-	n_lags = window_size*100
-	corr_threshold = 0.8
-	corr_val = True	
+	WINDOW_SIZE = 7 * 24
+	N_LAGS = WINDOW_SIZE*100
+	CORR_THRESHOLD = 0.8
+	CORR_VAL = True	
 	
-====== XP 3 - scale n_lags ======
+====== XP 3 - scale N_LAGS ======
 DYNAMIC parameters:
-	n_lags = window_size*[1,10,100,1000]
+	N_LAGS = WINDOW_SIZE*[1,10,100,1000]
 	
 FIXED parameters:
 	n_series = 100
-	window_size = 7 * 24
-	window_step = basic_window
-	corr_threshold = 0.8
-	corr_val = True
+	WINDOW_SIZE = 7 * 24
+	WINDOW_STEP = BASIC_WINDOW
+	CORR_THRESHOLD = 0.8
+	CORR_VAL = True
 
-====== XP 4 - scale window_size ======
+====== XP 4 - scale WINDOW_SIZE ======
 DYNAMIC parameters:
-	window_size =  [7 * 24, 15 * 24, 30 * 24, 180 * 24, 365 * 24]
+	WINDOW_SIZE =  [7 * 24, 15 * 24, 30 * 24, 180 * 24, 365 * 24]
 	
 FIXED parameters:
 	n_series = 100
-	n_lags = window_size*100
-	window_step = basic_window
-	corr_threshold = 0.8
-	corr_val = True
+	N_LAGS = WINDOW_SIZE*100
+	WINDOW_STEP = BASIC_WINDOW
+	CORR_THRESHOLD = 0.8
+	CORR_VAL = True
 
-====== XP 5 - scale corr_threshold ======
+====== XP 5 - scale CORR_THRESHOLD ======
 DYNAMIC parameters:
-	corr_threshold = [0.7,0.8,0.9,0.95]
+	CORR_THRESHOLD = [0.7,0.8,0.9,0.95]
 	
 FIXED parameters:
 	n_series = 100
-	n_lags = window_size*100
-	window_step = basic_window
-	window_size = 7 * 24
-	corr_val = True	
+	N_LAGS = WINDOW_SIZE*100
+	WINDOW_STEP = BASIC_WINDOW
+	WINDOW_SIZE = 7 * 24
+	CORR_VAL = True	
 	
-====== XP 6 - corr_val + neg_corr ======
+====== XP 6 - CORR_VAL + NEG_CORR ======
 DYNAMIC parameters:
-	corr_val = [True,False]
+	CORR_VAL = [True,False]
 	NEG_CORR = [True,False]
 	
 FIXED parameters:
 	n_series = 100
-	n_lags = window_size*100
-	window_step = basic_window
-	window_size = 7 * 24
-	corr_threshold = 0.8
+	N_LAGS = WINDOW_SIZE*100
+	WINDOW_STEP = BASIC_WINDOW
+	WINDOW_SIZE = 7 * 24
+	CORR_THRESHOLD = 0.8

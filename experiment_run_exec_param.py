@@ -16,14 +16,26 @@ CORR_THRESHOLD = 0.7
 
 NEG_CORR = False
 
-# CorrTrack_compare-specific controls.
+# CorrTrack main-run validation control.
 CORR_VAL = True
+
+# CorrTrack monitoring control (main/brute-force/comparison stages).
+MONITOR = True
+
+# Track minimum pairwise distance during validation (used by pair_min_dist / recall_min).
+# Disable to skip min-distance bookkeeping while keeping correlation validation enabled.
+TRACK_MIN_DIST = True
+
+# Hyper-parameter search validation control.
+CORR_VAL_OPTIM = False
+
+# CorrTrack_compare-specific controls.
 RECALL_BY_WINDOW = True
 TRAIN_RATIO = 0.3
 TARGET_RECALL = 0.95
 
 # Artifact persistence for run scripts that write out intermediate outputs.
-ARTIFACT_MODE = "iterative"
+ARTIFACT_MODE = "final"
 
 VERBOSE = False
 TESTING = False

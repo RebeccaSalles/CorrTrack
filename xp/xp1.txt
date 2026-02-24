@@ -5,10 +5,10 @@ Data: Synthetic
 		m = n_series
 		n = 1.024 M
 		z = {Stationary base_proc: 0.5; Nonstationary base_proc: 0.1}
-		w = window_size
-		template_len = window_size
+		w = WINDOW_SIZE
+		template_len = WINDOW_SIZE
 		num_templates = {Stationary base_proc: 4; Nonstationary base_proc: 24}
-		threshold = corr_threshold
+		threshold = CORR_THRESHOLD
 	}
 	
 Methods: 
@@ -18,9 +18,10 @@ Methods:
 
 ALWAYS FIXED parameters:
 	
-	--sequential-sketch 
-	--sequential-candidates 
-	--sequential-validation
+	PARALLEL_SKETCH = False
+	PARALLEL_CANDIDATES = False
+	PARALLEL_VALIDATION = False
+	MAX_WORKERS = 0 (automatic = #CPUs)
 
 	NEG_CORR = False
 	TRAIN_RATIO = 0.7
@@ -28,10 +29,16 @@ ALWAYS FIXED parameters:
 	
 	plot = True
 	train_distances = False
-	basic_window = None #automatic #basic_window approx sqrt(window_size) (see: CorrTrack.get_bst_basic_window())
-	recall_by_window = True
-	verbose = False
-	testing = False
+	BASIC_WINDOW = None #automatic #BASIC_WINDOW approx sqrt(WINDOW_SIZE) (see: CorrTrack.get_bst_BASIC_WINDOW())
+	RECALL_BY_WINDOW = True
+	VERBOSE = False
+	TESTING = False
+	
+	MONITOR = True
+	TRACK_MIN_DIST = True
+	CORR_VAL_OPTIM = False
+	ARTIFACT_MODE = "final"
+
 
 HYPERPARAMETER search:
 	param_grid = {
@@ -45,6 +52,7 @@ HYPERPARAMETER search:
 		"seed_toggle": [1357],
 		"grid_dimension": [1] #fixed
 		"sketch_norm": ["mean_l2"] #fixed
+		"candidate_backend": ["flat", "bptree"]
 	}
 	
 	
@@ -54,11 +62,11 @@ DYNAMIC parameters:
 	n_series = [1,10,20,30,40,50,60,70,80,90,100,1000]
 	
 FIXED parameters:
-	window_size = 1024
-	n_lags = window_size*100
-	window_step = basic_window
-	corr_threshold = 0.8
-	corr_val = True
+	WINDOW_SIZE = 1024
+	N_LAGS = WINDOW_SIZE*100
+	WINDOW_STEP = BASIC_WINDOW
+	CORR_THRESHOLD = 0.8
+	CORR_VAL = True
 	
 	SYNTH_PARAMS = {
 		"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0},
@@ -66,16 +74,16 @@ FIXED parameters:
 	}
 	
 	
-====== XP 2 - scale window_step ======
+====== XP 2 - scale WINDOW_STEP ======
 DYNAMIC parameters:
-	window_step = [1, 0.5*basic_window, basic_window]
+	WINDOW_STEP = [1, 0.5*BASIC_WINDOW, BASIC_WINDOW]
 	
 FIXED parameters:
 	n_series = 100
-	window_size = 1024
-	n_lags = window_size*100
-	corr_threshold = 0.8
-	corr_val = True
+	WINDOW_SIZE = 1024
+	N_LAGS = WINDOW_SIZE*100
+	CORR_THRESHOLD = 0.8
+	CORR_VAL = True
 	
 	SYNTH_PARAMS = {
 		"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0},
@@ -83,16 +91,16 @@ FIXED parameters:
 	}
 	
 	
-====== XP 3 - scale n_lags ======
+====== XP 3 - scale N_LAGS ======
 DYNAMIC parameters:
-	n_lags = window_size*[1,10,100,1000]
+	N_LAGS = WINDOW_SIZE*[1,10,100,1000]
 	
 FIXED parameters:
 	n_series = 100
-	window_size = 1024
-	window_step = basic_window
-	corr_threshold = 0.8
-	corr_val = True
+	WINDOW_SIZE = 1024
+	WINDOW_STEP = BASIC_WINDOW
+	CORR_THRESHOLD = 0.8
+	CORR_VAL = True
 	
 	SYNTH_PARAMS = {
 		"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0},
@@ -100,16 +108,16 @@ FIXED parameters:
 	}
 
 
-====== XP 4 - scale window_size ======
+====== XP 4 - scale WINDOW_SIZE ======
 DYNAMIC parameters:
-	window_size = [128,256,512,1024,2048,4096,8192]
+	WINDOW_SIZE = [128,256,512,1024,2048,4096,8192]
 	
 FIXED parameters:
 	n_series = 100
-	n_lags = window_size*100
-	window_step = basic_window
-	corr_threshold = 0.8
-	corr_val = True
+	N_LAGS = WINDOW_SIZE*100
+	WINDOW_STEP = BASIC_WINDOW
+	CORR_THRESHOLD = 0.8
+	CORR_VAL = True
 	
 	SYNTH_PARAMS = {
 		"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0},
@@ -117,16 +125,16 @@ FIXED parameters:
 	}
 
 
-====== XP 5 - scale corr_threshold ======
+====== XP 5 - scale CORR_THRESHOLD ======
 DYNAMIC parameters:
-	corr_threshold = [0.7,0.8,0.9,0.95]
+	CORR_THRESHOLD = [0.7,0.8,0.9,0.95]
 	
 FIXED parameters:
 	n_series = 100
-	n_lags = window_size*100
-	window_step = basic_window
-	window_size = 1024
-	corr_val = True
+	N_LAGS = WINDOW_SIZE*100
+	WINDOW_STEP = BASIC_WINDOW
+	WINDOW_SIZE = 1024
+	CORR_VAL = True
 	
 	SYNTH_PARAMS = {
 		"base_proc": {"type": "ar1", "phi": 0.7, "sigma": 1.0},
@@ -134,7 +142,7 @@ FIXED parameters:
 	}
 	
 	
-====== XP 6 - vary base_proc + corr_val + neg_corr ======
+====== XP 6 - vary base_proc + CORR_VAL + NEG_CORR ======
 DYNAMIC parameters:
 	SYNTH_PARAMS = {
 		#stationary
@@ -152,12 +160,12 @@ DYNAMIC parameters:
 		
 		corr_sign = "both"
 	}
-	corr_val = [True,False]
+	CORR_VAL = [True,False]
 	NEG_CORR = [True,False]
 	
 FIXED parameters:
 	n_series = 100
-	n_lags = window_size*100
-	window_step = basic_window
-	window_size = 1024
-	corr_threshold = 0.8
+	N_LAGS = WINDOW_SIZE*100
+	WINDOW_STEP = BASIC_WINDOW
+	WINDOW_SIZE = 1024
+	CORR_THRESHOLD = 0.8

@@ -44,7 +44,7 @@ DEFAULT_PARALLEL = any(
 )
 DEFAULT_EXEC_MODE = "thread" if DEFAULT_PARALLEL else "sequential"
 DEFAULT_NEG_CORR = getattr(_DEFAULT_EXEC_CFG, "NEG_CORR", False)
-DEFAULT_CORR_VAL = getattr(_DEFAULT_EXEC_CFG, "CORR_VAL", True)
+DEFAULT_CORR_VAL_OPTIM = getattr(_DEFAULT_EXEC_CFG, "CORR_VAL_OPTIM", False)
 DEFAULT_RECALL_BY_WINDOW = getattr(_DEFAULT_EXEC_CFG, "RECALL_BY_WINDOW", True)
 DEFAULT_TARGET_RECALL = getattr(_DEFAULT_EXEC_CFG, "TARGET_RECALL", 0.95)
 DEFAULT_TRAIN_RATIO = getattr(_DEFAULT_EXEC_CFG, "TRAIN_RATIO", 0.3)
@@ -59,7 +59,7 @@ PARALLEL_CANDIDATES = DEFAULT_PARALLEL_CANDIDATES
 PARALLEL_VALIDATION = DEFAULT_PARALLEL_VALIDATION
 EXEC_MODE = DEFAULT_EXEC_MODE
 NEG_CORR = DEFAULT_NEG_CORR
-CORR_VAL = DEFAULT_CORR_VAL
+CORR_VAL_OPTIM = DEFAULT_CORR_VAL_OPTIM
 RECALL_BY_WINDOW = DEFAULT_RECALL_BY_WINDOW
 TARGET_RECALL = DEFAULT_TARGET_RECALL
 WINDOW_SIZE = DEFAULT_WINDOW_SIZE
@@ -257,8 +257,8 @@ def main():
     parser.add_argument("--sequential-validation", dest="parallel_validation", action="store_false")
     parser.add_argument("--neg-corr", dest="neg_corr", action="store_true")
     parser.add_argument("--no-neg-corr", dest="neg_corr", action="store_false")
-    parser.add_argument("--corr-val", dest="corr_val", action="store_true")
-    parser.add_argument("--no-corr-val", dest="corr_val", action="store_false")
+    parser.add_argument("--corr-val-optim", dest="corr_val_optim", action="store_true")
+    parser.add_argument("--no-corr-val-optim", dest="corr_val_optim", action="store_false")
     parser.add_argument("--recall-by-window", dest="recall_by_window", action="store_true")
     parser.add_argument("--no-recall-by-window", dest="recall_by_window", action="store_false")
     parser.add_argument("--verbose", dest="verbose", action="store_true")
@@ -271,7 +271,7 @@ def main():
         parallel_candidates=None,
         parallel_validation=None,
         neg_corr=None,
-        corr_val=None,
+        corr_val_optim=None,
         recall_by_window=None,
         verbose=None,
         testing=None,
@@ -287,7 +287,7 @@ def main():
 
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
-    global EXEC_MODE, NEG_CORR, CORR_VAL, RECALL_BY_WINDOW
+    global EXEC_MODE, NEG_CORR, CORR_VAL_OPTIM, RECALL_BY_WINDOW
     global TARGET_RECALL, TRAIN_RATIO, PARAM_GRID, DATA_LOADER, RESULT_FOLDER, MAX_WORKERS
     global VERBOSE, TESTING
 
@@ -309,7 +309,9 @@ def main():
         PARALLEL = _any_parallel(PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION)
     EXEC_MODE = "thread" if _any_parallel(PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION) else "sequential"
     NEG_CORR = _resolve_cfg_value(args.neg_corr, cfg_exec, "NEG_CORR", DEFAULT_NEG_CORR)
-    CORR_VAL = _resolve_cfg_value(args.corr_val, cfg_exec, "CORR_VAL", DEFAULT_CORR_VAL)
+    CORR_VAL_OPTIM = _resolve_cfg_value(
+        args.corr_val_optim, cfg_exec, "CORR_VAL_OPTIM", DEFAULT_CORR_VAL_OPTIM
+    )
     RECALL_BY_WINDOW = _resolve_cfg_value(
         args.recall_by_window, cfg_exec, "RECALL_BY_WINDOW", DEFAULT_RECALL_BY_WINDOW
     )
@@ -353,7 +355,7 @@ def main():
                         RECALL_BY_WINDOW,
                         alg,
                         NEG_CORR,
-                        CORR_VAL,
+                        CORR_VAL_OPTIM,
                         exec=EXEC_MODE,
                         max_workers=MAX_WORKERS,
                         verbose=VERBOSE,
@@ -361,6 +363,7 @@ def main():
                         parallel_sketch=PARALLEL_SKETCH,
                         parallel_candidates=PARALLEL_CANDIDATES,
                         parallel_validation=PARALLEL_VALIDATION,
+                        track_min_dist=False,
                     )
 
                     output_prefix = os.path.join(output_dir, f"corrtrack_optim_{dataset_id}")

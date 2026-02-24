@@ -33,6 +33,8 @@ DEFAULT_PARALLEL = any(
 )
 DEFAULT_EXEC_MODE = "thread" if DEFAULT_PARALLEL else "sequential"
 DEFAULT_NEG_CORR = getattr(_DEFAULT_EXEC_CFG, "NEG_CORR", False)
+DEFAULT_MONITOR = getattr(_DEFAULT_EXEC_CFG, "MONITOR", True)
+DEFAULT_TRACK_MIN_DIST = getattr(_DEFAULT_EXEC_CFG, "TRACK_MIN_DIST", True)
 DEFAULT_RECALL_BY_WINDOW = getattr(_DEFAULT_EXEC_CFG, "RECALL_BY_WINDOW", True)
 DEFAULT_ARTIFACT_MODE = getattr(_DEFAULT_EXEC_CFG, "ARTIFACT_MODE", "iterative")
 DEFAULT_VERBOSE = getattr(_DEFAULT_EXEC_CFG, "VERBOSE", False)
@@ -56,6 +58,8 @@ PARALLEL_CANDIDATES = DEFAULT_PARALLEL_CANDIDATES
 PARALLEL_VALIDATION = DEFAULT_PARALLEL_VALIDATION
 EXEC_MODE = DEFAULT_EXEC_MODE
 NEG_CORR = DEFAULT_NEG_CORR
+MONITOR = DEFAULT_MONITOR
+TRACK_MIN_DIST = DEFAULT_TRACK_MIN_DIST
 RECALL_BY_WINDOW = DEFAULT_RECALL_BY_WINDOW
 ARTIFACT_MODE = DEFAULT_ARTIFACT_MODE
 VERBOSE = DEFAULT_VERBOSE
@@ -158,6 +162,8 @@ def build_base_config():
         "parallel_candidates": PARALLEL_CANDIDATES,
         "parallel_validation": PARALLEL_VALIDATION,
         "max_workers": MAX_WORKERS,
+        "monitor": MONITOR,
+        "track_min_dist": TRACK_MIN_DIST,
         "artifact_mode": ARTIFACT_MODE,
         "verbose": VERBOSE,
         "testing": TESTING,
@@ -241,6 +247,10 @@ def parse_args():
     parser.add_argument("--sequential-validation", dest="parallel_validation", action="store_false")
     parser.add_argument("--neg-corr", dest="neg_corr", action="store_true")
     parser.add_argument("--no-neg-corr", dest="neg_corr", action="store_false")
+    parser.add_argument("--monitor", dest="monitor", action="store_true")
+    parser.add_argument("--no-monitor", dest="monitor", action="store_false")
+    parser.add_argument("--track-min-dist", dest="track_min_dist", action="store_true")
+    parser.add_argument("--no-track-min-dist", dest="track_min_dist", action="store_false")
     parser.add_argument("--recall-by-window", dest="recall_by_window", action="store_true")
     parser.add_argument(
         "--artifact-mode",
@@ -264,6 +274,8 @@ def parse_args():
         parallel_candidates=None,
         parallel_validation=None,
         neg_corr=None,
+        monitor=None,
+        track_min_dist=None,
         recall_by_window=None,
         artifact_mode=None,
         verbose=None,
@@ -281,7 +293,7 @@ def main():
 
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
-    global EXEC_MODE, NEG_CORR, RECALL_BY_WINDOW, ARTIFACT_MODE
+    global EXEC_MODE, NEG_CORR, MONITOR, TRACK_MIN_DIST, RECALL_BY_WINDOW, ARTIFACT_MODE
     global DATA_LOADER, RESULT_FOLDER, MAX_WORKERS, VERBOSE, TESTING
 
     RESULT_FOLDER = _resolve_cfg_value(args.result_folder, cfg_dataset, "RESULT_FOLDER", DEFAULT_RESULT_FOLDER)
@@ -302,6 +314,10 @@ def main():
         PARALLEL = _any_parallel(PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION)
     EXEC_MODE = "thread" if _any_parallel(PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION) else "sequential"
     NEG_CORR = _resolve_cfg_value(args.neg_corr, cfg_exec, "NEG_CORR", DEFAULT_NEG_CORR)
+    MONITOR = _resolve_cfg_value(args.monitor, cfg_exec, "MONITOR", DEFAULT_MONITOR)
+    TRACK_MIN_DIST = _resolve_cfg_value(
+        args.track_min_dist, cfg_exec, "TRACK_MIN_DIST", DEFAULT_TRACK_MIN_DIST
+    )
     RECALL_BY_WINDOW = _resolve_cfg_value(
         args.recall_by_window, cfg_exec, "RECALL_BY_WINDOW", DEFAULT_RECALL_BY_WINDOW
     )

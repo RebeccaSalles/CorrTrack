@@ -10,4 +10,5 @@ PARAM_GRID = {
     "seed_toggle": [1357],
     "grid_dimension": [1],
     "sketch_norm": ["mean_l2"],
+    "candidate_backend": ["flat", "bptree"],
 }

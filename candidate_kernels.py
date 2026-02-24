@@ -9,6 +9,129 @@ from bisect import bisect_left, bisect_right
 import numpy as np
 
 
+class BalancedIndex:
+    """Fallback balanced-index API compatible with the Cython implementation."""
+
+    _LOW_SENTINEL = -2**63
+    _HIGH_SENTINEL = 2**63 - 1
+
+    def __init__(self, n_vectors=0, initial_capacity=1024, seed=0):
+        self.n_vectors = max(0, int(n_vectors or 0))
+        self._entries = []  # sorted (value, entry_id, window_idx)
+        self._meta = {}  # entry_id -> (value, window_idx, vector|None)
+        self._next_id = 0
+
+    def insert(self, value, window_idx, vector=None):
+        value = float(value)
+        window_idx = int(window_idx)
+        entry_id = self._next_id
+        self._next_id += 1
+        vec = None
+        if self.n_vectors > 0 and vector is not None:
+            vec = np.asarray(vector, dtype=np.float64).ravel()
+            if vec.shape[0] != self.n_vectors:
+                raise ValueError("vector size does not match BalancedIndex dimension")
+        rec = (value, int(entry_id), window_idx)
+        pos = bisect_left(self._entries, rec)
+        self._entries.insert(pos, rec)
+        self._meta[int(entry_id)] = (value, window_idx, vec)
+        return int(entry_id)
+
+    def remove(self, entry_id):
+        entry_id = int(entry_id)
+        meta = self._meta.pop(entry_id, None)
+        if meta is None:
+            return False
+        value = float(meta[0])
+        pos = bisect_left(self._entries, (value, entry_id, self._LOW_SENTINEL))
+        while pos < len(self._entries) and self._entries[pos][0] == value:
+            if self._entries[pos][1] == entry_id:
+                self._entries.pop(pos)
+                return True
+            pos += 1
+        return False
+
+    def find_pairs(self, recent_entry_ids, win_sid_idx, win_time, tau):
+        tau = float(tau)
+        if tau < 0.0 or not self._entries:
+            return []
+        entries = self._entries
+        sid_idx = np.asarray(win_sid_idx, dtype=np.int64)
+        times = np.asarray(win_time, dtype=np.int64)
+        pairs = []
+        for raw_id in np.asarray(recent_entry_ids, dtype=np.int64):
+            entry_id = int(raw_id)
+            meta = self._meta.get(entry_id)
+            if meta is None:
+                continue
+            value, ridx, _ = meta
+            if ridx < 0 or ridx >= sid_idx.shape[0]:
+                continue
+            sid_r = int(sid_idx[ridx])
+            time_r = int(times[ridx])
+            lower = value - tau
+            upper = value + tau
+            left = bisect_left(entries, (lower, self._LOW_SENTINEL, self._LOW_SENTINEL))
+            right = bisect_right(entries, (upper, self._HIGH_SENTINEL, self._HIGH_SENTINEL))
+            for _v, other_entry_id, other_idx in entries[left:right]:
+                if other_entry_id == entry_id:
+                    continue
+                if other_idx < 0 or other_idx >= sid_idx.shape[0]:
+                    continue
+                sid_o = int(sid_idx[other_idx])
+                time_o = int(times[other_idx])
+                if sid_o == sid_r and time_o == time_r:
+                    continue
+                pairs.append((int(ridx), int(other_idx)))
+        return pairs
+
+    def find_pairs_full(self, recent_entry_ids, win_sid_idx, win_time, tau):
+        tau = float(tau)
+        if tau < 0.0 or not self._entries or self.n_vectors <= 0:
+            return []
+        tau_sq = tau * tau
+        entries = self._entries
+        sid_idx = np.asarray(win_sid_idx, dtype=np.int64)
+        times = np.asarray(win_time, dtype=np.int64)
+        pairs = []
+        for raw_id in np.asarray(recent_entry_ids, dtype=np.int64):
+            entry_id = int(raw_id)
+            meta = self._meta.get(entry_id)
+            if meta is None:
+                continue
+            value, ridx, vec_r = meta
+            if vec_r is None:
+                continue
+            if ridx < 0 or ridx >= sid_idx.shape[0]:
+                continue
+            sid_r = int(sid_idx[ridx])
+            time_r = int(times[ridx])
+            lower = value - tau
+            upper = value + tau
+            left = bisect_left(entries, (lower, self._LOW_SENTINEL, self._LOW_SENTINEL))
+            right = bisect_right(entries, (upper, self._HIGH_SENTINEL, self._HIGH_SENTINEL))
+            for _v, other_entry_id, other_idx in entries[left:right]:
+                if other_entry_id == entry_id:
+                    continue
+                other_meta = self._meta.get(int(other_entry_id))
+                if other_meta is None:
+                    continue
+                vec_o = other_meta[2]
+                if vec_o is None:
+                    continue
+                if other_idx < 0 or other_idx >= sid_idx.shape[0]:
+                    continue
+                sid_o = int(sid_idx[other_idx])
+                time_o = int(times[other_idx])
+                if sid_o == sid_r and time_o == time_r:
+                    continue
+                diff = vec_r - vec_o
+                if float(np.dot(diff, diff)) > tau_sq:
+                    continue
+                pairs.append((int(ridx), int(other_idx)))
+        return pairs
+
+
 def _is_near_constant_stats(var_sum, n, std_thresh=1e-3):
     if n <= 0:
         return True
