@@ -52,7 +52,7 @@ HYPERPARAMETER search:
 		"seed_toggle": [1357],
 		"grid_dimension": [1] #fixed
 		"sketch_norm": ["mean_l2"] #fixed
-		"candidate_backend": ["flat", "bptree"]
+		"candidate_backend": ["bptree"]
 	}
 	
 	
