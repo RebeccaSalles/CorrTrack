@@ -186,6 +186,7 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     "f1_neg",
     "precision",
     "recall",
+    "specificity",
     "recall_min",
     "f1",
     "aucroc",
@@ -260,6 +261,7 @@ COMPARISON_COLUMNS: Sequence[str] = (
     "f1_neg",
     "precision",
     "recall",
+    "specificity",
     "recall_min",
     "f1",
     "aucroc",
@@ -3085,13 +3087,16 @@ class CorrTrack:
     
     def compute_metrics(predicted: np.ndarray, ground_truth: np.ndarray):
         assert predicted.shape == ground_truth.shape, "Arrays must have the same shape."
-        predicted_bool = predicted.astype(bool)
-        ground_truth_bool = ground_truth.astype(bool)
-        tp = np.sum(predicted_bool & ground_truth_bool)
-        fp = np.sum(predicted_bool & ~ground_truth_bool)
-        fn = np.sum(~predicted_bool & ground_truth_bool)
+        pred = set(np.flatnonzero(np.asarray(predicted).astype(bool).ravel()))
+        gt = set(np.flatnonzero(np.asarray(ground_truth).astype(bool).ravel()))
+        all_idx = set(range(np.asarray(predicted).size))
+        tp = len(pred & gt)
+        fp = len(pred - gt)
+        fn = len(gt - pred)
+        tn = len(all_idx - (pred | gt))
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
         f1        = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
         try:
             aucroc = roc_auc_score(ground_truth, predicted)
@@ -3104,17 +3109,29 @@ class CorrTrack:
         return {
             'precision': precision,
             'recall': recall,
+            'specificity': specificity,
             'f1_score': f1,
             'aucroc': aucroc,
             'pr_auc': pr_auc
         }
     
-    def compute_metrics_bf(predicted: dict, ground_truth: dict, windows=True, pair_min_dist=None):
+    def compute_metrics_bf(
+        predicted: dict,
+        ground_truth: dict,
+        windows=True,
+        pair_min_dist=None,
+        total_pairs_bf=None,
+    ):
         if windows:
-            return CorrTrack._compute_metrics_bf_windows(predicted, ground_truth, pair_min_dist)
+            return CorrTrack._compute_metrics_bf_windows(
+                predicted,
+                ground_truth,
+                pair_min_dist,
+                total_pairs_bf=total_pairs_bf,
+            )
         return CorrTrack.compute_metrics_bf_timestamps(predicted, ground_truth)
     
-    def _compute_metrics_bf_windows(predicted: dict, ground_truth: dict, pair_min_dist=None):
+    def _compute_metrics_bf_windows(predicted: dict, ground_truth: dict, pair_min_dist=None, total_pairs_bf=None):
         def _normalize_key(key):
             id1, id2, t1, t2, w = key
 
@@ -3164,15 +3181,37 @@ class CorrTrack:
         pred_neg = set(normalized_predicted_neg)
         gt_neg = set(normalized_ground_truth_neg)
         
+        def _safe_prec_recall(pred_set, gt_set, total_pairs=None):
+            fp = len(pred_set - gt_set)
+            specificity = 0.0
+            try:
+                total_pairs = int(total_pairs) if total_pairs is not None else None
+            except (TypeError, ValueError):
+                total_pairs = None
+            if total_pairs is not None:
+                negatives = max(total_pairs - len(gt_set), 0)
+                if negatives > 0:
+                    tn = max(negatives - fp, 0)
+                    specificity = tn / negatives
+            if len(pred_set) == 0:
+                return 0.0, (1.0 if len(gt_set) == 0 else 0.0), specificity  # precision 0, recall 0 unless both empty
+            if len(gt_set) == 0:
+                return 0.0, 0.0, specificity
+            precision = (len(pred_set) - len(pred_set - gt_set)) / len(pred_set)
+            recall    = (len(gt_set) - len(gt_set - pred_set)) / len(gt_set)
+            return precision, recall, specificity
+
         # Union of normalized keys
         all_keys = pred | gt
         sorted_keys = sorted(all_keys)
 
+        recall_min = None if pair_min_dist is None else int(pair_min_dist in pred)
         if not sorted_keys:
-            recall_min = None if pair_min_dist is None else int(pair_min_dist in pred)
+            _, _, specificity = _safe_prec_recall(pred, gt, total_pairs_bf)
             return {
                 'precision': 0.0,
                 'recall': 0.0,
+                'specificity': specificity,
                 'f1_score': 0.0,
                 'aucroc': float('nan'),
                 'pr_auc': float('nan'),
@@ -3198,39 +3237,16 @@ class CorrTrack:
 
         assert predicted_array.shape == ground_truth_array.shape, "Arrays must have the same shape after concatenation."
 
-        # Binary conversion
-        predicted_bool = predicted_array.astype(bool)
-        ground_truth_bool = ground_truth_array.astype(bool)
-
-        # Metric computations
-        #tp = np.sum(predicted_bool & ground_truth_bool)
-        #fp = np.sum(predicted_bool & ~ground_truth_bool)
-        #fn = np.sum(~predicted_bool & ground_truth_bool)
-
-        #precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        #recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-
-        recall_min = None if pair_min_dist is None else int(pair_min_dist in pred)
-
-        def _safe_prec_recall(pred_set, gt_set):
-            if len(pred_set) == 0:
-                return 0.0, (1.0 if len(gt_set) == 0 else 0.0)  # precision 0, recall 0 unless both empty
-            if len(gt_set) == 0:
-                return 0.0, 0.0
-            precision = (len(pred_set) - len(pred_set - gt_set)) / len(pred_set)
-            recall    = (len(gt_set) - len(gt_set - pred_set)) / len(gt_set)
-            return precision, recall
-
         # overall
-        precision, recall = _safe_prec_recall(pred, gt)
+        precision, recall, specificity = _safe_prec_recall(pred, gt, total_pairs_bf)
         f1 = 2*precision*recall/(precision+recall) if (precision+recall)>0 else 0.0
 
         # pos
-        precision_pos, recall_pos = _safe_prec_recall(pred_pos, gt_pos)
+        precision_pos, recall_pos, _ = _safe_prec_recall(pred_pos, gt_pos)
         f1_pos = 2*precision_pos*recall_pos/(precision_pos+recall_pos) if (precision_pos+recall_pos)>0 else 0.0
 
         # neg
-        precision_neg, recall_neg = _safe_prec_recall(pred_neg, gt_neg)
+        precision_neg, recall_neg, _ = _safe_prec_recall(pred_neg, gt_neg)
         f1_neg = 2*precision_neg*recall_neg/(precision_neg+recall_neg) if (precision_neg+recall_neg)>0 else 0.0
 
         try:
@@ -3246,6 +3262,7 @@ class CorrTrack:
         return {
             'precision': precision,
             'recall': recall,
+            'specificity': specificity,
             'f1_score': f1,
             'aucroc': aucroc,
             'pr_auc': pr_auc,
@@ -3282,6 +3299,7 @@ class CorrTrack:
             return {
                 'precision': 0.0,
                 'recall': 0.0,
+                'specificity': 0.0,
                 'f1_score': 0.0,
                 'aucroc': float('nan'),
                 'pr_auc': float('nan')
@@ -3304,17 +3322,18 @@ class CorrTrack:
 
         assert predicted_array.shape == ground_truth_array.shape, "Arrays must have the same shape after concatenation."
 
-        # Binary conversion
-        predicted_bool = predicted_array.astype(bool)
-        ground_truth_bool = ground_truth_array.astype(bool)
-
-        # Metric computations
-        tp = np.sum(predicted_bool & ground_truth_bool)
-        fp = np.sum(predicted_bool & ~ground_truth_bool)
-        fn = np.sum(~predicted_bool & ground_truth_bool)
+        # Metric computations from set representation.
+        pred = set(np.flatnonzero(predicted_array.astype(bool).ravel()))
+        gt = set(np.flatnonzero(ground_truth_array.astype(bool).ravel()))
+        all_idx = set(range(predicted_array.size))
+        tp = len(pred & gt)
+        fp = len(pred - gt)
+        fn = len(gt - pred)
+        tn = len(all_idx - (pred | gt))
 
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
         f1        = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
 
         try:
@@ -3330,6 +3349,7 @@ class CorrTrack:
         return {
             'precision': precision,
             'recall': recall,
+            'specificity': specificity,
             'f1_score': f1,
             'aucroc': aucroc,
             'pr_auc': pr_auc
@@ -5502,6 +5522,7 @@ class CorrTrack_optimize:
 
         self.runtime_bf = runtime
         self.pair_min_dist_bf = self.corrtrack_bf.pair_min_dist
+        self.tested_bf = self.corrtrack_bf.tested_candidates
     
     def _init_optim_record(self, dataset_id, param_combo):
         record = {key: None for key in OPTIM_RESULT_COLUMNS}
@@ -5704,7 +5725,11 @@ class CorrTrack_optimize:
                 corr_flags = corrtrack.get_correlation_flags(length_data, 0)
 
             metrics = CorrTrack.compute_metrics_bf(
-                corr_flags, self.ground_truth, self.recall_by_window, self.pair_min_dist_bf
+                corr_flags,
+                self.ground_truth,
+                self.recall_by_window,
+                self.pair_min_dist_bf,
+                total_pairs_bf=self.tested_bf,
             )
 
             record["precision_pos"] = metrics["precision_pos"]
@@ -5715,6 +5740,7 @@ class CorrTrack_optimize:
             record["f1_neg"] = metrics["f1_score_neg"]
             record["precision"] = metrics["precision"]
             record["recall"] = metrics["recall"]
+            record["specificity"] = metrics["specificity"]
             record["recall_min"] = metrics["recall_min"]
             record["f1"] = metrics["f1_score"]
             record["aucroc"] = metrics["aucroc"]
@@ -6220,6 +6246,7 @@ class CorrTrack_compare:
         f1_neg = metrics["f1_score_neg"]
         precision = metrics["precision"]
         recall = metrics["recall"]
+        specificity = metrics["specificity"]
         recall_min = metrics["recall_min"]
         f1 = metrics["f1_score"]
         aucroc = metrics["aucroc"]
@@ -6343,6 +6370,7 @@ class CorrTrack_compare:
             fmt(f1_neg),
             fmt(precision),
             fmt(recall),
+            fmt(specificity),
             fmt(recall_min),
             fmt(f1),
             fmt(aucroc),
@@ -6386,6 +6414,7 @@ class CorrTrack_compare:
             "f1_score_neg",
             "precision",
             "recall",
+            "specificity",
             "recall_min",
             "f1_score",
             "aucroc",
@@ -6411,6 +6440,7 @@ class CorrTrack_compare:
                 ground_truth,
                 self.recall_by_window,
                 self.pair_min_dist_bf,
+                total_pairs_bf=self.tested_bf,
             )
 
             runtime = to_float(record.get("runtime"))
@@ -6461,6 +6491,7 @@ class CorrTrack_compare:
                         ground_truth,
                         self.recall_by_window,
                         self.pair_min_dist_bf,
+                        total_pairs_bf=self.tested_bf,
                     )
                 else:
                     fil_metrics = build_empty_metrics()
@@ -6529,7 +6560,13 @@ class CorrTrack_compare:
             feature_kwargs,
         )
         speedup = runtime_bf / runtime if runtime else float("inf")
-        metrics = CorrTrack.compute_metrics_bf(corr_flags, corr_flags_bf,self.recall_by_window,self.pair_min_dist_bf)
+        metrics = CorrTrack.compute_metrics_bf(
+            corr_flags,
+            corr_flags_bf,
+            self.recall_by_window,
+            self.pair_min_dist_bf,
+            total_pairs_bf=self.tested_bf,
+        )
         bf_artifact_time = getattr(self, "artifact_time_bf", 0.0)
 
         bf_maxlag_csv = os.path.join(path, "bf_max_lag_correlated.csv")
@@ -6648,8 +6685,8 @@ class CorrTrack_compare:
             _format_float(rel_waste_red),
             f"{metrics['precision_pos']:.4f}",f"{metrics['recall_pos']:.4f}",f"{metrics['f1_score_pos']:.4f}",
             f"{metrics['precision_neg']:.4f}",f"{metrics['recall_neg']:.4f}",f"{metrics['f1_score_neg']:.4f}",
-            f"{metrics['precision']:.4f}", f"{metrics['recall']:.4f}", _format_optional_float(metrics['recall_min']),
-            f"{metrics['f1_score']:.4f}", f"{metrics['aucroc']:.4f}",
+            f"{metrics['precision']:.4f}", f"{metrics['recall']:.4f}", f"{metrics['specificity']:.4f}",
+            _format_optional_float(metrics['recall_min']), f"{metrics['f1_score']:.4f}", f"{metrics['aucroc']:.4f}",
             f"{metrics['pr_auc']:.4f}"
         ] + [
             f"{maxlag_precision:.4f}",
