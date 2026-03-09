@@ -24,7 +24,7 @@ ALWAYS FIXED parameters:
 	MAX_WORKERS = 0 (automatic = #CPUs)
 
 	NEG_CORR = False
-	TRAIN_RATIO = 0.7
+	TRAIN_RATIO = 0.5
 	TARGET_RECALL = 0.9
 	
 	plot = True
