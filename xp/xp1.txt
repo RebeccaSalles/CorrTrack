@@ -43,7 +43,7 @@ ALWAYS FIXED parameters:
 HYPERPARAMETER search:
 	param_grid = {
 		"n_vectors": [8,16,32,64],
-		"cell_size": [0.25,0.5,0.75,1,1.25], #strech rate
+		"cell_size": [0.25,0.5,0.75,1,1.25,1.5], #strech rate
 		"freq_threshold": [0], #not needed in sequential
 
 		"preprocess": [False],
