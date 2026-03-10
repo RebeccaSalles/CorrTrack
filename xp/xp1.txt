@@ -3,7 +3,7 @@ Experiment - Sequential - Synthetic
 Data: Synthetic
 	SYNTH_PARAMS = {
 		m = n_series
-		n = 1.024 M
+		n = 100k
 		z = {Stationary base_proc: 0.5; Nonstationary base_proc: 0.1}
 		w = WINDOW_SIZE
 		template_len = WINDOW_SIZE

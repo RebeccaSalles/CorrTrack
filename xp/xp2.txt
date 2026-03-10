@@ -3,7 +3,7 @@ Experiment - Sequential - Climatic
 Data: ASOS
 	country = ["fr","br"]
 	variable = ["air_temperature","wind_direction","wind_speed","visibility","flights","delays","delay_perc","relative_humidity","apparent_temperature","pressure","dew_point"]
-	n_years = [20] #365*24*20 = 175200
+	n_years = [10] #365*24*10 = 87600
 	
 Methods: 
 	corrtrack
