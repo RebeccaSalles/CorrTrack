@@ -76,7 +76,7 @@ FIXED parameters:
 	
 ====== XP 2 - scale WINDOW_STEP ======
 DYNAMIC parameters:
-	WINDOW_STEP = [1, 0.5*BASIC_WINDOW, BASIC_WINDOW]
+	WINDOW_STEP = [1]
 	
 FIXED parameters:
 	n_series = 100
@@ -110,7 +110,7 @@ FIXED parameters:
 
 ====== XP 4 - scale WINDOW_SIZE ======
 DYNAMIC parameters:
-	WINDOW_SIZE = [128,256,512,1024,2048,4096,8192]
+	WINDOW_SIZE = [128,256,512,1024,2048]
 	
 FIXED parameters:
 	n_series = 100

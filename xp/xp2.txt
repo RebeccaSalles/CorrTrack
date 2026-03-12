@@ -37,7 +37,7 @@ ALWAYS FIXED parameters:
 HYPERPARAMETER search:
 	param_grid = {
 		"n_vectors": [8,16,32,64],
-		"cell_size": [0.25,0.5,0.75,1,1.25,1.5], #strech rate
+		"cell_stretch": [0.25,0.5,0.75,1,1.25,1.5], #stretch rate
 		"freq_threshold": [0], #not needed in sequential
 
 		"preprocess": [False],
@@ -61,21 +61,10 @@ FIXED parameters:
 	WINDOW_STEP = BASIC_WINDOW
 	CORR_THRESHOLD = 0.8
 	CORR_VAL = True
-	
-====== XP 1.2 - scale n_series for all var. at the same time ======
-DYNAMIC parameters:
-	n_series = [5,25,50,75,100, max=all_X_all_var)]
-	
-FIXED parameters:
-	WINDOW_SIZE = 7 * 24
-	N_LAGS = WINDOW_SIZE*100
-	WINDOW_STEP = BASIC_WINDOW
-	CORR_THRESHOLD = 0.8
-	CORR_VAL = True
-	
+
 ====== XP 2 - scale WINDOW_STEP ======
 DYNAMIC parameters:
-	WINDOW_STEP = [1, 0.5*BASIC_WINDOW, BASIC_WINDOW]
+	WINDOW_STEP = [1]
 	
 FIXED parameters:
 	n_series = 100
@@ -97,7 +86,7 @@ FIXED parameters:
 
 ====== XP 4 - scale WINDOW_SIZE ======
 DYNAMIC parameters:
-	WINDOW_SIZE =  [7 * 24, 15 * 24, 30 * 24, 180 * 24, 365 * 24]
+	WINDOW_SIZE =  [7 * 24, 15 * 24, 30 * 24]
 	
 FIXED parameters:
 	n_series = 100
