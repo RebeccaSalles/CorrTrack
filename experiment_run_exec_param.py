@@ -37,6 +37,9 @@ TARGET_RECALL = 0.95
 # Artifact persistence for run scripts that write out intermediate outputs.
 ARTIFACT_MODE = "buffered"
 ARTIFACT_BUFFER_MAX_ROWS = 250000
+SAVE_ONLY_REQUIRED_ARTIFACTS = True
+SAVE_MAXLAG_ARTIFACTS = False
+DELETE_MAIN_ARTIFACTS_AFTER_COMPARE = False
 
 VERBOSE = False
 TESTING = False

@@ -464,6 +464,11 @@ def execute_corrtrack_pass(
     artifact_buffer_max_rows = metadata.get("artifact_buffer_max_rows")
     if artifact_buffer_max_rows in (None, ""):
         artifact_buffer_max_rows = getattr(corrtrack, "_artifact_buffer_max_rows", 250000)
+    artifact_policy = _resolve_artifact_save_policy(
+        recall_by_window,
+        metadata.get("save_only_required_artifacts"),
+        metadata.get("save_maxlag_artifacts"),
+    )
 
     artifact_mode_value = (artifact_mode or "iterative").lower()
     if artifact_mode_value not in ("iterative", "final", "buffered"):
@@ -474,6 +479,10 @@ def execute_corrtrack_pass(
         artifact_mode=effective_artifact_mode,
         artifact_buffer_max_rows=artifact_buffer_max_rows,
         recall_by_window=recall_by_window,
+        save_correlated=artifact_policy["save_correlated"],
+        save_status=artifact_policy["save_status"],
+        save_anomalies=artifact_policy["save_anomalies"],
+        save_maxlag=artifact_policy["save_maxlag"],
     )
     corrtrack._step_observer_enabled = bool(step_observer)
     corrtrack._validated_step = {}
@@ -562,7 +571,7 @@ def execute_corrtrack_pass(
 
     runtime = max(runtime - artifact_time_overlap, 0.0)
 
-    if artifact_active:
+    if artifact_active and getattr(corrtrack, "_artifact_save_maxlag", True):
         _t0 = time.time()
         corrtrack._save_max_lag_correlated(f"{artifact_prefix}_max_lag_correlated.csv")
         artifact_time_total += time.time() - _t0
@@ -616,6 +625,11 @@ def run_and_log_bruteforce(
     metadata.setdefault("alg", metadata.get("alg", "bf"))
     metadata.setdefault("optim", metadata.get("optim", "baseline"))
     metadata.setdefault("artifact_buffer_max_rows", base_config.get("artifact_buffer_max_rows"))
+    metadata.setdefault(
+        "save_only_required_artifacts",
+        base_config.get("save_only_required_artifacts"),
+    )
+    metadata.setdefault("save_maxlag_artifacts", base_config.get("save_maxlag_artifacts"))
 
     artifact_mode = base_config.get("artifact_mode", "iterative")
     monitor = _coerce_to_bool(base_config.get("monitor", True), default=True)
@@ -693,6 +707,14 @@ def run_and_log_corrtrack(
     metadata.setdefault("alg", metadata.get("alg"))
     metadata.setdefault("optim", metadata.get("optim", "main"))
     metadata.setdefault("artifact_buffer_max_rows", run_params.get("artifact_buffer_max_rows") or base_config.get("artifact_buffer_max_rows"))
+    metadata.setdefault(
+        "save_only_required_artifacts",
+        run_params.get("save_only_required_artifacts", base_config.get("save_only_required_artifacts")),
+    )
+    metadata.setdefault(
+        "save_maxlag_artifacts",
+        run_params.get("save_maxlag_artifacts", base_config.get("save_maxlag_artifacts")),
+    )
 
     def _to_int(value):
         try:
@@ -803,6 +825,30 @@ def _coerce_to_bool(value, default=False):
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "t", "yes", "y"}
     return bool(value)
+
+
+def _resolve_artifact_save_policy(
+    recall_by_window,
+    save_only_required_artifacts=False,
+    save_maxlag_artifacts=True,
+):
+    save_only_required = _coerce_to_bool(save_only_required_artifacts, default=False)
+    save_maxlag = _coerce_to_bool(save_maxlag_artifacts, default=True)
+
+    if save_only_required:
+        return {
+            "save_correlated": bool(recall_by_window),
+            "save_status": False,
+            "save_anomalies": not bool(recall_by_window),
+            "save_maxlag": save_maxlag,
+        }
+
+    return {
+        "save_correlated": True,
+        "save_status": True,
+        "save_anomalies": True,
+        "save_maxlag": save_maxlag,
+    }
 
 
 def _resolve_parallel_flag(value, default=False) -> bool:
@@ -1845,6 +1891,10 @@ class CorrTrack:
         self._artifact_buffer_max_rows = 250000
         self._artifact_buffered = False
         self._artifact_recall_by_window = True
+        self._artifact_save_correlated = True
+        self._artifact_save_status = True
+        self._artifact_save_anomalies = True
+        self._artifact_save_maxlag = True
         self._spill_correlated = {}
         self._spill_correlated_chunks = []
         self._spill_correlated_chunk_index = 0
@@ -2491,12 +2541,25 @@ class CorrTrack:
         time = int(np.min(timepts + last_corr_length - (window_size - self.window_step)))
         return (pair, (time, -1))
 
-    def _configure_artifact_runtime(self, artifact_mode="final", artifact_buffer_max_rows=None, recall_by_window=True):
+    def _configure_artifact_runtime(
+        self,
+        artifact_mode="final",
+        artifact_buffer_max_rows=None,
+        recall_by_window=True,
+        save_correlated=True,
+        save_status=True,
+        save_anomalies=True,
+        save_maxlag=True,
+    ):
         mode_value = (artifact_mode or "final").lower()
         if mode_value not in {"iterative", "final", "buffered"}:
             mode_value = "final"
         self._artifact_mode_runtime = mode_value
         self._artifact_recall_by_window = bool(recall_by_window)
+        self._artifact_save_correlated = bool(save_correlated)
+        self._artifact_save_status = bool(save_status)
+        self._artifact_save_anomalies = bool(save_anomalies)
+        self._artifact_save_maxlag = bool(save_maxlag)
         try:
             max_rows = int(artifact_buffer_max_rows) if artifact_buffer_max_rows is not None else self._artifact_buffer_max_rows
         except (TypeError, ValueError):
@@ -2521,9 +2584,18 @@ class CorrTrack:
             return False
         limit = max(1, int(getattr(self, "_artifact_buffer_max_rows", 1)))
         return (
-            len(getattr(self, "_spill_correlated", {})) >= limit
-            or len(getattr(self, "_spill_status_rows", [])) >= limit
-            or len(getattr(self, "_spill_anomaly_rows", [])) >= limit
+            (
+                getattr(self, "_artifact_save_correlated", True)
+                and len(getattr(self, "_spill_correlated", {})) >= limit
+            )
+            or (
+                getattr(self, "_artifact_save_status", True)
+                and len(getattr(self, "_spill_status_rows", [])) >= limit
+            )
+            or (
+                getattr(self, "_artifact_save_anomalies", True)
+                and len(getattr(self, "_spill_anomaly_rows", [])) >= limit
+            )
         )
 
     def _record_correlated(self, pair, corr, retain_validated=True):
@@ -2538,12 +2610,18 @@ class CorrTrack:
             self.validated.update(accepted_map)
         if getattr(self, "_artifact_buffered", False):
             t0 = time.perf_counter()
-            self._spill_correlated.update(accepted_map)
-            for pair, corr in accepted_map.items():
-                self._update_maxlag_state(pair, corr)
+            if getattr(self, "_artifact_save_correlated", True):
+                self._spill_correlated.update(accepted_map)
+            if getattr(self, "_artifact_save_maxlag", True):
+                for pair, corr in accepted_map.items():
+                    self._update_maxlag_state(pair, corr)
             self.artifact_bookkeeping_time += time.perf_counter() - t0
         else:
-            self.correlated.update(accepted_map)
+            if getattr(self, "_artifact_save_correlated", True):
+                self.correlated.update(accepted_map)
+            if getattr(self, "_artifact_save_maxlag", True):
+                for pair, corr in accepted_map.items():
+                    self._update_maxlag_state(pair, corr)
 
     def _update_maxlag_state(self, pair, corr):
         id1, id2, t1, t2, _window = pair
@@ -2621,6 +2699,8 @@ class CorrTrack:
             }
 
     def _buffered_emit_anomaly(self, key, marker):
+        if not getattr(self, "_artifact_save_anomalies", True):
+            return
         id1, id2, lag = key
         if isinstance(marker, tuple):
             time_val, kind = marker
@@ -2629,6 +2709,8 @@ class CorrTrack:
         self._spill_anomaly_rows.append((id1, id2, lag, int(time_val), int(kind)))
 
     def _buffered_finalize_status(self, key, status):
+        if not getattr(self, "_artifact_save_status", True):
+            return
         if key is None or status is None:
             return
         id1, id2, lag = key
@@ -2695,6 +2777,8 @@ class CorrTrack:
         self.previous_correlations = new_in
 
     def _flush_correlated_chunk(self):
+        if not getattr(self, "_artifact_save_correlated", True):
+            return False
         if not self._spill_correlated:
             return False
         prefix = self._artifact_state.get("prefix")
@@ -2717,6 +2801,8 @@ class CorrTrack:
         return True
 
     def _flush_status_chunk(self):
+        if not getattr(self, "_artifact_save_status", True):
+            return False
         if not self._spill_status_rows:
             return False
         prefix = self._artifact_state.get("prefix")
@@ -2735,6 +2821,8 @@ class CorrTrack:
         return True
 
     def _flush_anomaly_chunk(self):
+        if not getattr(self, "_artifact_save_anomalies", True):
+            return False
         if not self._spill_anomaly_rows:
             return False
         prefix = self._artifact_state.get("prefix")
@@ -2818,7 +2906,7 @@ class CorrTrack:
         self._maybe_flush_artifact_buffers(force=True)
 
         correlated_csv = f"{prefix}_correlated.csv"
-        if self._spill_correlated_chunks:
+        if getattr(self, "_artifact_save_correlated", True) and self._spill_correlated_chunks:
             self._merge_sorted_csv_chunks(
                 self._spill_correlated_chunks,
                 correlated_csv,
@@ -2834,13 +2922,13 @@ class CorrTrack:
                     row[4],
                 ],
             )
-        elif not os.path.exists(correlated_csv):
+        elif getattr(self, "_artifact_save_correlated", True) and not os.path.exists(correlated_csv):
             with open(correlated_csv, "w", newline="") as file:
                 writer = csv.writer(file, delimiter=CSV_DELIMITER)
                 writer.writerow(["id1", "id2", "time1_idx", "time1", "time2_idx", "time2", "corr"])
 
         status_csv = f"{prefix}_status.csv"
-        if self._spill_status_chunks:
+        if getattr(self, "_artifact_save_status", True) and self._spill_status_chunks:
             self._merge_sorted_csv_chunks(
                 self._spill_status_chunks,
                 status_csv,
@@ -2856,13 +2944,13 @@ class CorrTrack:
                     row[6],
                 ],
             )
-        elif not os.path.exists(status_csv):
+        elif getattr(self, "_artifact_save_status", True) and not os.path.exists(status_csv):
             with open(status_csv, "w", newline="") as file:
                 writer = csv.writer(file, delimiter=CSV_DELIMITER)
                 writer.writerow(["id1", "id2", "lag", "start_time_id1", "start_time_id2", "duration", "corr_sign"])
 
         anomalies_csv = f"{prefix}_anomalies.csv"
-        if self._spill_anomaly_chunks:
+        if getattr(self, "_artifact_save_anomalies", True) and self._spill_anomaly_chunks:
             self._merge_sorted_csv_chunks(
                 self._spill_anomaly_chunks,
                 anomalies_csv,
@@ -2877,7 +2965,7 @@ class CorrTrack:
                     _marker_to_label(int(row[4])),
                 ],
             )
-        elif not os.path.exists(anomalies_csv):
+        elif getattr(self, "_artifact_save_anomalies", True) and not os.path.exists(anomalies_csv):
             with open(anomalies_csv, "w", newline="") as file:
                 writer = csv.writer(file, delimiter=CSV_DELIMITER)
                 writer.writerow(["id1", "id2", "lag", "time_idx", "time", "anomaly"])
@@ -2921,7 +3009,11 @@ class CorrTrack:
                 validated_now = dict.fromkeys(candidates, 1.0)
                 if retain_validated:
                     self.validated = validated_now
-                self.correlated.update(validated_now)
+                if getattr(self, "_artifact_save_correlated", True):
+                    self.correlated.update(validated_now)
+                if getattr(self, "_artifact_save_maxlag", True):
+                    for pair in candidates:
+                        self._update_maxlag_state(pair, 1.0)
             self.tested_candidates += n_pairs
             self.validated_candidates += n_pairs
             return
@@ -3057,7 +3149,7 @@ class CorrTrack:
             self._monitor_corr_buffered()
             return
 
-        if _cy_monitor_step is not None:
+        if _cy_monitor_step is not None and getattr(self, "_artifact_save_correlated", True):
             t0 = time.perf_counter() if self.profile_enabled else None
             validated_items = tuple(self.validated.items()) if self.validated else ()
             new_in = _cy_monitor_step(
@@ -3188,7 +3280,10 @@ class CorrTrack:
                 writer.writerow([id1,id2,t1_idx,t1,t2_idx,t2,corr])
 
     def _save_max_lag_correlated(self,output_csv):
-        if getattr(self, "_artifact_buffered", False) and self._maxlag_state:
+        if not getattr(self, "_artifact_save_maxlag", True):
+            return
+
+        if self._maxlag_state:
             os.makedirs(os.path.dirname(output_csv), exist_ok=True)
             with open(output_csv, mode='w', newline='') as file:
                 writer = csv.writer(file, delimiter=CSV_DELIMITER)
@@ -3573,11 +3668,16 @@ class CorrTrack:
         if not state or not state.get("prefix"):
             return
         prefix = state["prefix"]
-        self._append_correlated_artifact(prefix)
-        self._append_status_artifact(prefix)
-        self._append_anomalies_artifact(prefix)
+        if getattr(self, "_artifact_save_correlated", True):
+            self._append_correlated_artifact(prefix)
+        if getattr(self, "_artifact_save_status", True):
+            self._append_status_artifact(prefix)
+        if getattr(self, "_artifact_save_anomalies", True):
+            self._append_anomalies_artifact(prefix)
 
     def _append_correlated_artifact(self, prefix):
+        if not getattr(self, "_artifact_save_correlated", True):
+            return
         state = self._artifact_state
         rows = []
         for pair, corr in self.correlated.items():
@@ -3643,6 +3743,8 @@ class CorrTrack:
             )
 
     def _append_status_artifact(self, prefix):
+        if not getattr(self, "_artifact_save_status", True):
+            return
         state = self._artifact_state
         if not getattr(self, "corr_lengths", None):
             return
@@ -3668,6 +3770,8 @@ class CorrTrack:
             )
 
     def _append_anomalies_artifact(self, prefix):
+        if not getattr(self, "_artifact_save_anomalies", True):
+            return
         state = self._artifact_state
         if not getattr(self, "corr_anomalies", None):
             return
@@ -6349,7 +6453,32 @@ class Candidates:
 
 
 class CorrTrack_optimize:
-    def __init__(self,train_data,ids,window_size,window_step,n_lags,corr_threshold,recall_by_window,alg,neg_corr,corr_val, exec="parallel",max_workers=0, sketch_norm="z", verbose=False, testing=False, parallel_sketch=None, parallel_candidates=None, parallel_validation=None, track_min_dist=False, artifact_mode="buffered", artifact_buffer_max_rows=250000):
+    def __init__(
+        self,
+        train_data,
+        ids,
+        window_size,
+        window_step,
+        n_lags,
+        corr_threshold,
+        recall_by_window,
+        alg,
+        neg_corr,
+        corr_val,
+        exec="parallel",
+        max_workers=0,
+        sketch_norm="z",
+        verbose=False,
+        testing=False,
+        parallel_sketch=None,
+        parallel_candidates=None,
+        parallel_validation=None,
+        track_min_dist=False,
+        artifact_mode="buffered",
+        artifact_buffer_max_rows=250000,
+        save_only_required_artifacts=False,
+        save_maxlag_artifacts=True,
+    ):
 
         self.neg_corr = neg_corr
         self.corr_val = corr_val
@@ -6387,6 +6516,14 @@ class CorrTrack_optimize:
             self.artifact_buffer_max_rows = max(1, int(artifact_buffer_max_rows))
         except (TypeError, ValueError):
             self.artifact_buffer_max_rows = 250000
+        self.save_only_required_artifacts = _coerce_to_bool(
+            save_only_required_artifacts,
+            default=False,
+        )
+        self.save_maxlag_artifacts = _coerce_to_bool(
+            save_maxlag_artifacts,
+            default=True,
+        )
         self._optim_artifact_dir = None
         self._bf_artifact_prefix = None
         self._bf_record = None
@@ -6486,6 +6623,8 @@ class CorrTrack_optimize:
             "alg": "bf",
             "optim": "baseline",
             "artifact_buffer_max_rows": self.artifact_buffer_max_rows,
+            "save_only_required_artifacts": self.save_only_required_artifacts,
+            "save_maxlag_artifacts": self.save_maxlag_artifacts,
         }
 
         try:
@@ -6693,10 +6832,12 @@ class CorrTrack_optimize:
                 "seed": seed,
                 "seed_toggle": seed_toggle,
                 "preprocess": preprocess,
-                "sketch_norm": self.sketch_norm,
+                "sketch_norm": corrtrack.sketch_norm,
                 "candidate_backend": param_combo.get("candidate_backend"),
                 "freq_threshold": freq_threshold,
                 "artifact_buffer_max_rows": self.artifact_buffer_max_rows,
+                "save_only_required_artifacts": self.save_only_required_artifacts,
+                "save_maxlag_artifacts": self.save_maxlag_artifacts,
             }
 
             if use_online_window_metrics:
@@ -6765,6 +6906,13 @@ class CorrTrack_optimize:
             for field in copy_fields:
                 if field in run_record:
                     record[field] = run_record.get(field)
+
+            record["sketch_norm"] = corrtrack.sketch_norm
+            record["candidate_backend"] = getattr(
+                corrtrack,
+                "candidate_backend_effective",
+                getattr(corrtrack, "candidate_backend", None),
+            )
 
             record["corr_w"] = run_record.get("correlated")
             record["tested_w"] = run_record.get("tested")
@@ -7832,7 +7980,14 @@ class CorrTrack_compare:
             fmt(maxlag_diff_std),
         ]
 
-    def compare_from_artifacts(self, dataset_id, bf_run_csv, corrtrack_run_files, output_csv):
+    def compare_from_artifacts(
+        self,
+        dataset_id,
+        bf_run_csv,
+        corrtrack_run_files,
+        output_csv,
+        delete_main_artifacts_after_compare=False,
+    ):
         bf_record = self._load_run_record(bf_run_csv, dataset_id, run_kind="bf")
         bf_prefix = bf_record.get("artifact_path")
         self.pair_min_dist_bf = self._parse_pair_min_dist(bf_record.get("pair_min_dist"))
@@ -7884,6 +8039,7 @@ class CorrTrack_compare:
             return {key: math.nan for key in metric_keys}
 
         results = []
+        cleanup_prefixes = set()
         if isinstance(corrtrack_run_files, dict):
             run_iter = corrtrack_run_files.items()
         else:
@@ -7911,10 +8067,11 @@ class CorrTrack_compare:
 
             artifact_time = to_float(record.get("artifact_time"))
 
-            maxlag_metrics = (0.0, 0.0, 0.0, float("nan"), float("nan"))
-            if bf_maxlag_csv and prefix:
+            maxlag_metrics = (float("nan"), float("nan"), float("nan"), float("nan"), float("nan"))
+            if bf_maxlag_csv and prefix and os.path.exists(bf_maxlag_csv):
                 candidate_maxlag_csv = f"{prefix}_max_lag_correlated.csv"
-                maxlag_metrics = self._compute_maxlag_metrics(bf_maxlag_csv, candidate_maxlag_csv)
+                if os.path.exists(candidate_maxlag_csv):
+                    maxlag_metrics = self._compute_maxlag_metrics(bf_maxlag_csv, candidate_maxlag_csv)
 
             row = self._build_comparison_row(
                 dataset_id,
@@ -7929,6 +8086,8 @@ class CorrTrack_compare:
                 maxlag_metrics,
             )
             results.append(row)
+            if prefix:
+                cleanup_prefixes.add(prefix)
 
         base_dir = os.path.dirname(os.path.abspath(bf_run_csv))
         filcorr_run_csv = os.path.join(base_dir, "filcorr_run.csv")
@@ -7968,8 +8127,8 @@ class CorrTrack_compare:
                 speedup = (self.runtime_bf / runtime) if runtime else float("inf")
                 artifact_time = to_float(filcorr_record.get("artifact_time"))
 
-                maxlag_metrics = (0.0, 0.0, 0.0, float("nan"), float("nan"))
-                if bf_maxlag_csv and os.path.exists(filcorr_maxlag_csv):
+                maxlag_metrics = (float("nan"), float("nan"), float("nan"), float("nan"), float("nan"))
+                if bf_maxlag_csv and os.path.exists(bf_maxlag_csv) and os.path.exists(filcorr_maxlag_csv):
                     maxlag_metrics = self._compute_maxlag_metrics(bf_maxlag_csv, filcorr_maxlag_csv)
 
                 filcorr_record["mode"] = "filcorr"
@@ -7995,6 +8154,10 @@ class CorrTrack_compare:
             writer = csv.writer(file, delimiter=CSV_DELIMITER)
             writer.writerow(COMPARISON_COLUMNS)
             writer.writerows(results)
+
+        if _coerce_to_bool(delete_main_artifacts_after_compare, default=False):
+            for prefix in sorted(cleanup_prefixes):
+                _remove_artifact_files(prefix)
 
         return results
 
@@ -8039,10 +8202,17 @@ class CorrTrack_compare:
 
         bf_maxlag_csv = os.path.join(path, "bf_max_lag_correlated.csv")
         candidate_maxlag_csv = os.path.join(path, f"{prefix}_max_lag_correlated.csv")
-        maxlag_precision, maxlag_recall, maxlag_f1, maxlag_diff_mean, maxlag_diff_std = self._compute_maxlag_metrics(
-            bf_maxlag_csv,
-            candidate_maxlag_csv,
-        )
+        if os.path.exists(bf_maxlag_csv) and os.path.exists(candidate_maxlag_csv):
+            maxlag_precision, maxlag_recall, maxlag_f1, maxlag_diff_mean, maxlag_diff_std = self._compute_maxlag_metrics(
+                bf_maxlag_csv,
+                candidate_maxlag_csv,
+            )
+        else:
+            maxlag_precision = float("nan")
+            maxlag_recall = float("nan")
+            maxlag_f1 = float("nan")
+            maxlag_diff_mean = float("nan")
+            maxlag_diff_std = float("nan")
 
         def _format_float(value):
             if isinstance(value, float) and math.isnan(value):
@@ -8175,7 +8345,12 @@ class CorrTrack_compare:
         corrtrack_run_files=None,
     ):
         if not run and bf_run_csv and corrtrack_run_files:
-            return self.compare_from_artifacts(dataset_id, bf_run_csv, corrtrack_run_files, output_csv)
+            return self.compare_from_artifacts(
+                dataset_id,
+                bf_run_csv,
+                corrtrack_run_files,
+                output_csv,
+            )
         path = os.path.dirname(os.path.abspath(output_csv))
 
         bst = {}

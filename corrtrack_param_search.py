@@ -48,6 +48,8 @@ DEFAULT_CORR_VAL_OPTIM = getattr(_DEFAULT_EXEC_CFG, "CORR_VAL_OPTIM", False)
 DEFAULT_RECALL_BY_WINDOW = getattr(_DEFAULT_EXEC_CFG, "RECALL_BY_WINDOW", True)
 DEFAULT_ARTIFACT_MODE = getattr(_DEFAULT_EXEC_CFG, "ARTIFACT_MODE", "buffered")
 DEFAULT_ARTIFACT_BUFFER_MAX_ROWS = getattr(_DEFAULT_EXEC_CFG, "ARTIFACT_BUFFER_MAX_ROWS", 250000)
+DEFAULT_SAVE_ONLY_REQUIRED_ARTIFACTS = getattr(_DEFAULT_EXEC_CFG, "SAVE_ONLY_REQUIRED_ARTIFACTS", False)
+DEFAULT_SAVE_MAXLAG_ARTIFACTS = getattr(_DEFAULT_EXEC_CFG, "SAVE_MAXLAG_ARTIFACTS", True)
 DEFAULT_TARGET_RECALL = getattr(_DEFAULT_EXEC_CFG, "TARGET_RECALL", 0.95)
 DEFAULT_TRAIN_RATIO = getattr(_DEFAULT_EXEC_CFG, "TRAIN_RATIO", 0.3)
 DEFAULT_VERBOSE = getattr(_DEFAULT_EXEC_CFG, "VERBOSE", False)
@@ -65,6 +67,8 @@ CORR_VAL_OPTIM = DEFAULT_CORR_VAL_OPTIM
 RECALL_BY_WINDOW = DEFAULT_RECALL_BY_WINDOW
 ARTIFACT_MODE = DEFAULT_ARTIFACT_MODE
 ARTIFACT_BUFFER_MAX_ROWS = DEFAULT_ARTIFACT_BUFFER_MAX_ROWS
+SAVE_ONLY_REQUIRED_ARTIFACTS = DEFAULT_SAVE_ONLY_REQUIRED_ARTIFACTS
+SAVE_MAXLAG_ARTIFACTS = DEFAULT_SAVE_MAXLAG_ARTIFACTS
 TARGET_RECALL = DEFAULT_TARGET_RECALL
 WINDOW_SIZE = DEFAULT_WINDOW_SIZE
 WINDOW_STEP = DEFAULT_WINDOW_STEP
@@ -271,6 +275,26 @@ def main():
         default=None,
     )
     parser.add_argument("--artifact-buffer-max-rows", type=int, default=None)
+    parser.add_argument(
+        "--save-only-required-artifacts",
+        dest="save_only_required_artifacts",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--save-all-artifacts",
+        dest="save_only_required_artifacts",
+        action="store_false",
+    )
+    parser.add_argument(
+        "--save-maxlag-artifacts",
+        dest="save_maxlag_artifacts",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--no-save-maxlag-artifacts",
+        dest="save_maxlag_artifacts",
+        action="store_false",
+    )
     parser.add_argument("--verbose", dest="verbose", action="store_true")
     parser.add_argument("--no-verbose", dest="verbose", action="store_false")
     parser.add_argument("--testing", dest="testing", action="store_true")
@@ -283,6 +307,8 @@ def main():
         neg_corr=None,
         corr_val_optim=None,
         recall_by_window=None,
+        save_only_required_artifacts=None,
+        save_maxlag_artifacts=None,
         verbose=None,
         testing=None,
     )
@@ -297,7 +323,7 @@ def main():
 
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
-    global EXEC_MODE, NEG_CORR, CORR_VAL_OPTIM, RECALL_BY_WINDOW, ARTIFACT_MODE, ARTIFACT_BUFFER_MAX_ROWS
+    global EXEC_MODE, NEG_CORR, CORR_VAL_OPTIM, RECALL_BY_WINDOW, ARTIFACT_MODE, ARTIFACT_BUFFER_MAX_ROWS, SAVE_ONLY_REQUIRED_ARTIFACTS, SAVE_MAXLAG_ARTIFACTS
     global TARGET_RECALL, TRAIN_RATIO, PARAM_GRID, DATA_LOADER, RESULT_FOLDER, MAX_WORKERS
     global VERBOSE, TESTING
 
@@ -328,6 +354,18 @@ def main():
     ARTIFACT_MODE = _resolve_cfg_value(args.artifact_mode, cfg_exec, "ARTIFACT_MODE", DEFAULT_ARTIFACT_MODE)
     ARTIFACT_BUFFER_MAX_ROWS = _resolve_cfg_value(
         args.artifact_buffer_max_rows, cfg_exec, "ARTIFACT_BUFFER_MAX_ROWS", DEFAULT_ARTIFACT_BUFFER_MAX_ROWS
+    )
+    SAVE_ONLY_REQUIRED_ARTIFACTS = _resolve_cfg_value(
+        args.save_only_required_artifacts,
+        cfg_exec,
+        "SAVE_ONLY_REQUIRED_ARTIFACTS",
+        DEFAULT_SAVE_ONLY_REQUIRED_ARTIFACTS,
+    )
+    SAVE_MAXLAG_ARTIFACTS = _resolve_cfg_value(
+        args.save_maxlag_artifacts,
+        cfg_exec,
+        "SAVE_MAXLAG_ARTIFACTS",
+        DEFAULT_SAVE_MAXLAG_ARTIFACTS,
     )
     TARGET_RECALL = _resolve_cfg_value(args.target_recall, cfg_exec, "TARGET_RECALL", DEFAULT_TARGET_RECALL)
     TRAIN_RATIO = _resolve_cfg_value(args.train_ratio, cfg_exec, "TRAIN_RATIO", DEFAULT_TRAIN_RATIO)
@@ -380,6 +418,8 @@ def main():
                         track_min_dist=False,
                         artifact_mode=ARTIFACT_MODE,
                         artifact_buffer_max_rows=ARTIFACT_BUFFER_MAX_ROWS,
+                        save_only_required_artifacts=SAVE_ONLY_REQUIRED_ARTIFACTS,
+                        save_maxlag_artifacts=SAVE_MAXLAG_ARTIFACTS,
                     )
 
                     output_prefix = os.path.join(output_dir, f"corrtrack_optim_{dataset_id}")

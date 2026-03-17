@@ -127,6 +127,9 @@ Place your dataset files under `datasets/asos-airports/` using the `<country>-<v
    TARGET_RECALL = 0.95
    ARTIFACT_MODE = "buffered"
    ARTIFACT_BUFFER_MAX_ROWS = 250000
+   SAVE_ONLY_REQUIRED_ARTIFACTS = True
+   SAVE_MAXLAG_ARTIFACTS = False
+   DELETE_MAIN_ARTIFACTS_AFTER_COMPARE = False
 
    PARALLEL_SKETCH = False
    PARALLEL_CANDIDATES = False
@@ -146,6 +149,14 @@ Place your dataset files under `datasets/asos-airports/` using the `<country>-<v
    - `buffered`: keep a bounded in-memory buffer and flush when `ARTIFACT_BUFFER_MAX_ROWS` is reached
 
    `ARTIFACT_BUFFER_MAX_ROWS` is a row-count threshold used only in `buffered` mode. Lower it to reduce peak memory; raise it to reduce flush frequency.
+
+   `SAVE_ONLY_REQUIRED_ARTIFACTS=True` tells the run stages to write only the artifact family needed for the selected metric mode:
+   - `RECALL_BY_WINDOW=True`: keep `_correlated.csv`, skip `_anomalies.csv` and `_status.csv`
+   - `RECALL_BY_WINDOW=False`: keep `_anomalies.csv`, skip `_correlated.csv` and `_status.csv`
+
+   `SAVE_MAXLAG_ARTIFACTS=False` skips `_max_lag_correlated.csv`. When disabled, max-lag comparison columns are reported as `nan`.
+
+   `DELETE_MAIN_ARTIFACTS_AFTER_COMPARE=True` removes the main CorrTrack artifact bundle after `corrtrack_compare_runs.py` successfully writes the metrics CSV.
 
    Hyper-parameter search has an additional optimizer-only fast path: when `RECALL_BY_WINDOW=True` and `CORR_VAL_OPTIM=False`, CorrTrack trials are compared online against brute-force ground truth instead of writing trial `_correlated.csv` artifacts. In that mode, exact overall metrics are still reported, `recall_pos` / `recall_neg` are exact BF-sign-stratified recall values, and signed precision/F1 metrics are reported as `nan`.
 
@@ -303,8 +314,11 @@ Each stage script reads the execution defaults from `experiment_run_exec_param.p
 --recall-by-window / --no-recall-by-window
 --artifact-mode         stage-dependent; "iterative" | "final" | "buffered"
 --artifact-buffer-max-rows  row threshold for buffered artifact flushing
+--save-only-required-artifacts / --save-all-artifacts
+--save-maxlag-artifacts / --no-save-maxlag-artifacts
 --target-recall         (hyper-param search) default from exec config (fallback 0.95)
 --train-ratio           (hyper-param search & comparison) default from exec config (fallback 0.3)
+--delete-main-artifacts-after-compare / --keep-main-artifacts-after-compare
 --verbose / --no-verbose
 --testing / --no-testing
 ```
@@ -347,9 +361,9 @@ Stage-specific parameters:
 
 | Script | Additional options |
 | --- | --- |
-| `corrtrack_run_bruteforce.py`, `corrtrack_run_corrtrack.py` | `--artifact-mode {iterative,final,buffered}`, `--artifact-buffer-max-rows N`. |
-| `corrtrack_param_search.py` | `--param-grid-config PATH` (hyper-parameter grid), `--target-recall`, `--train-ratio`, `--corr-val-optim/--no-corr-val-optim`, `--artifact-mode {iterative,final,buffered}`, `--artifact-buffer-max-rows N`. |
-| `corrtrack_compare_runs.py` | `--train-ratio` for the metrics split, `--filcorr-results` to collate FilCorr CSV outputs before comparison. |
+| `corrtrack_run_bruteforce.py`, `corrtrack_run_corrtrack.py` | `--artifact-mode {iterative,final,buffered}`, `--artifact-buffer-max-rows N`, `--save-only-required-artifacts/--save-all-artifacts`, `--save-maxlag-artifacts/--no-save-maxlag-artifacts`. |
+| `corrtrack_param_search.py` | `--param-grid-config PATH` (hyper-parameter grid), `--target-recall`, `--train-ratio`, `--corr-val-optim/--no-corr-val-optim`, `--artifact-mode {iterative,final,buffered}`, `--artifact-buffer-max-rows N`, `--save-only-required-artifacts/--save-all-artifacts`, `--save-maxlag-artifacts/--no-save-maxlag-artifacts`. |
+| `corrtrack_compare_runs.py` | `--train-ratio` for the metrics split, `--filcorr-results` to collate FilCorr CSV outputs before comparison, `--delete-main-artifacts-after-compare/--keep-main-artifacts-after-compare`. |
 | `run_corrtrack_experiment.py` | `--param-grid-config PATH` and `--base-dir PATH` to locate scripts. |
 | `debug_corrtrack.py` | `--param-grid-config PATH`, `--exec-param-config PATH`, `--result-folder`, `--samples-per-class`, `--output-dir`, `--skip-initial-run`, `--refresh-artifacts`, `--artifact-mode`, `--verbose/--no-verbose`, `--testing/--no-testing`. |
 
@@ -423,8 +437,9 @@ python3 run_corrtrack_experiment.py \
 * `--corr-val-optim` goes only to the hyper-parameter search; `--corr-val` goes only to the CorrTrack run when using the orchestrator.
 * `--track-min-dist` is forwarded to brute-force, CorrTrack, and comparison stages; hyper-parameter search always keeps min-distance tracking disabled.
 * `--train-ratio` affects the parameter search and comparison steps.
-* `--artifact-mode` is forwarded by the orchestrator only to brute-force and CorrTrack run stages.
-* `--artifact-buffer-max-rows` is currently a direct stage-script option; the orchestrator does not forward it.
+* `--artifact-mode` and `--artifact-buffer-max-rows` are forwarded to brute-force, hyper-parameter search, and CorrTrack main-run stages.
+* `--save-only-required-artifacts` / `--save-all-artifacts` and `--save-maxlag-artifacts` / `--no-save-maxlag-artifacts` are forwarded to brute-force, hyper-parameter search, and CorrTrack main-run stages.
+* `--delete-main-artifacts-after-compare` is forwarded only to the comparison stage.
 
 ---
 
@@ -442,7 +457,7 @@ python3 corrtrack_run_bruteforce.py \
   --artifact-mode final
 ```
 
-_Outputs_: `bf_run.csv` plus artifact CSVs such as `_correlated.csv`, `_status.csv`, `_anomalies.csv`, and `_max_lag_correlated.csv`. `buffered` is usually the best default for large runs; `iterative` appends after each window, while `final` writes only once at the end.
+_Outputs_: `bf_run.csv` plus the artifact CSVs enabled by your artifact policy. With `SAVE_ONLY_REQUIRED_ARTIFACTS=True`, brute-force writes only `_correlated.csv` for window-based recall or only `_anomalies.csv` for timestamp-based recall; `_status.csv` is skipped, and `_max_lag_correlated.csv` is written only when `SAVE_MAXLAG_ARTIFACTS=True`. `buffered` is usually the best default for large runs; `iterative` appends after each window, while `final` writes only once at the end.
 
 Synthetic variant:
 
@@ -524,7 +539,7 @@ python3 corrtrack_run_corrtrack.py \
   --artifact-mode final
 ```
 
-Runs CorrTrack using the best parameters chosen in the previous step. Results go to `corrtrack_run_<alg>.csv` and associated artifact CSVs.
+Runs CorrTrack using the best parameters chosen in the previous step. Results go to `corrtrack_run_<alg>.csv` and the artifact CSVs enabled by your artifact policy.
 
 Synthetic variant:
 
@@ -556,7 +571,7 @@ python3 corrtrack_compare_runs.py \
   --filcorr-results ../correlation/asos_exp/tests/filcorr_res
 ```
 
-Combines brute-force and CorrTrack outputs, producing `corrtrack_metrics_<dataset_id>.csv` with accuracy and performance metrics. Artifact comparison is streamed from the sorted CSV outputs, so large `_correlated.csv` files no longer need to be loaded fully into memory. When `--filcorr-results` is provided, the step also filters FilCorr CSVs whose names include any brute-force time-series ids, merges them via `integrate_filcorr_results.py`, and emits `filcorr_run.csv` alongside the comparison artifacts for easier downstream analysis.
+Combines brute-force and CorrTrack outputs, producing `corrtrack_metrics_<dataset_id>.csv` with accuracy and performance metrics. Artifact comparison is streamed from the sorted CSV outputs, so large `_correlated.csv` files no longer need to be loaded fully into memory. When `--filcorr-results` is provided, the step also filters FilCorr CSVs whose names include any brute-force time-series ids, merges them via `integrate_filcorr_results.py`, and emits `filcorr_run.csv` alongside the comparison artifacts for easier downstream analysis. If `DELETE_MAIN_ARTIFACTS_AFTER_COMPARE=True` or `--delete-main-artifacts-after-compare` is set, the main CorrTrack artifact bundle is removed after the metrics CSV is written successfully.
 
 The comparison CSV includes the same derived diagnostics as the optim CSV (`speedup_ceil`, `rel_speedup_eff`, `corr_prop`, `waste_val_bf`, `waste_val`, `rel_waste_red`) so the performance ratios stay aligned across stages. In streamed comparison mode, `aucroc` and `pr_auc` are reported as `nan`.
 

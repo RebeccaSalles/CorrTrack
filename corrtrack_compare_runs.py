@@ -47,6 +47,11 @@ DEFAULT_RECALL_BY_WINDOW = getattr(_DEFAULT_EXEC_CFG, "RECALL_BY_WINDOW", True)
 DEFAULT_TRAIN_RATIO = getattr(_DEFAULT_EXEC_CFG, "TRAIN_RATIO", 0.3)
 DEFAULT_VERBOSE = getattr(_DEFAULT_EXEC_CFG, "VERBOSE", False)
 DEFAULT_TESTING = getattr(_DEFAULT_EXEC_CFG, "TESTING", False)
+DEFAULT_DELETE_MAIN_ARTIFACTS_AFTER_COMPARE = getattr(
+    _DEFAULT_EXEC_CFG,
+    "DELETE_MAIN_ARTIFACTS_AFTER_COMPARE",
+    False,
+)
 DEFAULT_RESULT_FOLDER = None
 DEFAULT_MAX_WORKERS = getattr(_DEFAULT_EXEC_CFG, "MAX_WORKERS", 0)
 
@@ -73,6 +78,7 @@ RECALL_BY_WINDOW = DEFAULT_RECALL_BY_WINDOW
 TRAIN_RATIO = DEFAULT_TRAIN_RATIO
 VERBOSE = DEFAULT_VERBOSE
 TESTING = DEFAULT_TESTING
+DELETE_MAIN_ARTIFACTS_AFTER_COMPARE = DEFAULT_DELETE_MAIN_ARTIFACTS_AFTER_COMPARE
 RESULT_FOLDER = DEFAULT_RESULT_FOLDER
 MAX_WORKERS = DEFAULT_MAX_WORKERS
 COUNTRIES = VARIABLES = N_VARS = N_YEARS = None
@@ -254,6 +260,16 @@ def parse_args():
     parser.add_argument("--testing", dest="testing", action="store_true")
     parser.add_argument("--no-testing", dest="testing", action="store_false")
     parser.add_argument(
+        "--delete-main-artifacts-after-compare",
+        dest="delete_main_artifacts_after_compare",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--keep-main-artifacts-after-compare",
+        dest="delete_main_artifacts_after_compare",
+        action="store_false",
+    )
+    parser.add_argument(
         "--filcorr-results",
         type=Path,
         default=None,
@@ -275,6 +291,7 @@ def parse_args():
         recall_by_window=None,
         verbose=None,
         testing=None,
+        delete_main_artifacts_after_compare=None,
     )
     return parser.parse_args()
 
@@ -394,7 +411,7 @@ def main():
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD, RESULT_FOLDER, MAX_WORKERS
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
     global EXEC_MODE, NEG_CORR, CORR_VAL, MONITOR, TRACK_MIN_DIST, RECALL_BY_WINDOW, TRAIN_RATIO, DATA_LOADER
-    global VERBOSE, TESTING
+    global VERBOSE, TESTING, DELETE_MAIN_ARTIFACTS_AFTER_COMPARE
 
     RESULT_FOLDER = _resolve_cfg_value(args.result_folder, cfg_dataset, "RESULT_FOLDER", DEFAULT_RESULT_FOLDER)
     WINDOW_SIZE = _resolve_cfg_value(args.window_size, cfg_exec, "WINDOW_SIZE", DEFAULT_WINDOW_SIZE)
@@ -426,6 +443,12 @@ def main():
     MAX_WORKERS = _resolve_cfg_value(None, cfg_exec, "MAX_WORKERS", DEFAULT_MAX_WORKERS)
     VERBOSE = _resolve_cfg_value(args.verbose, cfg_exec, "VERBOSE", DEFAULT_VERBOSE)
     TESTING = _resolve_cfg_value(args.testing, cfg_exec, "TESTING", DEFAULT_TESTING)
+    DELETE_MAIN_ARTIFACTS_AFTER_COMPARE = _resolve_cfg_value(
+        args.delete_main_artifacts_after_compare,
+        cfg_exec,
+        "DELETE_MAIN_ARTIFACTS_AFTER_COMPARE",
+        DEFAULT_DELETE_MAIN_ARTIFACTS_AFTER_COMPARE,
+    )
     if args.loader:
         DATA_LOADER = _load_loader(args.loader)
     if DATA_LOADER is None:
@@ -480,7 +503,13 @@ def main():
                     track_min_dist=TRACK_MIN_DIST,
                 )
 
-                cc.compare_from_artifacts(dataset_id, bf_run_csv, corrtrack_run_files, output_csv)
+                cc.compare_from_artifacts(
+                    dataset_id,
+                    bf_run_csv,
+                    corrtrack_run_files,
+                    output_csv,
+                    delete_main_artifacts_after_compare=DELETE_MAIN_ARTIFACTS_AFTER_COMPARE,
+                )
 
 
 if __name__ == "__main__":

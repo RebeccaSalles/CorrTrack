@@ -74,7 +74,14 @@ ARG_SPECS: dict[str, tuple[int, set[str]]] = {
     "--no-recall-by-window": (0, {"brute", "param", "corrtrack", "compare"}),
     "--target-recall": (1, {"param"}),
     "--train-ratio": (1, {"param", "compare"}),
-    "--artifact-mode": (1, {"brute", "corrtrack"}),
+    "--artifact-mode": (1, {"brute", "param", "corrtrack"}),
+    "--artifact-buffer-max-rows": (1, {"brute", "param", "corrtrack"}),
+    "--save-only-required-artifacts": (0, {"brute", "param", "corrtrack"}),
+    "--save-all-artifacts": (0, {"brute", "param", "corrtrack"}),
+    "--save-maxlag-artifacts": (0, {"brute", "param", "corrtrack"}),
+    "--no-save-maxlag-artifacts": (0, {"brute", "param", "corrtrack"}),
+    "--delete-main-artifacts-after-compare": (0, {"compare"}),
+    "--keep-main-artifacts-after-compare": (0, {"compare"}),
     "--loader": (1, {"brute", "param", "corrtrack", "compare"}),
 }
 
