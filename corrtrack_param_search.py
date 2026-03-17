@@ -46,6 +46,8 @@ DEFAULT_EXEC_MODE = "thread" if DEFAULT_PARALLEL else "sequential"
 DEFAULT_NEG_CORR = getattr(_DEFAULT_EXEC_CFG, "NEG_CORR", False)
 DEFAULT_CORR_VAL_OPTIM = getattr(_DEFAULT_EXEC_CFG, "CORR_VAL_OPTIM", False)
 DEFAULT_RECALL_BY_WINDOW = getattr(_DEFAULT_EXEC_CFG, "RECALL_BY_WINDOW", True)
+DEFAULT_ARTIFACT_MODE = getattr(_DEFAULT_EXEC_CFG, "ARTIFACT_MODE", "buffered")
+DEFAULT_ARTIFACT_BUFFER_MAX_ROWS = getattr(_DEFAULT_EXEC_CFG, "ARTIFACT_BUFFER_MAX_ROWS", 250000)
 DEFAULT_TARGET_RECALL = getattr(_DEFAULT_EXEC_CFG, "TARGET_RECALL", 0.95)
 DEFAULT_TRAIN_RATIO = getattr(_DEFAULT_EXEC_CFG, "TRAIN_RATIO", 0.3)
 DEFAULT_VERBOSE = getattr(_DEFAULT_EXEC_CFG, "VERBOSE", False)
@@ -61,6 +63,8 @@ EXEC_MODE = DEFAULT_EXEC_MODE
 NEG_CORR = DEFAULT_NEG_CORR
 CORR_VAL_OPTIM = DEFAULT_CORR_VAL_OPTIM
 RECALL_BY_WINDOW = DEFAULT_RECALL_BY_WINDOW
+ARTIFACT_MODE = DEFAULT_ARTIFACT_MODE
+ARTIFACT_BUFFER_MAX_ROWS = DEFAULT_ARTIFACT_BUFFER_MAX_ROWS
 TARGET_RECALL = DEFAULT_TARGET_RECALL
 WINDOW_SIZE = DEFAULT_WINDOW_SIZE
 WINDOW_STEP = DEFAULT_WINDOW_STEP
@@ -261,6 +265,12 @@ def main():
     parser.add_argument("--no-corr-val-optim", dest="corr_val_optim", action="store_false")
     parser.add_argument("--recall-by-window", dest="recall_by_window", action="store_true")
     parser.add_argument("--no-recall-by-window", dest="recall_by_window", action="store_false")
+    parser.add_argument(
+        "--artifact-mode",
+        choices=("iterative", "final", "buffered"),
+        default=None,
+    )
+    parser.add_argument("--artifact-buffer-max-rows", type=int, default=None)
     parser.add_argument("--verbose", dest="verbose", action="store_true")
     parser.add_argument("--no-verbose", dest="verbose", action="store_false")
     parser.add_argument("--testing", dest="testing", action="store_true")
@@ -287,7 +297,7 @@ def main():
 
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
-    global EXEC_MODE, NEG_CORR, CORR_VAL_OPTIM, RECALL_BY_WINDOW
+    global EXEC_MODE, NEG_CORR, CORR_VAL_OPTIM, RECALL_BY_WINDOW, ARTIFACT_MODE, ARTIFACT_BUFFER_MAX_ROWS
     global TARGET_RECALL, TRAIN_RATIO, PARAM_GRID, DATA_LOADER, RESULT_FOLDER, MAX_WORKERS
     global VERBOSE, TESTING
 
@@ -314,6 +324,10 @@ def main():
     )
     RECALL_BY_WINDOW = _resolve_cfg_value(
         args.recall_by_window, cfg_exec, "RECALL_BY_WINDOW", DEFAULT_RECALL_BY_WINDOW
+    )
+    ARTIFACT_MODE = _resolve_cfg_value(args.artifact_mode, cfg_exec, "ARTIFACT_MODE", DEFAULT_ARTIFACT_MODE)
+    ARTIFACT_BUFFER_MAX_ROWS = _resolve_cfg_value(
+        args.artifact_buffer_max_rows, cfg_exec, "ARTIFACT_BUFFER_MAX_ROWS", DEFAULT_ARTIFACT_BUFFER_MAX_ROWS
     )
     TARGET_RECALL = _resolve_cfg_value(args.target_recall, cfg_exec, "TARGET_RECALL", DEFAULT_TARGET_RECALL)
     TRAIN_RATIO = _resolve_cfg_value(args.train_ratio, cfg_exec, "TRAIN_RATIO", DEFAULT_TRAIN_RATIO)
@@ -364,6 +378,8 @@ def main():
                         parallel_candidates=PARALLEL_CANDIDATES,
                         parallel_validation=PARALLEL_VALIDATION,
                         track_min_dist=False,
+                        artifact_mode=ARTIFACT_MODE,
+                        artifact_buffer_max_rows=ARTIFACT_BUFFER_MAX_ROWS,
                     )
 
                     output_prefix = os.path.join(output_dir, f"corrtrack_optim_{dataset_id}")

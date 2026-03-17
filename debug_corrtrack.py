@@ -807,8 +807,12 @@ class DebugCorrTrack(CorrTrack):
         if self.debugger:
             self.debugger.observe_buckets(self)
 
-    def _get_validated_corr(self, corr_val=True, force_mode=None):
-        super()._get_validated_corr(corr_val=corr_val, force_mode=force_mode)
+    def _get_validated_corr(self, corr_val=True, force_mode=None, retain_validated=True):
+        super()._get_validated_corr(
+            corr_val=corr_val,
+            force_mode=force_mode,
+            retain_validated=retain_validated,
+        )
         if self.debugger:
             self.debugger.observe_validation(self)
 

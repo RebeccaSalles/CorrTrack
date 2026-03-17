@@ -37,6 +37,7 @@ DEFAULT_MONITOR = getattr(_DEFAULT_EXEC_CFG, "MONITOR", True)
 DEFAULT_TRACK_MIN_DIST = getattr(_DEFAULT_EXEC_CFG, "TRACK_MIN_DIST", True)
 DEFAULT_RECALL_BY_WINDOW = getattr(_DEFAULT_EXEC_CFG, "RECALL_BY_WINDOW", True)
 DEFAULT_ARTIFACT_MODE = getattr(_DEFAULT_EXEC_CFG, "ARTIFACT_MODE", "iterative")
+DEFAULT_ARTIFACT_BUFFER_MAX_ROWS = getattr(_DEFAULT_EXEC_CFG, "ARTIFACT_BUFFER_MAX_ROWS", 250000)
 DEFAULT_VERBOSE = getattr(_DEFAULT_EXEC_CFG, "VERBOSE", False)
 DEFAULT_TESTING = getattr(_DEFAULT_EXEC_CFG, "TESTING", False)
 DEFAULT_RESULT_FOLDER = None
@@ -62,6 +63,7 @@ MONITOR = DEFAULT_MONITOR
 TRACK_MIN_DIST = DEFAULT_TRACK_MIN_DIST
 RECALL_BY_WINDOW = DEFAULT_RECALL_BY_WINDOW
 ARTIFACT_MODE = DEFAULT_ARTIFACT_MODE
+ARTIFACT_BUFFER_MAX_ROWS = DEFAULT_ARTIFACT_BUFFER_MAX_ROWS
 VERBOSE = DEFAULT_VERBOSE
 TESTING = DEFAULT_TESTING
 RESULT_FOLDER = DEFAULT_RESULT_FOLDER
@@ -165,6 +167,7 @@ def build_base_config():
         "monitor": MONITOR,
         "track_min_dist": TRACK_MIN_DIST,
         "artifact_mode": ARTIFACT_MODE,
+        "artifact_buffer_max_rows": ARTIFACT_BUFFER_MAX_ROWS,
         "verbose": VERBOSE,
         "testing": TESTING,
     }
@@ -254,10 +257,11 @@ def parse_args():
     parser.add_argument("--recall-by-window", dest="recall_by_window", action="store_true")
     parser.add_argument(
         "--artifact-mode",
-        choices=("iterative", "final"),
+        choices=("iterative", "final", "buffered"),
         default=None,
-        help="Persist artifacts after each iteration (iterative) or only once after the run (final).",
+        help="Persist artifacts after each iteration (iterative), only once after the run (final), or spill in bounded chunks (buffered).",
     )
+    parser.add_argument("--artifact-buffer-max-rows", type=int, default=None)
     parser.add_argument("--verbose", dest="verbose", action="store_true")
     parser.add_argument("--no-verbose", dest="verbose", action="store_false")
     parser.add_argument("--testing", dest="testing", action="store_true")
@@ -278,6 +282,7 @@ def parse_args():
         track_min_dist=None,
         recall_by_window=None,
         artifact_mode=None,
+        artifact_buffer_max_rows=None,
         verbose=None,
         testing=None,
     )
@@ -293,7 +298,7 @@ def main():
 
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
-    global EXEC_MODE, NEG_CORR, MONITOR, TRACK_MIN_DIST, RECALL_BY_WINDOW, ARTIFACT_MODE
+    global EXEC_MODE, NEG_CORR, MONITOR, TRACK_MIN_DIST, RECALL_BY_WINDOW, ARTIFACT_MODE, ARTIFACT_BUFFER_MAX_ROWS
     global DATA_LOADER, RESULT_FOLDER, MAX_WORKERS, VERBOSE, TESTING
 
     RESULT_FOLDER = _resolve_cfg_value(args.result_folder, cfg_dataset, "RESULT_FOLDER", DEFAULT_RESULT_FOLDER)
@@ -322,6 +327,9 @@ def main():
         args.recall_by_window, cfg_exec, "RECALL_BY_WINDOW", DEFAULT_RECALL_BY_WINDOW
     )
     ARTIFACT_MODE = _resolve_cfg_value(args.artifact_mode, cfg_exec, "ARTIFACT_MODE", DEFAULT_ARTIFACT_MODE)
+    ARTIFACT_BUFFER_MAX_ROWS = _resolve_cfg_value(
+        args.artifact_buffer_max_rows, cfg_exec, "ARTIFACT_BUFFER_MAX_ROWS", DEFAULT_ARTIFACT_BUFFER_MAX_ROWS
+    )
     MAX_WORKERS = _resolve_cfg_value(None, cfg_exec, "MAX_WORKERS", DEFAULT_MAX_WORKERS)
     VERBOSE = _resolve_cfg_value(args.verbose, cfg_exec, "VERBOSE", DEFAULT_VERBOSE)
     TESTING = _resolve_cfg_value(args.testing, cfg_exec, "TESTING", DEFAULT_TESTING)

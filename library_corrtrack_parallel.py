@@ -9,6 +9,7 @@ import time
 import datetime
 import os
 import ast
+import heapq
 import pandas as pd
 from itertools import combinations, product, repeat
 from collections import defaultdict
@@ -17,7 +18,7 @@ import warnings
 from scipy.stats import norm
 from functools import partial
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Iterable, Optional, Sequence
+from typing import Iterable, Iterator, Optional, Sequence
 import traceback
 
 CSV_DELIMITER = ";"
@@ -318,6 +319,41 @@ def _row_from_mapping(columns: Sequence[str], data: dict) -> list:
         row.append(value)
     return row
 
+
+def _remove_artifact_files(prefix: Optional[str]) -> None:
+    if not prefix:
+        return
+    suffixes = (
+        "_correlated.csv",
+        "_neg_pairs.csv",
+        "_candidates.csv",
+        "_status.csv",
+        "_anomalies.csv",
+        "_max_lag_correlated.csv",
+    )
+    for suffix in suffixes:
+        path = f"{prefix}{suffix}"
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    base_dir = os.path.dirname(os.path.abspath(prefix))
+    base_name = os.path.basename(prefix)
+    try:
+        for name in os.listdir(base_dir):
+            if not name.startswith(base_name + "_"):
+                continue
+            if ".chunk" not in name:
+                continue
+            path = os.path.join(base_dir, name)
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
 def _run_batch_static(func, batch):
     """Top-level batch helper to avoid bound-method pickling issues."""
     return [func(item) for item in batch]
@@ -367,6 +403,7 @@ def execute_corrtrack_pass(
     verbose: bool = False,
     testing: bool = False,
     monitor: bool = True,
+    step_observer=None,
 ) -> tuple[dict, Optional[tuple], Optional[np.ndarray]]:
     """
     Execute a CorrTrack pass (brute-force or main) and collect runtime statistics.
@@ -424,18 +461,41 @@ def execute_corrtrack_pass(
         record["workers_validation"] = 1
 
     artifact_active = bool(artifact_prefix)
+    artifact_buffer_max_rows = metadata.get("artifact_buffer_max_rows")
+    if artifact_buffer_max_rows in (None, ""):
+        artifact_buffer_max_rows = getattr(corrtrack, "_artifact_buffer_max_rows", 250000)
+
+    artifact_mode_value = (artifact_mode or "iterative").lower()
+    if artifact_mode_value not in ("iterative", "final", "buffered"):
+        artifact_mode_value = "iterative"
+    effective_artifact_mode = artifact_mode_value if artifact_active else "final"
+
+    corrtrack._configure_artifact_runtime(
+        artifact_mode=effective_artifact_mode,
+        artifact_buffer_max_rows=artifact_buffer_max_rows,
+        recall_by_window=recall_by_window,
+    )
+    corrtrack._step_observer_enabled = bool(step_observer)
+    corrtrack._validated_step = {}
+    corrtrack._online_window_metrics_only = bool(
+        step_observer is not None
+        and run_kind == "corrtrack"
+        and recall_by_window
+        and not corr_val
+        and not monitor
+        and not artifact_active
+    )
     if artifact_active:
         base_dir = os.path.dirname(os.path.abspath(artifact_prefix))
         os.makedirs(base_dir, exist_ok=True)
         corrtrack._start_artifact_logging(artifact_prefix)
 
-    artifact_mode_value = (artifact_mode or "iterative").lower()
-    if artifact_mode_value not in ("iterative", "final"):
-        artifact_mode_value = "iterative"
-    artifact_per_iteration = artifact_mode_value == "iterative"
+    artifact_per_iteration = artifact_active and effective_artifact_mode == "iterative"
+    artifact_buffered = artifact_active and effective_artifact_mode == "buffered"
 
     artifact_time_total = 0.0
     artifact_time_overlap = 0.0
+    artifact_bookkeeping_before = getattr(corrtrack, "artifact_bookkeeping_time", 0.0)
 
     start_time = time.time()
     for start in range(0, data.shape[1] - window_step + 1, window_step):
@@ -444,7 +504,20 @@ def execute_corrtrack_pass(
             corrtrack.run_bf(chunk, ids, verbose=verbose, testing=testing, corr_val=True, monitor=monitor)
         else:
             corrtrack.run(chunk, ids, verbose=verbose, testing=testing, corr_val=corr_val, monitor=monitor)
-        if artifact_active and artifact_per_iteration:
+        if step_observer is not None:
+            _t0 = time.time()
+            step_observer(corrtrack)
+            elapsed = time.time() - _t0
+            artifact_time_total += elapsed
+            artifact_time_overlap += elapsed
+        if artifact_active and artifact_buffered:
+            _t0 = time.time()
+            flushed = corrtrack._maybe_flush_artifact_buffers()
+            elapsed = time.time() - _t0
+            if flushed:
+                artifact_time_total += elapsed
+                artifact_time_overlap += elapsed
+        elif artifact_active and artifact_per_iteration:
             _t0 = time.time()
             corrtrack._append_artifacts()
             elapsed = time.time() - _t0
@@ -452,7 +525,11 @@ def execute_corrtrack_pass(
             artifact_time_overlap += elapsed
     end_time = time.time()
 
-    if artifact_active and not artifact_per_iteration:
+    if artifact_active and artifact_buffered:
+        _t0 = time.time()
+        corrtrack._finalize_buffered_artifacts()
+        artifact_time_total += time.time() - _t0
+    elif artifact_active and not artifact_per_iteration:
         _t0 = time.time()
         corrtrack._append_artifacts()
         artifact_time_total += time.time() - _t0
@@ -490,6 +567,14 @@ def execute_corrtrack_pass(
         corrtrack._save_max_lag_correlated(f"{artifact_prefix}_max_lag_correlated.csv")
         artifact_time_total += time.time() - _t0
 
+    artifact_bookkeeping_delta = max(
+        getattr(corrtrack, "artifact_bookkeeping_time", 0.0) - artifact_bookkeeping_before,
+        0.0,
+    )
+    artifact_time_total += artifact_bookkeeping_delta
+    artifact_time_overlap += artifact_bookkeeping_delta
+    runtime = max(runtime - artifact_bookkeeping_delta, 0.0)
+
     record["runtime"] = runtime
     record["artifact_time"] = artifact_time_total
     if hasattr(corrtrack, "n_lagged_windows"):
@@ -500,7 +585,13 @@ def execute_corrtrack_pass(
     pair_min_dist = getattr(corrtrack, "pair_min_dist", None)
     record["pair_min_dist"] = str(pair_min_dist) if pair_min_dist is not None else ""
 
-    if recall_by_window:
+    corrtrack._step_observer_enabled = False
+    corrtrack._online_window_metrics_only = False
+    corrtrack._validated_step = {}
+
+    if artifact_buffered:
+        corr_flags = None
+    elif recall_by_window:
         corr_flags = getattr(corrtrack, "correlated", None)
     else:
         corr_flags = corrtrack.get_correlation_flags(data.shape[1], 0)
@@ -524,6 +615,7 @@ def run_and_log_bruteforce(
     metadata.setdefault("mode", "bf")
     metadata.setdefault("alg", metadata.get("alg", "bf"))
     metadata.setdefault("optim", metadata.get("optim", "baseline"))
+    metadata.setdefault("artifact_buffer_max_rows", base_config.get("artifact_buffer_max_rows"))
 
     artifact_mode = base_config.get("artifact_mode", "iterative")
     monitor = _coerce_to_bool(base_config.get("monitor", True), default=True)
@@ -600,6 +692,7 @@ def run_and_log_corrtrack(
     metadata.setdefault("mode", "main")
     metadata.setdefault("alg", metadata.get("alg"))
     metadata.setdefault("optim", metadata.get("optim", "main"))
+    metadata.setdefault("artifact_buffer_max_rows", run_params.get("artifact_buffer_max_rows") or base_config.get("artifact_buffer_max_rows"))
 
     def _to_int(value):
         try:
@@ -1151,15 +1244,375 @@ def _normalize_bf_key(pair):
 
 
 
+def _normalize_window_metric_key(id1, id2, t1, t2, window_size):
+    return _normalize_bf_key((id1, id2, t1, t2, window_size))
+
+
+def _normalize_pair_lag_key(id1, id2, lag):
+    ids = tuple(sorted((id1, id2)))
+    return ids + (lag,)
+
+
+def _marker_to_label(marker):
+    if marker == 1:
+        return "into"
+    if marker == -1:
+        return "out_of"
+    if marker == 0:
+        return "changed_sign"
+    return str(marker)
+
+
+def _label_to_marker(label):
+    if label == "into":
+        return 1
+    if label == "out_of":
+        return -1
+    if label == "changed_sign":
+        return 0
+    try:
+        return int(label)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _to_sortable_time_value(value):
+    if isinstance(value, np.datetime64):
+        if np.isnat(value):
+            return ""
+        return str(value.astype("datetime64[ns]"))
+    if isinstance(value, (datetime.datetime, datetime.date)):
+        return str(np.datetime64(value))
+    if isinstance(value, (np.integer, int)):
+        return int(value)
+    if isinstance(value, (np.floating, float)):
+        if math.isnan(value):
+            return ""
+        return float(value)
+    return str(value)
+
+
+def _window_sort_key(pair, window_size):
+    id1, id2, t1, t2 = pair
+    norm = _normalize_window_metric_key(id1, id2, t1, t2, window_size)
+    return (
+        str(norm[0]),
+        str(norm[1]),
+        _to_sortable_time_value(norm[2]),
+        _to_sortable_time_value(norm[3]),
+    )
+
+
+def _status_sort_key(row):
+    id1, id2, lag, t1, t2, _duration, _sign = row
+    norm = _normalize_pair_lag_key(id1, id2, lag)
+    return (
+        str(norm[0]),
+        str(norm[1]),
+        _to_sortable_time_value(norm[2]),
+        _to_sortable_time_value(t1),
+        _to_sortable_time_value(t2),
+    )
+
+
+def _anomaly_sort_key(row):
+    id1, id2, lag, time_val, marker = row
+    norm = _normalize_pair_lag_key(id1, id2, lag)
+    return (
+        str(norm[0]),
+        str(norm[1]),
+        _to_sortable_time_value(norm[2]),
+        _to_sortable_time_value(time_val),
+        int(marker),
+    )
+
+
+def _maxlag_sort_key(key):
+    id1, id2, t1_idx = key
+    return (str(id1), str(id2), _to_sortable_time_value(t1_idx))
+
+
+def _compute_total_time_from_record(record):
+    try:
+        n_w = int(float(record.get("n_w", 0) or 0))
+        window_size = int(float(record.get("window_size", 0) or 0))
+        window_step = int(float(record.get("window_step", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+    if n_w <= 0 or window_size <= 0 or window_step <= 0:
+        return 0
+    return ((n_w - 1) * window_step) + window_size
+
+
+def _intervals_total_length(intervals):
+    total = 0
+    for start, end in intervals:
+        total += max(int(end) - int(start), 0)
+    return total
+
+
+def _intervals_overlap_length(lhs, rhs):
+    i = j = 0
+    overlap = 0
+    while i < len(lhs) and j < len(rhs):
+        start = max(int(lhs[i][0]), int(rhs[j][0]))
+        end = min(int(lhs[i][1]), int(rhs[j][1]))
+        if end > start:
+            overlap += end - start
+        if int(lhs[i][1]) <= int(rhs[j][1]):
+            i += 1
+        else:
+            j += 1
+    return overlap
+
+
+def _welford_update(count, mean, m2, value):
+    count += 1
+    delta = value - mean
+    mean += delta / count
+    delta2 = value - mean
+    m2 += delta * delta2
+    return count, mean, m2
+
+
+def _safe_prec_recall_from_counts(tp, pred_total, gt_total):
+    precision = tp / pred_total if pred_total > 0 else 0.0
+    recall = tp / gt_total if gt_total > 0 else 0.0
+    return precision, recall
+
+
+def _empty_stream_metrics(include_sign=True):
+    metrics = {
+        "precision": 0.0,
+        "recall": 0.0,
+        "specificity": 0.0,
+        "f1_score": 0.0,
+        "aucroc": float("nan"),
+        "pr_auc": float("nan"),
+        "recall_min": None,
+    }
+    if include_sign:
+        metrics.update({
+            "precision_pos": 0.0,
+            "recall_pos": 0.0,
+            "f1_score_pos": 0.0,
+            "precision_neg": 0.0,
+            "recall_neg": 0.0,
+            "f1_score_neg": 0.0,
+        })
+    return metrics
+
+
+def _current_candidate_anchor(corrtrack):
+    window_index = getattr(corrtrack, "window_index", None)
+    window_data = getattr(corrtrack, "window_data", None)
+    window_size = getattr(corrtrack, "window_size", None)
+    if window_index is None or window_data is None or window_size is None:
+        return None
+    try:
+        window_count = int(window_data.shape[1]) - int(window_size) + 1
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if window_count <= 0 or len(window_index) < window_count:
+        return None
+    try:
+        return int(window_index[window_count - 1])
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+class _OptimizerBFWindowReferenceWriter:
+    def __init__(self, csv_path, window_size):
+        self.csv_path = csv_path
+        self.window_size = window_size
+        os.makedirs(os.path.dirname(csv_path) or ".", exist_ok=True)
+        self._handle = open(csv_path, "w", newline="")
+        self._writer = csv.writer(self._handle, delimiter=CSV_DELIMITER)
+        self._writer.writerow(["id1", "id2", "time1_idx", "time2_idx", "sign"])
+        self.gt_total = 0
+        self.gt_pos = 0
+        self.gt_neg = 0
+
+    def observe(self, corrtrack):
+        validated = getattr(corrtrack, "_validated_step", None) or {}
+        if not validated:
+            return
+        rows = []
+        for pair, corr in validated.items():
+            norm = _normalize_window_metric_key(pair[0], pair[1], pair[2], pair[3], pair[4])
+            sign = 1 if float(corr) > 0 else -1
+            rows.append((str(norm[0]), str(norm[1]), int(norm[2]), int(norm[3]), int(sign)))
+        rows.sort(key=lambda row: (row[2], row[0], row[1], row[3]))
+        self._writer.writerows(rows)
+        self.gt_total += len(rows)
+        for row in rows:
+            if row[4] > 0:
+                self.gt_pos += 1
+            else:
+                self.gt_neg += 1
+
+    def close(self):
+        handle = getattr(self, "_handle", None)
+        if handle is None:
+            return
+        try:
+            handle.close()
+        finally:
+            self._handle = None
+
+
+class _OptimizerOnlineWindowMetrics:
+    def __init__(
+        self,
+        reference_csv,
+        window_size,
+        gt_total,
+        gt_pos,
+        gt_neg,
+        total_pairs_bf=None,
+        pair_min_dist=None,
+    ):
+        self.reference_csv = reference_csv
+        self.window_size = window_size
+        self.gt_total = int(gt_total or 0)
+        self.gt_pos = int(gt_pos or 0)
+        self.gt_neg = int(gt_neg or 0)
+        try:
+            self.total_pairs_bf = int(total_pairs_bf) if total_pairs_bf is not None else None
+        except (TypeError, ValueError):
+            self.total_pairs_bf = None
+        self.recall_min_key = None
+        if pair_min_dist is not None and isinstance(pair_min_dist, tuple) and len(pair_min_dist) >= 5:
+            self.recall_min_key = _normalize_window_metric_key(
+                pair_min_dist[0],
+                pair_min_dist[1],
+                pair_min_dist[2],
+                pair_min_dist[3],
+                pair_min_dist[4],
+            )
+        self.recall_min_hit = False
+        self.pred_total = 0
+        self.tp = 0
+        self.tp_pos = 0
+        self.tp_neg = 0
+        self._file = open(reference_csv, newline="")
+        self._reader = csv.DictReader(self._file, delimiter=_detect_csv_delimiter(reference_csv, default=CSV_DELIMITER))
+        self._next_row = next(self._reader, None)
+
+    @staticmethod
+    def _parse_int(value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _load_group(self, anchor):
+        group = {}
+        while self._next_row is not None:
+            row_anchor = self._parse_int(self._next_row.get("time1_idx"))
+            if row_anchor is None:
+                self._next_row = next(self._reader, None)
+                continue
+            if row_anchor < anchor:
+                self._next_row = next(self._reader, None)
+                continue
+            if row_anchor > anchor:
+                break
+            id1 = self._next_row.get("id1")
+            id2 = self._next_row.get("id2")
+            time2 = self._parse_int(self._next_row.get("time2_idx"))
+            sign = self._parse_int(self._next_row.get("sign"))
+            if id1 is not None and id2 is not None and time2 is not None and sign is not None:
+                group[(id1, id2, row_anchor, time2, self.window_size)] = sign
+            self._next_row = next(self._reader, None)
+        return group
+
+    def observe(self, corrtrack):
+        anchor = _current_candidate_anchor(corrtrack)
+        if anchor is None:
+            return
+        gt_group = self._load_group(anchor)
+        predicted = set()
+        for pair in getattr(corrtrack, "candidates", {}) or {}:
+            if not isinstance(pair, tuple) or len(pair) < 5:
+                continue
+            predicted.add(_normalize_window_metric_key(pair[0], pair[1], pair[2], pair[3], pair[4]))
+        self.pred_total += len(predicted)
+        if self.recall_min_key is not None and self.recall_min_key in predicted:
+            self.recall_min_hit = True
+        for key in predicted:
+            sign = gt_group.get(key)
+            if sign is None:
+                continue
+            self.tp += 1
+            if sign > 0:
+                self.tp_pos += 1
+            else:
+                self.tp_neg += 1
+
+    def metrics(self):
+        metrics = _empty_stream_metrics(include_sign=True)
+        precision, recall = _safe_prec_recall_from_counts(self.tp, self.pred_total, self.gt_total)
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+        recall_pos = self.tp_pos / self.gt_pos if self.gt_pos > 0 else 0.0
+        recall_neg = self.tp_neg / self.gt_neg if self.gt_neg > 0 else 0.0
+        specificity = 0.0
+        if self.total_pairs_bf is not None:
+            negatives = max(self.total_pairs_bf - self.gt_total, 0)
+            if negatives > 0:
+                fp = max(self.pred_total - self.tp, 0)
+                tn = max(negatives - fp, 0)
+                specificity = tn / negatives
+        metrics.update(
+            {
+                "precision": precision,
+                "recall": recall,
+                "specificity": specificity,
+                "f1_score": f1,
+                "precision_pos": float("nan"),
+                "recall_pos": recall_pos,
+                "f1_score_pos": float("nan"),
+                "precision_neg": float("nan"),
+                "recall_neg": recall_neg,
+                "f1_score_neg": float("nan"),
+                "recall_min": None if self.recall_min_key is None else int(self.recall_min_hit),
+                "aucroc": float("nan"),
+                "pr_auc": float("nan"),
+            }
+        )
+        return metrics
+
+    def close(self):
+        handle = getattr(self, "_file", None)
+        if handle is None:
+            return
+        try:
+            handle.close()
+        finally:
+            self._file = None
+            self._reader = None
+            self._next_row = None
+
+
 def _corr_validation_batch_worker(payload):
     """Validate a batch of candidate pairs.
 
     payload keys:
-      - items: list of metadata dicts
+      - items: list of metadata dicts, or
+      - pairs, x_batch, y_batch: pre-built batch arrays
       - corr_threshold, neg_corr, corr_val
     Returns list of tuples (pair, is_corr, corr, dist, is_constant, is_spiked)
     """
-    items = payload["items"]
+    items = payload.get("items")
+    if items is None:
+        pairs = payload.get("pairs") or []
+        x_batch = payload.get("x_batch")
+        y_batch = payload.get("y_batch")
+        items = []
+        if x_batch is None or y_batch is None:
+            return []
+        for pair, x, y in zip(pairs, x_batch, y_batch):
+            items.append({"pair": pair, "x": x, "y": y})
     corr_threshold = payload["corr_threshold"]
     neg_corr = payload["neg_corr"]
     corr_val = payload.get("corr_val", True)
@@ -1388,6 +1841,24 @@ class CorrTrack:
             "status": {},
             "anomalies": set(),
         }
+        self._artifact_mode_runtime = "final"
+        self._artifact_buffer_max_rows = 250000
+        self._artifact_buffered = False
+        self._artifact_recall_by_window = True
+        self._spill_correlated = {}
+        self._spill_correlated_chunks = []
+        self._spill_correlated_chunk_index = 0
+        self._spill_status_rows = []
+        self._spill_status_chunks = []
+        self._spill_status_chunk_index = 0
+        self._spill_anomaly_rows = []
+        self._spill_anomaly_chunks = []
+        self._spill_anomaly_chunk_index = 0
+        self._active_corr_lengths = {}
+        self._maxlag_state = {}
+        self._step_observer_enabled = False
+        self._validated_step = {}
+        self._online_window_metrics_only = False
         self.sketches = {}
         self.brute_force_steps = 0
         self.constant_candidates = 0
@@ -1399,6 +1870,7 @@ class CorrTrack:
         self.candidate_time = 0
         self.validation_time = 0
         self.monitor_time = 0
+        self.artifact_bookkeeping_time = 0.0
 
         self.profile_enabled = bool(int(os.environ.get("CORRTRACK_PROFILE", "0")))
         self.profile_print_every = max(0, int(os.environ.get("CORRTRACK_PROFILE_EVERY", "0") or 0))
@@ -1969,12 +2441,14 @@ class CorrTrack:
 
         return (pair, is_correlated, pair_corr, pair_dist)
     
-    def _in_corr(self,pair):
+    def _in_corr(self,pair, corr_value=None):
         #monitor continuous and fallen into correlation
         timepts = np.array([pair[2],pair[3]])
         window_size = pair[4]
         corr_lag = max(timepts) - min(timepts)
-        corr_sign = (1 if self.correlated[pair] >= 0 else -1)
+        if corr_value is None:
+            corr_value = self.correlated[pair]
+        corr_sign = (1 if corr_value >= 0 else -1)
         key = (pair[0],pair[1],corr_lag) #ids = (pair[0],pair[1])
         key2 = (pair[1],pair[0],corr_lag)
         if key not in self.corr_lengths.keys() and key2 not in self.corr_lengths.keys():
@@ -2016,9 +2490,406 @@ class CorrTrack:
         last_corr_length = status[3]
         time = int(np.min(timepts + last_corr_length - (window_size - self.window_step)))
         return (pair, (time, -1))
+
+    def _configure_artifact_runtime(self, artifact_mode="final", artifact_buffer_max_rows=None, recall_by_window=True):
+        mode_value = (artifact_mode or "final").lower()
+        if mode_value not in {"iterative", "final", "buffered"}:
+            mode_value = "final"
+        self._artifact_mode_runtime = mode_value
+        self._artifact_recall_by_window = bool(recall_by_window)
+        try:
+            max_rows = int(artifact_buffer_max_rows) if artifact_buffer_max_rows is not None else self._artifact_buffer_max_rows
+        except (TypeError, ValueError):
+            max_rows = self._artifact_buffer_max_rows
+        self._artifact_buffer_max_rows = max(1, max_rows)
+        self._artifact_buffered = mode_value == "buffered"
+
+        self._spill_correlated = {}
+        self._spill_correlated_chunks = []
+        self._spill_correlated_chunk_index = 0
+        self._spill_status_rows = []
+        self._spill_status_chunks = []
+        self._spill_status_chunk_index = 0
+        self._spill_anomaly_rows = []
+        self._spill_anomaly_chunks = []
+        self._spill_anomaly_chunk_index = 0
+        self._active_corr_lengths = {}
+        self._maxlag_state = {}
+
+    def _artifact_runtime_flush_needed(self):
+        if not self._artifact_buffered:
+            return False
+        limit = max(1, int(getattr(self, "_artifact_buffer_max_rows", 1)))
+        return (
+            len(getattr(self, "_spill_correlated", {})) >= limit
+            or len(getattr(self, "_spill_status_rows", [])) >= limit
+            or len(getattr(self, "_spill_anomaly_rows", [])) >= limit
+        )
+
+    def _record_correlated(self, pair, corr, retain_validated=True):
+        self._record_correlated_batch({pair: corr}, retain_validated=retain_validated)
+
+    def _record_correlated_batch(self, accepted_map, retain_validated=True):
+        if not accepted_map:
+            return
+        if getattr(self, "_step_observer_enabled", False):
+            self._validated_step.update(accepted_map)
+        if retain_validated:
+            self.validated.update(accepted_map)
+        if getattr(self, "_artifact_buffered", False):
+            t0 = time.perf_counter()
+            self._spill_correlated.update(accepted_map)
+            for pair, corr in accepted_map.items():
+                self._update_maxlag_state(pair, corr)
+            self.artifact_bookkeeping_time += time.perf_counter() - t0
+        else:
+            self.correlated.update(accepted_map)
+
+    def _update_maxlag_state(self, pair, corr):
+        id1, id2, t1, t2, _window = pair
+        if corr is None:
+            return
+        if isinstance(corr, float) and math.isnan(corr):
+            return
+
+        timepts = np.array([t1, t2])
+        try:
+            lag = int(abs(timepts.max() - timepts.min()))
+        except TypeError:
+            lag = int(abs(np.int64(timepts.max()) - np.int64(timepts.min())))
+
+        if self.n_lags is not None and lag > self.n_lags:
+            return
+
+        pair_ids = tuple(sorted((id1, id2)))
+        if pair_ids[0] == id1:
+            time1 = t1
+        else:
+            time1 = t2
+
+        key = (pair_ids[0], pair_ids[1], int(time1))
+        score = abs(float(corr))
+        prev = self._maxlag_state.get(key)
+        if prev is None or score > prev["score"] or (score == prev["score"] and lag < prev["lag"]):
+            self._maxlag_state[key] = {
+                "max_corr": corr,
+                "lag": lag,
+                "score": score,
+                "time1_raw": time1,
+            }
+
+    def _iter_validation_payloads(self, pairs, chunk_size):
+        base_index = self.window_index[0]
+        ids_lookup = self.series_ids
+        data = self.window_data
+
+        batch_pairs = []
+        batch_x = []
+        batch_y = []
+        for pair in pairs:
+            id1, id2, t1, t2, window_size = pair
+            start1 = int(t1 - base_index)
+            start2 = int(t2 - base_index)
+            x = data[ids_lookup[id1], start1:start1 + window_size]
+            y = data[ids_lookup[id2], start2:start2 + window_size]
+            if x.size != window_size or y.size != window_size:
+                continue
+            batch_pairs.append(pair)
+            batch_x.append(x.astype(np.float64, copy=False))
+            batch_y.append(y.astype(np.float64, copy=False))
+            if len(batch_pairs) >= chunk_size:
+                yield {
+                    "pairs": list(batch_pairs),
+                    "x_batch": np.asarray(batch_x, dtype=np.float64),
+                    "y_batch": np.asarray(batch_y, dtype=np.float64),
+                    "corr_threshold": self.corr_threshold,
+                    "neg_corr": self.neg_corr,
+                    "corr_val": True,
+                }
+                batch_pairs = []
+                batch_x = []
+                batch_y = []
+
+        if batch_pairs:
+            yield {
+                "pairs": list(batch_pairs),
+                "x_batch": np.asarray(batch_x, dtype=np.float64),
+                "y_batch": np.asarray(batch_y, dtype=np.float64),
+                "corr_threshold": self.corr_threshold,
+                "neg_corr": self.neg_corr,
+                "corr_val": True,
+            }
+
+    def _buffered_emit_anomaly(self, key, marker):
+        id1, id2, lag = key
+        if isinstance(marker, tuple):
+            time_val, kind = marker
+        else:
+            time_val, kind = marker, 0
+        self._spill_anomaly_rows.append((id1, id2, lag, int(time_val), int(kind)))
+
+    def _buffered_finalize_status(self, key, status):
+        if key is None or status is None:
+            return
+        id1, id2, lag = key
+        t1, t2, _w, corr_len, corr_sign = status
+        self._spill_status_rows.append((id1, id2, lag, int(t1), int(t2), int(corr_len), int(corr_sign)))
+
+    def _buffered_in_corr(self, pair, corr):
+        timepts = np.array([pair[2], pair[3]])
+        window_size = pair[4]
+        corr_lag = max(timepts) - min(timepts)
+        corr_sign = (1 if corr >= 0 else -1)
+        key = (pair[0], pair[1], corr_lag)
+        key2 = (pair[1], pair[0], corr_lag)
+
+        if key not in self._active_corr_lengths and key2 not in self._active_corr_lengths:
+            status = [int(timepts[0]), int(timepts[1]), int(window_size), int(window_size), int(corr_sign)]
+            self._active_corr_lengths[key] = status
+            self._buffered_emit_anomaly(key, (int(min(timepts)), 1))
+            return key, status
+
+        if key2 in self._active_corr_lengths:
+            key = key2
+
+        last_corr = self._active_corr_lengths[key]
+        first_timepts = np.array([last_corr[0], last_corr[1]])
+        last_window_size = last_corr[2]
+        last_corr_length = last_corr[3]
+        last_corr_sign = last_corr[4]
+        curr_time = max(timepts + window_size)
+        next_corr_time = max(first_timepts + last_corr_length + self.window_step)
+
+        if curr_time < next_corr_time:
+            return None
+
+        if curr_time == next_corr_time and window_size == last_window_size and corr_sign == last_corr_sign:
+            last_corr[3] += self.window_step
+            return key, last_corr
+
+        self._buffered_finalize_status(key, list(last_corr))
+        status = [int(timepts[0]), int(timepts[1]), int(window_size), int(window_size), int(corr_sign)]
+        self._active_corr_lengths[key] = status
+        marker = 1 if corr_sign == last_corr_sign else 0
+        self._buffered_emit_anomaly(key, (int(min(timepts)), marker))
+        return key, status
+
+    def _monitor_corr_buffered(self):
+        new_in = {}
+        if len(self.validated) > 0:
+            for pair, corr in self.validated.items():
+                new_pair = self._buffered_in_corr(pair, corr)
+                if new_pair is not None:
+                    key, status = new_pair
+                    new_in[key] = [status[0], status[1], status[2], status[3]]
+                    if key in self.previous_correlations:
+                        del self.previous_correlations[key]
+
+        if len(self.previous_correlations) > 0:
+            for pair_key, rec in [self._out_corr(item) for item in self.previous_correlations.items()]:
+                self._buffered_emit_anomaly(pair_key, rec)
+                active_status = self._active_corr_lengths.pop(pair_key, None)
+                if active_status is not None:
+                    self._buffered_finalize_status(pair_key, list(active_status))
+
+        self.previous_correlations = new_in
+
+    def _flush_correlated_chunk(self):
+        if not self._spill_correlated:
+            return False
+        prefix = self._artifact_state.get("prefix")
+        if not prefix:
+            return False
+        self._spill_correlated_chunk_index += 1
+        path = f"{prefix}_correlated.chunk{self._spill_correlated_chunk_index:06d}.csv"
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        rows = sorted(
+            self._spill_correlated.items(),
+            key=lambda item: _window_sort_key((item[0][0], item[0][1], item[0][2], item[0][3]), item[0][4]),
+        )
+        with open(path, "w", newline="") as file:
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
+            writer.writerow(["id1", "id2", "time1_idx", "time2_idx", "corr"])
+            for pair, corr in rows:
+                writer.writerow([pair[0], pair[1], int(pair[2]), int(pair[3]), corr])
+        self._spill_correlated_chunks.append(path)
+        self._spill_correlated = {}
+        return True
+
+    def _flush_status_chunk(self):
+        if not self._spill_status_rows:
+            return False
+        prefix = self._artifact_state.get("prefix")
+        if not prefix:
+            return False
+        self._spill_status_chunk_index += 1
+        path = f"{prefix}_status.chunk{self._spill_status_chunk_index:06d}.csv"
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        rows = sorted(self._spill_status_rows, key=_status_sort_key)
+        with open(path, "w", newline="") as file:
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
+            writer.writerow(["id1", "id2", "lag", "start_time_id1_idx", "start_time_id2_idx", "duration", "corr_sign"])
+            writer.writerows(rows)
+        self._spill_status_chunks.append(path)
+        self._spill_status_rows = []
+        return True
+
+    def _flush_anomaly_chunk(self):
+        if not self._spill_anomaly_rows:
+            return False
+        prefix = self._artifact_state.get("prefix")
+        if not prefix:
+            return False
+        self._spill_anomaly_chunk_index += 1
+        path = f"{prefix}_anomalies.chunk{self._spill_anomaly_chunk_index:06d}.csv"
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        rows = sorted(self._spill_anomaly_rows, key=_anomaly_sort_key)
+        with open(path, "w", newline="") as file:
+            writer = csv.writer(file, delimiter=CSV_DELIMITER)
+            writer.writerow(["id1", "id2", "lag", "time_idx", "marker"])
+            writer.writerows(rows)
+        self._spill_anomaly_chunks.append(path)
+        self._spill_anomaly_rows = []
+        return True
+
+    def _maybe_flush_artifact_buffers(self, force=False):
+        if not self._artifact_buffered:
+            return 0
+        if not force and not self._artifact_runtime_flush_needed():
+            return 0
+        flushed = 0
+        flushed += int(self._flush_correlated_chunk())
+        flushed += int(self._flush_status_chunk())
+        flushed += int(self._flush_anomaly_chunk())
+        return flushed
+
+    def _merge_sorted_csv_chunks(self, chunk_paths, output_csv, header, key_fn, row_transform=None):
+        os.makedirs(os.path.dirname(output_csv), exist_ok=True)
+        with open(output_csv, "w", newline="") as out_file:
+            writer = csv.writer(out_file, delimiter=CSV_DELIMITER)
+            writer.writerow(header)
+
+            files = []
+            readers = []
+            heap = []
+            try:
+                for index, path in enumerate(chunk_paths):
+                    handle = open(path, newline="")
+                    reader = csv.reader(handle, delimiter=CSV_DELIMITER)
+                    next(reader, None)
+                    row = next(reader, None)
+                    if row is not None:
+                        heap.append((key_fn(row), index, row))
+                    files.append(handle)
+                    readers.append(reader)
+
+                heapq.heapify(heap)
+                while heap:
+                    _sort_key, index, row = heapq.heappop(heap)
+                    writer.writerow(row_transform(row) if row_transform else row)
+                    next_row = next(readers[index], None)
+                    if next_row is not None:
+                        heapq.heappush(heap, (key_fn(next_row), index, next_row))
+            finally:
+                for handle in files:
+                    try:
+                        handle.close()
+                    except Exception:
+                        pass
+
+        for path in chunk_paths:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    def _finalize_buffered_artifacts(self):
+        if not self._artifact_buffered:
+            return
+        self._maybe_flush_artifact_buffers(force=True)
+
+        prefix = self._artifact_state.get("prefix")
+        if not prefix:
+            return
+
+        for key, status in list(self._active_corr_lengths.items()):
+            self._buffered_finalize_status(key, list(status))
+        self._active_corr_lengths = {}
+        self._maybe_flush_artifact_buffers(force=True)
+
+        correlated_csv = f"{prefix}_correlated.csv"
+        if self._spill_correlated_chunks:
+            self._merge_sorted_csv_chunks(
+                self._spill_correlated_chunks,
+                correlated_csv,
+                ["id1", "id2", "time1_idx", "time1", "time2_idx", "time2", "corr"],
+                key_fn=lambda row: _window_sort_key((row[0], row[1], int(row[2]), int(row[3])), self.window_size),
+                row_transform=lambda row: [
+                    row[0],
+                    row[1],
+                    row[2],
+                    self._safe_index_to_datetime(int(row[2])) if str(row[2]).strip() != "" else row[2],
+                    row[3],
+                    self._safe_index_to_datetime(int(row[3])) if str(row[3]).strip() != "" else row[3],
+                    row[4],
+                ],
+            )
+        elif not os.path.exists(correlated_csv):
+            with open(correlated_csv, "w", newline="") as file:
+                writer = csv.writer(file, delimiter=CSV_DELIMITER)
+                writer.writerow(["id1", "id2", "time1_idx", "time1", "time2_idx", "time2", "corr"])
+
+        status_csv = f"{prefix}_status.csv"
+        if self._spill_status_chunks:
+            self._merge_sorted_csv_chunks(
+                self._spill_status_chunks,
+                status_csv,
+                ["id1", "id2", "lag", "start_time_id1", "start_time_id2", "duration", "corr_sign"],
+                key_fn=lambda row: _status_sort_key((row[0], row[1], int(row[2]), int(row[3]), int(row[4]), int(row[5]), int(row[6]))),
+                row_transform=lambda row: [
+                    row[0],
+                    row[1],
+                    row[2],
+                    self._safe_index_to_datetime(int(row[3])),
+                    self._safe_index_to_datetime(int(row[4])),
+                    row[5],
+                    row[6],
+                ],
+            )
+        elif not os.path.exists(status_csv):
+            with open(status_csv, "w", newline="") as file:
+                writer = csv.writer(file, delimiter=CSV_DELIMITER)
+                writer.writerow(["id1", "id2", "lag", "start_time_id1", "start_time_id2", "duration", "corr_sign"])
+
+        anomalies_csv = f"{prefix}_anomalies.csv"
+        if self._spill_anomaly_chunks:
+            self._merge_sorted_csv_chunks(
+                self._spill_anomaly_chunks,
+                anomalies_csv,
+                ["id1", "id2", "lag", "time_idx", "time", "anomaly"],
+                key_fn=lambda row: _anomaly_sort_key((row[0], row[1], int(row[2]), int(row[3]), int(row[4]))),
+                row_transform=lambda row: [
+                    row[0],
+                    row[1],
+                    row[2],
+                    row[3],
+                    self._safe_index_to_datetime(int(row[3])),
+                    _marker_to_label(int(row[4])),
+                ],
+            )
+        elif not os.path.exists(anomalies_csv):
+            with open(anomalies_csv, "w", newline="") as file:
+                writer = csv.writer(file, delimiter=CSV_DELIMITER)
+                writer.writerow(["id1", "id2", "lag", "time_idx", "time", "anomaly"])
+
+        self._spill_correlated_chunks = []
+        self._spill_status_chunks = []
+        self._spill_anomaly_chunks = []
     
-    def _get_validated_corr(self, corr_val=True, force_mode=None):
+    def _get_validated_corr(self, corr_val=True, force_mode=None, retain_validated=True):
         self.validated = {}
+        if getattr(self, "_step_observer_enabled", False):
+            self._validated_step = {}
         if not self.candidates:
             return
 
@@ -2029,10 +2900,28 @@ class CorrTrack:
         self.total_candidates += n_pairs
 
         if not corr_val:
-            # Fast path: avoid Python per-item assignment loops.
-            validated_now = dict.fromkeys(candidates, 1.0)
-            self.validated = validated_now
-            self.correlated.update(validated_now)
+            if getattr(self, "_online_window_metrics_only", False) and not retain_validated:
+                self.tested_candidates += n_pairs
+                self.validated_candidates += n_pairs
+                return
+            if getattr(self, "_artifact_buffered", False):
+                if retain_validated:
+                    validated_now = dict.fromkeys(candidates, 1.0)
+                    self.validated = validated_now
+                    self._record_correlated_batch(validated_now, retain_validated=False)
+                else:
+                    t0 = time.perf_counter()
+                    spill = self._spill_correlated
+                    update_maxlag = self._update_maxlag_state
+                    for pair in candidates:
+                        spill[pair] = 1.0
+                        update_maxlag(pair, 1.0)
+                    self.artifact_bookkeeping_time += time.perf_counter() - t0
+            else:
+                validated_now = dict.fromkeys(candidates, 1.0)
+                if retain_validated:
+                    self.validated = validated_now
+                self.correlated.update(validated_now)
             self.tested_candidates += n_pairs
             self.validated_candidates += n_pairs
             return
@@ -2048,36 +2937,16 @@ class CorrTrack:
 
         if worker_mode == "sequential":
             if _cy_validate_corr_batch is not None:
-                base_index = self.window_index[0]
-                ids_lookup = self.series_ids
-                data = self.window_data
-                items = []
-                for pair in pairs:
-                    id1, id2, t1, t2, window_size = pair
-                    start1 = int(t1 - base_index)
-                    start2 = int(t2 - base_index)
-                    x = data[ids_lookup[id1], start1:start1 + window_size]
-                    y = data[ids_lookup[id2], start2:start2 + window_size]
-                    if x.size != window_size or y.size != window_size:
-                        continue
-                    items.append({
-                        "pair": pair,
-                        "x": x.astype(np.float64, copy=False),
-                        "y": y.astype(np.float64, copy=False),
-                    })
-
-                if not items:
-                    return
-
                 chunk_size = 256
                 tested = validated = 0
                 if track_min_dist:
                     min_dist, min_pair = self.min_dist, self.pair_min_dist
                 eff_std_thresh = 1e-3
-                for i in range(0, len(items), chunk_size):
-                    payload_items = items[i:i + chunk_size]
-                    x_batch = np.asarray([item["x"] for item in payload_items], dtype=np.float64)
-                    y_batch = np.asarray([item["y"] for item in payload_items], dtype=np.float64)
+                had_payload = False
+                for payload in self._iter_validation_payloads(pairs, chunk_size):
+                    had_payload = True
+                    x_batch = payload["x_batch"]
+                    y_batch = payload["y_batch"]
                     batch_results = _cy_validate_corr_batch(
                         x_batch,
                         y_batch,
@@ -2085,16 +2954,18 @@ class CorrTrack:
                         bool(self.neg_corr),
                         eff_std_thresh,
                     )
-                    for item, entry in zip(payload_items, batch_results):
-                        pair = item["pair"]
+                    accepted_now = {}
+                    for pair, entry in zip(payload["pairs"], batch_results):
                         is_correlated, pair_corr, pair_dist, _is_const, _is_spiked = entry
                         tested += 1
                         if track_min_dist and pair_dist < min_dist:
                             min_dist, min_pair = pair_dist, pair
                         if is_correlated:
                             validated += 1
-                            self.correlated[pair] = pair_corr
-                            self.validated[pair] = pair_corr
+                            accepted_now[pair] = pair_corr
+                    self._record_correlated_batch(accepted_now, retain_validated=retain_validated)
+                if not had_payload:
+                    return
                 self.tested_candidates += tested
                 self.validated_candidates += validated
                 if track_min_dist:
@@ -2104,6 +2975,7 @@ class CorrTrack:
             tested = validated = 0
             if track_min_dist:
                 min_dist, min_pair = self.min_dist, self.pair_min_dist
+            accepted_now = {}
             for pair in pairs:
                 pair, is_corr, corr, dist = self._validate_corr(pair, True)
                 tested += 1
@@ -2111,68 +2983,48 @@ class CorrTrack:
                     min_dist, min_pair = dist, pair
                 if is_corr:
                     validated += 1
-                    self.correlated[pair] = corr
-                    self.validated[pair] = corr
+                    accepted_now[pair] = corr
+            self._record_correlated_batch(accepted_now, retain_validated=retain_validated)
             self.tested_candidates += tested
             self.validated_candidates += validated
             if track_min_dist:
                 self.min_dist, self.pair_min_dist = min_dist, min_pair
             return
 
-        base_index = self.window_index[0]
-        ids_lookup = self.series_ids
-        data = self.window_data
-
+        chunk_size = 256
         t0 = time.perf_counter() if self.profile_enabled else None
-        items = []
-        for pair in pairs:
-            id1, id2, t1, t2, window_size = pair
-            start1 = int(t1 - base_index)
-            start2 = int(t2 - base_index)
-            x = data[ids_lookup[id1], start1:start1 + window_size]
-            y = data[ids_lookup[id2], start2:start2 + window_size]
-            if x.size != window_size or y.size != window_size:
-                continue
-            items.append({
-                "pair": pair,
-                "x": x.astype(np.float64, copy=False),
-                "y": y.astype(np.float64, copy=False),
-            })
+        payload_iter = self._iter_validation_payloads(pairs, chunk_size)
+        first_payload = next(payload_iter, None)
         if t0 is not None:
             self._profile_add("val.build_items", time.perf_counter() - t0)
 
-        if not items:
+        if first_payload is None:
             return
-
-        chunk_size = 256
-
-        payloads = []
-        for i in range(0, len(items), chunk_size):
-            payload_items = items[i:i + chunk_size]
-            payload = {
-                "items": payload_items,
-                "corr_threshold": self.corr_threshold,
-                "neg_corr": self.neg_corr,
-                "corr_val": True,
-            }
-            payloads.append(payload)
-
-        t0 = time.perf_counter() if self.profile_enabled else None
-        results_batches = self._parallel_map(
-            _corr_validation_batch_worker,
-            payloads,
-            mode=worker_mode,
-            max_workers=self.n_nodes,
-            preserve_order=False,
-        )
-        if t0 is not None:
-            self._profile_add("val.dispatch", time.perf_counter() - t0)
 
         tested = validated = 0
         if track_min_dist:
             min_dist, min_pair = self.min_dist, self.pair_min_dist
         t0 = time.perf_counter() if self.profile_enabled else None
-        for batch in results_batches:
+        max_workers = max(1, int(self.n_nodes or 1))
+        in_flight = {}
+        pool = self._get_thread_pool(max_workers)
+
+        def _submit(payload):
+            future = pool.submit(_corr_validation_batch_worker, payload)
+            in_flight[future] = None
+
+        _submit(first_payload)
+        for _ in range(max_workers * 2 - 1):
+            payload = next(payload_iter, None)
+            if payload is None:
+                break
+            _submit(payload)
+
+        while in_flight:
+            future = next(as_completed(tuple(in_flight)))
+            del in_flight[future]
+            batch = future.result()
+            accepted_now = {}
             for pair, is_correlated, corr, dist, is_constant, _ in batch:
                 tested += 1
                 if is_constant:
@@ -2181,8 +3033,11 @@ class CorrTrack:
                     min_dist, min_pair = dist, pair
                 if is_correlated:
                     validated += 1
-                    self.correlated[pair] = corr
-                    self.validated[pair] = corr
+                    accepted_now[pair] = corr
+            self._record_correlated_batch(accepted_now, retain_validated=retain_validated)
+            next_payload = next(payload_iter, None)
+            if next_payload is not None:
+                _submit(next_payload)
         if t0 is not None:
             self._profile_add("val.merge", time.perf_counter() - t0)
 
@@ -2198,6 +3053,10 @@ class CorrTrack:
         Fast path: one-pass Cython kernel (when monitor_kernels is available).
         Fallback: Python hybrid path with sequential 'in' and parallel 'out'.
         """
+        if getattr(self, "_artifact_buffered", False):
+            self._monitor_corr_buffered()
+            return
+
         if _cy_monitor_step is not None:
             t0 = time.perf_counter() if self.profile_enabled else None
             validated_items = tuple(self.validated.items()) if self.validated else ()
@@ -2219,7 +3078,7 @@ class CorrTrack:
             t0 = time.perf_counter() if self.profile_enabled else None
             # sequential 'in' to preserve state coupling
             for pair, corr in self.validated.items():
-                new_pair = self._in_corr(pair)
+                new_pair = self._in_corr(pair, corr)
                 if new_pair is not None:
                     new_in.update(new_pair)
                     key = list(new_pair.keys())[0]
@@ -2319,14 +3178,37 @@ class CorrTrack:
 
         with open(output_csv, mode='w', newline='') as file:
             writer = csv.writer(file, delimiter=CSV_DELIMITER)
-            writer.writerow(["id1", "id2", "time1", "time2", "corr"])
+            writer.writerow(["id1", "id2", "time1_idx", "time1", "time2_idx", "time2", "corr"])
             for pair,corr in sorted_items:
                 id1, id2, t1, t2, _ = pair
+                t1_idx = t1
+                t2_idx = t2
                 if self.datetime_index:
                     t1, t2 = self._safe_index_to_datetime(t1), self._safe_index_to_datetime(t2)
-                writer.writerow([id1,id2,t1,t2,corr])
+                writer.writerow([id1,id2,t1_idx,t1,t2_idx,t2,corr])
 
     def _save_max_lag_correlated(self,output_csv):
+        if getattr(self, "_artifact_buffered", False) and self._maxlag_state:
+            os.makedirs(os.path.dirname(output_csv), exist_ok=True)
+            with open(output_csv, mode='w', newline='') as file:
+                writer = csv.writer(file, delimiter=CSV_DELIMITER)
+                writer.writerow(["id1", "id2", "t1_index", "time1", "max_corr", "lag"])
+                for key in sorted(self._maxlag_state, key=_maxlag_sort_key):
+                    id1, id2, t1_idx = key
+                    record = self._maxlag_state[key]
+                    time1_display = record["time1_raw"]
+                    if self.datetime_index:
+                        time1_display = self._safe_index_to_datetime(time1_display)
+                    writer.writerow([
+                        id1,
+                        id2,
+                        t1_idx,
+                        time1_display,
+                        record["max_corr"],
+                        record["lag"],
+                    ])
+            return
+
         if not self.correlated:
             return
 
@@ -2435,6 +3317,8 @@ class CorrTrack:
                     ids = (key[0],key[1])
                     lag = key[2]
                     for t1,t2,w,corr_len,corr_sign in value:
+                        time1 = t1
+                        time2 = t2
                         if self.datetime_index:
                             time1 = self._safe_index_to_datetime(t1)
                             time2 = self._safe_index_to_datetime(t2)
@@ -2442,7 +3326,7 @@ class CorrTrack:
                         
 
     def _print_anomalies(self):
-        if len(self.corr_lengths)>0:
+        if len(self.corr_anomalies)>0:
             for key,value in self.corr_anomalies.items():
                 ids = (key[0],key[1])
                 lag = key[2]
@@ -2490,23 +3374,25 @@ class CorrTrack:
                     writer.writerow([id1, id2, time1, time2, corr])
 
     def _save_anomalies(self,output_csv):
-        if len(self.corr_lengths)>0:
+        if len(self.corr_anomalies)>0:
             os.makedirs(os.path.dirname(output_csv), exist_ok=True)
             with open(output_csv, mode='w', newline='') as file:
                 writer = csv.writer(file, delimiter=CSV_DELIMITER)
-                writer.writerow(["id1", "id2", "lag", "time", "anomaly"])
+                writer.writerow(["id1", "id2", "lag", "time_idx", "time", "anomaly"])
                 for key,value in self.corr_anomalies.items():
                     ids = (key[0],key[1])
                     lag = key[2]
                     for time,type in value:
+                        time_idx = time
+                        time_display = time
                         if self.datetime_index:
-                            time = self._safe_index_to_datetime(time)
+                            time_display = self._safe_index_to_datetime(time)
                         if type == 1:
-                            writer.writerow([ids[0],ids[1],lag,time,"into"])
+                            writer.writerow([ids[0],ids[1],lag,time_idx,time_display,"into"])
                         elif type == -1:
-                            writer.writerow([ids[0],ids[1],lag,time,"out_of"])
+                            writer.writerow([ids[0],ids[1],lag,time_idx,time_display,"out_of"])
                         elif type == 0:
-                            writer.writerow([ids[0],ids[1],lag,time,"changed_sign"])
+                            writer.writerow([ids[0],ids[1],lag,time_idx,time_display,"changed_sign"])
 
     def _artifact_write_rows(self, path, header, rows):
         if not rows:
@@ -2534,9 +3420,12 @@ class CorrTrack:
                 reader = csv.reader(file, delimiter=delimiter)
                 next(reader, None)
                 for row in reader:
-                    if len(row) < 4:
+                    if len(row) >= 7:
+                        key = tuple(row[:6])
+                    elif len(row) >= 5:
+                        key = (row[0], row[1], row[2], row[2], row[3], row[3])
+                    else:
                         continue
-                    key = tuple(row[:4])
                     state["correlated"].add(key)
 
         def _load_neg_pairs(path):
@@ -2587,9 +3476,12 @@ class CorrTrack:
                 reader = csv.reader(file, delimiter=delimiter)
                 next(reader, None)
                 for row in reader:
-                    if len(row) < 5:
+                    if len(row) >= 6:
+                        state["anomalies"].add(tuple(row[:6]))
+                    elif len(row) >= 5:
+                        state["anomalies"].add((row[0], row[1], row[2], row[3], row[3], row[4]))
+                    else:
                         continue
-                    state["anomalies"].add(tuple(row[:5]))
 
         loaders = [
             (f"{prefix}_correlated.csv", _load_correlated),
@@ -2621,15 +3513,26 @@ class CorrTrack:
             return
 
         self._reset_artifact_files(prefix)
-        self._artifact_state = {
-            "prefix": prefix,
-            "headers": set(),
-            "correlated": set(),
-            "neg_pairs": set(),
-            "candidates": {},
-            "status": {},
-            "anomalies": set(),
-        }
+        if getattr(self, "_artifact_buffered", False):
+            self._artifact_state = {
+                "prefix": prefix,
+                "headers": set(),
+                "correlated": set(),
+                "neg_pairs": set(),
+                "candidates": {},
+                "status": {},
+                "anomalies": set(),
+            }
+        else:
+            self._artifact_state = {
+                "prefix": prefix,
+                "headers": set(),
+                "correlated": set(),
+                "neg_pairs": set(),
+                "candidates": {},
+                "status": {},
+                "anomalies": set(),
+            }
 
     def _reset_artifact_files(self, prefix):
         if not prefix:
@@ -2649,6 +3552,21 @@ class CorrTrack:
                     os.remove(path)
                 except OSError:
                     pass
+        base_dir = os.path.dirname(os.path.abspath(prefix))
+        base_name = os.path.basename(prefix)
+        try:
+            for name in os.listdir(base_dir):
+                if not name.startswith(base_name + "_"):
+                    continue
+                if ".chunk" not in name:
+                    continue
+                path = os.path.join(base_dir, name)
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+        except OSError:
+            pass
 
     def _append_artifacts(self):
         state = getattr(self, "_artifact_state", None)
@@ -2666,15 +3584,15 @@ class CorrTrack:
             id1, id2, t1, t2, _ = pair
             t1_display = self._safe_index_to_datetime(t1)
             t2_display = self._safe_index_to_datetime(t2)
-            key = (str(id1), str(id2), str(t1_display), str(t2_display))
+            key = (str(id1), str(id2), str(t1), str(t1_display), str(t2), str(t2_display))
             if key in state["correlated"]:
                 continue
-            rows.append([id1, id2, t1_display, t2_display, corr])
+            rows.append([id1, id2, t1, t1_display, t2, t2_display, corr])
             state["correlated"].add(key)
         if rows:
             self._artifact_write_rows(
                 f"{prefix}_correlated.csv",
-                ["id1", "id2", "time1", "time2", "corr"],
+                ["id1", "id2", "time1_idx", "time1", "time2_idx", "time2", "corr"],
                 rows,
             )
 
@@ -2767,15 +3685,15 @@ class CorrTrack:
                     label = "changed_sign"
                 else:
                     label = str(kind)
-                tracker_key = (str(ids[0]), str(ids[1]), str(lag), str(time_val), label)
+                tracker_key = (str(ids[0]), str(ids[1]), str(lag), str(time), str(time_val), label)
                 if tracker_key in state["anomalies"]:
                     continue
                 state["anomalies"].add(tracker_key)
-                rows.append([ids[0], ids[1], lag, time_val, label])
+                rows.append([ids[0], ids[1], lag, time, time_val, label])
         if rows:
             self._artifact_write_rows(
                 f"{prefix}_anomalies.csv",
-                ["id1", "id2", "lag", "time", "anomaly"],
+                ["id1", "id2", "lag", "time_idx", "time", "anomaly"],
                 rows,
             )
     
@@ -3302,7 +4220,14 @@ class CorrTrack:
                 'specificity': 0.0,
                 'f1_score': 0.0,
                 'aucroc': float('nan'),
-                'pr_auc': float('nan')
+                'pr_auc': float('nan'),
+                'recall_min': None,
+                'precision_pos': float('nan'),
+                'recall_pos': float('nan'),
+                'f1_score_pos': float('nan'),
+                'precision_neg': float('nan'),
+                'recall_neg': float('nan'),
+                'f1_score_neg': float('nan'),
             }
 
         # Infer expected length
@@ -3352,7 +4277,14 @@ class CorrTrack:
             'specificity': specificity,
             'f1_score': f1,
             'aucroc': aucroc,
-            'pr_auc': pr_auc
+            'pr_auc': pr_auc,
+            'recall_min': None,
+            'precision_pos': float('nan'),
+            'recall_pos': float('nan'),
+            'f1_score_pos': float('nan'),
+            'precision_neg': float('nan'),
+            'recall_neg': float('nan'),
+            'f1_score_neg': float('nan'),
         }
 
     def get_bst_basic_window(window_size: int, window_step: int = None) -> int:
@@ -3503,10 +4435,12 @@ class CorrTrack:
         self.candidate_time += end_time - start_time
 
         # validation
-        start_time = time.time()
-        self._get_validated_corr(corr_val, force_mode=val_mode)
-        end_time = time.time()
-        self.validation_time += end_time - start_time
+        bookkeeping_before = self.artifact_bookkeeping_time
+        start_time = time.perf_counter()
+        self._get_validated_corr(corr_val, force_mode=val_mode, retain_validated=monitor)
+        end_time = time.perf_counter()
+        bookkeeping_delta = max(self.artifact_bookkeeping_time - bookkeeping_before, 0.0)
+        self.validation_time += max((end_time - start_time) - bookkeeping_delta, 0.0)
 
         if monitor:
             # monitoring
@@ -3553,10 +4487,12 @@ class CorrTrack:
         self.candidate_time += end_time - start_time
 
         # 3) validation (parallel)
-        start_time = time.time()
-        self._get_validated_corr(corr_val, force_mode=val_mode)
-        end_time = time.time()
-        self.validation_time += end_time - start_time
+        bookkeeping_before = self.artifact_bookkeeping_time
+        start_time = time.perf_counter()
+        self._get_validated_corr(corr_val, force_mode=val_mode, retain_validated=monitor)
+        end_time = time.perf_counter()
+        bookkeeping_delta = max(self.artifact_bookkeeping_time - bookkeeping_before, 0.0)
+        self.validation_time += max((end_time - start_time) - bookkeeping_delta, 0.0)
 
         if monitor:
             # 4) monitoring (parallel 'out', sequential 'in')
@@ -5413,7 +6349,7 @@ class Candidates:
 
 
 class CorrTrack_optimize:
-    def __init__(self,train_data,ids,window_size,window_step,n_lags,corr_threshold,recall_by_window,alg,neg_corr,corr_val, exec="parallel",max_workers=0, sketch_norm="z", verbose=False, testing=False, parallel_sketch=None, parallel_candidates=None, parallel_validation=None, track_min_dist=False):
+    def __init__(self,train_data,ids,window_size,window_step,n_lags,corr_threshold,recall_by_window,alg,neg_corr,corr_val, exec="parallel",max_workers=0, sketch_norm="z", verbose=False, testing=False, parallel_sketch=None, parallel_candidates=None, parallel_validation=None, track_min_dist=False, artifact_mode="buffered", artifact_buffer_max_rows=250000):
 
         self.neg_corr = neg_corr
         self.corr_val = corr_val
@@ -5443,6 +6379,20 @@ class CorrTrack_optimize:
         self.parallel_sketch = _resolve_parallel_flag(parallel_sketch, False)
         self.parallel_candidates = _resolve_parallel_flag(parallel_candidates, False)
         self.parallel_validation = _resolve_parallel_flag(parallel_validation, parallel_default)
+        artifact_mode_value = (artifact_mode or "buffered").lower()
+        if artifact_mode_value not in {"iterative", "final", "buffered"}:
+            artifact_mode_value = "buffered"
+        self.artifact_mode = artifact_mode_value
+        try:
+            self.artifact_buffer_max_rows = max(1, int(artifact_buffer_max_rows))
+        except (TypeError, ValueError):
+            self.artifact_buffer_max_rows = 250000
+        self._optim_artifact_dir = None
+        self._bf_artifact_prefix = None
+        self._bf_record = None
+        self._metric_helper = None
+        self._bf_online_reference_csv = None
+        self._bf_online_stats = None
         self.corrtrack_bf = CorrTrack(window_size=self.window_size,basic_window=None,window_step=window_step,n_vectors=1,n_lags=self.n_lags,
                                     grid_dimension=1,cell_size=1,seed=None,seed_toggle=None,corr_threshold=self.corr_threshold,
                                     neg_corr=self.neg_corr,preprocess=False,exec=self.exec,max_workers=self.max_workers,
@@ -5453,6 +6403,33 @@ class CorrTrack_optimize:
         self.basic_window = self.corrtrack_bf.basic_window
 
         self.alg = alg
+
+    def _artifact_metric_helper(self):
+        helper = getattr(self, "_metric_helper", None)
+        if helper is None:
+            helper = CorrTrack_compare.__new__(CorrTrack_compare)
+            helper.window_size = self.window_size
+            helper.recall_by_window = self.recall_by_window
+            self._metric_helper = helper
+        return helper
+
+    def _artifact_prefix(self, stem):
+        if not self._optim_artifact_dir:
+            raise RuntimeError("Optimizer artifact directory is not configured")
+        return os.path.join(self._optim_artifact_dir, stem)
+
+    def _use_online_window_metrics(self):
+        return bool(self.recall_by_window and not self.corr_val)
+
+    def _monitor_for_metrics(self):
+        return not self.recall_by_window
+
+    @staticmethod
+    def _to_float(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
 
     def _run_is_parallel(self) -> bool:
         return self.exec != "sequential"
@@ -5492,37 +6469,69 @@ class CorrTrack_optimize:
         for res in results:
             yield res
     
-    def _get_bf_ground_truth(self):
+    def _get_bf_ground_truth(self, dataset_id):
         """
-        Compute brute-force ground truth with the same inner-execution policy
-        that CorrTrack would use (policy-relative). The outer loop is sequential.
+        Compute brute-force ground truth through the buffered artifact execution path.
         """
-        length_data = self.train_data.shape[1]
+        bf_prefix = self._artifact_prefix("bf")
+        online_writer = None
+        if self._use_online_window_metrics():
+            self._bf_online_reference_csv = f"{bf_prefix}_online_windows.csv"
+            online_writer = _OptimizerBFWindowReferenceWriter(
+                self._bf_online_reference_csv,
+                self.window_size,
+            )
+        metadata = {
+            "mode": "bf",
+            "alg": "bf",
+            "optim": "baseline",
+            "artifact_buffer_max_rows": self.artifact_buffer_max_rows,
+        }
 
-        start_time = time.time()
-        for start in range(0, length_data - self.window_step + 1, self.window_step):
-            chunk = self.train_data[:, start:start + self.window_step]
-            self.corrtrack_bf.run_bf(
-                chunk,
+        try:
+            bf_record, _runtime_parts, _corr_flags = execute_corrtrack_pass(
+                "bf",
+                dataset_id,
+                self.corrtrack_bf,
+                self.train_data,
                 self.ids,
+                metadata,
+                corr_val=True,
+                recall_by_window=self.recall_by_window,
+                artifact_prefix=bf_prefix,
+                artifact_mode=self.artifact_mode,
                 verbose=self.verbose,
                 testing=self.testing,
-                corr_val=True,
-                monitor=False,
+                monitor=self._monitor_for_metrics(),
+                step_observer=online_writer.observe if online_writer is not None else None,
             )
-        end_time = time.time()
-        runtime = end_time - start_time
-        print("Run Brute-Force, Finished in ",runtime)
+        finally:
+            if online_writer is not None:
+                online_writer.close()
 
-        # Get flags based on brute-force
-        if self.recall_by_window:
-            self.ground_truth = self.corrtrack_bf.correlated
+        self._bf_record = bf_record
+        self._bf_artifact_prefix = bf_prefix
+        self.runtime_bf = self._to_float(bf_record.get("runtime"))
+        self.artifact_time_bf = self._to_float(bf_record.get("artifact_time"))
+        self.candidate_time_bf = self._to_float(bf_record.get("cand_time"))
+        self.validation_time_bf = self._to_float(bf_record.get("val_time"))
+        self.monitor_time_bf = self._to_float(bf_record.get("monit_time"))
+        self.correlated_bf = int(float(bf_record.get("correlated", 0) or 0))
+        self.tested_bf = int(float(bf_record.get("tested", 0) or 0))
+        self.total_bf = int(float(bf_record.get("total_candidates", 0) or 0))
+        self.pair_min_dist_bf = self._artifact_metric_helper()._parse_pair_min_dist(
+            bf_record.get("pair_min_dist")
+        )
+        if online_writer is not None:
+            self._bf_online_stats = {
+                "gt_total": online_writer.gt_total,
+                "gt_pos": online_writer.gt_pos,
+                "gt_neg": online_writer.gt_neg,
+            }
         else:
-            self.ground_truth = self.corrtrack_bf.get_correlation_flags(length_data, 0)
-
-        self.runtime_bf = runtime
-        self.pair_min_dist_bf = self.corrtrack_bf.pair_min_dist
-        self.tested_bf = self.corrtrack_bf.tested_candidates
+            self._bf_online_reference_csv = None
+            self._bf_online_stats = None
+        print("Run Brute-Force, Finished in ", self.runtime_bf)
     
     def _init_optim_record(self, dataset_id, param_combo):
         record = {key: None for key in OPTIM_RESULT_COLUMNS}
@@ -5561,14 +6570,14 @@ class CorrTrack_optimize:
         record["grid_dimension"] = param_combo.get("grid_dimension")
         record["freq_threshold"] = param_combo.get("freq_threshold")
 
-        record["cand_time_bf"] = getattr(self.corrtrack_bf, "candidate_time", None)
-        record["val_time_bf"] = getattr(self.corrtrack_bf, "validation_time", None)
-        record["monit_time_bf"] = getattr(self.corrtrack_bf, "monitor_time", None)
+        record["cand_time_bf"] = getattr(self, "candidate_time_bf", None)
+        record["val_time_bf"] = getattr(self, "validation_time_bf", None)
+        record["monit_time_bf"] = getattr(self, "monitor_time_bf", None)
         record["runtime_bf"] = getattr(self, "runtime_bf", None)
         record["artifact_time_bf"] = getattr(self, "artifact_time_bf", None)
-        record["corr_w_bf"] = getattr(self.corrtrack_bf, "validated_candidates", None)
-        record["tested_w_bf"] = getattr(self.corrtrack_bf, "tested_candidates", None)
-        record["cand_w_bf"] = getattr(self.corrtrack_bf, "total_candidates", None)
+        record["corr_w_bf"] = getattr(self, "correlated_bf", None)
+        record["tested_w_bf"] = getattr(self, "tested_bf", None)
+        record["cand_w_bf"] = getattr(self, "total_bf", None)
         record["artifact_time"] = None
 
         record["status"] = "pending"
@@ -5576,7 +6585,7 @@ class CorrTrack_optimize:
         return record
     
     def _run_corrtrack(self, args):
-        param_combo, dataset_id = args
+        trial_index, param_combo, dataset_id = args
         record = self._init_optim_record(dataset_id, param_combo)
 
         nodes = param_combo.get("nodes")
@@ -5630,6 +6639,9 @@ class CorrTrack_optimize:
         record["freq_threshold"] = freq_threshold
 
         length_data = self.train_data.shape[1]
+        use_online_window_metrics = self._use_online_window_metrics()
+        trial_prefix = None if use_online_window_metrics else self._artifact_prefix(f"trial_{int(trial_index):06d}")
+        online_metrics = None
 
         try:
             corrtrack = CorrTrack(
@@ -5673,36 +6685,94 @@ class CorrTrack_optimize:
             record["workers_sketch"] = corrtrack.n_sketch_nodes
             record["workers_candidates"] = corrtrack.n_candidate_nodes
             record["workers_validation"] = corrtrack.n_nodes if corrtrack.parallel_validation else 1
+            metadata = {
+                "mode": "optim",
+                "alg": self.alg,
+                "optim": "recall_speedup",
+                "nodes": nodes,
+                "seed": seed,
+                "seed_toggle": seed_toggle,
+                "preprocess": preprocess,
+                "sketch_norm": self.sketch_norm,
+                "candidate_backend": param_combo.get("candidate_backend"),
+                "freq_threshold": freq_threshold,
+                "artifact_buffer_max_rows": self.artifact_buffer_max_rows,
+            }
 
-            start_time = time.time()
-            for start in range(0, length_data - self.window_step + 1, self.window_step):
-                chunk = self.train_data[:, start : (start + self.window_step)]
-                corrtrack.run(
-                    chunk,
-                    self.ids,
-                    verbose=self.verbose,
-                    testing=self.testing,
-                    corr_val=self.corr_val,
-                    monitor=False,
+            if use_online_window_metrics:
+                if not self._bf_online_reference_csv or not self._bf_online_stats:
+                    raise RuntimeError("Missing optimizer online BF reference for window metrics")
+                online_metrics = _OptimizerOnlineWindowMetrics(
+                    self._bf_online_reference_csv,
+                    self.window_size,
+                    self._bf_online_stats.get("gt_total", 0),
+                    self._bf_online_stats.get("gt_pos", 0),
+                    self._bf_online_stats.get("gt_neg", 0),
+                    total_pairs_bf=self.tested_bf,
+                    pair_min_dist=self.pair_min_dist_bf,
                 )
-            end_time = time.time()
-            runtime = end_time - start_time
-            runtime = max(runtime, 0.0)
-            record["runtime"] = runtime
-            record["sk_time"] = corrtrack.sketch_time
-            record["cand_time"] = corrtrack.candidate_time
-            record["val_time"] = corrtrack.validation_time
-            record["monit_time"] = corrtrack.monitor_time
-            record["corr_w"] = corrtrack.validated_candidates
-            record["tested_w"] = corrtrack.tested_candidates
-            record["cand_w"] = corrtrack.total_candidates
-            record["mem_w"] = corrtrack.n_lagged_windows - 1
 
-            runtime_bf = record.get("runtime_bf") or 0.0
-            if runtime > 0:
-                record["speedup"] = runtime_bf / runtime
-            else:
-                record["speedup"] = float("inf")
+            run_record, _runtime_parts, _corr_flags = execute_corrtrack_pass(
+                "corrtrack",
+                dataset_id,
+                corrtrack,
+                self.train_data,
+                self.ids,
+                metadata,
+                corr_val=self.corr_val,
+                recall_by_window=self.recall_by_window,
+                artifact_prefix=trial_prefix,
+                artifact_mode=self.artifact_mode,
+                verbose=self.verbose,
+                testing=self.testing,
+                monitor=self._monitor_for_metrics(),
+                step_observer=online_metrics.observe if online_metrics is not None else None,
+            )
+
+            copy_fields = (
+                "mem_w",
+                "exec_mode",
+                "parallel_sketch",
+                "parallel_candidates",
+                "parallel_validation",
+                "workers_total",
+                "workers_sketch",
+                "workers_candidates",
+                "workers_validation",
+                "window_size",
+                "window_step",
+                "basic_window",
+                "n_lags",
+                "seed",
+                "seed_toggle",
+                "preprocess",
+                "sketch_norm",
+                "candidate_backend",
+                "corr_threshold",
+                "grid_max",
+                "cell_stretch",
+                "cell_size",
+                "n_vectors",
+                "grid_dimension",
+                "freq_threshold",
+                "sk_time",
+                "cand_time",
+                "val_time",
+                "monit_time",
+                "runtime",
+                "artifact_time",
+            )
+            for field in copy_fields:
+                if field in run_record:
+                    record[field] = run_record.get(field)
+
+            record["corr_w"] = run_record.get("correlated")
+            record["tested_w"] = run_record.get("tested")
+            record["cand_w"] = run_record.get("total_candidates")
+
+            runtime = self._to_float(record.get("runtime"))
+            runtime_bf = self._to_float(record.get("runtime_bf"))
+            record["speedup"] = (runtime_bf / runtime) if runtime > 0 else float("inf")
 
             record["speedup_ceil"] = _compute_speedup_ceil(
                 record.get("cand_time_bf"),
@@ -5719,18 +6789,22 @@ class CorrTrack_optimize:
             record["waste_val"] = _safe_div(record.get("cand_w"), record.get("corr_w"))
             record["rel_waste_red"] = _safe_div(record.get("waste_val_bf"), record.get("waste_val"))
 
-            if self.recall_by_window:
-                corr_flags = corrtrack.correlated
+            metric_helper = self._artifact_metric_helper()
+            if online_metrics is not None:
+                metrics = online_metrics.metrics()
+            elif self.recall_by_window:
+                metrics = metric_helper._stream_window_metrics_from_artifacts(
+                    self._bf_artifact_prefix,
+                    trial_prefix,
+                    pair_min_dist=self.pair_min_dist_bf,
+                    total_pairs_bf=self.tested_bf,
+                )
             else:
-                corr_flags = corrtrack.get_correlation_flags(length_data, 0)
-
-            metrics = CorrTrack.compute_metrics_bf(
-                corr_flags,
-                self.ground_truth,
-                self.recall_by_window,
-                self.pair_min_dist_bf,
-                total_pairs_bf=self.tested_bf,
-            )
+                metrics = metric_helper._stream_timestamp_metrics_from_artifacts(
+                    self._bf_artifact_prefix,
+                    trial_prefix,
+                    length_data,
+                )
 
             record["precision_pos"] = metrics["precision_pos"]
             record["recall_pos"] = metrics["recall_pos"]
@@ -5753,29 +6827,58 @@ class CorrTrack_optimize:
             record["error"] = str(exc)
             print(f"Skipped params={param_combo} due to error: {exc}")
             traceback.print_exc()
+        finally:
+            if online_metrics is not None:
+                online_metrics.close()
+            if trial_prefix:
+                _remove_artifact_files(trial_prefix)
 
         return record
 
     def _run_options(self, param_grid, output_csv, dataset_id):
         names = list(param_grid.keys())
-        tasks = [(dict(zip(names, vals)), dataset_id) for vals in itertools.product(*param_grid.values())]
+        tasks = [
+            (idx, dict(zip(names, vals)), dataset_id)
+            for idx, vals in enumerate(itertools.product(*param_grid.values()))
+        ]
 
-        if self.ground_truth is None:
-            self._get_bf_ground_truth()
+        self._optim_artifact_dir = os.path.splitext(os.path.abspath(output_csv))[0] + "_artifacts"
+        os.makedirs(self._optim_artifact_dir, exist_ok=True)
+        self._bf_artifact_prefix = None
+        self._bf_record = None
+        self._metric_helper = None
+        try:
+            self._get_bf_ground_truth(dataset_id)
 
-        if os.path.exists(output_csv):
-            os.remove(output_csv)
+            if os.path.exists(output_csv):
+                os.remove(output_csv)
 
-        total_tasks = len(tasks)
-        completed = 0
-        with CSVStreamWriter(output_csv, OPTIM_RESULT_COLUMNS) as writer:
-            for record in self._outer_iter(tasks, self._run_corrtrack, unordered=True):
-                if not record:
-                    continue
-                writer.write_row(_row_from_mapping(OPTIM_RESULT_COLUMNS, record))
-                completed += 1
-                status = record.get("status", "unknown")
-                print(f"[Optim] Completed {completed}/{total_tasks} ({status})")
+            total_tasks = len(tasks)
+            completed = 0
+            with CSVStreamWriter(output_csv, OPTIM_RESULT_COLUMNS) as writer:
+                for record in self._outer_iter(tasks, self._run_corrtrack, unordered=True):
+                    if not record:
+                        continue
+                    writer.write_row(_row_from_mapping(OPTIM_RESULT_COLUMNS, record))
+                    completed += 1
+                    status = record.get("status", "unknown")
+                    print(f"[Optim] Completed {completed}/{total_tasks} ({status})")
+        finally:
+            _remove_artifact_files(self._bf_artifact_prefix)
+            if self._bf_online_reference_csv:
+                try:
+                    os.remove(self._bf_online_reference_csv)
+                except OSError:
+                    pass
+            try:
+                if self._optim_artifact_dir and os.path.isdir(self._optim_artifact_dir) and not os.listdir(self._optim_artifact_dir):
+                    os.rmdir(self._optim_artifact_dir)
+            except OSError:
+                pass
+            self._bf_artifact_prefix = None
+            self._bf_record = None
+            self._bf_online_reference_csv = None
+            self._bf_online_stats = None
     
     def get_optim_params(self, param_grid, output_csv, dataset_id, run=True, target_recall=0.95):
         output_csv = output_csv + "_" + self.alg + ".csv"
@@ -6035,33 +7138,62 @@ class CorrTrack_compare:
         return records
 
     def _compute_maxlag_metrics(self, bf_csv, candidate_csv):
-        bf_entries = self._load_maxlag_csv(bf_csv)
-        candidate_entries = self._load_maxlag_csv(candidate_csv)
+        bf_iter = self._iter_maxlag_rows(bf_csv)
+        candidate_iter = self._iter_maxlag_rows(candidate_csv)
 
-        bf_keys = set(bf_entries.keys())
-        candidate_keys = set(candidate_entries.keys())
+        bf_row = next(bf_iter, None)
+        candidate_row = next(candidate_iter, None)
 
-        tp = len(bf_keys & candidate_keys)
-        fp = len(candidate_keys - bf_keys)
-        fn = len(bf_keys - candidate_keys)
+        tp = 0
+        bf_total = 0
+        candidate_total = 0
+        diff_count = 0
+        diff_mean = 0.0
+        diff_m2 = 0.0
 
+        while bf_row is not None or candidate_row is not None:
+            if candidate_row is None:
+                bf_total += 1
+                bf_row = next(bf_iter, None)
+                continue
+            if bf_row is None:
+                candidate_total += 1
+                candidate_row = next(candidate_iter, None)
+                continue
+
+            bf_key, bf_val = bf_row
+            candidate_key, candidate_val = candidate_row
+
+            if bf_key == candidate_key:
+                bf_total += 1
+                candidate_total += 1
+                tp += 1
+                diff = bf_val - candidate_val
+                if math.isclose(diff, 0.0, rel_tol=1e-10, abs_tol=1e-12):
+                    diff = 0.0
+                else:
+                    diff = round(diff, 12)
+                diff_count, diff_mean, diff_m2 = _welford_update(diff_count, diff_mean, diff_m2, diff)
+                bf_row = next(bf_iter, None)
+                candidate_row = next(candidate_iter, None)
+            elif bf_key < candidate_key:
+                bf_total += 1
+                bf_row = next(bf_iter, None)
+            else:
+                candidate_total += 1
+                candidate_row = next(candidate_iter, None)
+
+        fp = max(candidate_total - tp, 0)
+        fn = max(bf_total - tp, 0)
         precision = tp / (tp + fp) if (tp + fp) else 0.0
         recall = tp / (tp + fn) if (tp + fn) else 0.0
         f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
 
         mean_diff = float("nan")
         std_diff = float("nan")
-        common_keys = sorted(
-            bf_keys & candidate_keys,
-            key=lambda item: (item[0], item[1], str(item[2])),
-        )
-        if common_keys:
-            diffs = [bf_entries[key] - candidate_entries[key] for key in common_keys]
-            diffs = [0.0 if math.isclose(d, 0.0, rel_tol=1e-10, abs_tol=1e-12) else round(d, 12) for d in diffs]
-            if diffs:
-                diffs_arr = np.asarray(diffs, dtype=float)
-                mean_diff = float(np.mean(diffs_arr))
-                std_diff = float(np.std(diffs_arr, ddof=0))
+        if diff_count > 0:
+            mean_diff = float(diff_mean)
+            std_diff = float(math.sqrt(diff_m2 / diff_count))
 
         return precision, recall, f1, mean_diff, std_diff
 
@@ -6158,6 +7290,320 @@ class CorrTrack_compare:
                 return stripped
         return value
 
+    def _canonical_window_key(self, id1, id2, time1, time2):
+        return _normalize_window_metric_key(id1, id2, time1, time2, self.window_size)
+
+    def _canonical_pair_min_dist_key(self, pair):
+        if pair is None or not isinstance(pair, tuple) or len(pair) < 5:
+            return None
+        return self._canonical_window_key(pair[0], pair[1], pair[2], pair[3])
+
+    def _correlated_csv_path(self, artifact_prefix):
+        if not artifact_prefix:
+            return None
+        if artifact_prefix.endswith("_correlated.csv"):
+            return artifact_prefix
+        return f"{artifact_prefix}_correlated.csv"
+
+    def _anomalies_csv_path(self, artifact_prefix):
+        if not artifact_prefix:
+            return None
+        if artifact_prefix.endswith("_anomalies.csv"):
+            return artifact_prefix
+        return f"{artifact_prefix}_anomalies.csv"
+
+    def _iter_correlated_rows(self, artifact_prefix):
+        csv_path = self._correlated_csv_path(artifact_prefix)
+        if not csv_path or not os.path.exists(csv_path):
+            return
+        delimiter = _detect_csv_delimiter(csv_path, default=CSV_DELIMITER)
+        with open(csv_path, newline="") as file:
+            reader = csv.DictReader(file, delimiter=delimiter)
+            for row in reader:
+                id1 = row.get("id1")
+                id2 = row.get("id2")
+                if id1 is None or id2 is None:
+                    continue
+                time1 = self._coerce_time_value(row.get("time1_idx"))
+                if time1 in (None, "", "nan"):
+                    time1 = self._coerce_time_value(row.get("time1"))
+                time2 = self._coerce_time_value(row.get("time2_idx"))
+                if time2 in (None, "", "nan"):
+                    time2 = self._coerce_time_value(row.get("time2"))
+                corr_val = row.get("corr")
+                try:
+                    corr_val = float(corr_val)
+                except (TypeError, ValueError):
+                    continue
+                yield self._canonical_window_key(id1, id2, time1, time2), corr_val
+
+    def _iter_maxlag_rows(self, csv_path):
+        if not csv_path or not os.path.exists(csv_path):
+            return
+        delimiter = _detect_csv_delimiter(csv_path, default=CSV_DELIMITER)
+        with open(csv_path, newline="") as file:
+            reader = csv.DictReader(file, delimiter=delimiter)
+            for row in reader:
+                id1 = row.get("id1")
+                id2 = row.get("id2")
+                corr_val = row.get("max_corr")
+                if id1 is None or id2 is None or corr_val is None:
+                    continue
+                key_time = self._normalize_time_key(row.get("time1"), row.get("t1_index"))
+                if key_time is None:
+                    continue
+                try:
+                    corr_val = float(corr_val)
+                except (TypeError, ValueError):
+                    continue
+                yield (id1, id2, key_time), corr_val
+
+    def _stream_window_metrics_from_artifacts(self, ground_truth_prefix, predicted_prefix, pair_min_dist=None, total_pairs_bf=None):
+        metrics = _empty_stream_metrics(include_sign=True)
+        gt_iter = self._iter_correlated_rows(ground_truth_prefix)
+        pred_iter = self._iter_correlated_rows(predicted_prefix)
+        gt_row = next(gt_iter, None)
+        pred_row = next(pred_iter, None)
+
+        gt_total = 0
+        pred_total = 0
+        tp = 0
+        gt_pos = gt_neg = pred_pos = pred_neg = 0
+        tp_pos = tp_neg = 0
+
+        recall_min_key = self._canonical_pair_min_dist_key(pair_min_dist)
+        recall_min_hit = False
+
+        while gt_row is not None or pred_row is not None:
+            if pred_row is None:
+                gt_key, gt_val = gt_row
+                gt_total += 1
+                if gt_val > 0:
+                    gt_pos += 1
+                else:
+                    gt_neg += 1
+                gt_row = next(gt_iter, None)
+                continue
+            if gt_row is None:
+                pred_key, pred_val = pred_row
+                pred_total += 1
+                if pred_val > 0:
+                    pred_pos += 1
+                else:
+                    pred_neg += 1
+                if recall_min_key is not None and pred_key == recall_min_key:
+                    recall_min_hit = True
+                pred_row = next(pred_iter, None)
+                continue
+
+            gt_key, gt_val = gt_row
+            pred_key, pred_val = pred_row
+
+            if gt_key == pred_key:
+                gt_total += 1
+                pred_total += 1
+                tp += 1
+                if gt_val > 0:
+                    gt_pos += 1
+                else:
+                    gt_neg += 1
+                if pred_val > 0:
+                    pred_pos += 1
+                else:
+                    pred_neg += 1
+                if gt_val > 0 and pred_val > 0:
+                    tp_pos += 1
+                if gt_val <= 0 and pred_val <= 0:
+                    tp_neg += 1
+                if recall_min_key is not None and pred_key == recall_min_key:
+                    recall_min_hit = True
+                gt_row = next(gt_iter, None)
+                pred_row = next(pred_iter, None)
+            elif gt_key < pred_key:
+                gt_total += 1
+                if gt_val > 0:
+                    gt_pos += 1
+                else:
+                    gt_neg += 1
+                gt_row = next(gt_iter, None)
+            else:
+                pred_total += 1
+                if pred_val > 0:
+                    pred_pos += 1
+                else:
+                    pred_neg += 1
+                if recall_min_key is not None and pred_key == recall_min_key:
+                    recall_min_hit = True
+                pred_row = next(pred_iter, None)
+
+        fp = max(pred_total - tp, 0)
+        precision, recall = _safe_prec_recall_from_counts(tp, pred_total, gt_total)
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+
+        precision_pos, recall_pos = _safe_prec_recall_from_counts(tp_pos, pred_pos, gt_pos)
+        f1_pos = 2 * precision_pos * recall_pos / (precision_pos + recall_pos) if (precision_pos + recall_pos) else 0.0
+
+        precision_neg, recall_neg = _safe_prec_recall_from_counts(tp_neg, pred_neg, gt_neg)
+        f1_neg = 2 * precision_neg * recall_neg / (precision_neg + recall_neg) if (precision_neg + recall_neg) else 0.0
+
+        specificity = 0.0
+        try:
+            total_pairs = int(total_pairs_bf) if total_pairs_bf is not None else None
+        except (TypeError, ValueError):
+            total_pairs = None
+        if total_pairs is not None:
+            negatives = max(total_pairs - gt_total, 0)
+            if negatives > 0:
+                tn = max(negatives - fp, 0)
+                specificity = tn / negatives
+
+        metrics.update({
+            "precision": precision,
+            "recall": recall,
+            "specificity": specificity,
+            "f1_score": f1,
+            "recall_min": None if recall_min_key is None else int(recall_min_hit),
+            "precision_pos": precision_pos,
+            "recall_pos": recall_pos,
+            "f1_score_pos": f1_pos,
+            "precision_neg": precision_neg,
+            "recall_neg": recall_neg,
+            "f1_score_neg": f1_neg,
+        })
+        return metrics
+
+    def _iter_anomaly_interval_groups(self, artifact_prefix, total_time, tolerance=None):
+        csv_path = self._anomalies_csv_path(artifact_prefix)
+        if not csv_path or not os.path.exists(csv_path):
+            return
+        if tolerance is None:
+            tolerance = self.window_size
+        delimiter = _detect_csv_delimiter(csv_path, default=CSV_DELIMITER)
+        with open(csv_path, newline="") as file:
+            reader = csv.DictReader(file, delimiter=delimiter)
+            current_key = None
+            active = False
+            last_out_time = None
+            start_time = None
+            intervals = []
+            for row in reader:
+                id1 = row.get("id1")
+                id2 = row.get("id2")
+                lag_val = row.get("lag")
+                if id1 is None or id2 is None or lag_val in (None, ""):
+                    continue
+                try:
+                    lag = int(float(lag_val))
+                except (TypeError, ValueError):
+                    continue
+                key = _normalize_pair_lag_key(id1, id2, lag)
+                time_val = self._normalize_time_key(row.get("time_idx"), row.get("time"))
+                if time_val is None:
+                    continue
+                if isinstance(time_val, (np.datetime64, datetime.datetime, datetime.date)):
+                    continue
+                marker = _label_to_marker(row.get("anomaly") or row.get("marker"))
+
+                if current_key is not None and key != current_key:
+                    if active and start_time is not None:
+                        intervals.append((int(start_time), int(total_time)))
+                    yield current_key, intervals
+                    current_key = key
+                    active = False
+                    last_out_time = None
+                    start_time = None
+                    intervals = []
+                elif current_key is None:
+                    current_key = key
+
+                time_idx = int(time_val)
+                if marker == 1:
+                    if not active:
+                        if last_out_time is None or (time_idx - last_out_time) > tolerance:
+                            active = True
+                            start_time = time_idx
+                elif marker == -1:
+                    if active and start_time is not None:
+                        intervals.append((int(start_time), int(time_idx)))
+                        active = False
+                        last_out_time = time_idx
+
+            if current_key is not None:
+                if active and start_time is not None:
+                    intervals.append((int(start_time), int(total_time)))
+                yield current_key, intervals
+
+    def _stream_timestamp_metrics_from_artifacts(self, ground_truth_prefix, predicted_prefix, total_time):
+        metrics = _empty_stream_metrics(include_sign=True)
+        if total_time <= 0:
+            return metrics
+
+        gt_iter = self._iter_anomaly_interval_groups(ground_truth_prefix, total_time)
+        pred_iter = self._iter_anomaly_interval_groups(predicted_prefix, total_time)
+        gt_group = next(gt_iter, None)
+        pred_group = next(pred_iter, None)
+
+        gt_total = 0
+        pred_total = 0
+        tp = 0
+        union_keys = 0
+
+        while gt_group is not None or pred_group is not None:
+            if pred_group is None:
+                union_keys += 1
+                gt_total += _intervals_total_length(gt_group[1])
+                gt_group = next(gt_iter, None)
+                continue
+            if gt_group is None:
+                union_keys += 1
+                pred_total += _intervals_total_length(pred_group[1])
+                pred_group = next(pred_iter, None)
+                continue
+
+            gt_key, gt_intervals = gt_group
+            pred_key, pred_intervals = pred_group
+
+            if gt_key == pred_key:
+                union_keys += 1
+                gt_len = _intervals_total_length(gt_intervals)
+                pred_len = _intervals_total_length(pred_intervals)
+                overlap = _intervals_overlap_length(gt_intervals, pred_intervals)
+                gt_total += gt_len
+                pred_total += pred_len
+                tp += overlap
+                gt_group = next(gt_iter, None)
+                pred_group = next(pred_iter, None)
+            elif gt_key < pred_key:
+                union_keys += 1
+                gt_total += _intervals_total_length(gt_intervals)
+                gt_group = next(gt_iter, None)
+            else:
+                union_keys += 1
+                pred_total += _intervals_total_length(pred_intervals)
+                pred_group = next(pred_iter, None)
+
+        fp = max(pred_total - tp, 0)
+        fn = max(gt_total - tp, 0)
+        total_points = max(union_keys * int(total_time), 0)
+        tn = max(total_points - tp - fp - fn, 0)
+        precision, recall = _safe_prec_recall_from_counts(tp, pred_total, gt_total)
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+        metrics.update({
+            "precision": precision,
+            "recall": recall,
+            "specificity": specificity,
+            "f1_score": f1,
+            "precision_pos": float("nan"),
+            "recall_pos": float("nan"),
+            "f1_score_pos": float("nan"),
+            "precision_neg": float("nan"),
+            "recall_neg": float("nan"),
+            "f1_score_neg": float("nan"),
+            "recall_min": None,
+        })
+        return metrics
+
     def _load_correlated_dict(self, artifact_prefix):
         if not artifact_prefix:
             return {}
@@ -6178,8 +7624,12 @@ class CorrTrack_compare:
                     id2 = row.get("id2")
                     if id1 is None or id2 is None:
                         continue
-                    time1 = self._coerce_time_value(row.get("time1"))
-                    time2 = self._coerce_time_value(row.get("time2"))
+                    time1 = self._coerce_time_value(row.get("time1_idx"))
+                    if time1 in (None, "", "nan"):
+                        time1 = self._coerce_time_value(row.get("time1"))
+                    time2 = self._coerce_time_value(row.get("time2_idx"))
+                    if time2 in (None, "", "nan"):
+                        time2 = self._coerce_time_value(row.get("time2"))
                     corr_val = row.get("corr")
                     try:
                         corr_val = float(corr_val)
@@ -6385,7 +7835,6 @@ class CorrTrack_compare:
     def compare_from_artifacts(self, dataset_id, bf_run_csv, corrtrack_run_files, output_csv):
         bf_record = self._load_run_record(bf_run_csv, dataset_id, run_kind="bf")
         bf_prefix = bf_record.get("artifact_path")
-        ground_truth = self._load_correlated_dict(bf_prefix)
         self.pair_min_dist_bf = self._parse_pair_min_dist(bf_record.get("pair_min_dist"))
 
         def to_float(value):
@@ -6402,6 +7851,16 @@ class CorrTrack_compare:
         self.correlated_bf = int(float(bf_record.get("correlated", 0) or 0))
         self.tested_bf = int(float(bf_record.get("tested", 0) or 0))
         self.total_bf = int(float(bf_record.get("total_candidates", 0) or 0))
+
+        total_time = 0
+        try:
+            n_w = int(float(bf_record.get("n_w", 0) or 0))
+            window_step = int(float(bf_record.get("window_step", 0) or 0))
+            window_size = int(float(bf_record.get("window_size", self.window_size) or self.window_size))
+            if n_w > 0 and window_step > 0 and window_size > 0:
+                total_time = (n_w - 1) * window_step + window_size
+        except (TypeError, ValueError):
+            total_time = 0
 
         bf_maxlag_csv = f"{bf_prefix}_max_lag_correlated.csv" if bf_prefix else None
 
@@ -6433,15 +7892,19 @@ class CorrTrack_compare:
         for alg, run_csv in run_iter:
             record = self._load_run_record(run_csv, dataset_id, alg=alg)
             prefix = record.get("artifact_path")
-            predicted = self._load_correlated_dict(prefix)
-
-            metrics = CorrTrack.compute_metrics_bf(
-                predicted,
-                ground_truth,
-                self.recall_by_window,
-                self.pair_min_dist_bf,
-                total_pairs_bf=self.tested_bf,
-            )
+            if self.recall_by_window:
+                metrics = self._stream_window_metrics_from_artifacts(
+                    bf_prefix,
+                    prefix,
+                    pair_min_dist=self.pair_min_dist_bf,
+                    total_pairs_bf=self.tested_bf,
+                )
+            else:
+                metrics = self._stream_timestamp_metrics_from_artifacts(
+                    bf_prefix,
+                    prefix,
+                    total_time,
+                )
 
             runtime = to_float(record.get("runtime"))
             speedup = (self.runtime_bf / runtime) if runtime else float("inf")
@@ -6485,14 +7948,19 @@ class CorrTrack_compare:
                     prefix = None
 
                 if prefix:
-                    predicted = self._load_correlated_dict(prefix)
-                    fil_metrics = CorrTrack.compute_metrics_bf(
-                        predicted,
-                        ground_truth,
-                        self.recall_by_window,
-                        self.pair_min_dist_bf,
-                        total_pairs_bf=self.tested_bf,
-                    )
+                    if self.recall_by_window:
+                        fil_metrics = self._stream_window_metrics_from_artifacts(
+                            bf_prefix,
+                            prefix,
+                            pair_min_dist=self.pair_min_dist_bf,
+                            total_pairs_bf=self.tested_bf,
+                        )
+                    else:
+                        fil_metrics = self._stream_timestamp_metrics_from_artifacts(
+                            bf_prefix,
+                            prefix,
+                            total_time,
+                        )
                 else:
                     fil_metrics = build_empty_metrics()
 

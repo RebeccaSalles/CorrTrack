@@ -35,7 +35,8 @@ TRAIN_RATIO = 0.3
 TARGET_RECALL = 0.95
 
 # Artifact persistence for run scripts that write out intermediate outputs.
-ARTIFACT_MODE = "final"
+ARTIFACT_MODE = "buffered"
+ARTIFACT_BUFFER_MAX_ROWS = 250000
 
 VERBOSE = False
 TESTING = False
