@@ -68,6 +68,27 @@ def _build_stem(
     return stem
 
 
+def _obs_sigma_value(base_proc: Optional[Dict[str, Any]]) -> float:
+    if not base_proc:
+        return 0.0
+    try:
+        return max(0.0, float(base_proc.get("obs_sigma", 0.0)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _add_observation_noise(
+    X: np.ndarray,
+    base_proc: Optional[Dict[str, Any]],
+    rng: np.random.Generator,
+) -> np.ndarray:
+    obs_sigma = _obs_sigma_value(base_proc)
+    if obs_sigma <= 0.0:
+        return X.astype(np.float32, copy=False)
+    noisy = np.asarray(X, dtype=np.float64) + rng.normal(0.0, obs_sigma, size=X.shape)
+    return noisy.astype(np.float32, copy=False)
+
+
 def _gen_base_series(
     m: int, n: int, base_proc: Optional[Dict[str, Any]], rng: np.random.Generator
 ) -> np.ndarray:
@@ -89,7 +110,7 @@ def _gen_base_series(
         X[:, 0] = eps[:, 0]
         for t in range(1, n):
             X[:, t] = X[:, t - 1] + eps[:, t]
-        return X
+        return _add_observation_noise(X, base_proc, rng)
 
     if kind == "seasonal_arima":
         phi = float(base_proc.get("phi", 0.6))
@@ -142,7 +163,7 @@ def _gen_base_series(
         for t in range(1, n):
             seasonal = amplitude * np.sin(2 * math.pi * t / max(1, period) + phases)
             X[:, t] = X[:, t - 1] + drift + seasonal + eps[:, t]
-        return X.astype(np.float32)
+        return _add_observation_noise(X, base_proc, rng)
 
     if kind == "trend_poly":
         t_norm = np.linspace(0.0, 1.0, n, dtype=np.float32)
@@ -169,7 +190,7 @@ def _gen_base_series(
         X[:, 0] = seasonal[:, 0]
         for t in range(1, n):
             X[:, t] = X[:, t - 1] + seasonal[:, t]
-        return X.astype(np.float32)
+        return _add_observation_noise(X, base_proc, rng)
 
     # Default AR(1)
     phi = float(base_proc.get("phi", 0.6))

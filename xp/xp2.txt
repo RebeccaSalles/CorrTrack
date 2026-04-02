@@ -79,7 +79,7 @@ FIXED parameters:
 	
 ====== XP 3 - scale N_LAGS ======
 DYNAMIC parameters:
-	N_LAGS = WINDOW_SIZE*[1,10,100,1000]
+	N_LAGS = WINDOW_SIZE*[1,10,100]
 	
 FIXED parameters:
 	n_series = 100
