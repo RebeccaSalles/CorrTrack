@@ -33,10 +33,16 @@ CORR_VAL_OPTIM = False
 RECALL_BY_WINDOW = True
 TRAIN_RATIO = 0.3
 TARGET_RECALL = 0.95
+# If no hyperopt row reaches TARGET_RECALL, keep rows within this absolute
+# recall distance from the best available recall before applying speedup/cand_w.
+RECALL_FALLBACK_TOLERANCE = 0.01
+# Keep hyperopt candidates whose speedup is at least this fraction of the best
+# feasible speedup, then pick the one with the lowest candidate count.
+SPEEDUP_NEAR_RATIO = 0.98
 
 # Artifact persistence for run scripts that write out intermediate outputs.
 ARTIFACT_MODE = "buffered"
-ARTIFACT_BUFFER_MAX_ROWS = 250000
+ARTIFACT_BUFFER_MAX_ROWS = 150000
 SAVE_ONLY_REQUIRED_ARTIFACTS = True
 SAVE_MAXLAG_ARTIFACTS = True
 DELETE_MAIN_ARTIFACTS_AFTER_COMPARE = True

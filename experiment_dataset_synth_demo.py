@@ -26,7 +26,7 @@ SYNTH_PARAMS = {
     #"base_proc": {"type": "seasonal_arima", "phi": 0.7, "theta": -0.4, "season_period": 96, "season_amplitude": 1.2, "sigma": 0.9},
 
     #Nonstationary
-    #"base_proc": {"type": "rw", "sigma": 1.0, "obs_sigma": 2.0},
+    "base_proc": {"type": "rw", "sigma": 1.0, "obs_sigma": 2.0},
     #"base_proc": {"type": "rw_seasonal_drift", "drift": 0.04, "season_amplitude": 0.6, "season_period": 288, "sigma": 0.8, "obs_sigma": 1.0},
     #"base_proc": {"type": "trend_poly", "phi": 0.5, "sigma": 0.7}, #*special
     #"base_proc": {"type": "integrated_seasonal", "season_lag": 48, "phi": 0.4, "psi": 0.5, "sigma": 1.0, "obs_sigma": 0.0},

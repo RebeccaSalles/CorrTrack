@@ -20,6 +20,8 @@ ALWAYS FIXED parameters:
 	NEG_CORR = False
 	TRAIN_RATIO = 0.3
 	TARGET_RECALL = 0.95
+	RECALL_FALLBACK_TOLERANCE = 0.01
+	SPEEDUP_NEAR_RATIO = 0.98
 	
 	plot = True
 	train_distances = False

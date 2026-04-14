@@ -73,6 +73,7 @@ ARG_SPECS: dict[str, tuple[int, set[str]]] = {
     "--recall-by-window": (0, {"brute", "param", "corrtrack", "compare"}),
     "--no-recall-by-window": (0, {"brute", "param", "corrtrack", "compare"}),
     "--target-recall": (1, {"param"}),
+    "--recall-fallback-tolerance": (1, {"param"}),
     "--train-ratio": (1, {"param", "compare"}),
     "--artifact-mode": (1, {"brute", "param", "corrtrack"}),
     "--artifact-buffer-max-rows": (1, {"brute", "param", "corrtrack"}),

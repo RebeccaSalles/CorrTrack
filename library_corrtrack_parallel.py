@@ -500,7 +500,7 @@ def execute_corrtrack_pass(
         corrtrack._start_artifact_logging(artifact_prefix)
 
     artifact_per_iteration = artifact_active and effective_artifact_mode == "iterative"
-    artifact_buffered = artifact_active and effective_artifact_mode == "buffered"
+    artifact_chunked = artifact_active and effective_artifact_mode in {"iterative", "buffered"}
 
     artifact_time_total = 0.0
     artifact_time_overlap = 0.0
@@ -519,28 +519,27 @@ def execute_corrtrack_pass(
             elapsed = time.time() - _t0
             artifact_time_total += elapsed
             artifact_time_overlap += elapsed
-        if artifact_active and artifact_buffered:
+        if artifact_active and artifact_chunked:
             _t0 = time.time()
-            flushed = corrtrack._maybe_flush_artifact_buffers()
+            flushed = corrtrack._maybe_flush_artifact_buffers(force=artifact_per_iteration)
             elapsed = time.time() - _t0
             if flushed:
                 artifact_time_total += elapsed
                 artifact_time_overlap += elapsed
-        elif artifact_active and artifact_per_iteration:
-            _t0 = time.time()
-            corrtrack._append_artifacts()
-            elapsed = time.time() - _t0
-            artifact_time_total += elapsed
-            artifact_time_overlap += elapsed
     end_time = time.time()
 
-    if artifact_active and artifact_buffered:
+    if artifact_active and artifact_chunked:
         _t0 = time.time()
         corrtrack._finalize_buffered_artifacts()
         artifact_time_total += time.time() - _t0
-    elif artifact_active and not artifact_per_iteration:
+    elif artifact_active:
         _t0 = time.time()
-        corrtrack._append_artifacts()
+        if getattr(corrtrack, "_artifact_save_correlated", True):
+            corrtrack._save_correlated(f"{artifact_prefix}_correlated.csv")
+        if getattr(corrtrack, "_artifact_save_status", True):
+            corrtrack._save_monitor_status(f"{artifact_prefix}_status.csv")
+        if getattr(corrtrack, "_artifact_save_anomalies", True):
+            corrtrack._save_anomalies(f"{artifact_prefix}_anomalies.csv")
         artifact_time_total += time.time() - _t0
 
     runtime = end_time - start_time
@@ -598,7 +597,7 @@ def execute_corrtrack_pass(
     corrtrack._online_window_metrics_only = False
     corrtrack._validated_step = {}
 
-    if artifact_buffered:
+    if artifact_chunked:
         corr_flags = None
     elif recall_by_window:
         corr_flags = getattr(corrtrack, "correlated", None)
@@ -2565,7 +2564,10 @@ class CorrTrack:
         except (TypeError, ValueError):
             max_rows = self._artifact_buffer_max_rows
         self._artifact_buffer_max_rows = max(1, max_rows)
-        self._artifact_buffered = mode_value == "buffered"
+        # Both buffered and iterative modes should flow through the sorted
+        # chunk writer so downstream streaming comparison can rely on global
+        # canonical ordering.
+        self._artifact_buffered = mode_value in {"iterative", "buffered"}
 
         self._spill_correlated = {}
         self._spill_correlated_chunks = []
@@ -2851,7 +2853,16 @@ class CorrTrack:
         flushed += int(self._flush_anomaly_chunk())
         return flushed
 
-    def _merge_sorted_csv_chunks(self, chunk_paths, output_csv, header, key_fn, row_transform=None):
+    def _merge_sorted_csv_chunks(
+        self,
+        chunk_paths,
+        output_csv,
+        header,
+        key_fn,
+        row_transform=None,
+        dedupe_key_fn=None,
+        dedupe_row_fn=None,
+    ):
         os.makedirs(os.path.dirname(output_csv), exist_ok=True)
         with open(output_csv, "w", newline="") as out_file:
             writer = csv.writer(out_file, delimiter=CSV_DELIMITER)
@@ -2860,6 +2871,8 @@ class CorrTrack:
             files = []
             readers = []
             heap = []
+            pending_row = None
+            pending_dedupe_key = None
             try:
                 for index, path in enumerate(chunk_paths):
                     handle = open(path, newline="")
@@ -2874,10 +2887,25 @@ class CorrTrack:
                 heapq.heapify(heap)
                 while heap:
                     _sort_key, index, row = heapq.heappop(heap)
-                    writer.writerow(row_transform(row) if row_transform else row)
+                    if dedupe_key_fn is None:
+                        writer.writerow(row_transform(row) if row_transform else row)
+                    else:
+                        dedupe_key = dedupe_key_fn(row)
+                        if pending_row is None:
+                            pending_row = row
+                            pending_dedupe_key = dedupe_key
+                        elif dedupe_key == pending_dedupe_key:
+                            if dedupe_row_fn is not None:
+                                pending_row = dedupe_row_fn(pending_row, row)
+                        else:
+                            writer.writerow(row_transform(pending_row) if row_transform else pending_row)
+                            pending_row = row
+                            pending_dedupe_key = dedupe_key
                     next_row = next(readers[index], None)
                     if next_row is not None:
                         heapq.heappush(heap, (key_fn(next_row), index, next_row))
+                if pending_row is not None:
+                    writer.writerow(row_transform(pending_row) if row_transform else pending_row)
             finally:
                 for handle in files:
                     try:
@@ -2912,6 +2940,8 @@ class CorrTrack:
                 correlated_csv,
                 ["id1", "id2", "time1_idx", "time1", "time2_idx", "time2", "corr"],
                 key_fn=lambda row: _window_sort_key((row[0], row[1], int(row[2]), int(row[3])), self.window_size),
+                dedupe_key_fn=lambda row: _normalize_bf_key((row[0], row[1], int(row[2]), int(row[3]), self.window_size)),
+                dedupe_row_fn=self._choose_stronger_correlated_row,
                 row_transform=lambda row: [
                     row[0],
                     row[1],
@@ -2956,6 +2986,10 @@ class CorrTrack:
                 anomalies_csv,
                 ["id1", "id2", "lag", "time_idx", "time", "anomaly"],
                 key_fn=lambda row: _anomaly_sort_key((row[0], row[1], int(row[2]), int(row[3]), int(row[4]))),
+                dedupe_key_fn=lambda row: (
+                    _normalize_pair_lag_key(row[0], row[1], int(row[2]))
+                    + (int(row[3]), int(row[4]))
+                ),
                 row_transform=lambda row: [
                     row[0],
                     row[1],
@@ -2973,6 +3007,18 @@ class CorrTrack:
         self._spill_correlated_chunks = []
         self._spill_status_chunks = []
         self._spill_anomaly_chunks = []
+
+    @staticmethod
+    def _choose_stronger_correlated_row(existing_row, new_row):
+        try:
+            existing_corr = abs(float(existing_row[4]))
+        except (TypeError, ValueError, IndexError):
+            existing_corr = float("-inf")
+        try:
+            new_corr = abs(float(new_row[4]))
+        except (TypeError, ValueError, IndexError):
+            new_corr = float("-inf")
+        return new_row if new_corr > existing_corr else existing_row
     
     def _get_validated_corr(self, corr_val=True, force_mode=None, retain_validated=True):
         self.validated = {}
@@ -3262,10 +3308,14 @@ class CorrTrack:
 
         os.makedirs(os.path.dirname(output_csv), exist_ok=True)
 
-        # sort lexicographically by (id1, id2, t1)
+        # Keep final-mode artifacts in the same canonical order expected by the
+        # streaming comparator and buffered chunk merger.
         sorted_items = sorted(
             self.correlated.items(),
-            key=lambda item: (item[0][0], item[0][1], item[0][2], item[0][3])
+            key=lambda item: _window_sort_key(
+                (item[0][0], item[0][1], item[0][2], item[0][3]),
+                self.window_size,
+            ),
         )
 
         with open(output_csv, mode='w', newline='') as file:
@@ -3405,19 +3455,23 @@ class CorrTrack:
     def _save_monitor_status(self,output_csv):
         if len(self.corr_lengths)>0:
             os.makedirs(os.path.dirname(output_csv), exist_ok=True)
+            rows = []
+            for key,value in self.corr_lengths.items():
+                ids = (key[0],key[1])
+                lag = key[2]
+                for t1,t2,w,corr_len,corr_sign in value:
+                    rows.append((ids[0], ids[1], lag, t1, t2, corr_len, corr_sign))
+            rows.sort(key=_status_sort_key)
             with open(output_csv, mode='w', newline='') as file:
                 writer = csv.writer(file, delimiter=CSV_DELIMITER)
                 writer.writerow(["id1", "id2", "lag", "start_time_id1", "start_time_id2", "duration", "corr_sign"])
-                for key,value in self.corr_lengths.items():
-                    ids = (key[0],key[1])
-                    lag = key[2]
-                    for t1,t2,w,corr_len,corr_sign in value:
-                        time1 = t1
-                        time2 = t2
-                        if self.datetime_index:
-                            time1 = self._safe_index_to_datetime(t1)
-                            time2 = self._safe_index_to_datetime(t2)
-                        writer.writerow([ids[0],ids[1],lag,time1,time2,corr_len,corr_sign])
+                for id1, id2, lag, t1, t2, corr_len, corr_sign in rows:
+                    time1 = t1
+                    time2 = t2
+                    if self.datetime_index:
+                        time1 = self._safe_index_to_datetime(t1)
+                        time2 = self._safe_index_to_datetime(t2)
+                    writer.writerow([id1,id2,lag,time1,time2,corr_len,corr_sign])
                         
 
     def _print_anomalies(self):
@@ -3471,23 +3525,27 @@ class CorrTrack:
     def _save_anomalies(self,output_csv):
         if len(self.corr_anomalies)>0:
             os.makedirs(os.path.dirname(output_csv), exist_ok=True)
+            rows = []
+            for key,value in self.corr_anomalies.items():
+                ids = (key[0],key[1])
+                lag = key[2]
+                for time, marker in value:
+                    rows.append((ids[0], ids[1], lag, time, marker))
+            rows.sort(key=_anomaly_sort_key)
             with open(output_csv, mode='w', newline='') as file:
                 writer = csv.writer(file, delimiter=CSV_DELIMITER)
                 writer.writerow(["id1", "id2", "lag", "time_idx", "time", "anomaly"])
-                for key,value in self.corr_anomalies.items():
-                    ids = (key[0],key[1])
-                    lag = key[2]
-                    for time,type in value:
-                        time_idx = time
-                        time_display = time
-                        if self.datetime_index:
-                            time_display = self._safe_index_to_datetime(time)
-                        if type == 1:
-                            writer.writerow([ids[0],ids[1],lag,time_idx,time_display,"into"])
-                        elif type == -1:
-                            writer.writerow([ids[0],ids[1],lag,time_idx,time_display,"out_of"])
-                        elif type == 0:
-                            writer.writerow([ids[0],ids[1],lag,time_idx,time_display,"changed_sign"])
+                for id1, id2, lag, time, marker in rows:
+                    time_idx = time
+                    time_display = time
+                    if self.datetime_index:
+                        time_display = self._safe_index_to_datetime(time)
+                    if marker == 1:
+                        writer.writerow([id1,id2,lag,time_idx,time_display,"into"])
+                    elif marker == -1:
+                        writer.writerow([id1,id2,lag,time_idx,time_display,"out_of"])
+                    elif marker == 0:
+                        writer.writerow([id1,id2,lag,time_idx,time_display,"changed_sign"])
 
     def _artifact_write_rows(self, path, header, rows):
         if not rows:
@@ -7028,7 +7086,16 @@ class CorrTrack_optimize:
             self._bf_online_reference_csv = None
             self._bf_online_stats = None
     
-    def get_optim_params(self, param_grid, output_csv, dataset_id, run=True, target_recall=0.95):
+    def get_optim_params(
+        self,
+        param_grid,
+        output_csv,
+        dataset_id,
+        run=True,
+        target_recall=0.95,
+        recall_fallback_tolerance=0.01,
+        speedup_near_ratio=0.98,
+    ):
         output_csv = output_csv + "_" + self.alg + ".csv"
         if run:
             self._run_options(param_grid, output_csv, dataset_id)
@@ -7041,14 +7108,42 @@ class CorrTrack_optimize:
             raise ValueError(f"No successful parameter combinations found in {output_csv}")
 
         subset = metrics[(metrics["speedup"] > 1) & (metrics["freq_threshold"] < 1)]
-        if not subset.empty:
-            recall_subset = subset[subset["recall"] > target_recall]
+        feasible = subset if not subset.empty else metrics
+
+        recall_subset = feasible[feasible["recall"] >= target_recall]
+        if recall_subset.empty:
+            max_recall = feasible["recall"].max()
+            try:
+                recall_fallback_tolerance = float(recall_fallback_tolerance)
+            except (TypeError, ValueError):
+                recall_fallback_tolerance = 0.01
+            if not np.isfinite(recall_fallback_tolerance):
+                recall_fallback_tolerance = 0.01
+            recall_fallback_tolerance = max(recall_fallback_tolerance, 0.0)
+
+            recall_floor = max(max_recall - recall_fallback_tolerance, 0.0)
+            recall_subset = feasible[feasible["recall"] >= recall_floor]
             if recall_subset.empty:
-                max_recall = subset["recall"].max()
-                recall_subset = subset[subset["recall"] == max_recall]
-            bst_params = recall_subset.sort_values("speedup", ascending=False).head(1)
-        else:
-            bst_params = metrics.sort_values("speedup", ascending=False).head(1)
+                recall_subset = feasible[feasible["recall"] == max_recall]
+
+        try:
+            speedup_near_ratio = float(speedup_near_ratio)
+        except (TypeError, ValueError):
+            speedup_near_ratio = 0.98
+        if not np.isfinite(speedup_near_ratio):
+            speedup_near_ratio = 0.98
+        speedup_near_ratio = min(max(speedup_near_ratio, 0.0), 1.0)
+
+        best_speedup = recall_subset["speedup"].max()
+        near_best = recall_subset[recall_subset["speedup"] >= best_speedup * speedup_near_ratio]
+        if near_best.empty:
+            near_best = recall_subset[recall_subset["speedup"] == best_speedup]
+
+        bst_params = near_best.sort_values(
+            ["cand_w", "speedup"],
+            ascending=[True, False],
+            na_position="last",
+        ).head(1)
 
         return bst_params
         #return self.ground_truth, self.runtime_bf, CorrTrack_HyperOptim._skyline_query(metrics, ref_metrics) 
@@ -7380,6 +7475,15 @@ class CorrTrack_compare:
             if lowered in {"nan", "nat"}:
                 return None
             try:
+                if "." in stripped:
+                    numeric = float(stripped)
+                    if math.isnan(numeric):
+                        return None
+                    return int(numeric)
+                return int(stripped)
+            except ValueError:
+                pass
+            try:
                 dt = np.datetime64(stripped)
             except ValueError:
                 try:
@@ -7467,6 +7571,8 @@ class CorrTrack_compare:
         delimiter = _detect_csv_delimiter(csv_path, default=CSV_DELIMITER)
         with open(csv_path, newline="") as file:
             reader = csv.DictReader(file, delimiter=delimiter)
+            pending_key = None
+            pending_corr = None
             for row in reader:
                 id1 = row.get("id1")
                 id2 = row.get("id2")
@@ -7483,7 +7589,18 @@ class CorrTrack_compare:
                     corr_val = float(corr_val)
                 except (TypeError, ValueError):
                     continue
-                yield self._canonical_window_key(id1, id2, time1, time2), corr_val
+                key = self._canonical_window_key(id1, id2, time1, time2)
+                if pending_key is None:
+                    pending_key, pending_corr = key, corr_val
+                    continue
+                if key == pending_key:
+                    if abs(corr_val) > abs(pending_corr):
+                        pending_corr = corr_val
+                    continue
+                yield pending_key, pending_corr
+                pending_key, pending_corr = key, corr_val
+            if pending_key is not None:
+                yield pending_key, pending_corr
 
     def _iter_maxlag_rows(self, csv_path):
         if not csv_path or not os.path.exists(csv_path):
@@ -7491,6 +7608,8 @@ class CorrTrack_compare:
         delimiter = _detect_csv_delimiter(csv_path, default=CSV_DELIMITER)
         with open(csv_path, newline="") as file:
             reader = csv.DictReader(file, delimiter=delimiter)
+            pending_key = None
+            pending_corr = None
             for row in reader:
                 id1 = row.get("id1")
                 id2 = row.get("id2")
@@ -7504,7 +7623,18 @@ class CorrTrack_compare:
                     corr_val = float(corr_val)
                 except (TypeError, ValueError):
                     continue
-                yield (id1, id2, key_time), corr_val
+                key = (id1, id2, key_time)
+                if pending_key is None:
+                    pending_key, pending_corr = key, corr_val
+                    continue
+                if key == pending_key:
+                    if abs(corr_val) > abs(pending_corr):
+                        pending_corr = corr_val
+                    continue
+                yield pending_key, pending_corr
+                pending_key, pending_corr = key, corr_val
+            if pending_key is not None:
+                yield pending_key, pending_corr
 
     def _stream_window_metrics_from_artifacts(self, ground_truth_prefix, predicted_prefix, pair_min_dist=None, total_pairs_bf=None):
         metrics = _empty_stream_metrics(include_sign=True)
@@ -7634,6 +7764,7 @@ class CorrTrack_compare:
             last_out_time = None
             start_time = None
             intervals = []
+            last_event = None
             for row in reader:
                 id1 = row.get("id1")
                 id2 = row.get("id2")
@@ -7666,15 +7797,25 @@ class CorrTrack_compare:
 
                 time_idx = int(time_val)
                 if marker == 1:
+                    event = (key, time_idx, marker)
+                    if event == last_event:
+                        continue
+                    last_event = event
                     if not active:
                         if last_out_time is None or (time_idx - last_out_time) > tolerance:
                             active = True
                             start_time = time_idx
                 elif marker == -1:
+                    event = (key, time_idx, marker)
+                    if event == last_event:
+                        continue
+                    last_event = event
                     if active and start_time is not None:
                         intervals.append((int(start_time), int(time_idx)))
                         active = False
                         last_out_time = time_idx
+                else:
+                    last_event = (key, time_idx, marker)
 
             if current_key is not None:
                 if active and start_time is not None:
