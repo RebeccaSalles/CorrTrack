@@ -51,7 +51,7 @@ DEFAULT_ARTIFACT_BUFFER_MAX_ROWS = getattr(_DEFAULT_EXEC_CFG, "ARTIFACT_BUFFER_M
 DEFAULT_SAVE_ONLY_REQUIRED_ARTIFACTS = getattr(_DEFAULT_EXEC_CFG, "SAVE_ONLY_REQUIRED_ARTIFACTS", False)
 DEFAULT_SAVE_MAXLAG_ARTIFACTS = getattr(_DEFAULT_EXEC_CFG, "SAVE_MAXLAG_ARTIFACTS", True)
 DEFAULT_TARGET_RECALL = getattr(_DEFAULT_EXEC_CFG, "TARGET_RECALL", 0.95)
-DEFAULT_RECALL_FALLBACK_TOLERANCE = getattr(_DEFAULT_EXEC_CFG, "RECALL_FALLBACK_TOLERANCE", 0.01)
+DEFAULT_RECALL_FALLBACK_NEAR_RATIO = getattr(_DEFAULT_EXEC_CFG, "RECALL_FALLBACK_NEAR_RATIO", 0.98)
 DEFAULT_SPEEDUP_NEAR_RATIO = getattr(_DEFAULT_EXEC_CFG, "SPEEDUP_NEAR_RATIO", 0.98)
 DEFAULT_TRAIN_RATIO = getattr(_DEFAULT_EXEC_CFG, "TRAIN_RATIO", 0.3)
 DEFAULT_VERBOSE = getattr(_DEFAULT_EXEC_CFG, "VERBOSE", False)
@@ -72,7 +72,7 @@ ARTIFACT_BUFFER_MAX_ROWS = DEFAULT_ARTIFACT_BUFFER_MAX_ROWS
 SAVE_ONLY_REQUIRED_ARTIFACTS = DEFAULT_SAVE_ONLY_REQUIRED_ARTIFACTS
 SAVE_MAXLAG_ARTIFACTS = DEFAULT_SAVE_MAXLAG_ARTIFACTS
 TARGET_RECALL = DEFAULT_TARGET_RECALL
-RECALL_FALLBACK_TOLERANCE = DEFAULT_RECALL_FALLBACK_TOLERANCE
+RECALL_FALLBACK_NEAR_RATIO = DEFAULT_RECALL_FALLBACK_NEAR_RATIO
 SPEEDUP_NEAR_RATIO = DEFAULT_SPEEDUP_NEAR_RATIO
 WINDOW_SIZE = DEFAULT_WINDOW_SIZE
 WINDOW_STEP = DEFAULT_WINDOW_STEP
@@ -317,7 +317,7 @@ def main():
         testing=None,
     )
     parser.add_argument("--target-recall", type=float, default=None)
-    parser.add_argument("--recall-fallback-tolerance", type=float, default=None)
+    parser.add_argument("--recall-fallback-near-ratio", type=float, default=None)
     parser.add_argument("--speedup-near-ratio", type=float, default=None)
     parser.add_argument("--train-ratio", type=float, default=None)
     args = parser.parse_args()
@@ -330,7 +330,7 @@ def main():
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
     global EXEC_MODE, NEG_CORR, CORR_VAL_OPTIM, RECALL_BY_WINDOW, ARTIFACT_MODE, ARTIFACT_BUFFER_MAX_ROWS, SAVE_ONLY_REQUIRED_ARTIFACTS, SAVE_MAXLAG_ARTIFACTS
-    global TARGET_RECALL, RECALL_FALLBACK_TOLERANCE, SPEEDUP_NEAR_RATIO, TRAIN_RATIO, PARAM_GRID, DATA_LOADER, RESULT_FOLDER, MAX_WORKERS
+    global TARGET_RECALL, RECALL_FALLBACK_NEAR_RATIO, SPEEDUP_NEAR_RATIO, TRAIN_RATIO, PARAM_GRID, DATA_LOADER, RESULT_FOLDER, MAX_WORKERS
     global VERBOSE, TESTING
 
     RESULT_FOLDER = _resolve_cfg_value(args.result_folder, cfg_dataset, "RESULT_FOLDER", DEFAULT_RESULT_FOLDER)
@@ -374,11 +374,11 @@ def main():
         DEFAULT_SAVE_MAXLAG_ARTIFACTS,
     )
     TARGET_RECALL = _resolve_cfg_value(args.target_recall, cfg_exec, "TARGET_RECALL", DEFAULT_TARGET_RECALL)
-    RECALL_FALLBACK_TOLERANCE = _resolve_cfg_value(
-        args.recall_fallback_tolerance,
+    RECALL_FALLBACK_NEAR_RATIO = _resolve_cfg_value(
+        args.recall_fallback_near_ratio,
         cfg_exec,
-        "RECALL_FALLBACK_TOLERANCE",
-        DEFAULT_RECALL_FALLBACK_TOLERANCE,
+        "RECALL_FALLBACK_NEAR_RATIO",
+        DEFAULT_RECALL_FALLBACK_NEAR_RATIO,
     )
     SPEEDUP_NEAR_RATIO = _resolve_cfg_value(
         args.speedup_near_ratio,
@@ -447,7 +447,7 @@ def main():
                         dataset_id,
                         run=True,
                         target_recall=TARGET_RECALL,
-                        recall_fallback_tolerance=RECALL_FALLBACK_TOLERANCE,
+                        recall_fallback_near_ratio=RECALL_FALLBACK_NEAR_RATIO,
                         speedup_near_ratio=SPEEDUP_NEAR_RATIO,
                     )
 

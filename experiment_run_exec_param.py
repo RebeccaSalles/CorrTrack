@@ -33,9 +33,9 @@ CORR_VAL_OPTIM = False
 RECALL_BY_WINDOW = True
 TRAIN_RATIO = 0.3
 TARGET_RECALL = 0.95
-# If no hyperopt row reaches TARGET_RECALL, keep rows within this absolute
-# recall distance from the best available recall before applying speedup/cand_w.
-RECALL_FALLBACK_TOLERANCE = 0.01
+# If no hyperopt row reaches TARGET_RECALL, keep rows whose recall is at least
+# this fraction of the best available recall before applying speedup/cand_w.
+RECALL_FALLBACK_NEAR_RATIO = 0.98
 # Keep hyperopt candidates whose speedup is at least this fraction of the best
 # feasible speedup, then pick the one with the lowest candidate count.
 SPEEDUP_NEAR_RATIO = 0.98

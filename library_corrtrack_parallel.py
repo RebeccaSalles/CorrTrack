@@ -7093,7 +7093,7 @@ class CorrTrack_optimize:
         dataset_id,
         run=True,
         target_recall=0.95,
-        recall_fallback_tolerance=0.01,
+        recall_fallback_near_ratio=0.98,
         speedup_near_ratio=0.98,
     ):
         output_csv = output_csv + "_" + self.alg + ".csv"
@@ -7114,14 +7114,14 @@ class CorrTrack_optimize:
         if recall_subset.empty:
             max_recall = feasible["recall"].max()
             try:
-                recall_fallback_tolerance = float(recall_fallback_tolerance)
+                recall_fallback_near_ratio = float(recall_fallback_near_ratio)
             except (TypeError, ValueError):
-                recall_fallback_tolerance = 0.01
-            if not np.isfinite(recall_fallback_tolerance):
-                recall_fallback_tolerance = 0.01
-            recall_fallback_tolerance = max(recall_fallback_tolerance, 0.0)
+                recall_fallback_near_ratio = 0.98
+            if not np.isfinite(recall_fallback_near_ratio):
+                recall_fallback_near_ratio = 0.98
+            recall_fallback_near_ratio = min(max(recall_fallback_near_ratio, 0.0), 1.0)
 
-            recall_floor = max(max_recall - recall_fallback_tolerance, 0.0)
+            recall_floor = max(max_recall * recall_fallback_near_ratio, 0.0)
             recall_subset = feasible[feasible["recall"] >= recall_floor]
             if recall_subset.empty:
                 recall_subset = feasible[feasible["recall"] == max_recall]

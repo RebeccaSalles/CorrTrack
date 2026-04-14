@@ -317,7 +317,7 @@ Each stage script reads the execution defaults from `experiment_run_exec_param.p
 --save-only-required-artifacts / --save-all-artifacts
 --save-maxlag-artifacts / --no-save-maxlag-artifacts
 --target-recall         (hyper-param search) default from exec config (fallback 0.95)
---recall-fallback-tolerance  (hyper-param search) if target recall is unmet, keep rows within this absolute recall distance from the best available recall; default from exec config (fallback 0.01)
+--recall-fallback-near-ratio  (hyper-param search) if target recall is unmet, keep rows whose recall is at least this fraction of the best available recall; default from exec config (fallback 0.98)
 --speedup-near-ratio    (hyper-param search) keep rows within this fraction of the best speedup before minimizing cand_w; default from exec config (fallback 0.98)
 --train-ratio           (hyper-param search & comparison) default from exec config (fallback 0.3)
 --delete-main-artifacts-after-compare / --keep-main-artifacts-after-compare
@@ -364,7 +364,7 @@ Stage-specific parameters:
 | Script | Additional options |
 | --- | --- |
 | `corrtrack_run_bruteforce.py`, `corrtrack_run_corrtrack.py` | `--artifact-mode {iterative,final,buffered}`, `--artifact-buffer-max-rows N`, `--save-only-required-artifacts/--save-all-artifacts`, `--save-maxlag-artifacts/--no-save-maxlag-artifacts`. |
-| `corrtrack_param_search.py` | `--param-grid-config PATH` (hyper-parameter grid), `--target-recall`, `--recall-fallback-tolerance`, `--speedup-near-ratio`, `--train-ratio`, `--corr-val-optim/--no-corr-val-optim`, `--artifact-mode {iterative,final,buffered}`, `--artifact-buffer-max-rows N`, `--save-only-required-artifacts/--save-all-artifacts`, `--save-maxlag-artifacts/--no-save-maxlag-artifacts`. |
+| `corrtrack_param_search.py` | `--param-grid-config PATH` (hyper-parameter grid), `--target-recall`, `--recall-fallback-near-ratio`, `--speedup-near-ratio`, `--train-ratio`, `--corr-val-optim/--no-corr-val-optim`, `--artifact-mode {iterative,final,buffered}`, `--artifact-buffer-max-rows N`, `--save-only-required-artifacts/--save-all-artifacts`, `--save-maxlag-artifacts/--no-save-maxlag-artifacts`. |
 | `corrtrack_compare_runs.py` | `--train-ratio` for the metrics split, `--filcorr-results` to collate FilCorr CSV outputs before comparison, `--delete-main-artifacts-after-compare/--keep-main-artifacts-after-compare`. |
 | `run_corrtrack_experiment.py` | `--param-grid-config PATH` and `--base-dir PATH` to locate scripts. |
 | `debug_corrtrack.py` | `--param-grid-config PATH`, `--exec-param-config PATH`, `--result-folder`, `--samples-per-class`, `--output-dir`, `--skip-initial-run`, `--refresh-artifacts`, `--artifact-mode`, `--verbose/--no-verbose`, `--testing/--no-testing`. |
@@ -436,7 +436,7 @@ python3 run_corrtrack_experiment.py \
 
 * `--corr-threshold`, `--parallel/--sequential`, etc. are applied to every stage that understands them.
 * `--target-recall` goes only to the hyper-parameter search.
-* `--recall-fallback-tolerance` goes only to the hyper-parameter search.
+* `--recall-fallback-near-ratio` goes only to the hyper-parameter search.
 * `--corr-val-optim` goes only to the hyper-parameter search; `--corr-val` goes only to the CorrTrack run when using the orchestrator.
 * `--track-min-dist` is forwarded to brute-force, CorrTrack, and comparison stages; hyper-parameter search always keeps min-distance tracking disabled.
 * `--train-ratio` affects the parameter search and comparison steps.
@@ -494,7 +494,7 @@ python3 corrtrack_param_search.py \
 
 Creates `optim/<dataset_id>/corrtrack_optim_<dataset_id>.csv` with one row per combination plus `best_params_*.json` summaries.
 
-`best_params_*.json` is selected from the feasible rows (`speedup > 1` and `freq_threshold < 1`, or all rows if that feasible subset is empty), then filtered to `recall >= target_recall`. If no row reaches the recall target, the selector falls back to the best recall available and keeps every row within `RECALL_FALLBACK_TOLERANCE` of that value (CLI: `--recall-fallback-tolerance`, default `0.01`). From that recall-qualified set, the optimizer keeps only the near-best speedup band defined by `speedup >= best_speedup * SPEEDUP_NEAR_RATIO` (CLI: `--speedup-near-ratio`, default `0.98`) and then chooses the row with the lowest `cand_w`; higher `speedup` breaks ties.
+`best_params_*.json` is selected from the feasible rows (`speedup > 1` and `freq_threshold < 1`, or all rows if that feasible subset is empty), then filtered to `recall >= target_recall`. If no row reaches the recall target, the selector falls back to the best recall available and keeps every row with `recall >= max_recall * RECALL_FALLBACK_NEAR_RATIO` (CLI: `--recall-fallback-near-ratio`, default `0.98`). From that recall-qualified set, the optimizer keeps only the near-best speedup band defined by `speedup >= best_speedup * SPEEDUP_NEAR_RATIO` (CLI: `--speedup-near-ratio`, default `0.98`) and then chooses the row with the lowest `cand_w`; higher `speedup` breaks ties.
 
 When `RECALL_BY_WINDOW=True` and `CORR_VAL_OPTIM=False`, parameter search automatically switches to the optimizer-online path. In that mode:
 - brute-force still builds one exact ground-truth reference
