@@ -194,6 +194,111 @@ def apply_orth_and_normalize(double[:, ::1] raw_matrix,
     return raw, norm
 
 
+def incremental_combine_and_normalize(double[:, :, ::1] base_dots,
+                                      double[:, ::1] diff_toggle,
+                                      double[:, :, ::1] new_blocks,
+                                      double[:, :, ::1] weights,
+                                      double[:] mean_vec,
+                                      double[:] random_sums,
+                                      int norm_mode,
+                                      int apply_diff):
+    """Build the next incremental dot cache and normalized sketch in one pass."""
+    cdef Py_ssize_t n_series = base_dots.shape[0]
+    cdef Py_ssize_t n_base = base_dots.shape[1]
+    cdef Py_ssize_t n_vectors = base_dots.shape[2]
+    cdef Py_ssize_t n_new = new_blocks.shape[1]
+    cdef Py_ssize_t basic_window = new_blocks.shape[2] if new_blocks.ndim == 3 else 0
+    cdef Py_ssize_t w_basic = weights.shape[0]
+    cdef Py_ssize_t w_vectors = weights.shape[1]
+    cdef Py_ssize_t w_window = weights.shape[2] if weights.ndim == 3 else 0
+    cdef Py_ssize_t total_basic = n_base + n_new
+
+    if w_basic != n_new or (n_new > 0 and (w_vectors != n_vectors or w_window != basic_window)):
+        raise ValueError("incremental weights shape mismatch")
+    if apply_diff and n_base > 0 and (diff_toggle.shape[0] < n_base or diff_toggle.shape[1] != n_vectors):
+        raise ValueError("diff_toggle shape mismatch")
+    if norm_mode == 1:
+        if mean_vec.shape[0] != n_series or random_sums.shape[0] != n_vectors:
+            raise ValueError("mean_vec/random_sums shape mismatch")
+
+    cdef np.ndarray[np.float64_t, ndim=3] updated = np.empty(
+        (n_series, total_basic, n_vectors),
+        dtype=np.float64,
+    )
+    cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(
+        (n_series, n_vectors),
+        dtype=np.float64,
+    )
+    cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(
+        (n_series, n_vectors),
+        dtype=np.float64,
+    )
+
+    cdef double[:, :, ::1] updated_mv = updated
+    cdef double[:, ::1] raw_mv = raw
+    cdef double[:, ::1] norm_mv = norm
+    cdef Py_ssize_t s, b, v, w
+    cdef double acc, mean, var_acc, denom, centered, mu_value, adj, val
+
+    with nogil:
+        for s in range(n_series):
+            for v in range(n_vectors):
+                raw_mv[s, v] = 0.0
+
+            for b in range(n_base):
+                for v in range(n_vectors):
+                    val = base_dots[s, b, v]
+                    if apply_diff:
+                        val = val * diff_toggle[b, v]
+                    updated_mv[s, b, v] = val
+                    raw_mv[s, v] += val
+
+            for b in range(n_new):
+                for v in range(n_vectors):
+                    acc = 0.0
+                    for w in range(basic_window):
+                        acc += new_blocks[s, b, w] * weights[b, v, w]
+                    updated_mv[s, n_base + b, v] = acc
+                    raw_mv[s, v] += acc
+
+            if norm_mode == 1:
+                mu_value = mean_vec[s]
+                denom = 0.0
+                for v in range(n_vectors):
+                    adj = raw_mv[s, v] - mu_value * random_sums[v]
+                    denom += adj * adj
+                denom = sqrt(denom)
+                if denom <= 0.0 or denom != denom:
+                    for v in range(n_vectors):
+                        norm_mv[s, v] = 0.0
+                else:
+                    for v in range(n_vectors):
+                        adj = raw_mv[s, v] - mu_value * random_sums[v]
+                        norm_mv[s, v] = adj / denom
+            else:
+                mean = 0.0
+                for v in range(n_vectors):
+                    mean += raw_mv[s, v]
+                if n_vectors > 0:
+                    mean /= n_vectors
+
+                var_acc = 0.0
+                for v in range(n_vectors):
+                    centered = raw_mv[s, v] - mean
+                    var_acc += centered * centered
+
+                denom = sqrt(var_acc / n_vectors) if n_vectors > 0 else 0.0
+                if denom <= 0.0 or denom != denom:
+                    for v in range(n_vectors):
+                        norm_mv[s, v] = 0.0
+                else:
+                    for v in range(n_vectors):
+                        centered = raw_mv[s, v] - mean
+                        norm_mv[s, v] = centered / denom
+
+    return updated, raw, norm
+
+
 def compute_constant_flags(double[:] sum1,
                            double[:] sum2,
                            double[:] sum3,

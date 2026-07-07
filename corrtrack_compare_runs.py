@@ -43,8 +43,8 @@ DEFAULT_NEG_CORR = getattr(_DEFAULT_EXEC_CFG, "NEG_CORR", False)
 DEFAULT_CORR_VAL = getattr(_DEFAULT_EXEC_CFG, "CORR_VAL", True)
 DEFAULT_MONITOR = getattr(_DEFAULT_EXEC_CFG, "MONITOR", True)
 DEFAULT_TRACK_MIN_DIST = getattr(_DEFAULT_EXEC_CFG, "TRACK_MIN_DIST", True)
-DEFAULT_RECALL_BY_WINDOW = getattr(_DEFAULT_EXEC_CFG, "RECALL_BY_WINDOW", True)
 DEFAULT_TRAIN_RATIO = getattr(_DEFAULT_EXEC_CFG, "TRAIN_RATIO", 0.3)
+DEFAULT_OPTIM_TUNING_MODE = "sampling"
 DEFAULT_VERBOSE = getattr(_DEFAULT_EXEC_CFG, "VERBOSE", False)
 DEFAULT_TESTING = getattr(_DEFAULT_EXEC_CFG, "TESTING", False)
 DEFAULT_DELETE_MAIN_ARTIFACTS_AFTER_COMPARE = getattr(
@@ -54,6 +54,19 @@ DEFAULT_DELETE_MAIN_ARTIFACTS_AFTER_COMPARE = getattr(
 )
 DEFAULT_RESULT_FOLDER = None
 DEFAULT_MAX_WORKERS = getattr(_DEFAULT_EXEC_CFG, "MAX_WORKERS", 0)
+DEFAULT_CANDIDATE_BUCKET_WIDTH = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_BUCKET_WIDTH", None)
+DEFAULT_CANDIDATE_BLOCK_SIZE_STEPS = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_BLOCK_SIZE_STEPS", 32)
+DEFAULT_CANDIDATE_BLOCK_INDEX_DIMS = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_BLOCK_INDEX_DIMS", 1)
+DEFAULT_CANDIDATE_N_PIVOTS = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_N_PIVOTS", 8)
+DEFAULT_CANDIDATE_N_PROBE_PIVOTS = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_N_PROBE_PIVOTS", 2)
+DEFAULT_CANDIDATE_PIVOT_SELECTION = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_PIVOT_SELECTION", "random_unit")
+DEFAULT_CANDIDATE_PIVOT_SEED = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_PIVOT_SEED", 2468)
+DEFAULT_CANDIDATE_SIMILARITY = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_SIMILARITY", "l2")
+DEFAULT_CANDIDATE_COSINE_THRESHOLD = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_COSINE_THRESHOLD", None)
+DEFAULT_CANDIDATE_HAMMING_Z = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_HAMMING_Z", 3.0)
+DEFAULT_CANDIDATE_HAMMING_GROUPS = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_HAMMING_GROUPS", 8)
+DEFAULT_CANDIDATE_FILTER_HAMMING = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_FILTER_HAMMING", True)
+DEFAULT_CANDIDATE_FILTER_COSINE = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_FILTER_COSINE", True)
 
 DEFAULT_DATASET_CONFIG = Path(__file__).with_name(
     "experiment_dataset_fr_air_temperature_7_1.py"
@@ -74,13 +87,26 @@ NEG_CORR = DEFAULT_NEG_CORR
 CORR_VAL = DEFAULT_CORR_VAL
 MONITOR = DEFAULT_MONITOR
 TRACK_MIN_DIST = DEFAULT_TRACK_MIN_DIST
-RECALL_BY_WINDOW = DEFAULT_RECALL_BY_WINDOW
 TRAIN_RATIO = DEFAULT_TRAIN_RATIO
+OPTIM_TUNING_MODE = DEFAULT_OPTIM_TUNING_MODE
 VERBOSE = DEFAULT_VERBOSE
 TESTING = DEFAULT_TESTING
 DELETE_MAIN_ARTIFACTS_AFTER_COMPARE = DEFAULT_DELETE_MAIN_ARTIFACTS_AFTER_COMPARE
 RESULT_FOLDER = DEFAULT_RESULT_FOLDER
 MAX_WORKERS = DEFAULT_MAX_WORKERS
+CANDIDATE_BUCKET_WIDTH = DEFAULT_CANDIDATE_BUCKET_WIDTH
+CANDIDATE_BLOCK_SIZE_STEPS = DEFAULT_CANDIDATE_BLOCK_SIZE_STEPS
+CANDIDATE_BLOCK_INDEX_DIMS = DEFAULT_CANDIDATE_BLOCK_INDEX_DIMS
+CANDIDATE_N_PIVOTS = DEFAULT_CANDIDATE_N_PIVOTS
+CANDIDATE_N_PROBE_PIVOTS = DEFAULT_CANDIDATE_N_PROBE_PIVOTS
+CANDIDATE_PIVOT_SELECTION = DEFAULT_CANDIDATE_PIVOT_SELECTION
+CANDIDATE_PIVOT_SEED = DEFAULT_CANDIDATE_PIVOT_SEED
+CANDIDATE_SIMILARITY = DEFAULT_CANDIDATE_SIMILARITY
+CANDIDATE_COSINE_THRESHOLD = DEFAULT_CANDIDATE_COSINE_THRESHOLD
+CANDIDATE_HAMMING_Z = DEFAULT_CANDIDATE_HAMMING_Z
+CANDIDATE_HAMMING_GROUPS = DEFAULT_CANDIDATE_HAMMING_GROUPS
+CANDIDATE_FILTER_HAMMING = DEFAULT_CANDIDATE_FILTER_HAMMING
+CANDIDATE_FILTER_COSINE = DEFAULT_CANDIDATE_FILTER_COSINE
 COUNTRIES = VARIABLES = N_VARS = N_YEARS = None
 MODES = ["corrtrack"]
 DATA_LOADER: Callable[..., tuple[np.ndarray, np.ndarray]] | None = None
@@ -188,21 +214,34 @@ def _select_rows(total_rows: int, span: int) -> np.ndarray:
     return rows
 
 
-def prepare_data(data, ids, n_year, n_var, train_ratio):
+def prepare_data(data, ids, n_year, n_var, train_ratio, tuning_mode="sampling"):
     rows = _select_rows(data.shape[0], n_year)
     data_stream = np.c_[data[rows, 0], data[rows, 1 : (n_var + 1)]]
     length_data = data_stream.shape[0]
     train_end = round(train_ratio * length_data)
+    tuning_mode = "sampling"
+    if train_end <= 0:
+        raise ValueError(
+            f"train_ratio={train_ratio} leaves no train data for comparison; "
+            "choose a value greater than 0."
+        )
+    if train_end >= length_data:
+        raise ValueError(
+            f"train_ratio={train_ratio} leaves no holdout test data for comparison; "
+            "choose a value strictly between 0 and 1."
+        )
     train_data = np.transpose(data_stream[:train_end, :])
-    test_data = np.transpose(data_stream)
+    test_data = np.transpose(data_stream[train_end:, :])
     ids_n_var = ids[: data_stream.shape[1] - 1]
     return train_data, test_data, ids_n_var
 
 
 def config_folder():
+    window_slug = "-".join(str(v) for v in WINDOW_SIZE) if isinstance(WINDOW_SIZE, (list, tuple)) else str(WINDOW_SIZE)
     threshold_slug = str(CORR_THRESHOLD).replace(".", "p")
     exec_slug = str(EXEC_MODE or "unknown").replace(" ", "_")
-    return f"ws{WINDOW_SIZE}_step{WINDOW_STEP}_lags{N_LAGS}_thr{threshold_slug}_exec{exec_slug}"
+    slug = f"ws{window_slug}_step{WINDOW_STEP}_lags{N_LAGS}_thr{threshold_slug}_exec{exec_slug}"
+    return str(Path(Path(__file__).resolve().parent.name) / slug)
 
 
 def parse_args():
@@ -246,14 +285,14 @@ def parse_args():
     parser.add_argument("--sequential-validation", dest="parallel_validation", action="store_false")
     parser.add_argument("--neg-corr", dest="neg_corr", action="store_true")
     parser.add_argument("--no-neg-corr", dest="neg_corr", action="store_false")
+    parser.add_argument("--recall-by-window", dest="recall_by_window", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--no-recall-by-window", dest="recall_by_window", action="store_false", help=argparse.SUPPRESS)
     parser.add_argument("--corr-val", dest="corr_val", action="store_true")
     parser.add_argument("--no-corr-val", dest="corr_val", action="store_false")
     parser.add_argument("--monitor", dest="monitor", action="store_true")
     parser.add_argument("--no-monitor", dest="monitor", action="store_false")
     parser.add_argument("--track-min-dist", dest="track_min_dist", action="store_true")
     parser.add_argument("--no-track-min-dist", dest="track_min_dist", action="store_false")
-    parser.add_argument("--recall-by-window", dest="recall_by_window", action="store_true")
-    parser.add_argument("--no-recall-by-window", dest="recall_by_window", action="store_false")
     parser.add_argument("--train-ratio", type=float, default=None)
     parser.add_argument("--verbose", dest="verbose", action="store_true")
     parser.add_argument("--no-verbose", dest="verbose", action="store_false")
@@ -285,10 +324,10 @@ def parse_args():
         parallel_candidates=None,
         parallel_validation=None,
         neg_corr=None,
+        recall_by_window=None,
         corr_val=None,
         monitor=None,
         track_min_dist=None,
-        recall_by_window=None,
         verbose=None,
         testing=None,
         delete_main_artifacts_after_compare=None,
@@ -408,9 +447,9 @@ def main():
     _apply_dataset_config(cfg_dataset)
     _apply_parallel_defaults_from_cfg(cfg_exec, args)
 
-    global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD, RESULT_FOLDER, MAX_WORKERS
+    global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD, RESULT_FOLDER, MAX_WORKERS, CANDIDATE_BUCKET_WIDTH, CANDIDATE_BLOCK_SIZE_STEPS, CANDIDATE_BLOCK_INDEX_DIMS, CANDIDATE_N_PIVOTS, CANDIDATE_N_PROBE_PIVOTS, CANDIDATE_PIVOT_SELECTION, CANDIDATE_PIVOT_SEED, CANDIDATE_SIMILARITY, CANDIDATE_COSINE_THRESHOLD, CANDIDATE_HAMMING_Z, CANDIDATE_HAMMING_GROUPS, CANDIDATE_FILTER_HAMMING, CANDIDATE_FILTER_COSINE
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
-    global EXEC_MODE, NEG_CORR, CORR_VAL, MONITOR, TRACK_MIN_DIST, RECALL_BY_WINDOW, TRAIN_RATIO, DATA_LOADER
+    global EXEC_MODE, NEG_CORR, CORR_VAL, MONITOR, TRACK_MIN_DIST, TRAIN_RATIO, OPTIM_TUNING_MODE, DATA_LOADER
     global VERBOSE, TESTING, DELETE_MAIN_ARTIFACTS_AFTER_COMPARE
 
     RESULT_FOLDER = _resolve_cfg_value(args.result_folder, cfg_dataset, "RESULT_FOLDER", DEFAULT_RESULT_FOLDER)
@@ -436,11 +475,25 @@ def main():
     TRACK_MIN_DIST = _resolve_cfg_value(
         args.track_min_dist, cfg_exec, "TRACK_MIN_DIST", DEFAULT_TRACK_MIN_DIST
     )
-    RECALL_BY_WINDOW = _resolve_cfg_value(
-        args.recall_by_window, cfg_exec, "RECALL_BY_WINDOW", DEFAULT_RECALL_BY_WINDOW
-    )
+    if not CORR_VAL:
+        MONITOR = False
+        TRACK_MIN_DIST = False
     TRAIN_RATIO = _resolve_cfg_value(args.train_ratio, cfg_exec, "TRAIN_RATIO", DEFAULT_TRAIN_RATIO)
+    OPTIM_TUNING_MODE = "sampling"
     MAX_WORKERS = _resolve_cfg_value(None, cfg_exec, "MAX_WORKERS", DEFAULT_MAX_WORKERS)
+    CANDIDATE_BUCKET_WIDTH = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_BUCKET_WIDTH", DEFAULT_CANDIDATE_BUCKET_WIDTH)
+    CANDIDATE_BLOCK_SIZE_STEPS = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_BLOCK_SIZE_STEPS", DEFAULT_CANDIDATE_BLOCK_SIZE_STEPS)
+    CANDIDATE_BLOCK_INDEX_DIMS = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_BLOCK_INDEX_DIMS", DEFAULT_CANDIDATE_BLOCK_INDEX_DIMS)
+    CANDIDATE_N_PIVOTS = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_N_PIVOTS", DEFAULT_CANDIDATE_N_PIVOTS)
+    CANDIDATE_N_PROBE_PIVOTS = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_N_PROBE_PIVOTS", DEFAULT_CANDIDATE_N_PROBE_PIVOTS)
+    CANDIDATE_PIVOT_SELECTION = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_PIVOT_SELECTION", DEFAULT_CANDIDATE_PIVOT_SELECTION)
+    CANDIDATE_PIVOT_SEED = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_PIVOT_SEED", DEFAULT_CANDIDATE_PIVOT_SEED)
+    CANDIDATE_SIMILARITY = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_SIMILARITY", DEFAULT_CANDIDATE_SIMILARITY)
+    CANDIDATE_COSINE_THRESHOLD = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_COSINE_THRESHOLD", DEFAULT_CANDIDATE_COSINE_THRESHOLD)
+    CANDIDATE_HAMMING_Z = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_HAMMING_Z", DEFAULT_CANDIDATE_HAMMING_Z)
+    CANDIDATE_HAMMING_GROUPS = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_HAMMING_GROUPS", DEFAULT_CANDIDATE_HAMMING_GROUPS)
+    CANDIDATE_FILTER_HAMMING = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_FILTER_HAMMING", DEFAULT_CANDIDATE_FILTER_HAMMING)
+    CANDIDATE_FILTER_COSINE = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_FILTER_COSINE", DEFAULT_CANDIDATE_FILTER_COSINE)
     VERBOSE = _resolve_cfg_value(args.verbose, cfg_exec, "VERBOSE", DEFAULT_VERBOSE)
     TESTING = _resolve_cfg_value(args.testing, cfg_exec, "TESTING", DEFAULT_TESTING)
     DELETE_MAIN_ARTIFACTS_AFTER_COMPARE = _resolve_cfg_value(
@@ -463,7 +516,14 @@ def main():
             for n_var in N_VARS:
                 slug = _dataset_slug(country, var)
                 dataset_id = f"{slug}_{n_var}_{n_year}"
-                train_data, test_data, ids_n_var = prepare_data(data, ids, n_year, n_var, TRAIN_RATIO)
+                train_data, test_data, ids_n_var = prepare_data(
+                    data,
+                    ids,
+                    n_year,
+                    n_var,
+                    TRAIN_RATIO,
+                    tuning_mode=OPTIM_TUNING_MODE,
+                )
 
                 base_dir = os.path.join("correlation", RESULT_FOLDER, dataset_id, config_folder())
                 bf_run_csv = os.path.join(base_dir, "bf_run.csv")
@@ -488,12 +548,17 @@ def main():
                     N_LAGS,
                     CORR_THRESHOLD,
                     {},
-                    RECALL_BY_WINDOW,
+                    True,
                     NEG_CORR,
                     CORR_VAL,
                     MODES,
                     exec=EXEC_MODE,
                     max_workers=MAX_WORKERS,
+                    candidate_bucket_width=CANDIDATE_BUCKET_WIDTH,
+                    candidate_block_size_steps=CANDIDATE_BLOCK_SIZE_STEPS,
+                    candidate_block_index_dims=CANDIDATE_BLOCK_INDEX_DIMS,
+                    candidate_similarity=CANDIDATE_SIMILARITY,
+                    candidate_cosine_threshold=CANDIDATE_COSINE_THRESHOLD,
                     verbose=VERBOSE,
                     testing=TESTING,
                     parallel_sketch=PARALLEL_SKETCH,
@@ -501,6 +566,7 @@ def main():
                     parallel_validation=PARALLEL_VALIDATION,
                     monitor=MONITOR,
                     track_min_dist=TRACK_MIN_DIST,
+                    tuning_mode=OPTIM_TUNING_MODE,
                 )
 
                 cc.compare_from_artifacts(

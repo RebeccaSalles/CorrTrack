@@ -8,6 +8,6 @@ RESULT_FOLDER = "asos_exp/tests"
 COUNTRIES = ["fr"]
 VARIABLES = ["air_temperature"]
 N_VARS = [7]
-N_YEARS = [1]
+N_YEARS = [6]
 
-DATA_LOADER = partial(load_dataset, root="datasets/asos-airports")
+DATA_LOADER = partial(load_dataset, root="correlation/asos-airports")

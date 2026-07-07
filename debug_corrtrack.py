@@ -874,9 +874,14 @@ def discover_datasets(args: argparse.Namespace) -> List[DatasetContext]:
     corrtrack_main.NEG_CORR = _resolve_cfg_value(
         args.neg_corr, cfg_exec, "NEG_CORR", corrtrack_main.DEFAULT_NEG_CORR
     )
-    corrtrack_main.RECALL_BY_WINDOW = _resolve_cfg_value(
-        args.recall_by_window, cfg_exec, "RECALL_BY_WINDOW", corrtrack_main.DEFAULT_RECALL_BY_WINDOW
+    corrtrack_main.TRAIN_RATIO = _resolve_cfg_value(
+        args.train_ratio,
+        cfg_exec,
+        "TRAIN_RATIO",
+        getattr(corrtrack_main, "DEFAULT_TRAIN_RATIO", 0.3),
     )
+    corrtrack_main.OPTIM_TUNING_MODE = "sampling"
+    corrtrack_main.OPTIM_HYPEROPT_STRATEGY = "proxy_anchor"
     corrtrack_main.ARTIFACT_MODE = _resolve_cfg_value(
         args.artifact_mode, cfg_exec, "ARTIFACT_MODE", corrtrack_main.DEFAULT_ARTIFACT_MODE
     )
@@ -899,7 +904,14 @@ def discover_datasets(args: argparse.Namespace) -> List[DatasetContext]:
             for n_var in corrtrack_main.N_VARS:
                 slug = corrtrack_main._dataset_slug(country, var)
                 dataset_id = f"{slug}_{n_var}_{n_year}"
-                test_data, ids_n_var = corrtrack_main.prepare_test_data(data, ids, n_year, n_var)
+                test_data, ids_n_var = corrtrack_main.prepare_test_data(
+                    data,
+                    ids,
+                    n_year,
+                    n_var,
+                    corrtrack_main.TRAIN_RATIO,
+                    tuning_mode="sampling",
+                )
                 base_dir = Path("correlation") / corrtrack_main.RESULT_FOLDER / dataset_id / config_folder
                 contexts.append(
                     DatasetContext(
@@ -942,6 +954,8 @@ def run_full_pipeline(args: argparse.Namespace, passthrough: List[str]) -> None:
         cmd.extend(["--n-lags", str(args.n_lags)])
     if args.corr_threshold is not None:
         cmd.extend(["--corr-threshold", str(args.corr_threshold)])
+    if args.train_ratio is not None:
+        cmd.extend(["--train-ratio", str(args.train_ratio)])
     cmd.append("--parallel" if effective_parallel else "--sequential")
     if args.parallel_sketch is not None:
         cmd.append("--parallel-sketch" if args.parallel_sketch else "--sequential-sketch")
@@ -1543,6 +1557,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--basic-window", type=int, default=None)
     parser.add_argument("--n-lags", type=int, default=None)
     parser.add_argument("--corr-threshold", type=float, default=None)
+    parser.add_argument("--train-ratio", type=float, default=None)
     parser.add_argument("--parallel", dest="parallel", action="store_true")
     parser.add_argument("--sequential", dest="parallel", action="store_false")
     parser.add_argument("--parallel-sketch", dest="parallel_sketch", action="store_true")
@@ -1617,12 +1632,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     args.neg_corr = _resolve_cfg_value(
         args.neg_corr, cfg_exec, "NEG_CORR", corrtrack_main.DEFAULT_NEG_CORR
     )
-    args.recall_by_window = _resolve_cfg_value(
-        args.recall_by_window,
-        cfg_exec,
-        "RECALL_BY_WINDOW",
-        corrtrack_main.DEFAULT_RECALL_BY_WINDOW,
-    )
+    args.recall_by_window = True
     args.artifact_mode = _resolve_cfg_value(
         args.artifact_mode,
         cfg_exec,

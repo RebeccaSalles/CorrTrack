@@ -2,6 +2,7 @@ import os
 import json
 import math
 import csv
+from bisect import bisect_left, bisect_right
 from typing import Dict, List, Tuple, Optional, Any
 
 import numpy as np
@@ -54,6 +55,8 @@ def _build_stem(
     threshold: float,
     template_len: int,
     num_templates: int,
+    window_step: int,
+    max_lag: Optional[int],
     base_proc: Optional[Dict[str, Any]],
 ) -> str:
     stat_tag = _stationarity_tag(base_proc)
@@ -61,9 +64,11 @@ def _build_stem(
     sign_tag = corr_sign.lower()
     proc_type = (base_proc or {}).get("type", "ar1")
     proc_tag = str(proc_type).lower().replace(" ", "_")
+    lag_tag = "all" if max_lag is None else str(max_lag)
     stem = (
         f"synt_{stat_tag}_{proc_tag}_corr{rate_tag}_m{m}_w{w}_p{template_len}_"
-        f"g{num_templates}_sign{sign_tag}_thr{str(threshold).replace('.', 'p')}"
+        f"g{num_templates}_s{window_step}_lag{lag_tag}_"
+        f"sign{sign_tag}_thr{str(threshold).replace('.', 'p')}"
     )
     return stem
 
@@ -383,6 +388,59 @@ def _pick_series_with_weight(
     return choice
 
 
+def _normalize_window_step(window_step: Optional[int]) -> int:
+    step = 1 if window_step is None else int(window_step)
+    if step <= 0:
+        raise ValueError(f"window_step must be positive; got {window_step!r}")
+    return step
+
+
+def _normalize_max_lag(max_lag: Optional[int]) -> Optional[int]:
+    if max_lag is None:
+        return None
+    lag = int(max_lag)
+    if lag < 0:
+        return None
+    return lag
+
+
+def _candidate_partner_starts(
+    slots: List[int],
+    start: int,
+    max_lag: Optional[int],
+) -> List[int]:
+    if not slots:
+        return []
+    if max_lag is None:
+        return slots
+    lo = bisect_left(slots, start - max_lag)
+    hi = bisect_right(slots, start + max_lag)
+    return slots[lo:hi]
+
+
+def _remove_overlapping_starts(
+    slots: List[int],
+    start: int,
+    length: int,
+) -> List[int]:
+    if not slots:
+        return []
+    left_cut = start - length + 1
+    right_cut = start + length - 1
+    return [slot for slot in slots if slot < left_cut or slot > right_cut]
+
+
+def _max_nonoverlap_slots_per_series(
+    n: int,
+    length: int,
+    window_step: int,
+) -> int:
+    if length > n:
+        return 0
+    gap = int(math.ceil(length / float(window_step))) * window_step
+    return 1 + max(0, (n - length) // gap)
+
+
 def make_corr_dataset(
     save_dir: str,
     m: int,
@@ -395,6 +453,8 @@ def make_corr_dataset(
     threshold: float = 0.7,
     corr_sign: str = "pos",  # "pos" | "neg" | "both"
     base_proc: Optional[Dict[str, Any]] = None,
+    window_step: int = 1,
+    max_lag: Optional[int] = None,
     volatility_equalizer: Optional[Dict[str, Any]] = None,
     seed: Optional[int] = 7,
     hash_seed: Optional[int] = None,
@@ -406,7 +466,9 @@ def make_corr_dataset(
     Semantics:
       - Concatenate all series into one vector of length m * n.
       - Target number of correlated pairs: floor(z * m * n / (2 * p)), where p = template_len.
-      - Each pair uses two non-overlapping windows of length p (one per series).
+      - Each pair uses two windows of length p (one per series), with starts on the
+        ``window_step`` grid and optional ``max_lag`` constraint.
+      - Injected windows remain non-overlapping within each series.
       - Templates are sampled from the base process so marginals match the background.
       - w is the evaluation window length and must be divisible by p (p defaults to w).
     """
@@ -419,6 +481,8 @@ def make_corr_dataset(
     assert p <= n, "template_len must be <= n"
     if w % p != 0:
         raise ValueError(f"w ({w}) must be divisible by template_len ({p})")
+    window_step = _normalize_window_step(window_step)
+    max_lag = _normalize_max_lag(max_lag)
 
     if hash_seed is not None:
         os.environ["PYTHONHASHSEED"] = str(hash_seed)
@@ -428,12 +492,14 @@ def make_corr_dataset(
     X = _gen_base_series(m, n, base_proc, rng)  # shape (m, n)
     _apply_volatility_equalizer(X, volatility_equalizer, w)
 
-    # Prepare slots: non-overlapping p-length segments per series
+    # Prepare step-aligned candidate starts. Non-overlap is enforced lazily by
+    # retiring overlapping starts on a series after each placement.
     slots_by_series: List[List[int]] = [
-        list(range(0, n - p + 1, p)) for _ in range(m)
+        list(range(0, n - p + 1, window_step)) for _ in range(m)
     ]
     slots_total = sum(len(s) for s in slots_by_series)
-    max_pairs = slots_total // 2
+    max_slots_per_series = _max_nonoverlap_slots_per_series(n, p, window_step)
+    max_pairs = (m * max_slots_per_series) // 2
 
     pair_target = int(z * m * n // (2 * p))
     pair_goal = min(pair_target, max_pairs)
@@ -444,25 +510,48 @@ def make_corr_dataset(
 
     correlated_rows: List[Tuple[str, str, int, int, float]] = []
     pairs_used = 0
+    placement_attempts = 0
+    max_placement_attempts = max(2000, 40 * max(1, pair_goal))
+    discarded_starts = 0
 
-    while pairs_used < pair_goal:
+    while pairs_used < pair_goal and placement_attempts < max_placement_attempts:
+        placement_attempts += 1
         available_series = _series_with_slots(slots_by_series)
         if len(available_series) < 2:
             break
 
         i1 = _pick_series_with_weight(available_series, slots_by_series, rng)
-        remaining_series = [i for i in available_series if i != i1]
-        if not remaining_series:
-            break
-        i2 = _pick_series_with_weight(remaining_series, slots_by_series, rng)
-
         slots1 = slots_by_series[i1]
-        slots2 = slots_by_series[i2]
-        if not slots1 or not slots2:
+        if not slots1:
             continue
 
-        start1 = slots1.pop(int(rng.integers(0, len(slots1))))
-        start2 = slots2.pop(int(rng.integers(0, len(slots2))))
+        start1_idx = int(rng.integers(0, len(slots1)))
+        start1 = slots1[start1_idx]
+
+        partner_series: List[int] = []
+        partner_slot_sets: List[List[int]] = []
+        partner_weights: List[float] = []
+        for i2 in available_series:
+            if i2 == i1:
+                continue
+            partner_slots = _candidate_partner_starts(slots_by_series[i2], start1, max_lag)
+            if partner_slots:
+                partner_series.append(i2)
+                partner_slot_sets.append(partner_slots)
+                partner_weights.append(float(len(partner_slots)))
+
+        if not partner_series:
+            del slots1[start1_idx]
+            discarded_starts += 1
+            continue
+
+        partner_probs = np.asarray(partner_weights, dtype=np.float64)
+        partner_probs /= partner_probs.sum()
+        partner_idx = int(rng.choice(len(partner_series), p=partner_probs))
+        i2 = partner_series[partner_idx]
+        slots2 = slots_by_series[i2]
+        partner_slots = partner_slot_sets[partner_idx]
+        start2 = int(partner_slots[int(rng.integers(0, len(partner_slots)))])
 
         tpl = templates[int(rng.integers(0, len(templates)))]
         xw, yw, r_tpl = tpl
@@ -471,6 +560,9 @@ def make_corr_dataset(
 
         X[i1, start1 : start1 + p] = xw
         X[i2, start2 : start2 + p] = yw_use
+
+        slots_by_series[i1] = _remove_overlapping_starts(slots1, start1, p)
+        slots_by_series[i2] = _remove_overlapping_starts(slots2, start2, p)
 
         correlated_rows.append((f"s{i1+1}", f"s{i2+1}", start1 + 1, start2 + 1, r_use))
         pairs_used += 1
@@ -487,6 +579,8 @@ def make_corr_dataset(
         threshold=threshold,
         template_len=p,
         num_templates=num_templates,
+        window_step=window_step,
+        max_lag=max_lag,
         base_proc=base_proc,
     )
     os.makedirs(save_dir, exist_ok=True)
@@ -513,6 +607,8 @@ def make_corr_dataset(
         "w": w,
         "template_len": p,
         "num_templates": num_templates,
+        "window_step": window_step,
+        "max_lag": max_lag,
         "threshold": threshold,
         "corr_sign": corr_sign,
         "target_z": z,
@@ -520,6 +616,8 @@ def make_corr_dataset(
         "pair_target": pair_target,
         "pair_goal": pair_goal,
         "pairs_used": pairs_used,
+        "placement_attempts": placement_attempts,
+        "discarded_starts": discarded_starts,
         "samples_correlated": samples_correlated,
         "slots_total": slots_total,
         "slots_used": pairs_used * 2,
@@ -591,6 +689,18 @@ def _parse_args():
         help="JSON string describing the base process (e.g., '{\"type\":\"ar1\",\"phi\":0.6,\"sigma\":1.0}').",
     )
     p.add_argument(
+        "--window-step",
+        type=int,
+        default=1,
+        help="Start-time grid for injected pairs (default: 1).",
+    )
+    p.add_argument(
+        "--max-lag",
+        type=int,
+        default=None,
+        help="Maximum absolute lag |time1 - time2| for injected pairs (default: unconstrained).",
+    )
+    p.add_argument(
         "--volatility-equalizer",
         type=str,
         default=None,
@@ -624,6 +734,8 @@ def _parse_args():
         threshold=args.threshold,
         corr_sign=args.corr_sign,
         base_proc=base_proc,
+        window_step=args.window_step,
+        max_lag=args.max_lag,
         volatility_equalizer=vol_eq,
         seed=args.seed,
         hash_seed=args.hash_seed,

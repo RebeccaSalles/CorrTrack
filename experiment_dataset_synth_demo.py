@@ -4,16 +4,18 @@ from datasets.synth_loader import load_dataset as load_synth_dataset
 
 RESULT_FOLDER = "synthetic/tests"
 DATASET = ["synthetic"]
-N_SERIES = [8]
-N_OBS = [2000]
+N_SERIES = [50]
+N_OBS = [25856]
 OBS_MODE = "count"  # interpret N_OBS as absolute number of rows
 
 SYNTH_PARAMS = {
-    "m": 8,
-    "n": 2000,
-    "z": 0.001,
+    "m": 50,
+    "n": 25856,
+    "z": 0.2,
     "w": 256,
     "template_len": 256,
+    "window_step": 16,  # keep aligned with evaluation WINDOW_STEP / CLI overrides
+    "max_lag": 100 * 256,  # keep aligned with evaluation N_LAGS / CLI overrides
     "num_templates": 24,
     "threshold": 0.7,
     "corr_sign": "both",

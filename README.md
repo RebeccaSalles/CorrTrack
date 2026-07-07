@@ -119,10 +119,8 @@ Place your dataset files under `datasets/asos-airports/` using the `<country>-<v
 
    NEG_CORR = False
    CORR_VAL = True
-   CORR_VAL_OPTIM = False
    TRACK_MIN_DIST = True
    MONITOR = True
-   RECALL_BY_WINDOW = True
    TRAIN_RATIO = 0.3
    TARGET_RECALL = 0.95
    ARTIFACT_MODE = "buffered"
@@ -140,9 +138,10 @@ Place your dataset files under `datasets/asos-airports/` using the `<country>-<v
    TESTING = False
    ```
 
-   `CORR_VAL` controls validation for CorrTrack main/comparison runs, while `CORR_VAL_OPTIM` controls validation during hyper-parameter search only.
+   `CORR_VAL` controls validation for CorrTrack main/comparison runs. Hyper-parameter search runs with optimizer validation disabled internally.
    `TRACK_MIN_DIST` controls min-distance bookkeeping (`pair_min_dist` / `recall_min`) for brute-force/main/compare stages.
    Hyper-parameter search always forces `TRACK_MIN_DIST=False`.
+   If `CORR_VAL=False`, the run forces both `MONITOR=False` and `TRACK_MIN_DIST=False`; when `CORR_VAL=True`, those two settings remain independent.
    `ARTIFACT_MODE` controls when run artifacts are flushed to disk:
    - `iterative`: append after each iteration
    - `final`: keep in memory and write once at the end
@@ -150,15 +149,13 @@ Place your dataset files under `datasets/asos-airports/` using the `<country>-<v
 
    `ARTIFACT_BUFFER_MAX_ROWS` is a row-count threshold used only in `buffered` mode. Lower it to reduce peak memory; raise it to reduce flush frequency.
 
-   `SAVE_ONLY_REQUIRED_ARTIFACTS=True` tells the run stages to write only the artifact family needed for the selected metric mode:
-   - `RECALL_BY_WINDOW=True`: keep `_correlated.csv`, skip `_anomalies.csv` and `_status.csv`
-   - `RECALL_BY_WINDOW=False`: keep `_anomalies.csv`, skip `_correlated.csv` and `_status.csv`
+   Stable runs always compute recall by window. `SAVE_ONLY_REQUIRED_ARTIFACTS=True` keeps `_correlated.csv` and skips `_anomalies.csv` / `_status.csv`.
 
    `SAVE_MAXLAG_ARTIFACTS=False` skips `_max_lag_correlated.csv`. When disabled, max-lag comparison columns are reported as `nan`.
 
    `DELETE_MAIN_ARTIFACTS_AFTER_COMPARE=True` removes the main CorrTrack artifact bundle after `corrtrack_compare_runs.py` successfully writes the metrics CSV.
 
-   Hyper-parameter search has an additional optimizer-only fast path: when `RECALL_BY_WINDOW=True` and `CORR_VAL_OPTIM=False`, CorrTrack trials are compared online against brute-force ground truth instead of writing trial `_correlated.csv` artifacts. In that mode, exact overall metrics are still reported, `recall_pos` / `recall_neg` are exact BF-sign-stratified recall values, and signed precision/F1 metrics are reported as `nan`.
+   Hyper-parameter search compares CorrTrack trials online against brute-force ground truth instead of writing trial `_correlated.csv` artifacts. In that mode, exact overall metrics are still reported, `recall_pos` / `recall_neg` are exact BF-sign-stratified recall values, and signed precision/F1 metrics are reported as `nan`.
 
    Execution mode is derived from the per-phase flags above: if any of `PARALLEL_*` is `True`, the run uses threads; otherwise it is sequential. You can override these values per run with CLI flags, or swap the file via `--exec-param-config`. Output location (`RESULT_FOLDER`) lives in the dataset config and can be overridden with `--result-folder`.
 
@@ -496,7 +493,7 @@ Creates `optim/<dataset_id>/corrtrack_optim_<dataset_id>.csv` with one row per c
 
 `best_params_*.json` is selected from the feasible rows (`speedup > 1` and `freq_threshold < 1`, or all rows if that feasible subset is empty), then filtered to `recall >= target_recall`. If no row reaches the recall target, the selector falls back to the best recall available and keeps every row with `recall >= max_recall * RECALL_FALLBACK_NEAR_RATIO` (CLI: `--recall-fallback-near-ratio`, default `0.98`). From that recall-qualified set, the optimizer keeps only the near-best speedup band defined by `speedup >= best_speedup * SPEEDUP_NEAR_RATIO` (CLI: `--speedup-near-ratio`, default `0.98`) and then chooses the row with the lowest `cand_w`; higher `speedup` breaks ties.
 
-When `RECALL_BY_WINDOW=True` and `CORR_VAL_OPTIM=False`, parameter search automatically switches to the optimizer-online path. In that mode:
+Parameter search uses the optimizer-online path. In that mode:
 - brute-force still builds one exact ground-truth reference
 - CorrTrack trials are compared online per iteration and do not write trial `_correlated.csv` artifacts
 - `artifact_time_bf` / `artifact_time` include this online reference / compare work
@@ -687,7 +684,7 @@ No code changes are required beyond the new config and loader.
 
 * **Artifact persistence:** Use `--artifact-mode buffered` for large runs, `iterative` for per-window CSV updates, and `final` to write only once at the end.
 * **Buffered flushing:** Tune `ARTIFACT_BUFFER_MAX_ROWS` or `--artifact-buffer-max-rows` to trade memory for fewer disk flushes.
-* **Optimizer-online mode:** With `RECALL_BY_WINDOW=True` and `CORR_VAL_OPTIM=False`, hyper-parameter search compares trials online against BF and avoids writing trial `_correlated.csv` artifacts.
+* **Optimizer-online mode:** Hyper-parameter search compares trials online against BF and avoids writing trial `_correlated.csv` artifacts.
 * **Result paths include execution mode** (`…_exec<mode>`), preventing collisions across runs with different execution policies.
 * **Backward compatibility:** `load_data_asos.py` now defers to the new loader. Legacy scripts that import it remain functional.
 * **Validation:** Each stage ensures prerequisites (loader, best params, etc.) exist and will exit with a clear message if not.

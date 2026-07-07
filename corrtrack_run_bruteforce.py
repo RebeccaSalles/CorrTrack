@@ -35,9 +35,12 @@ DEFAULT_EXEC_MODE = "thread" if DEFAULT_PARALLEL else "sequential"
 DEFAULT_NEG_CORR = getattr(_DEFAULT_EXEC_CFG, "NEG_CORR", False)
 DEFAULT_MONITOR = getattr(_DEFAULT_EXEC_CFG, "MONITOR", True)
 DEFAULT_TRACK_MIN_DIST = getattr(_DEFAULT_EXEC_CFG, "TRACK_MIN_DIST", True)
-DEFAULT_RECALL_BY_WINDOW = getattr(_DEFAULT_EXEC_CFG, "RECALL_BY_WINDOW", True)
+DEFAULT_BASELINE_MODE = getattr(_DEFAULT_EXEC_CFG, "BASELINE_MODE", "bruteforce")
+DEFAULT_TRAIN_RATIO = getattr(_DEFAULT_EXEC_CFG, "TRAIN_RATIO", 0.3)
+DEFAULT_OPTIM_TUNING_MODE = "sampling"
 DEFAULT_ARTIFACT_MODE = getattr(_DEFAULT_EXEC_CFG, "ARTIFACT_MODE", "iterative")
 DEFAULT_ARTIFACT_BUFFER_MAX_ROWS = getattr(_DEFAULT_EXEC_CFG, "ARTIFACT_BUFFER_MAX_ROWS", 250000)
+DEFAULT_ARTIFACT_MERGE_MODE = getattr(_DEFAULT_EXEC_CFG, "ARTIFACT_MERGE_MODE", "merged")
 DEFAULT_SAVE_ONLY_REQUIRED_ARTIFACTS = getattr(_DEFAULT_EXEC_CFG, "SAVE_ONLY_REQUIRED_ARTIFACTS", False)
 DEFAULT_SAVE_MAXLAG_ARTIFACTS = getattr(_DEFAULT_EXEC_CFG, "SAVE_MAXLAG_ARTIFACTS", True)
 DEFAULT_VERBOSE = getattr(_DEFAULT_EXEC_CFG, "VERBOSE", False)
@@ -63,9 +66,12 @@ EXEC_MODE = DEFAULT_EXEC_MODE
 NEG_CORR = DEFAULT_NEG_CORR
 MONITOR = DEFAULT_MONITOR
 TRACK_MIN_DIST = DEFAULT_TRACK_MIN_DIST
-RECALL_BY_WINDOW = DEFAULT_RECALL_BY_WINDOW
+BASELINE_MODE = DEFAULT_BASELINE_MODE
+TRAIN_RATIO = DEFAULT_TRAIN_RATIO
+OPTIM_TUNING_MODE = DEFAULT_OPTIM_TUNING_MODE
 ARTIFACT_MODE = DEFAULT_ARTIFACT_MODE
 ARTIFACT_BUFFER_MAX_ROWS = DEFAULT_ARTIFACT_BUFFER_MAX_ROWS
+ARTIFACT_MERGE_MODE = DEFAULT_ARTIFACT_MERGE_MODE
 SAVE_ONLY_REQUIRED_ARTIFACTS = DEFAULT_SAVE_ONLY_REQUIRED_ARTIFACTS
 SAVE_MAXLAG_ARTIFACTS = DEFAULT_SAVE_MAXLAG_ARTIFACTS
 VERBOSE = DEFAULT_VERBOSE
@@ -168,10 +174,12 @@ def build_base_config():
         "parallel_candidates": PARALLEL_CANDIDATES,
         "parallel_validation": PARALLEL_VALIDATION,
         "max_workers": MAX_WORKERS,
+        "baseline_mode": BASELINE_MODE,
         "monitor": MONITOR,
         "track_min_dist": TRACK_MIN_DIST,
         "artifact_mode": ARTIFACT_MODE,
         "artifact_buffer_max_rows": ARTIFACT_BUFFER_MAX_ROWS,
+        "artifact_merge_mode": ARTIFACT_MERGE_MODE,
         "save_only_required_artifacts": SAVE_ONLY_REQUIRED_ARTIFACTS,
         "save_maxlag_artifacts": SAVE_MAXLAG_ARTIFACTS,
         "verbose": VERBOSE,
@@ -202,17 +210,33 @@ def _select_rows(total_rows: int, span: int) -> np.ndarray:
     return rows
 
 
-def prepare_stream(data, ids, n_year, n_var):
+def prepare_test_data(data, ids, n_year, n_var, train_ratio, tuning_mode="sampling"):
     rows = _select_rows(data.shape[0], n_year)
     data_stream = np.c_[data[rows, 0], data[rows, 1 : (n_var + 1)]]
+    length_data = data_stream.shape[0]
+    train_end = round(train_ratio * length_data)
+    tuning_mode = "sampling"
+    if train_end <= 0:
+        raise ValueError(
+            f"train_ratio={train_ratio} leaves no train data for brute-force evaluation; "
+            "choose a value greater than 0."
+        )
+    if train_end >= length_data:
+        raise ValueError(
+            f"train_ratio={train_ratio} leaves no holdout test data for brute-force evaluation; "
+            "choose a value strictly between 0 and 1."
+        )
+    test_data = np.transpose(data_stream[train_end:, :])
     ids_n_var = ids[: data_stream.shape[1] - 1]
-    return data_stream, ids_n_var
+    return test_data, ids_n_var
 
 
 def config_folder():
+    window_slug = "-".join(str(v) for v in WINDOW_SIZE) if isinstance(WINDOW_SIZE, (list, tuple)) else str(WINDOW_SIZE)
     threshold_slug = str(CORR_THRESHOLD).replace(".", "p")
     exec_slug = str(EXEC_MODE or "unknown").replace(" ", "_")
-    return f"ws{WINDOW_SIZE}_step{WINDOW_STEP}_lags{N_LAGS}_thr{threshold_slug}_exec{exec_slug}"
+    slug = f"ws{window_slug}_step{WINDOW_STEP}_lags{N_LAGS}_thr{threshold_slug}_exec{exec_slug}"
+    return str(Path(Path(__file__).resolve().parent.name) / slug)
 
 
 def parse_args():
@@ -256,11 +280,19 @@ def parse_args():
     parser.add_argument("--sequential-validation", dest="parallel_validation", action="store_false")
     parser.add_argument("--neg-corr", dest="neg_corr", action="store_true")
     parser.add_argument("--no-neg-corr", dest="neg_corr", action="store_false")
+    parser.add_argument("--recall-by-window", dest="recall_by_window", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--no-recall-by-window", dest="recall_by_window", action="store_false", help=argparse.SUPPRESS)
     parser.add_argument("--monitor", dest="monitor", action="store_true")
     parser.add_argument("--no-monitor", dest="monitor", action="store_false")
     parser.add_argument("--track-min-dist", dest="track_min_dist", action="store_true")
     parser.add_argument("--no-track-min-dist", dest="track_min_dist", action="store_false")
-    parser.add_argument("--recall-by-window", dest="recall_by_window", action="store_true")
+    parser.add_argument(
+        "--baseline-mode",
+        choices=("bruteforce", "exact_stomp"),
+        default=None,
+        help="Exact baseline implementation for the brute-force stage.",
+    )
+    parser.add_argument("--train-ratio", type=float, default=None)
     parser.add_argument(
         "--artifact-mode",
         choices=("iterative", "final", "buffered"),
@@ -268,6 +300,12 @@ def parse_args():
         help="Persist artifacts after each iteration (iterative), only once after the run (final), or spill in bounded chunks (buffered).",
     )
     parser.add_argument("--artifact-buffer-max-rows", type=int, default=None)
+    parser.add_argument(
+        "--artifact-merge-mode",
+        choices=("merged", "chunks"),
+        default=None,
+        help="Merge chunked artifact CSVs at finalize time, or leave chunks plus a manifest.",
+    )
     parser.add_argument(
         "--save-only-required-artifacts",
         dest="save_only_required_artifacts",
@@ -292,23 +330,19 @@ def parse_args():
     parser.add_argument("--no-verbose", dest="verbose", action="store_false")
     parser.add_argument("--testing", dest="testing", action="store_true")
     parser.add_argument("--no-testing", dest="testing", action="store_false")
-    parser.add_argument(
-        "--no-recall-by-window",
-        dest="recall_by_window",
-        action="store_false",
-        help="Disable recall-by-window mode (enabled by default).",
-    )
     parser.set_defaults(
         parallel=None,
         parallel_sketch=None,
         parallel_candidates=None,
         parallel_validation=None,
         neg_corr=None,
+        recall_by_window=None,
         monitor=None,
         track_min_dist=None,
-        recall_by_window=None,
+        baseline_mode=None,
         artifact_mode=None,
         artifact_buffer_max_rows=None,
+        artifact_merge_mode=None,
         save_only_required_artifacts=None,
         save_maxlag_artifacts=None,
         verbose=None,
@@ -326,8 +360,8 @@ def main():
 
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
-    global EXEC_MODE, NEG_CORR, MONITOR, TRACK_MIN_DIST, RECALL_BY_WINDOW, ARTIFACT_MODE, ARTIFACT_BUFFER_MAX_ROWS, SAVE_ONLY_REQUIRED_ARTIFACTS, SAVE_MAXLAG_ARTIFACTS
-    global DATA_LOADER, RESULT_FOLDER, MAX_WORKERS, VERBOSE, TESTING
+    global EXEC_MODE, NEG_CORR, MONITOR, TRACK_MIN_DIST, BASELINE_MODE, ARTIFACT_MODE, ARTIFACT_BUFFER_MAX_ROWS, ARTIFACT_MERGE_MODE, SAVE_ONLY_REQUIRED_ARTIFACTS, SAVE_MAXLAG_ARTIFACTS
+    global DATA_LOADER, RESULT_FOLDER, MAX_WORKERS, VERBOSE, TESTING, TRAIN_RATIO, OPTIM_TUNING_MODE
 
     RESULT_FOLDER = _resolve_cfg_value(args.result_folder, cfg_dataset, "RESULT_FOLDER", DEFAULT_RESULT_FOLDER)
     WINDOW_SIZE = _resolve_cfg_value(args.window_size, cfg_exec, "WINDOW_SIZE", DEFAULT_WINDOW_SIZE)
@@ -351,12 +385,15 @@ def main():
     TRACK_MIN_DIST = _resolve_cfg_value(
         args.track_min_dist, cfg_exec, "TRACK_MIN_DIST", DEFAULT_TRACK_MIN_DIST
     )
-    RECALL_BY_WINDOW = _resolve_cfg_value(
-        args.recall_by_window, cfg_exec, "RECALL_BY_WINDOW", DEFAULT_RECALL_BY_WINDOW
-    )
+    BASELINE_MODE = _resolve_cfg_value(args.baseline_mode, cfg_exec, "BASELINE_MODE", DEFAULT_BASELINE_MODE)
+    TRAIN_RATIO = _resolve_cfg_value(args.train_ratio, cfg_exec, "TRAIN_RATIO", DEFAULT_TRAIN_RATIO)
+    OPTIM_TUNING_MODE = "sampling"
     ARTIFACT_MODE = _resolve_cfg_value(args.artifact_mode, cfg_exec, "ARTIFACT_MODE", DEFAULT_ARTIFACT_MODE)
     ARTIFACT_BUFFER_MAX_ROWS = _resolve_cfg_value(
         args.artifact_buffer_max_rows, cfg_exec, "ARTIFACT_BUFFER_MAX_ROWS", DEFAULT_ARTIFACT_BUFFER_MAX_ROWS
+    )
+    ARTIFACT_MERGE_MODE = _resolve_cfg_value(
+        args.artifact_merge_mode, cfg_exec, "ARTIFACT_MERGE_MODE", DEFAULT_ARTIFACT_MERGE_MODE
     )
     SAVE_ONLY_REQUIRED_ARTIFACTS = _resolve_cfg_value(
         args.save_only_required_artifacts,
@@ -386,7 +423,14 @@ def main():
     for country, var, data, ids in iter_datasets():
         for n_year in N_YEARS:
             for n_var in N_VARS:
-                data_stream, ids_n_var = prepare_stream(data, ids, n_year, n_var)
+                test_data, ids_n_var = prepare_test_data(
+                    data,
+                    ids,
+                    n_year,
+                    n_var,
+                    TRAIN_RATIO,
+                    tuning_mode=OPTIM_TUNING_MODE,
+                )
                 slug = _dataset_slug(country, var)
                 dataset_id = f"{slug}_{n_var}_{n_year}"
                 output_dir = os.path.join("correlation", RESULT_FOLDER, dataset_id, config_folder())
@@ -399,7 +443,6 @@ def main():
                     "nodes": base_config.get("max_workers"),
                 }
 
-                test_data = np.transpose(data_stream)
                 output_csv = os.path.join(output_dir, "bf_run.csv")
 
                 run_and_log_bruteforce(
@@ -409,7 +452,7 @@ def main():
                     base_config,
                     output_csv,
                     metadata=metadata,
-                    recall_by_window=RECALL_BY_WINDOW,
+                    recall_by_window=True,
                     verbose=VERBOSE,
                     testing=TESTING,
                     artifact_prefix=os.path.join(output_dir, "bf"),
