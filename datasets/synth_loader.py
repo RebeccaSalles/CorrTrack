@@ -5,7 +5,7 @@ from typing import Any, Dict, Tuple
 
 import numpy as np
 
-from synth_corr_gen import _build_stem, make_corr_dataset
+from synth_corr_gen import _build_stem, make_corr_dataset, resolve_pair_goal
 
 DEFAULT_CACHE_ROOT = Path("datasets/synth_outputs")
 _DEFAULT_BASE_PROC: Dict[str, Any] = {"type": "ar1", "phi": 0.6, "sigma": 1.0}
@@ -18,7 +18,21 @@ def _stem_from_params(params: Dict[str, Any]) -> str:
         raise ValueError(f"generator_params is missing required keys: {', '.join(missing)}")
 
     template_len = int(params.get("template_len", params["w"]))
-    num_templates = int(params.get("num_templates", 4))
+    num_templates_raw = params.get("num_templates", 4)
+    if isinstance(num_templates_raw, str):
+        # (2026-08-24) Must resolve "auto" to the SAME concrete int
+        # make_corr_dataset itself will resolve internally (via the same
+        # shared resolve_pair_goal), or the cache stem computed here would
+        # permanently mismatch the file make_corr_dataset actually saves
+        # (a real bug hit and fixed the first time this was wired in).
+        if num_templates_raw.strip().lower() != "auto":
+            raise ValueError(f"num_templates string value must be 'auto', got {num_templates_raw!r}")
+        num_templates = resolve_pair_goal(
+            m=int(params["m"]), n=int(params["n"]), z=float(params["z"]),
+            template_len=template_len, window_step=int(params.get("window_step", 1)),
+        )
+    else:
+        num_templates = int(num_templates_raw)
 
     return _build_stem(
         m=int(params["m"]),
@@ -29,6 +43,8 @@ def _stem_from_params(params: Dict[str, Any]) -> str:
         threshold=float(params.get("threshold", 0.7)),
         template_len=template_len,
         num_templates=num_templates,
+        window_step=int(params.get("window_step", 1)),
+        max_lag=params.get("max_lag"),
         base_proc=params.get("base_proc"),
     )
 
@@ -74,6 +90,8 @@ def load_dataset(
     params.setdefault("corr_sign", "pos")
     params.setdefault("template_len", params.get("w"))
     params.setdefault("num_templates", 4)
+    params.setdefault("window_step", 1)
+    params.setdefault("max_lag", None)
     params.setdefault("seed", 7)
     params.setdefault("hash_seed", None)
     params["base_proc"] = dict(params.get("base_proc") or _DEFAULT_BASE_PROC)

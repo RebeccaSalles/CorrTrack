@@ -10,6 +10,11 @@
             "/usr/lib/python3/dist-packages/numpy/core/include/numpy/ndarraytypes.h",
             "/usr/lib/python3/dist-packages/numpy/core/include/numpy/ufuncobject.h"
         ],
+        "extra_compile_args": [
+            "-O3",
+            "-march=native",
+            "-ffast-math"
+        ],
         "include_dirs": [
             "/usr/lib/python3/dist-packages/numpy/core/include"
         ],
@@ -2923,10 +2928,13 @@ static int __Pyx_ValidateAndInit_memviewslice(
 static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(PyObject *, int writable_flag);
 
 /* ObjectToMemviewSlice.proto */
-static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_ds_double(PyObject *, int writable_flag);
+static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(PyObject *, int writable_flag);
 
 /* ObjectToMemviewSlice.proto */
-static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(PyObject *, int writable_flag);
+static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_ds_long(PyObject *, int writable_flag);
+
+/* ObjectToMemviewSlice.proto */
+static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_ds_double(PyObject *, int writable_flag);
 
 /* MemviewDtypeToObject.proto */
 static CYTHON_INLINE PyObject *__pyx_memview_get_double(const char *itemp);
@@ -3189,6 +3197,7 @@ static PyObject *__pyx_unpickle_Enum__set_state(struct __pyx_MemviewEnum_obj *, 
 static __Pyx_TypeInfo __Pyx_TypeInfo_nn___pyx_t_5numpy_float64_t = { "float64_t", NULL, sizeof(__pyx_t_5numpy_float64_t), { 0 }, 0, 'R', 0, 0 };
 static __Pyx_TypeInfo __Pyx_TypeInfo_nn___pyx_t_5numpy_uint8_t = { "uint8_t", NULL, sizeof(__pyx_t_5numpy_uint8_t), { 0 }, 0, __PYX_IS_UNSIGNED(__pyx_t_5numpy_uint8_t) ? 'U' : 'I', __PYX_IS_UNSIGNED(__pyx_t_5numpy_uint8_t), 0 };
 static __Pyx_TypeInfo __Pyx_TypeInfo_double = { "double", NULL, sizeof(double), { 0 }, 0, 'R', 0, 0 };
+static __Pyx_TypeInfo __Pyx_TypeInfo_long = { "long", NULL, sizeof(long), { 0 }, 0, __PYX_IS_UNSIGNED(long) ? 'U' : 'I', __PYX_IS_UNSIGNED(long), 0 };
 static __Pyx_TypeInfo __Pyx_TypeInfo_unsigned_char = { "unsigned char", NULL, sizeof(unsigned char), { 0 }, 0, __PYX_IS_UNSIGNED(unsigned char) ? 'U' : 'I', __PYX_IS_UNSIGNED(unsigned char), 0 };
 /* #### Code section: before_global_var ### */
 #define __Pyx_MODULE_NAME "sketch_kernels"
@@ -3214,6 +3223,7 @@ static const char __pyx_k_O[] = "O";
 static const char __pyx_k_b[] = "b";
 static const char __pyx_k_c[] = "c";
 static const char __pyx_k_i[] = "i";
+static const char __pyx_k_j[] = "j";
 static const char __pyx_k_n[] = "n";
 static const char __pyx_k_s[] = "s";
 static const char __pyx_k_v[] = "v";
@@ -3225,7 +3235,7 @@ static const char __pyx_k__7[] = ")";
 static const char __pyx_k_gc[] = "gc";
 static const char __pyx_k_id[] = "id";
 static const char __pyx_k_np[] = "np";
-static const char __pyx_k__36[] = "?";
+static const char __pyx_k__38[] = "?";
 static const char __pyx_k_abc[] = "abc";
 static const char __pyx_k_acc[] = "acc";
 static const char __pyx_k_adj[] = "adj";
@@ -3274,6 +3284,7 @@ static const char __pyx_k_range[] = "range";
 static const char __pyx_k_shape[] = "shape";
 static const char __pyx_k_start[] = "start";
 static const char __pyx_k_uint8[] = "uint8";
+static const char __pyx_k_zeros[] = "zeros";
 static const char __pyx_k_enable[] = "enable";
 static const char __pyx_k_encode[] = "encode";
 static const char __pyx_k_format[] = "format";
@@ -3317,6 +3328,7 @@ static const char __pyx_k_TypeError[] = "TypeError";
 static const char __pyx_k_base_dots[] = "base_dots";
 static const char __pyx_k_enumerate[] = "enumerate";
 static const char __pyx_k_isenabled[] = "isenabled";
+static const char __pyx_k_n_offsets[] = "n_offsets";
 static const char __pyx_k_n_vectors[] = "n_vectors";
 static const char __pyx_k_norm_mode[] = "norm_mode";
 static const char __pyx_k_pyx_state[] = "__pyx_state";
@@ -3326,11 +3338,14 @@ static const char __pyx_k_w_vectors[] = "w_vectors";
 static const char __pyx_k_IndexError[] = "IndexError";
 static const char __pyx_k_ValueError[] = "ValueError";
 static const char __pyx_k_apply_diff[] = "apply_diff";
+static const char __pyx_k_basic_dots[] = "basic_dots";
+static const char __pyx_k_feat_basic[] = "feat_basic";
 static const char __pyx_k_new_blocks[] = "new_blocks";
 static const char __pyx_k_pyx_result[] = "__pyx_result";
 static const char __pyx_k_pyx_vtable[] = "__pyx_vtable__";
 static const char __pyx_k_raw_matrix[] = "raw_matrix";
 static const char __pyx_k_std_thresh[] = "std_thresh";
+static const char __pyx_k_suffix_raw[] = "suffix_raw";
 static const char __pyx_k_updated_mv[] = "updated_mv";
 static const char __pyx_k_var_thresh[] = "var_thresh";
 static const char __pyx_k_ImportError[] = "ImportError";
@@ -3339,18 +3354,23 @@ static const char __pyx_k_PickleError[] = "PickleError";
 static const char __pyx_k_collections[] = "collections";
 static const char __pyx_k_const_flags[] = "const_flags";
 static const char __pyx_k_diff_toggle[] = "diff_toggle";
+static const char __pyx_k_feat_series[] = "feat_series";
 static const char __pyx_k_kurt_thresh[] = "kurt_thresh";
 static const char __pyx_k_random_sums[] = "random_sums";
 static const char __pyx_k_total_basic[] = "total_basic";
 static const char __pyx_k_basic_window[] = "basic_window";
+static const char __pyx_k_feature_sums[] = "feature_sums";
 static const char __pyx_k_initializing[] = "_initializing";
 static const char __pyx_k_is_coroutine[] = "_is_coroutine";
+static const char __pyx_k_offsets_desc[] = "offsets_desc";
 static const char __pyx_k_pyx_checksum[] = "__pyx_checksum";
 static const char __pyx_k_spiked_flags[] = "spiked_flags";
 static const char __pyx_k_stringsource[] = "<stringsource>";
 static const char __pyx_k_version_info[] = "version_info";
 static const char __pyx_k_class_getitem[] = "__class_getitem__";
+static const char __pyx_k_have_features[] = "have_features";
 static const char __pyx_k_reduce_cython[] = "__reduce_cython__";
+static const char __pyx_k_suffix_raw_mv[] = "suffix_raw_mv";
 static const char __pyx_k_window_blocks[] = "window_blocks";
 static const char __pyx_k_AssertionError[] = "AssertionError";
 static const char __pyx_k_sketch_kernels[] = "sketch_kernels";
@@ -3360,18 +3380,23 @@ static const char __pyx_k_collections_abc[] = "collections.abc";
 static const char __pyx_k_dtype_is_object[] = "dtype_is_object";
 static const char __pyx_k_pyx_PickleError[] = "__pyx_PickleError";
 static const char __pyx_k_setstate_cython[] = "__setstate_cython__";
+static const char __pyx_k_suffix_features[] = "suffix_features";
+static const char __pyx_k_running_features[] = "running_features";
 static const char __pyx_k_pyx_unpickle_Enum[] = "__pyx_unpickle_Enum";
 static const char __pyx_k_asyncio_coroutines[] = "asyncio.coroutines";
 static const char __pyx_k_cline_in_traceback[] = "cline_in_traceback";
 static const char __pyx_k_sketch_kernels_pyx[] = "sketch_kernels.pyx";
 static const char __pyx_k_strided_and_direct[] = "<strided and direct>";
+static const char __pyx_k_suffix_features_mv[] = "suffix_features_mv";
 static const char __pyx_k_build_sketch_matrix[] = "build_sketch_matrix";
 static const char __pyx_k_compute_series_dots[] = "compute_series_dots";
+static const char __pyx_k_running_features_mv[] = "running_features_mv";
 static const char __pyx_k_strided_and_indirect[] = "<strided and indirect>";
 static const char __pyx_k_Invalid_shape_in_axis[] = "Invalid shape in axis ";
 static const char __pyx_k_contiguous_and_direct[] = "<contiguous and direct>";
 static const char __pyx_k_Cannot_index_with_type[] = "Cannot index with type '";
 static const char __pyx_k_MemoryView_of_r_object[] = "<MemoryView of %r object>";
+static const char __pyx_k_build_multi_suffix_raw[] = "build_multi_suffix_raw";
 static const char __pyx_k_compute_constant_flags[] = "compute_constant_flags";
 static const char __pyx_k_weights_shape_mismatch[] = "weights shape mismatch";
 static const char __pyx_k_MemoryView_of_r_at_0x_x[] = "<MemoryView of %r at 0x%x>";
@@ -3447,10 +3472,11 @@ static PyObject *__pyx_pf___pyx_memoryviewslice___reduce_cython__(CYTHON_UNUSED 
 static PyObject *__pyx_pf___pyx_memoryviewslice_2__setstate_cython__(CYTHON_UNUSED struct __pyx_memoryviewslice_obj *__pyx_v_self, CYTHON_UNUSED PyObject *__pyx_v___pyx_state); /* proto */
 static PyObject *__pyx_pf_15View_dot_MemoryView___pyx_unpickle_Enum(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v___pyx_type, long __pyx_v___pyx_checksum, PyObject *__pyx_v___pyx_state); /* proto */
 static PyObject *__pyx_pf_14sketch_kernels_compute_series_dots(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_window_blocks, __Pyx_memviewslice __pyx_v_weights); /* proto */
-static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_window_blocks, __Pyx_memviewslice __pyx_v_weights, __Pyx_memviewslice __pyx_v_mean_vec, __Pyx_memviewslice __pyx_v_random_sums, int __pyx_v_norm_mode); /* proto */
-static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_raw_matrix, __Pyx_memviewslice __pyx_v_mean_vec, __Pyx_memviewslice __pyx_v_random_sums, int __pyx_v_norm_mode); /* proto */
-static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_base_dots, __Pyx_memviewslice __pyx_v_diff_toggle, __Pyx_memviewslice __pyx_v_new_blocks, __Pyx_memviewslice __pyx_v_weights, __Pyx_memviewslice __pyx_v_mean_vec, __Pyx_memviewslice __pyx_v_random_sums, int __pyx_v_norm_mode, int __pyx_v_apply_diff); /* proto */
-static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_sum1, __Pyx_memviewslice __pyx_v_sum2, __Pyx_memviewslice __pyx_v_sum3, __Pyx_memviewslice __pyx_v_sum4, long __pyx_v_n, double __pyx_v_std_thresh, double __pyx_v_kurt_thresh); /* proto */
+static PyObject *__pyx_pf_14sketch_kernels_2build_multi_suffix_raw(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_basic_dots, __Pyx_memviewslice __pyx_v_feature_sums, __Pyx_memviewslice __pyx_v_offsets_desc); /* proto */
+static PyObject *__pyx_pf_14sketch_kernels_4build_sketch_matrix(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_window_blocks, __Pyx_memviewslice __pyx_v_weights, __Pyx_memviewslice __pyx_v_mean_vec, __Pyx_memviewslice __pyx_v_random_sums, int __pyx_v_norm_mode); /* proto */
+static PyObject *__pyx_pf_14sketch_kernels_6apply_orth_and_normalize(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_raw_matrix, __Pyx_memviewslice __pyx_v_mean_vec, __Pyx_memviewslice __pyx_v_random_sums, int __pyx_v_norm_mode); /* proto */
+static PyObject *__pyx_pf_14sketch_kernels_8incremental_combine_and_normalize(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_base_dots, __Pyx_memviewslice __pyx_v_diff_toggle, __Pyx_memviewslice __pyx_v_new_blocks, __Pyx_memviewslice __pyx_v_weights, __Pyx_memviewslice __pyx_v_mean_vec, __Pyx_memviewslice __pyx_v_random_sums, int __pyx_v_norm_mode, int __pyx_v_apply_diff); /* proto */
+static PyObject *__pyx_pf_14sketch_kernels_10compute_constant_flags(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_sum1, __Pyx_memviewslice __pyx_v_sum2, __Pyx_memviewslice __pyx_v_sum3, __Pyx_memviewslice __pyx_v_sum4, long __pyx_v_n, double __pyx_v_std_thresh, double __pyx_v_kurt_thresh); /* proto */
 static PyObject *__pyx_tp_new_array(PyTypeObject *t, PyObject *a, PyObject *k); /*proto*/
 static PyObject *__pyx_tp_new_Enum(PyTypeObject *t, PyObject *a, PyObject *k); /*proto*/
 static PyObject *__pyx_tp_new_memoryview(PyTypeObject *t, PyObject *a, PyObject *k); /*proto*/
@@ -3562,7 +3588,7 @@ typedef struct {
   PyObject *__pyx_n_s_View_MemoryView;
   PyObject *__pyx_kp_u__2;
   PyObject *__pyx_n_s__3;
-  PyObject *__pyx_n_s__36;
+  PyObject *__pyx_n_s__38;
   PyObject *__pyx_kp_u__6;
   PyObject *__pyx_kp_u__7;
   PyObject *__pyx_n_s_abc;
@@ -3576,7 +3602,9 @@ typedef struct {
   PyObject *__pyx_n_s_b;
   PyObject *__pyx_n_s_base;
   PyObject *__pyx_n_s_base_dots;
+  PyObject *__pyx_n_s_basic_dots;
   PyObject *__pyx_n_s_basic_window;
+  PyObject *__pyx_n_s_build_multi_suffix_raw;
   PyObject *__pyx_n_s_build_sketch_matrix;
   PyObject *__pyx_n_s_c;
   PyObject *__pyx_n_u_c;
@@ -3607,6 +3635,9 @@ typedef struct {
   PyObject *__pyx_n_s_encode;
   PyObject *__pyx_n_s_enumerate;
   PyObject *__pyx_n_s_error;
+  PyObject *__pyx_n_s_feat_basic;
+  PyObject *__pyx_n_s_feat_series;
+  PyObject *__pyx_n_s_feature_sums;
   PyObject *__pyx_n_s_flags;
   PyObject *__pyx_n_s_float64;
   PyObject *__pyx_n_s_format;
@@ -3616,6 +3647,7 @@ typedef struct {
   PyObject *__pyx_n_s_getstate;
   PyObject *__pyx_kp_u_got;
   PyObject *__pyx_kp_u_got_differing_extents_in_dimensi;
+  PyObject *__pyx_n_s_have_features;
   PyObject *__pyx_n_s_i;
   PyObject *__pyx_n_s_id;
   PyObject *__pyx_n_s_import;
@@ -3627,6 +3659,7 @@ typedef struct {
   PyObject *__pyx_kp_u_isenabled;
   PyObject *__pyx_n_s_itemsize;
   PyObject *__pyx_kp_s_itemsize_0_for_cython_array;
+  PyObject *__pyx_n_s_j;
   PyObject *__pyx_n_s_kurt;
   PyObject *__pyx_n_s_kurt_thresh;
   PyObject *__pyx_n_s_main;
@@ -3642,6 +3675,7 @@ typedef struct {
   PyObject *__pyx_n_s_n_basic;
   PyObject *__pyx_n_s_n_d;
   PyObject *__pyx_n_s_n_new;
+  PyObject *__pyx_n_s_n_offsets;
   PyObject *__pyx_n_s_n_series;
   PyObject *__pyx_n_s_n_vectors;
   PyObject *__pyx_n_s_name;
@@ -3658,6 +3692,7 @@ typedef struct {
   PyObject *__pyx_kp_u_numpy_core_multiarray_failed_to;
   PyObject *__pyx_kp_u_numpy_core_umath_failed_to_impor;
   PyObject *__pyx_n_s_obj;
+  PyObject *__pyx_n_s_offsets_desc;
   PyObject *__pyx_n_s_out;
   PyObject *__pyx_n_s_out_mv;
   PyObject *__pyx_n_s_pack;
@@ -3678,6 +3713,8 @@ typedef struct {
   PyObject *__pyx_n_s_reduce_cython;
   PyObject *__pyx_n_s_reduce_ex;
   PyObject *__pyx_n_s_register;
+  PyObject *__pyx_n_s_running_features;
+  PyObject *__pyx_n_s_running_features_mv;
   PyObject *__pyx_n_s_s;
   PyObject *__pyx_n_s_setstate;
   PyObject *__pyx_n_s_setstate_cython;
@@ -3697,6 +3734,10 @@ typedef struct {
   PyObject *__pyx_kp_s_strided_and_indirect;
   PyObject *__pyx_kp_s_stringsource;
   PyObject *__pyx_n_s_struct;
+  PyObject *__pyx_n_s_suffix_features;
+  PyObject *__pyx_n_s_suffix_features_mv;
+  PyObject *__pyx_n_s_suffix_raw;
+  PyObject *__pyx_n_s_suffix_raw_mv;
   PyObject *__pyx_n_s_sum1;
   PyObject *__pyx_n_s_sum2;
   PyObject *__pyx_n_s_sum3;
@@ -3725,6 +3766,7 @@ typedef struct {
   PyObject *__pyx_n_s_weights;
   PyObject *__pyx_kp_u_weights_shape_mismatch;
   PyObject *__pyx_n_s_window_blocks;
+  PyObject *__pyx_n_s_zeros;
   PyObject *__pyx_int_0;
   PyObject *__pyx_int_1;
   PyObject *__pyx_int_3;
@@ -3756,12 +3798,14 @@ typedef struct {
   PyObject *__pyx_tuple__30;
   PyObject *__pyx_tuple__32;
   PyObject *__pyx_tuple__34;
+  PyObject *__pyx_tuple__36;
   PyObject *__pyx_codeobj__25;
   PyObject *__pyx_codeobj__27;
   PyObject *__pyx_codeobj__29;
   PyObject *__pyx_codeobj__31;
   PyObject *__pyx_codeobj__33;
   PyObject *__pyx_codeobj__35;
+  PyObject *__pyx_codeobj__37;
 } __pyx_mstate;
 
 #if CYTHON_USE_MODULE_STATE
@@ -3862,7 +3906,7 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_View_MemoryView);
   Py_CLEAR(clear_module_state->__pyx_kp_u__2);
   Py_CLEAR(clear_module_state->__pyx_n_s__3);
-  Py_CLEAR(clear_module_state->__pyx_n_s__36);
+  Py_CLEAR(clear_module_state->__pyx_n_s__38);
   Py_CLEAR(clear_module_state->__pyx_kp_u__6);
   Py_CLEAR(clear_module_state->__pyx_kp_u__7);
   Py_CLEAR(clear_module_state->__pyx_n_s_abc);
@@ -3876,7 +3920,9 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_b);
   Py_CLEAR(clear_module_state->__pyx_n_s_base);
   Py_CLEAR(clear_module_state->__pyx_n_s_base_dots);
+  Py_CLEAR(clear_module_state->__pyx_n_s_basic_dots);
   Py_CLEAR(clear_module_state->__pyx_n_s_basic_window);
+  Py_CLEAR(clear_module_state->__pyx_n_s_build_multi_suffix_raw);
   Py_CLEAR(clear_module_state->__pyx_n_s_build_sketch_matrix);
   Py_CLEAR(clear_module_state->__pyx_n_s_c);
   Py_CLEAR(clear_module_state->__pyx_n_u_c);
@@ -3907,6 +3953,9 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_encode);
   Py_CLEAR(clear_module_state->__pyx_n_s_enumerate);
   Py_CLEAR(clear_module_state->__pyx_n_s_error);
+  Py_CLEAR(clear_module_state->__pyx_n_s_feat_basic);
+  Py_CLEAR(clear_module_state->__pyx_n_s_feat_series);
+  Py_CLEAR(clear_module_state->__pyx_n_s_feature_sums);
   Py_CLEAR(clear_module_state->__pyx_n_s_flags);
   Py_CLEAR(clear_module_state->__pyx_n_s_float64);
   Py_CLEAR(clear_module_state->__pyx_n_s_format);
@@ -3916,6 +3965,7 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_getstate);
   Py_CLEAR(clear_module_state->__pyx_kp_u_got);
   Py_CLEAR(clear_module_state->__pyx_kp_u_got_differing_extents_in_dimensi);
+  Py_CLEAR(clear_module_state->__pyx_n_s_have_features);
   Py_CLEAR(clear_module_state->__pyx_n_s_i);
   Py_CLEAR(clear_module_state->__pyx_n_s_id);
   Py_CLEAR(clear_module_state->__pyx_n_s_import);
@@ -3927,6 +3977,7 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_kp_u_isenabled);
   Py_CLEAR(clear_module_state->__pyx_n_s_itemsize);
   Py_CLEAR(clear_module_state->__pyx_kp_s_itemsize_0_for_cython_array);
+  Py_CLEAR(clear_module_state->__pyx_n_s_j);
   Py_CLEAR(clear_module_state->__pyx_n_s_kurt);
   Py_CLEAR(clear_module_state->__pyx_n_s_kurt_thresh);
   Py_CLEAR(clear_module_state->__pyx_n_s_main);
@@ -3942,6 +3993,7 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_n_basic);
   Py_CLEAR(clear_module_state->__pyx_n_s_n_d);
   Py_CLEAR(clear_module_state->__pyx_n_s_n_new);
+  Py_CLEAR(clear_module_state->__pyx_n_s_n_offsets);
   Py_CLEAR(clear_module_state->__pyx_n_s_n_series);
   Py_CLEAR(clear_module_state->__pyx_n_s_n_vectors);
   Py_CLEAR(clear_module_state->__pyx_n_s_name);
@@ -3958,6 +4010,7 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_kp_u_numpy_core_multiarray_failed_to);
   Py_CLEAR(clear_module_state->__pyx_kp_u_numpy_core_umath_failed_to_impor);
   Py_CLEAR(clear_module_state->__pyx_n_s_obj);
+  Py_CLEAR(clear_module_state->__pyx_n_s_offsets_desc);
   Py_CLEAR(clear_module_state->__pyx_n_s_out);
   Py_CLEAR(clear_module_state->__pyx_n_s_out_mv);
   Py_CLEAR(clear_module_state->__pyx_n_s_pack);
@@ -3978,6 +4031,8 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_reduce_cython);
   Py_CLEAR(clear_module_state->__pyx_n_s_reduce_ex);
   Py_CLEAR(clear_module_state->__pyx_n_s_register);
+  Py_CLEAR(clear_module_state->__pyx_n_s_running_features);
+  Py_CLEAR(clear_module_state->__pyx_n_s_running_features_mv);
   Py_CLEAR(clear_module_state->__pyx_n_s_s);
   Py_CLEAR(clear_module_state->__pyx_n_s_setstate);
   Py_CLEAR(clear_module_state->__pyx_n_s_setstate_cython);
@@ -3997,6 +4052,10 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_kp_s_strided_and_indirect);
   Py_CLEAR(clear_module_state->__pyx_kp_s_stringsource);
   Py_CLEAR(clear_module_state->__pyx_n_s_struct);
+  Py_CLEAR(clear_module_state->__pyx_n_s_suffix_features);
+  Py_CLEAR(clear_module_state->__pyx_n_s_suffix_features_mv);
+  Py_CLEAR(clear_module_state->__pyx_n_s_suffix_raw);
+  Py_CLEAR(clear_module_state->__pyx_n_s_suffix_raw_mv);
   Py_CLEAR(clear_module_state->__pyx_n_s_sum1);
   Py_CLEAR(clear_module_state->__pyx_n_s_sum2);
   Py_CLEAR(clear_module_state->__pyx_n_s_sum3);
@@ -4025,6 +4084,7 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_weights);
   Py_CLEAR(clear_module_state->__pyx_kp_u_weights_shape_mismatch);
   Py_CLEAR(clear_module_state->__pyx_n_s_window_blocks);
+  Py_CLEAR(clear_module_state->__pyx_n_s_zeros);
   Py_CLEAR(clear_module_state->__pyx_int_0);
   Py_CLEAR(clear_module_state->__pyx_int_1);
   Py_CLEAR(clear_module_state->__pyx_int_3);
@@ -4056,12 +4116,14 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_tuple__30);
   Py_CLEAR(clear_module_state->__pyx_tuple__32);
   Py_CLEAR(clear_module_state->__pyx_tuple__34);
+  Py_CLEAR(clear_module_state->__pyx_tuple__36);
   Py_CLEAR(clear_module_state->__pyx_codeobj__25);
   Py_CLEAR(clear_module_state->__pyx_codeobj__27);
   Py_CLEAR(clear_module_state->__pyx_codeobj__29);
   Py_CLEAR(clear_module_state->__pyx_codeobj__31);
   Py_CLEAR(clear_module_state->__pyx_codeobj__33);
   Py_CLEAR(clear_module_state->__pyx_codeobj__35);
+  Py_CLEAR(clear_module_state->__pyx_codeobj__37);
   return 0;
 }
 #endif
@@ -4140,7 +4202,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_View_MemoryView);
   Py_VISIT(traverse_module_state->__pyx_kp_u__2);
   Py_VISIT(traverse_module_state->__pyx_n_s__3);
-  Py_VISIT(traverse_module_state->__pyx_n_s__36);
+  Py_VISIT(traverse_module_state->__pyx_n_s__38);
   Py_VISIT(traverse_module_state->__pyx_kp_u__6);
   Py_VISIT(traverse_module_state->__pyx_kp_u__7);
   Py_VISIT(traverse_module_state->__pyx_n_s_abc);
@@ -4154,7 +4216,9 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_b);
   Py_VISIT(traverse_module_state->__pyx_n_s_base);
   Py_VISIT(traverse_module_state->__pyx_n_s_base_dots);
+  Py_VISIT(traverse_module_state->__pyx_n_s_basic_dots);
   Py_VISIT(traverse_module_state->__pyx_n_s_basic_window);
+  Py_VISIT(traverse_module_state->__pyx_n_s_build_multi_suffix_raw);
   Py_VISIT(traverse_module_state->__pyx_n_s_build_sketch_matrix);
   Py_VISIT(traverse_module_state->__pyx_n_s_c);
   Py_VISIT(traverse_module_state->__pyx_n_u_c);
@@ -4185,6 +4249,9 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_encode);
   Py_VISIT(traverse_module_state->__pyx_n_s_enumerate);
   Py_VISIT(traverse_module_state->__pyx_n_s_error);
+  Py_VISIT(traverse_module_state->__pyx_n_s_feat_basic);
+  Py_VISIT(traverse_module_state->__pyx_n_s_feat_series);
+  Py_VISIT(traverse_module_state->__pyx_n_s_feature_sums);
   Py_VISIT(traverse_module_state->__pyx_n_s_flags);
   Py_VISIT(traverse_module_state->__pyx_n_s_float64);
   Py_VISIT(traverse_module_state->__pyx_n_s_format);
@@ -4194,6 +4261,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_getstate);
   Py_VISIT(traverse_module_state->__pyx_kp_u_got);
   Py_VISIT(traverse_module_state->__pyx_kp_u_got_differing_extents_in_dimensi);
+  Py_VISIT(traverse_module_state->__pyx_n_s_have_features);
   Py_VISIT(traverse_module_state->__pyx_n_s_i);
   Py_VISIT(traverse_module_state->__pyx_n_s_id);
   Py_VISIT(traverse_module_state->__pyx_n_s_import);
@@ -4205,6 +4273,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_kp_u_isenabled);
   Py_VISIT(traverse_module_state->__pyx_n_s_itemsize);
   Py_VISIT(traverse_module_state->__pyx_kp_s_itemsize_0_for_cython_array);
+  Py_VISIT(traverse_module_state->__pyx_n_s_j);
   Py_VISIT(traverse_module_state->__pyx_n_s_kurt);
   Py_VISIT(traverse_module_state->__pyx_n_s_kurt_thresh);
   Py_VISIT(traverse_module_state->__pyx_n_s_main);
@@ -4220,6 +4289,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_n_basic);
   Py_VISIT(traverse_module_state->__pyx_n_s_n_d);
   Py_VISIT(traverse_module_state->__pyx_n_s_n_new);
+  Py_VISIT(traverse_module_state->__pyx_n_s_n_offsets);
   Py_VISIT(traverse_module_state->__pyx_n_s_n_series);
   Py_VISIT(traverse_module_state->__pyx_n_s_n_vectors);
   Py_VISIT(traverse_module_state->__pyx_n_s_name);
@@ -4236,6 +4306,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_kp_u_numpy_core_multiarray_failed_to);
   Py_VISIT(traverse_module_state->__pyx_kp_u_numpy_core_umath_failed_to_impor);
   Py_VISIT(traverse_module_state->__pyx_n_s_obj);
+  Py_VISIT(traverse_module_state->__pyx_n_s_offsets_desc);
   Py_VISIT(traverse_module_state->__pyx_n_s_out);
   Py_VISIT(traverse_module_state->__pyx_n_s_out_mv);
   Py_VISIT(traverse_module_state->__pyx_n_s_pack);
@@ -4256,6 +4327,8 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_reduce_cython);
   Py_VISIT(traverse_module_state->__pyx_n_s_reduce_ex);
   Py_VISIT(traverse_module_state->__pyx_n_s_register);
+  Py_VISIT(traverse_module_state->__pyx_n_s_running_features);
+  Py_VISIT(traverse_module_state->__pyx_n_s_running_features_mv);
   Py_VISIT(traverse_module_state->__pyx_n_s_s);
   Py_VISIT(traverse_module_state->__pyx_n_s_setstate);
   Py_VISIT(traverse_module_state->__pyx_n_s_setstate_cython);
@@ -4275,6 +4348,10 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_kp_s_strided_and_indirect);
   Py_VISIT(traverse_module_state->__pyx_kp_s_stringsource);
   Py_VISIT(traverse_module_state->__pyx_n_s_struct);
+  Py_VISIT(traverse_module_state->__pyx_n_s_suffix_features);
+  Py_VISIT(traverse_module_state->__pyx_n_s_suffix_features_mv);
+  Py_VISIT(traverse_module_state->__pyx_n_s_suffix_raw);
+  Py_VISIT(traverse_module_state->__pyx_n_s_suffix_raw_mv);
   Py_VISIT(traverse_module_state->__pyx_n_s_sum1);
   Py_VISIT(traverse_module_state->__pyx_n_s_sum2);
   Py_VISIT(traverse_module_state->__pyx_n_s_sum3);
@@ -4303,6 +4380,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_weights);
   Py_VISIT(traverse_module_state->__pyx_kp_u_weights_shape_mismatch);
   Py_VISIT(traverse_module_state->__pyx_n_s_window_blocks);
+  Py_VISIT(traverse_module_state->__pyx_n_s_zeros);
   Py_VISIT(traverse_module_state->__pyx_int_0);
   Py_VISIT(traverse_module_state->__pyx_int_1);
   Py_VISIT(traverse_module_state->__pyx_int_3);
@@ -4334,12 +4412,14 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_tuple__30);
   Py_VISIT(traverse_module_state->__pyx_tuple__32);
   Py_VISIT(traverse_module_state->__pyx_tuple__34);
+  Py_VISIT(traverse_module_state->__pyx_tuple__36);
   Py_VISIT(traverse_module_state->__pyx_codeobj__25);
   Py_VISIT(traverse_module_state->__pyx_codeobj__27);
   Py_VISIT(traverse_module_state->__pyx_codeobj__29);
   Py_VISIT(traverse_module_state->__pyx_codeobj__31);
   Py_VISIT(traverse_module_state->__pyx_codeobj__33);
   Py_VISIT(traverse_module_state->__pyx_codeobj__35);
+  Py_VISIT(traverse_module_state->__pyx_codeobj__37);
   return 0;
 }
 #endif
@@ -4448,7 +4528,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_View_MemoryView __pyx_mstate_global->__pyx_n_s_View_MemoryView
 #define __pyx_kp_u__2 __pyx_mstate_global->__pyx_kp_u__2
 #define __pyx_n_s__3 __pyx_mstate_global->__pyx_n_s__3
-#define __pyx_n_s__36 __pyx_mstate_global->__pyx_n_s__36
+#define __pyx_n_s__38 __pyx_mstate_global->__pyx_n_s__38
 #define __pyx_kp_u__6 __pyx_mstate_global->__pyx_kp_u__6
 #define __pyx_kp_u__7 __pyx_mstate_global->__pyx_kp_u__7
 #define __pyx_n_s_abc __pyx_mstate_global->__pyx_n_s_abc
@@ -4462,7 +4542,9 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_b __pyx_mstate_global->__pyx_n_s_b
 #define __pyx_n_s_base __pyx_mstate_global->__pyx_n_s_base
 #define __pyx_n_s_base_dots __pyx_mstate_global->__pyx_n_s_base_dots
+#define __pyx_n_s_basic_dots __pyx_mstate_global->__pyx_n_s_basic_dots
 #define __pyx_n_s_basic_window __pyx_mstate_global->__pyx_n_s_basic_window
+#define __pyx_n_s_build_multi_suffix_raw __pyx_mstate_global->__pyx_n_s_build_multi_suffix_raw
 #define __pyx_n_s_build_sketch_matrix __pyx_mstate_global->__pyx_n_s_build_sketch_matrix
 #define __pyx_n_s_c __pyx_mstate_global->__pyx_n_s_c
 #define __pyx_n_u_c __pyx_mstate_global->__pyx_n_u_c
@@ -4493,6 +4575,9 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_encode __pyx_mstate_global->__pyx_n_s_encode
 #define __pyx_n_s_enumerate __pyx_mstate_global->__pyx_n_s_enumerate
 #define __pyx_n_s_error __pyx_mstate_global->__pyx_n_s_error
+#define __pyx_n_s_feat_basic __pyx_mstate_global->__pyx_n_s_feat_basic
+#define __pyx_n_s_feat_series __pyx_mstate_global->__pyx_n_s_feat_series
+#define __pyx_n_s_feature_sums __pyx_mstate_global->__pyx_n_s_feature_sums
 #define __pyx_n_s_flags __pyx_mstate_global->__pyx_n_s_flags
 #define __pyx_n_s_float64 __pyx_mstate_global->__pyx_n_s_float64
 #define __pyx_n_s_format __pyx_mstate_global->__pyx_n_s_format
@@ -4502,6 +4587,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_getstate __pyx_mstate_global->__pyx_n_s_getstate
 #define __pyx_kp_u_got __pyx_mstate_global->__pyx_kp_u_got
 #define __pyx_kp_u_got_differing_extents_in_dimensi __pyx_mstate_global->__pyx_kp_u_got_differing_extents_in_dimensi
+#define __pyx_n_s_have_features __pyx_mstate_global->__pyx_n_s_have_features
 #define __pyx_n_s_i __pyx_mstate_global->__pyx_n_s_i
 #define __pyx_n_s_id __pyx_mstate_global->__pyx_n_s_id
 #define __pyx_n_s_import __pyx_mstate_global->__pyx_n_s_import
@@ -4513,6 +4599,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_kp_u_isenabled __pyx_mstate_global->__pyx_kp_u_isenabled
 #define __pyx_n_s_itemsize __pyx_mstate_global->__pyx_n_s_itemsize
 #define __pyx_kp_s_itemsize_0_for_cython_array __pyx_mstate_global->__pyx_kp_s_itemsize_0_for_cython_array
+#define __pyx_n_s_j __pyx_mstate_global->__pyx_n_s_j
 #define __pyx_n_s_kurt __pyx_mstate_global->__pyx_n_s_kurt
 #define __pyx_n_s_kurt_thresh __pyx_mstate_global->__pyx_n_s_kurt_thresh
 #define __pyx_n_s_main __pyx_mstate_global->__pyx_n_s_main
@@ -4528,6 +4615,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_n_basic __pyx_mstate_global->__pyx_n_s_n_basic
 #define __pyx_n_s_n_d __pyx_mstate_global->__pyx_n_s_n_d
 #define __pyx_n_s_n_new __pyx_mstate_global->__pyx_n_s_n_new
+#define __pyx_n_s_n_offsets __pyx_mstate_global->__pyx_n_s_n_offsets
 #define __pyx_n_s_n_series __pyx_mstate_global->__pyx_n_s_n_series
 #define __pyx_n_s_n_vectors __pyx_mstate_global->__pyx_n_s_n_vectors
 #define __pyx_n_s_name __pyx_mstate_global->__pyx_n_s_name
@@ -4544,6 +4632,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_kp_u_numpy_core_multiarray_failed_to __pyx_mstate_global->__pyx_kp_u_numpy_core_multiarray_failed_to
 #define __pyx_kp_u_numpy_core_umath_failed_to_impor __pyx_mstate_global->__pyx_kp_u_numpy_core_umath_failed_to_impor
 #define __pyx_n_s_obj __pyx_mstate_global->__pyx_n_s_obj
+#define __pyx_n_s_offsets_desc __pyx_mstate_global->__pyx_n_s_offsets_desc
 #define __pyx_n_s_out __pyx_mstate_global->__pyx_n_s_out
 #define __pyx_n_s_out_mv __pyx_mstate_global->__pyx_n_s_out_mv
 #define __pyx_n_s_pack __pyx_mstate_global->__pyx_n_s_pack
@@ -4564,6 +4653,8 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_reduce_cython __pyx_mstate_global->__pyx_n_s_reduce_cython
 #define __pyx_n_s_reduce_ex __pyx_mstate_global->__pyx_n_s_reduce_ex
 #define __pyx_n_s_register __pyx_mstate_global->__pyx_n_s_register
+#define __pyx_n_s_running_features __pyx_mstate_global->__pyx_n_s_running_features
+#define __pyx_n_s_running_features_mv __pyx_mstate_global->__pyx_n_s_running_features_mv
 #define __pyx_n_s_s __pyx_mstate_global->__pyx_n_s_s
 #define __pyx_n_s_setstate __pyx_mstate_global->__pyx_n_s_setstate
 #define __pyx_n_s_setstate_cython __pyx_mstate_global->__pyx_n_s_setstate_cython
@@ -4583,6 +4674,10 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_kp_s_strided_and_indirect __pyx_mstate_global->__pyx_kp_s_strided_and_indirect
 #define __pyx_kp_s_stringsource __pyx_mstate_global->__pyx_kp_s_stringsource
 #define __pyx_n_s_struct __pyx_mstate_global->__pyx_n_s_struct
+#define __pyx_n_s_suffix_features __pyx_mstate_global->__pyx_n_s_suffix_features
+#define __pyx_n_s_suffix_features_mv __pyx_mstate_global->__pyx_n_s_suffix_features_mv
+#define __pyx_n_s_suffix_raw __pyx_mstate_global->__pyx_n_s_suffix_raw
+#define __pyx_n_s_suffix_raw_mv __pyx_mstate_global->__pyx_n_s_suffix_raw_mv
 #define __pyx_n_s_sum1 __pyx_mstate_global->__pyx_n_s_sum1
 #define __pyx_n_s_sum2 __pyx_mstate_global->__pyx_n_s_sum2
 #define __pyx_n_s_sum3 __pyx_mstate_global->__pyx_n_s_sum3
@@ -4611,6 +4706,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_weights __pyx_mstate_global->__pyx_n_s_weights
 #define __pyx_kp_u_weights_shape_mismatch __pyx_mstate_global->__pyx_kp_u_weights_shape_mismatch
 #define __pyx_n_s_window_blocks __pyx_mstate_global->__pyx_n_s_window_blocks
+#define __pyx_n_s_zeros __pyx_mstate_global->__pyx_n_s_zeros
 #define __pyx_int_0 __pyx_mstate_global->__pyx_int_0
 #define __pyx_int_1 __pyx_mstate_global->__pyx_int_1
 #define __pyx_int_3 __pyx_mstate_global->__pyx_int_3
@@ -4642,12 +4738,14 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_tuple__30 __pyx_mstate_global->__pyx_tuple__30
 #define __pyx_tuple__32 __pyx_mstate_global->__pyx_tuple__32
 #define __pyx_tuple__34 __pyx_mstate_global->__pyx_tuple__34
+#define __pyx_tuple__36 __pyx_mstate_global->__pyx_tuple__36
 #define __pyx_codeobj__25 __pyx_mstate_global->__pyx_codeobj__25
 #define __pyx_codeobj__27 __pyx_mstate_global->__pyx_codeobj__27
 #define __pyx_codeobj__29 __pyx_mstate_global->__pyx_codeobj__29
 #define __pyx_codeobj__31 __pyx_mstate_global->__pyx_codeobj__31
 #define __pyx_codeobj__33 __pyx_mstate_global->__pyx_codeobj__33
 #define __pyx_codeobj__35 __pyx_mstate_global->__pyx_codeobj__35
+#define __pyx_codeobj__37 __pyx_mstate_global->__pyx_codeobj__37
 /* #### Code section: module_code ### */
 
 /* "View.MemoryView":131
@@ -20015,7 +20113,976 @@ static PyObject *__pyx_pf_14sketch_kernels_compute_series_dots(CYTHON_UNUSED PyO
   return __pyx_r;
 }
 
-/* "sketch_kernels.pyx":36
+/* "sketch_kernels.pyx":44
+ * # their sketch from the trailing basic-window blocks of the max window's
+ * # already-computed basicDots, instead of recomputing from scratch.
+ * def build_multi_suffix_raw(double[:, :, ::1] basic_dots,             # <<<<<<<<<<<<<<
+ *                            double[:, ::1] feature_sums,
+ *                            long[:] offsets_desc):
+ */
+
+/* Python wrapper */
+static PyObject *__pyx_pw_14sketch_kernels_3build_multi_suffix_raw(PyObject *__pyx_self, 
+#if CYTHON_METH_FASTCALL
+PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
+#else
+PyObject *__pyx_args, PyObject *__pyx_kwds
+#endif
+); /*proto*/
+PyDoc_STRVAR(__pyx_doc_14sketch_kernels_2build_multi_suffix_raw, "Build max-window raw sketch and requested suffix raw sketches.\n\n    offsets_desc must be sorted descending. Each offset is a basic-window\n    position; the returned suffix at position i is the sum from\n    offsets_desc[i] through the last basic window.\n    ");
+static PyMethodDef __pyx_mdef_14sketch_kernels_3build_multi_suffix_raw = {"build_multi_suffix_raw", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_14sketch_kernels_3build_multi_suffix_raw, __Pyx_METH_FASTCALL|METH_KEYWORDS, __pyx_doc_14sketch_kernels_2build_multi_suffix_raw};
+static PyObject *__pyx_pw_14sketch_kernels_3build_multi_suffix_raw(PyObject *__pyx_self, 
+#if CYTHON_METH_FASTCALL
+PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
+#else
+PyObject *__pyx_args, PyObject *__pyx_kwds
+#endif
+) {
+  __Pyx_memviewslice __pyx_v_basic_dots = { 0, 0, { 0 }, { 0 }, { 0 } };
+  __Pyx_memviewslice __pyx_v_feature_sums = { 0, 0, { 0 }, { 0 }, { 0 } };
+  __Pyx_memviewslice __pyx_v_offsets_desc = { 0, 0, { 0 }, { 0 }, { 0 } };
+  #if !CYTHON_METH_FASTCALL
+  CYTHON_UNUSED Py_ssize_t __pyx_nargs;
+  #endif
+  CYTHON_UNUSED PyObject *const *__pyx_kwvalues;
+  PyObject* values[3] = {0,0,0};
+  int __pyx_lineno = 0;
+  const char *__pyx_filename = NULL;
+  int __pyx_clineno = 0;
+  PyObject *__pyx_r = 0;
+  __Pyx_RefNannyDeclarations
+  __Pyx_RefNannySetupContext("build_multi_suffix_raw (wrapper)", 0);
+  #if !CYTHON_METH_FASTCALL
+  #if CYTHON_ASSUME_SAFE_MACROS
+  __pyx_nargs = PyTuple_GET_SIZE(__pyx_args);
+  #else
+  __pyx_nargs = PyTuple_Size(__pyx_args); if (unlikely(__pyx_nargs < 0)) return NULL;
+  #endif
+  #endif
+  __pyx_kwvalues = __Pyx_KwValues_FASTCALL(__pyx_args, __pyx_nargs);
+  {
+    PyObject **__pyx_pyargnames[] = {&__pyx_n_s_basic_dots,&__pyx_n_s_feature_sums,&__pyx_n_s_offsets_desc,0};
+    if (__pyx_kwds) {
+      Py_ssize_t kw_args;
+      switch (__pyx_nargs) {
+        case  3: values[2] = __Pyx_Arg_FASTCALL(__pyx_args, 2);
+        CYTHON_FALLTHROUGH;
+        case  2: values[1] = __Pyx_Arg_FASTCALL(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
+        case  1: values[0] = __Pyx_Arg_FASTCALL(__pyx_args, 0);
+        CYTHON_FALLTHROUGH;
+        case  0: break;
+        default: goto __pyx_L5_argtuple_error;
+      }
+      kw_args = __Pyx_NumKwargs_FASTCALL(__pyx_kwds);
+      switch (__pyx_nargs) {
+        case  0:
+        if (likely((values[0] = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_basic_dots)) != 0)) {
+          (void)__Pyx_Arg_NewRef_FASTCALL(values[0]);
+          kw_args--;
+        }
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 44, __pyx_L3_error)
+        else goto __pyx_L5_argtuple_error;
+        CYTHON_FALLTHROUGH;
+        case  1:
+        if (likely((values[1] = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_feature_sums)) != 0)) {
+          (void)__Pyx_Arg_NewRef_FASTCALL(values[1]);
+          kw_args--;
+        }
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 44, __pyx_L3_error)
+        else {
+          __Pyx_RaiseArgtupleInvalid("build_multi_suffix_raw", 1, 3, 3, 1); __PYX_ERR(0, 44, __pyx_L3_error)
+        }
+        CYTHON_FALLTHROUGH;
+        case  2:
+        if (likely((values[2] = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_offsets_desc)) != 0)) {
+          (void)__Pyx_Arg_NewRef_FASTCALL(values[2]);
+          kw_args--;
+        }
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 44, __pyx_L3_error)
+        else {
+          __Pyx_RaiseArgtupleInvalid("build_multi_suffix_raw", 1, 3, 3, 2); __PYX_ERR(0, 44, __pyx_L3_error)
+        }
+      }
+      if (unlikely(kw_args > 0)) {
+        const Py_ssize_t kwd_pos_args = __pyx_nargs;
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "build_multi_suffix_raw") < 0)) __PYX_ERR(0, 44, __pyx_L3_error)
+      }
+    } else if (unlikely(__pyx_nargs != 3)) {
+      goto __pyx_L5_argtuple_error;
+    } else {
+      values[0] = __Pyx_Arg_FASTCALL(__pyx_args, 0);
+      values[1] = __Pyx_Arg_FASTCALL(__pyx_args, 1);
+      values[2] = __Pyx_Arg_FASTCALL(__pyx_args, 2);
+    }
+    __pyx_v_basic_dots = __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_basic_dots.memview)) __PYX_ERR(0, 44, __pyx_L3_error)
+    __pyx_v_feature_sums = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_feature_sums.memview)) __PYX_ERR(0, 45, __pyx_L3_error)
+    __pyx_v_offsets_desc = __Pyx_PyObject_to_MemoryviewSlice_ds_long(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_offsets_desc.memview)) __PYX_ERR(0, 46, __pyx_L3_error)
+  }
+  goto __pyx_L6_skip;
+  __pyx_L5_argtuple_error:;
+  __Pyx_RaiseArgtupleInvalid("build_multi_suffix_raw", 1, 3, 3, __pyx_nargs); __PYX_ERR(0, 44, __pyx_L3_error)
+  __pyx_L6_skip:;
+  goto __pyx_L4_argument_unpacking_done;
+  __pyx_L3_error:;
+  {
+    Py_ssize_t __pyx_temp;
+    for (__pyx_temp=0; __pyx_temp < (Py_ssize_t)(sizeof(values)/sizeof(values[0])); ++__pyx_temp) {
+      __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
+    }
+  }
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_basic_dots, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_feature_sums, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_offsets_desc, 1);
+  __Pyx_AddTraceback("sketch_kernels.build_multi_suffix_raw", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_RefNannyFinishContext();
+  return NULL;
+  __pyx_L4_argument_unpacking_done:;
+  __pyx_r = __pyx_pf_14sketch_kernels_2build_multi_suffix_raw(__pyx_self, __pyx_v_basic_dots, __pyx_v_feature_sums, __pyx_v_offsets_desc);
+
+  /* function exit code */
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_basic_dots, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_feature_sums, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_offsets_desc, 1);
+  {
+    Py_ssize_t __pyx_temp;
+    for (__pyx_temp=0; __pyx_temp < (Py_ssize_t)(sizeof(values)/sizeof(values[0])); ++__pyx_temp) {
+      __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
+    }
+  }
+  __Pyx_RefNannyFinishContext();
+  return __pyx_r;
+}
+
+static PyObject *__pyx_pf_14sketch_kernels_2build_multi_suffix_raw(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_basic_dots, __Pyx_memviewslice __pyx_v_feature_sums, __Pyx_memviewslice __pyx_v_offsets_desc) {
+  Py_ssize_t __pyx_v_n_series;
+  Py_ssize_t __pyx_v_n_basic;
+  Py_ssize_t __pyx_v_n_vectors;
+  Py_ssize_t __pyx_v_n_offsets;
+  Py_ssize_t __pyx_v_feat_series;
+  Py_ssize_t __pyx_v_feat_basic;
+  Py_ssize_t __pyx_v_s;
+  Py_ssize_t __pyx_v_b;
+  Py_ssize_t __pyx_v_v;
+  Py_ssize_t __pyx_v_j;
+  int __pyx_v_have_features;
+  PyArrayObject *__pyx_v_raw = 0;
+  PyArrayObject *__pyx_v_suffix_raw = 0;
+  PyArrayObject *__pyx_v_suffix_features = 0;
+  PyArrayObject *__pyx_v_running_features = 0;
+  __Pyx_memviewslice __pyx_v_raw_mv = { 0, 0, { 0 }, { 0 }, { 0 } };
+  __Pyx_memviewslice __pyx_v_suffix_raw_mv = { 0, 0, { 0 }, { 0 }, { 0 } };
+  __Pyx_memviewslice __pyx_v_suffix_features_mv = { 0, 0, { 0 }, { 0 }, { 0 } };
+  __Pyx_memviewslice __pyx_v_running_features_mv = { 0, 0, { 0 }, { 0 }, { 0 } };
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_raw;
+  __Pyx_Buffer __pyx_pybuffer_raw;
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_running_features;
+  __Pyx_Buffer __pyx_pybuffer_running_features;
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_suffix_features;
+  __Pyx_Buffer __pyx_pybuffer_suffix_features;
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_suffix_raw;
+  __Pyx_Buffer __pyx_pybuffer_suffix_raw;
+  PyObject *__pyx_r = NULL;
+  __Pyx_RefNannyDeclarations
+  int __pyx_t_1;
+  int __pyx_t_2;
+  PyObject *__pyx_t_3 = NULL;
+  PyObject *__pyx_t_4 = NULL;
+  PyObject *__pyx_t_5 = NULL;
+  PyObject *__pyx_t_6 = NULL;
+  PyObject *__pyx_t_7 = NULL;
+  PyArrayObject *__pyx_t_8 = NULL;
+  PyArrayObject *__pyx_t_9 = NULL;
+  PyArrayObject *__pyx_t_10 = NULL;
+  PyArrayObject *__pyx_t_11 = NULL;
+  __Pyx_memviewslice __pyx_t_12 = { 0, 0, { 0 }, { 0 }, { 0 } };
+  __Pyx_memviewslice __pyx_t_13 = { 0, 0, { 0 }, { 0 }, { 0 } };
+  __Pyx_memviewslice __pyx_t_14 = { 0, 0, { 0 }, { 0 }, { 0 } };
+  Py_ssize_t __pyx_t_15;
+  Py_ssize_t __pyx_t_16;
+  Py_ssize_t __pyx_t_17;
+  Py_ssize_t __pyx_t_18;
+  Py_ssize_t __pyx_t_19;
+  Py_ssize_t __pyx_t_20;
+  Py_ssize_t __pyx_t_21;
+  Py_ssize_t __pyx_t_22;
+  Py_ssize_t __pyx_t_23;
+  Py_ssize_t __pyx_t_24;
+  Py_ssize_t __pyx_t_25;
+  Py_ssize_t __pyx_t_26;
+  int __pyx_lineno = 0;
+  const char *__pyx_filename = NULL;
+  int __pyx_clineno = 0;
+  __Pyx_RefNannySetupContext("build_multi_suffix_raw", 1);
+  __pyx_pybuffer_raw.pybuffer.buf = NULL;
+  __pyx_pybuffer_raw.refcount = 0;
+  __pyx_pybuffernd_raw.data = NULL;
+  __pyx_pybuffernd_raw.rcbuffer = &__pyx_pybuffer_raw;
+  __pyx_pybuffer_suffix_raw.pybuffer.buf = NULL;
+  __pyx_pybuffer_suffix_raw.refcount = 0;
+  __pyx_pybuffernd_suffix_raw.data = NULL;
+  __pyx_pybuffernd_suffix_raw.rcbuffer = &__pyx_pybuffer_suffix_raw;
+  __pyx_pybuffer_suffix_features.pybuffer.buf = NULL;
+  __pyx_pybuffer_suffix_features.refcount = 0;
+  __pyx_pybuffernd_suffix_features.data = NULL;
+  __pyx_pybuffernd_suffix_features.rcbuffer = &__pyx_pybuffer_suffix_features;
+  __pyx_pybuffer_running_features.pybuffer.buf = NULL;
+  __pyx_pybuffer_running_features.refcount = 0;
+  __pyx_pybuffernd_running_features.data = NULL;
+  __pyx_pybuffernd_running_features.rcbuffer = &__pyx_pybuffer_running_features;
+
+  /* "sketch_kernels.pyx":53
+ *     offsets_desc[i] through the last basic window.
+ *     """
+ *     cdef Py_ssize_t n_series = basic_dots.shape[0]             # <<<<<<<<<<<<<<
+ *     cdef Py_ssize_t n_basic = basic_dots.shape[1]
+ *     cdef Py_ssize_t n_vectors = basic_dots.shape[2]
+ */
+  __pyx_v_n_series = (__pyx_v_basic_dots.shape[0]);
+
+  /* "sketch_kernels.pyx":54
+ *     """
+ *     cdef Py_ssize_t n_series = basic_dots.shape[0]
+ *     cdef Py_ssize_t n_basic = basic_dots.shape[1]             # <<<<<<<<<<<<<<
+ *     cdef Py_ssize_t n_vectors = basic_dots.shape[2]
+ *     cdef Py_ssize_t n_offsets = offsets_desc.shape[0]
+ */
+  __pyx_v_n_basic = (__pyx_v_basic_dots.shape[1]);
+
+  /* "sketch_kernels.pyx":55
+ *     cdef Py_ssize_t n_series = basic_dots.shape[0]
+ *     cdef Py_ssize_t n_basic = basic_dots.shape[1]
+ *     cdef Py_ssize_t n_vectors = basic_dots.shape[2]             # <<<<<<<<<<<<<<
+ *     cdef Py_ssize_t n_offsets = offsets_desc.shape[0]
+ *     cdef Py_ssize_t feat_series = feature_sums.shape[0]
+ */
+  __pyx_v_n_vectors = (__pyx_v_basic_dots.shape[2]);
+
+  /* "sketch_kernels.pyx":56
+ *     cdef Py_ssize_t n_basic = basic_dots.shape[1]
+ *     cdef Py_ssize_t n_vectors = basic_dots.shape[2]
+ *     cdef Py_ssize_t n_offsets = offsets_desc.shape[0]             # <<<<<<<<<<<<<<
+ *     cdef Py_ssize_t feat_series = feature_sums.shape[0]
+ *     cdef Py_ssize_t feat_basic = feature_sums.shape[1]
+ */
+  __pyx_v_n_offsets = (__pyx_v_offsets_desc.shape[0]);
+
+  /* "sketch_kernels.pyx":57
+ *     cdef Py_ssize_t n_vectors = basic_dots.shape[2]
+ *     cdef Py_ssize_t n_offsets = offsets_desc.shape[0]
+ *     cdef Py_ssize_t feat_series = feature_sums.shape[0]             # <<<<<<<<<<<<<<
+ *     cdef Py_ssize_t feat_basic = feature_sums.shape[1]
+ *     cdef Py_ssize_t s, b, v, j
+ */
+  __pyx_v_feat_series = (__pyx_v_feature_sums.shape[0]);
+
+  /* "sketch_kernels.pyx":58
+ *     cdef Py_ssize_t n_offsets = offsets_desc.shape[0]
+ *     cdef Py_ssize_t feat_series = feature_sums.shape[0]
+ *     cdef Py_ssize_t feat_basic = feature_sums.shape[1]             # <<<<<<<<<<<<<<
+ *     cdef Py_ssize_t s, b, v, j
+ *     cdef bint have_features = feat_series == n_series and feat_basic >= n_basic
+ */
+  __pyx_v_feat_basic = (__pyx_v_feature_sums.shape[1]);
+
+  /* "sketch_kernels.pyx":60
+ *     cdef Py_ssize_t feat_basic = feature_sums.shape[1]
+ *     cdef Py_ssize_t s, b, v, j
+ *     cdef bint have_features = feat_series == n_series and feat_basic >= n_basic             # <<<<<<<<<<<<<<
+ * 
+ *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.zeros(
+ */
+  __pyx_t_2 = (__pyx_v_feat_series == __pyx_v_n_series);
+  if (__pyx_t_2) {
+  } else {
+    __pyx_t_1 = __pyx_t_2;
+    goto __pyx_L3_bool_binop_done;
+  }
+  __pyx_t_2 = (__pyx_v_feat_basic >= __pyx_v_n_basic);
+  __pyx_t_1 = __pyx_t_2;
+  __pyx_L3_bool_binop_done:;
+  __pyx_v_have_features = __pyx_t_1;
+
+  /* "sketch_kernels.pyx":62
+ *     cdef bint have_features = feat_series == n_series and feat_basic >= n_basic
+ * 
+ *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.zeros(             # <<<<<<<<<<<<<<
+ *         (n_series, n_vectors),
+ *         dtype=np.float64,
+ */
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 62, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_zeros); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 62, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+
+  /* "sketch_kernels.pyx":63
+ * 
+ *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.zeros(
+ *         (n_series, n_vectors),             # <<<<<<<<<<<<<<
+ *         dtype=np.float64,
+ *     )
+ */
+  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 63, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 63, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __pyx_t_6 = PyTuple_New(2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 63, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
+  __Pyx_GIVEREF(__pyx_t_3);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_3)) __PYX_ERR(0, 63, __pyx_L1_error);
+  __Pyx_GIVEREF(__pyx_t_5);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 1, __pyx_t_5)) __PYX_ERR(0, 63, __pyx_L1_error);
+  __pyx_t_3 = 0;
+  __pyx_t_5 = 0;
+
+  /* "sketch_kernels.pyx":62
+ *     cdef bint have_features = feat_series == n_series and feat_basic >= n_basic
+ * 
+ *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.zeros(             # <<<<<<<<<<<<<<
+ *         (n_series, n_vectors),
+ *         dtype=np.float64,
+ */
+  __pyx_t_5 = PyTuple_New(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 62, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_GIVEREF(__pyx_t_6);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_6)) __PYX_ERR(0, 62, __pyx_L1_error);
+  __pyx_t_6 = 0;
+
+  /* "sketch_kernels.pyx":64
+ *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.zeros(
+ *         (n_series, n_vectors),
+ *         dtype=np.float64,             # <<<<<<<<<<<<<<
+ *     )
+ *     cdef np.ndarray[np.float64_t, ndim=3] suffix_raw = np.empty(
+ */
+  __pyx_t_6 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 64, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 64, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_float64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 64, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  if (PyDict_SetItem(__pyx_t_6, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 64, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+
+  /* "sketch_kernels.pyx":62
+ *     cdef bint have_features = feat_series == n_series and feat_basic >= n_basic
+ * 
+ *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.zeros(             # <<<<<<<<<<<<<<
+ *         (n_series, n_vectors),
+ *         dtype=np.float64,
+ */
+  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_5, __pyx_t_6); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 62, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+  if (!(likely(((__pyx_t_7) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_7, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 62, __pyx_L1_error)
+  __pyx_t_8 = ((PyArrayObject *)__pyx_t_7);
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_raw.rcbuffer->pybuffer, (PyObject*)__pyx_t_8, &__Pyx_TypeInfo_nn___pyx_t_5numpy_float64_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
+      __pyx_v_raw = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_raw.rcbuffer->pybuffer.buf = NULL;
+      __PYX_ERR(0, 62, __pyx_L1_error)
+    } else {__pyx_pybuffernd_raw.diminfo[0].strides = __pyx_pybuffernd_raw.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_raw.diminfo[0].shape = __pyx_pybuffernd_raw.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_raw.diminfo[1].strides = __pyx_pybuffernd_raw.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_raw.diminfo[1].shape = __pyx_pybuffernd_raw.rcbuffer->pybuffer.shape[1];
+    }
+  }
+  __pyx_t_8 = 0;
+  __pyx_v_raw = ((PyArrayObject *)__pyx_t_7);
+  __pyx_t_7 = 0;
+
+  /* "sketch_kernels.pyx":66
+ *         dtype=np.float64,
+ *     )
+ *     cdef np.ndarray[np.float64_t, ndim=3] suffix_raw = np.empty(             # <<<<<<<<<<<<<<
+ *         (n_offsets, n_series, n_vectors),
+ *         dtype=np.float64,
+ */
+  __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_n_s_np); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 66, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_7, __pyx_n_s_empty); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 66, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
+  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+
+  /* "sketch_kernels.pyx":67
+ *     )
+ *     cdef np.ndarray[np.float64_t, ndim=3] suffix_raw = np.empty(
+ *         (n_offsets, n_series, n_vectors),             # <<<<<<<<<<<<<<
+ *         dtype=np.float64,
+ *     )
+ */
+  __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_n_offsets); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 67, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 67, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __pyx_t_4 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 67, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __pyx_t_3 = PyTuple_New(3); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 67, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __Pyx_GIVEREF(__pyx_t_7);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_7)) __PYX_ERR(0, 67, __pyx_L1_error);
+  __Pyx_GIVEREF(__pyx_t_5);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 1, __pyx_t_5)) __PYX_ERR(0, 67, __pyx_L1_error);
+  __Pyx_GIVEREF(__pyx_t_4);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 2, __pyx_t_4)) __PYX_ERR(0, 67, __pyx_L1_error);
+  __pyx_t_7 = 0;
+  __pyx_t_5 = 0;
+  __pyx_t_4 = 0;
+
+  /* "sketch_kernels.pyx":66
+ *         dtype=np.float64,
+ *     )
+ *     cdef np.ndarray[np.float64_t, ndim=3] suffix_raw = np.empty(             # <<<<<<<<<<<<<<
+ *         (n_offsets, n_series, n_vectors),
+ *         dtype=np.float64,
+ */
+  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 66, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __Pyx_GIVEREF(__pyx_t_3);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_3)) __PYX_ERR(0, 66, __pyx_L1_error);
+  __pyx_t_3 = 0;
+
+  /* "sketch_kernels.pyx":68
+ *     cdef np.ndarray[np.float64_t, ndim=3] suffix_raw = np.empty(
+ *         (n_offsets, n_series, n_vectors),
+ *         dtype=np.float64,             # <<<<<<<<<<<<<<
+ *     )
+ *     cdef np.ndarray[np.float64_t, ndim=2] suffix_features = np.zeros(
+ */
+  __pyx_t_3 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 68, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 68, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_float64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 68, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  if (PyDict_SetItem(__pyx_t_3, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 68, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+
+  /* "sketch_kernels.pyx":66
+ *         dtype=np.float64,
+ *     )
+ *     cdef np.ndarray[np.float64_t, ndim=3] suffix_raw = np.empty(             # <<<<<<<<<<<<<<
+ *         (n_offsets, n_series, n_vectors),
+ *         dtype=np.float64,
+ */
+  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_4, __pyx_t_3); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 66, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  if (!(likely(((__pyx_t_7) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_7, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 66, __pyx_L1_error)
+  __pyx_t_9 = ((PyArrayObject *)__pyx_t_7);
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_suffix_raw.rcbuffer->pybuffer, (PyObject*)__pyx_t_9, &__Pyx_TypeInfo_nn___pyx_t_5numpy_float64_t, PyBUF_FORMAT| PyBUF_STRIDES, 3, 0, __pyx_stack) == -1)) {
+      __pyx_v_suffix_raw = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_suffix_raw.rcbuffer->pybuffer.buf = NULL;
+      __PYX_ERR(0, 66, __pyx_L1_error)
+    } else {__pyx_pybuffernd_suffix_raw.diminfo[0].strides = __pyx_pybuffernd_suffix_raw.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_suffix_raw.diminfo[0].shape = __pyx_pybuffernd_suffix_raw.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_suffix_raw.diminfo[1].strides = __pyx_pybuffernd_suffix_raw.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_suffix_raw.diminfo[1].shape = __pyx_pybuffernd_suffix_raw.rcbuffer->pybuffer.shape[1]; __pyx_pybuffernd_suffix_raw.diminfo[2].strides = __pyx_pybuffernd_suffix_raw.rcbuffer->pybuffer.strides[2]; __pyx_pybuffernd_suffix_raw.diminfo[2].shape = __pyx_pybuffernd_suffix_raw.rcbuffer->pybuffer.shape[2];
+    }
+  }
+  __pyx_t_9 = 0;
+  __pyx_v_suffix_raw = ((PyArrayObject *)__pyx_t_7);
+  __pyx_t_7 = 0;
+
+  /* "sketch_kernels.pyx":70
+ *         dtype=np.float64,
+ *     )
+ *     cdef np.ndarray[np.float64_t, ndim=2] suffix_features = np.zeros(             # <<<<<<<<<<<<<<
+ *         (n_offsets, n_series),
+ *         dtype=np.float64,
+ */
+  __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_n_s_np); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 70, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_7, __pyx_n_s_zeros); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 70, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+
+  /* "sketch_kernels.pyx":71
+ *     )
+ *     cdef np.ndarray[np.float64_t, ndim=2] suffix_features = np.zeros(
+ *         (n_offsets, n_series),             # <<<<<<<<<<<<<<
+ *         dtype=np.float64,
+ *     )
+ */
+  __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_n_offsets); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 71, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __pyx_t_4 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 71, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __pyx_t_6 = PyTuple_New(2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 71, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
+  __Pyx_GIVEREF(__pyx_t_7);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_7)) __PYX_ERR(0, 71, __pyx_L1_error);
+  __Pyx_GIVEREF(__pyx_t_4);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 1, __pyx_t_4)) __PYX_ERR(0, 71, __pyx_L1_error);
+  __pyx_t_7 = 0;
+  __pyx_t_4 = 0;
+
+  /* "sketch_kernels.pyx":70
+ *         dtype=np.float64,
+ *     )
+ *     cdef np.ndarray[np.float64_t, ndim=2] suffix_features = np.zeros(             # <<<<<<<<<<<<<<
+ *         (n_offsets, n_series),
+ *         dtype=np.float64,
+ */
+  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 70, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __Pyx_GIVEREF(__pyx_t_6);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_6)) __PYX_ERR(0, 70, __pyx_L1_error);
+  __pyx_t_6 = 0;
+
+  /* "sketch_kernels.pyx":72
+ *     cdef np.ndarray[np.float64_t, ndim=2] suffix_features = np.zeros(
+ *         (n_offsets, n_series),
+ *         dtype=np.float64,             # <<<<<<<<<<<<<<
+ *     )
+ *     cdef np.ndarray[np.float64_t, ndim=1] running_features = np.zeros(
+ */
+  __pyx_t_6 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 72, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
+  __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_n_s_np); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 72, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_7, __pyx_n_s_float64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 72, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+  if (PyDict_SetItem(__pyx_t_6, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 72, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+
+  /* "sketch_kernels.pyx":70
+ *         dtype=np.float64,
+ *     )
+ *     cdef np.ndarray[np.float64_t, ndim=2] suffix_features = np.zeros(             # <<<<<<<<<<<<<<
+ *         (n_offsets, n_series),
+ *         dtype=np.float64,
+ */
+  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_4, __pyx_t_6); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 70, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+  if (!(likely(((__pyx_t_5) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_5, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 70, __pyx_L1_error)
+  __pyx_t_10 = ((PyArrayObject *)__pyx_t_5);
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_suffix_features.rcbuffer->pybuffer, (PyObject*)__pyx_t_10, &__Pyx_TypeInfo_nn___pyx_t_5numpy_float64_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
+      __pyx_v_suffix_features = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_suffix_features.rcbuffer->pybuffer.buf = NULL;
+      __PYX_ERR(0, 70, __pyx_L1_error)
+    } else {__pyx_pybuffernd_suffix_features.diminfo[0].strides = __pyx_pybuffernd_suffix_features.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_suffix_features.diminfo[0].shape = __pyx_pybuffernd_suffix_features.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_suffix_features.diminfo[1].strides = __pyx_pybuffernd_suffix_features.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_suffix_features.diminfo[1].shape = __pyx_pybuffernd_suffix_features.rcbuffer->pybuffer.shape[1];
+    }
+  }
+  __pyx_t_10 = 0;
+  __pyx_v_suffix_features = ((PyArrayObject *)__pyx_t_5);
+  __pyx_t_5 = 0;
+
+  /* "sketch_kernels.pyx":74
+ *         dtype=np.float64,
+ *     )
+ *     cdef np.ndarray[np.float64_t, ndim=1] running_features = np.zeros(             # <<<<<<<<<<<<<<
+ *         n_series,
+ *         dtype=np.float64,
+ */
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 74, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_zeros); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 74, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+
+  /* "sketch_kernels.pyx":75
+ *     )
+ *     cdef np.ndarray[np.float64_t, ndim=1] running_features = np.zeros(
+ *         n_series,             # <<<<<<<<<<<<<<
+ *         dtype=np.float64,
+ *     )
+ */
+  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 75, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+
+  /* "sketch_kernels.pyx":74
+ *         dtype=np.float64,
+ *     )
+ *     cdef np.ndarray[np.float64_t, ndim=1] running_features = np.zeros(             # <<<<<<<<<<<<<<
+ *         n_series,
+ *         dtype=np.float64,
+ */
+  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 74, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __Pyx_GIVEREF(__pyx_t_5);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_5)) __PYX_ERR(0, 74, __pyx_L1_error);
+  __pyx_t_5 = 0;
+
+  /* "sketch_kernels.pyx":76
+ *     cdef np.ndarray[np.float64_t, ndim=1] running_features = np.zeros(
+ *         n_series,
+ *         dtype=np.float64,             # <<<<<<<<<<<<<<
+ *     )
+ * 
+ */
+  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 76, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 76, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_float64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 76, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 76, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+
+  /* "sketch_kernels.pyx":74
+ *         dtype=np.float64,
+ *     )
+ *     cdef np.ndarray[np.float64_t, ndim=1] running_features = np.zeros(             # <<<<<<<<<<<<<<
+ *         n_series,
+ *         dtype=np.float64,
+ */
+  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_4, __pyx_t_5); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 74, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  if (!(likely(((__pyx_t_7) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_7, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 74, __pyx_L1_error)
+  __pyx_t_11 = ((PyArrayObject *)__pyx_t_7);
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_running_features.rcbuffer->pybuffer, (PyObject*)__pyx_t_11, &__Pyx_TypeInfo_nn___pyx_t_5numpy_float64_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) {
+      __pyx_v_running_features = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_running_features.rcbuffer->pybuffer.buf = NULL;
+      __PYX_ERR(0, 74, __pyx_L1_error)
+    } else {__pyx_pybuffernd_running_features.diminfo[0].strides = __pyx_pybuffernd_running_features.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_running_features.diminfo[0].shape = __pyx_pybuffernd_running_features.rcbuffer->pybuffer.shape[0];
+    }
+  }
+  __pyx_t_11 = 0;
+  __pyx_v_running_features = ((PyArrayObject *)__pyx_t_7);
+  __pyx_t_7 = 0;
+
+  /* "sketch_kernels.pyx":79
+ *     )
+ * 
+ *     cdef double[:, ::1] raw_mv = raw             # <<<<<<<<<<<<<<
+ *     cdef double[:, :, ::1] suffix_raw_mv = suffix_raw
+ *     cdef double[:, ::1] suffix_features_mv = suffix_features
+ */
+  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(((PyObject *)__pyx_v_raw), PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 79, __pyx_L1_error)
+  __pyx_v_raw_mv = __pyx_t_12;
+  __pyx_t_12.memview = NULL;
+  __pyx_t_12.data = NULL;
+
+  /* "sketch_kernels.pyx":80
+ * 
+ *     cdef double[:, ::1] raw_mv = raw
+ *     cdef double[:, :, ::1] suffix_raw_mv = suffix_raw             # <<<<<<<<<<<<<<
+ *     cdef double[:, ::1] suffix_features_mv = suffix_features
+ *     cdef double[:] running_features_mv = running_features
+ */
+  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(((PyObject *)__pyx_v_suffix_raw), PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 80, __pyx_L1_error)
+  __pyx_v_suffix_raw_mv = __pyx_t_13;
+  __pyx_t_13.memview = NULL;
+  __pyx_t_13.data = NULL;
+
+  /* "sketch_kernels.pyx":81
+ *     cdef double[:, ::1] raw_mv = raw
+ *     cdef double[:, :, ::1] suffix_raw_mv = suffix_raw
+ *     cdef double[:, ::1] suffix_features_mv = suffix_features             # <<<<<<<<<<<<<<
+ *     cdef double[:] running_features_mv = running_features
+ * 
+ */
+  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(((PyObject *)__pyx_v_suffix_features), PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 81, __pyx_L1_error)
+  __pyx_v_suffix_features_mv = __pyx_t_12;
+  __pyx_t_12.memview = NULL;
+  __pyx_t_12.data = NULL;
+
+  /* "sketch_kernels.pyx":82
+ *     cdef double[:, :, ::1] suffix_raw_mv = suffix_raw
+ *     cdef double[:, ::1] suffix_features_mv = suffix_features
+ *     cdef double[:] running_features_mv = running_features             # <<<<<<<<<<<<<<
+ * 
+ *     with nogil:
+ */
+  __pyx_t_14 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(((PyObject *)__pyx_v_running_features), PyBUF_WRITABLE); if (unlikely(!__pyx_t_14.memview)) __PYX_ERR(0, 82, __pyx_L1_error)
+  __pyx_v_running_features_mv = __pyx_t_14;
+  __pyx_t_14.memview = NULL;
+  __pyx_t_14.data = NULL;
+
+  /* "sketch_kernels.pyx":84
+ *     cdef double[:] running_features_mv = running_features
+ * 
+ *     with nogil:             # <<<<<<<<<<<<<<
+ *         j = 0
+ *         for b in range(n_basic - 1, -1, -1):
+ */
+  {
+      #ifdef WITH_THREAD
+      PyThreadState *_save;
+      _save = NULL;
+      Py_UNBLOCK_THREADS
+      __Pyx_FastGIL_Remember();
+      #endif
+      /*try:*/ {
+
+        /* "sketch_kernels.pyx":85
+ * 
+ *     with nogil:
+ *         j = 0             # <<<<<<<<<<<<<<
+ *         for b in range(n_basic - 1, -1, -1):
+ *             for s in range(n_series):
+ */
+        __pyx_v_j = 0;
+
+        /* "sketch_kernels.pyx":86
+ *     with nogil:
+ *         j = 0
+ *         for b in range(n_basic - 1, -1, -1):             # <<<<<<<<<<<<<<
+ *             for s in range(n_series):
+ *                 for v in range(n_vectors):
+ */
+        for (__pyx_t_15 = (__pyx_v_n_basic - 1); __pyx_t_15 > -1L; __pyx_t_15-=1) {
+          __pyx_v_b = __pyx_t_15;
+
+          /* "sketch_kernels.pyx":87
+ *         j = 0
+ *         for b in range(n_basic - 1, -1, -1):
+ *             for s in range(n_series):             # <<<<<<<<<<<<<<
+ *                 for v in range(n_vectors):
+ *                     raw_mv[s, v] += basic_dots[s, b, v]
+ */
+          __pyx_t_16 = __pyx_v_n_series;
+          __pyx_t_17 = __pyx_t_16;
+          for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
+            __pyx_v_s = __pyx_t_18;
+
+            /* "sketch_kernels.pyx":88
+ *         for b in range(n_basic - 1, -1, -1):
+ *             for s in range(n_series):
+ *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
+ *                     raw_mv[s, v] += basic_dots[s, b, v]
+ *                 if have_features:
+ */
+            __pyx_t_19 = __pyx_v_n_vectors;
+            __pyx_t_20 = __pyx_t_19;
+            for (__pyx_t_21 = 0; __pyx_t_21 < __pyx_t_20; __pyx_t_21+=1) {
+              __pyx_v_v = __pyx_t_21;
+
+              /* "sketch_kernels.pyx":89
+ *             for s in range(n_series):
+ *                 for v in range(n_vectors):
+ *                     raw_mv[s, v] += basic_dots[s, b, v]             # <<<<<<<<<<<<<<
+ *                 if have_features:
+ *                     running_features_mv[s] += feature_sums[s, b]
+ */
+              __pyx_t_22 = __pyx_v_s;
+              __pyx_t_23 = __pyx_v_b;
+              __pyx_t_24 = __pyx_v_v;
+              __pyx_t_25 = __pyx_v_s;
+              __pyx_t_26 = __pyx_v_v;
+              *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_25 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_26)) )) += (*((double *) ( /* dim=2 */ ((char *) (((double *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_basic_dots.data + __pyx_t_22 * __pyx_v_basic_dots.strides[0]) ) + __pyx_t_23 * __pyx_v_basic_dots.strides[1]) )) + __pyx_t_24)) )));
+            }
+
+            /* "sketch_kernels.pyx":90
+ *                 for v in range(n_vectors):
+ *                     raw_mv[s, v] += basic_dots[s, b, v]
+ *                 if have_features:             # <<<<<<<<<<<<<<
+ *                     running_features_mv[s] += feature_sums[s, b]
+ * 
+ */
+            if (__pyx_v_have_features) {
+
+              /* "sketch_kernels.pyx":91
+ *                     raw_mv[s, v] += basic_dots[s, b, v]
+ *                 if have_features:
+ *                     running_features_mv[s] += feature_sums[s, b]             # <<<<<<<<<<<<<<
+ * 
+ *             while j < n_offsets and offsets_desc[j] == b:
+ */
+              __pyx_t_24 = __pyx_v_s;
+              __pyx_t_23 = __pyx_v_b;
+              __pyx_t_22 = __pyx_v_s;
+              *((double *) ( /* dim=0 */ (__pyx_v_running_features_mv.data + __pyx_t_22 * __pyx_v_running_features_mv.strides[0]) )) += (*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_feature_sums.data + __pyx_t_24 * __pyx_v_feature_sums.strides[0]) )) + __pyx_t_23)) )));
+
+              /* "sketch_kernels.pyx":90
+ *                 for v in range(n_vectors):
+ *                     raw_mv[s, v] += basic_dots[s, b, v]
+ *                 if have_features:             # <<<<<<<<<<<<<<
+ *                     running_features_mv[s] += feature_sums[s, b]
+ * 
+ */
+            }
+          }
+
+          /* "sketch_kernels.pyx":93
+ *                     running_features_mv[s] += feature_sums[s, b]
+ * 
+ *             while j < n_offsets and offsets_desc[j] == b:             # <<<<<<<<<<<<<<
+ *                 for s in range(n_series):
+ *                     for v in range(n_vectors):
+ */
+          while (1) {
+            __pyx_t_2 = (__pyx_v_j < __pyx_v_n_offsets);
+            if (__pyx_t_2) {
+            } else {
+              __pyx_t_1 = __pyx_t_2;
+              goto __pyx_L17_bool_binop_done;
+            }
+            __pyx_t_23 = __pyx_v_j;
+            __pyx_t_2 = ((*((long *) ( /* dim=0 */ (__pyx_v_offsets_desc.data + __pyx_t_23 * __pyx_v_offsets_desc.strides[0]) ))) == __pyx_v_b);
+            __pyx_t_1 = __pyx_t_2;
+            __pyx_L17_bool_binop_done:;
+            if (!__pyx_t_1) break;
+
+            /* "sketch_kernels.pyx":94
+ * 
+ *             while j < n_offsets and offsets_desc[j] == b:
+ *                 for s in range(n_series):             # <<<<<<<<<<<<<<
+ *                     for v in range(n_vectors):
+ *                         suffix_raw_mv[j, s, v] = raw_mv[s, v]
+ */
+            __pyx_t_16 = __pyx_v_n_series;
+            __pyx_t_17 = __pyx_t_16;
+            for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
+              __pyx_v_s = __pyx_t_18;
+
+              /* "sketch_kernels.pyx":95
+ *             while j < n_offsets and offsets_desc[j] == b:
+ *                 for s in range(n_series):
+ *                     for v in range(n_vectors):             # <<<<<<<<<<<<<<
+ *                         suffix_raw_mv[j, s, v] = raw_mv[s, v]
+ *                     suffix_features_mv[j, s] = running_features_mv[s]
+ */
+              __pyx_t_19 = __pyx_v_n_vectors;
+              __pyx_t_20 = __pyx_t_19;
+              for (__pyx_t_21 = 0; __pyx_t_21 < __pyx_t_20; __pyx_t_21+=1) {
+                __pyx_v_v = __pyx_t_21;
+
+                /* "sketch_kernels.pyx":96
+ *                 for s in range(n_series):
+ *                     for v in range(n_vectors):
+ *                         suffix_raw_mv[j, s, v] = raw_mv[s, v]             # <<<<<<<<<<<<<<
+ *                     suffix_features_mv[j, s] = running_features_mv[s]
+ *                 j += 1
+ */
+                __pyx_t_23 = __pyx_v_s;
+                __pyx_t_24 = __pyx_v_v;
+                __pyx_t_22 = __pyx_v_j;
+                __pyx_t_26 = __pyx_v_s;
+                __pyx_t_25 = __pyx_v_v;
+                *((double *) ( /* dim=2 */ ((char *) (((double *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_suffix_raw_mv.data + __pyx_t_22 * __pyx_v_suffix_raw_mv.strides[0]) ) + __pyx_t_26 * __pyx_v_suffix_raw_mv.strides[1]) )) + __pyx_t_25)) )) = (*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_23 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_24)) )));
+              }
+
+              /* "sketch_kernels.pyx":97
+ *                     for v in range(n_vectors):
+ *                         suffix_raw_mv[j, s, v] = raw_mv[s, v]
+ *                     suffix_features_mv[j, s] = running_features_mv[s]             # <<<<<<<<<<<<<<
+ *                 j += 1
+ * 
+ */
+              __pyx_t_24 = __pyx_v_s;
+              __pyx_t_23 = __pyx_v_j;
+              __pyx_t_25 = __pyx_v_s;
+              *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_suffix_features_mv.data + __pyx_t_23 * __pyx_v_suffix_features_mv.strides[0]) )) + __pyx_t_25)) )) = (*((double *) ( /* dim=0 */ (__pyx_v_running_features_mv.data + __pyx_t_24 * __pyx_v_running_features_mv.strides[0]) )));
+            }
+
+            /* "sketch_kernels.pyx":98
+ *                         suffix_raw_mv[j, s, v] = raw_mv[s, v]
+ *                     suffix_features_mv[j, s] = running_features_mv[s]
+ *                 j += 1             # <<<<<<<<<<<<<<
+ * 
+ *     return raw, suffix_raw, suffix_features
+ */
+            __pyx_v_j = (__pyx_v_j + 1);
+          }
+        }
+      }
+
+      /* "sketch_kernels.pyx":84
+ *     cdef double[:] running_features_mv = running_features
+ * 
+ *     with nogil:             # <<<<<<<<<<<<<<
+ *         j = 0
+ *         for b in range(n_basic - 1, -1, -1):
+ */
+      /*finally:*/ {
+        /*normal exit:*/{
+          #ifdef WITH_THREAD
+          __Pyx_FastGIL_Forget();
+          Py_BLOCK_THREADS
+          #endif
+          goto __pyx_L7;
+        }
+        __pyx_L7:;
+      }
+  }
+
+  /* "sketch_kernels.pyx":100
+ *                 j += 1
+ * 
+ *     return raw, suffix_raw, suffix_features             # <<<<<<<<<<<<<<
+ * 
+ * 
+ */
+  __Pyx_XDECREF(__pyx_r);
+  __pyx_t_7 = PyTuple_New(3); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 100, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __Pyx_INCREF((PyObject *)__pyx_v_raw);
+  __Pyx_GIVEREF((PyObject *)__pyx_v_raw);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, ((PyObject *)__pyx_v_raw))) __PYX_ERR(0, 100, __pyx_L1_error);
+  __Pyx_INCREF((PyObject *)__pyx_v_suffix_raw);
+  __Pyx_GIVEREF((PyObject *)__pyx_v_suffix_raw);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 1, ((PyObject *)__pyx_v_suffix_raw))) __PYX_ERR(0, 100, __pyx_L1_error);
+  __Pyx_INCREF((PyObject *)__pyx_v_suffix_features);
+  __Pyx_GIVEREF((PyObject *)__pyx_v_suffix_features);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 2, ((PyObject *)__pyx_v_suffix_features))) __PYX_ERR(0, 100, __pyx_L1_error);
+  __pyx_r = __pyx_t_7;
+  __pyx_t_7 = 0;
+  goto __pyx_L0;
+
+  /* "sketch_kernels.pyx":44
+ * # their sketch from the trailing basic-window blocks of the max window's
+ * # already-computed basicDots, instead of recomputing from scratch.
+ * def build_multi_suffix_raw(double[:, :, ::1] basic_dots,             # <<<<<<<<<<<<<<
+ *                            double[:, ::1] feature_sums,
+ *                            long[:] offsets_desc):
+ */
+
+  /* function exit code */
+  __pyx_L1_error:;
+  __Pyx_XDECREF(__pyx_t_3);
+  __Pyx_XDECREF(__pyx_t_4);
+  __Pyx_XDECREF(__pyx_t_5);
+  __Pyx_XDECREF(__pyx_t_6);
+  __Pyx_XDECREF(__pyx_t_7);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_t_12, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_t_13, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_t_14, 1);
+  { PyObject *__pyx_type, *__pyx_value, *__pyx_tb;
+    __Pyx_PyThreadState_declare
+    __Pyx_PyThreadState_assign
+    __Pyx_ErrFetch(&__pyx_type, &__pyx_value, &__pyx_tb);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_raw.rcbuffer->pybuffer);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_running_features.rcbuffer->pybuffer);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_suffix_features.rcbuffer->pybuffer);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_suffix_raw.rcbuffer->pybuffer);
+  __Pyx_ErrRestore(__pyx_type, __pyx_value, __pyx_tb);}
+  __Pyx_AddTraceback("sketch_kernels.build_multi_suffix_raw", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __pyx_r = NULL;
+  goto __pyx_L2;
+  __pyx_L0:;
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_raw.rcbuffer->pybuffer);
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_running_features.rcbuffer->pybuffer);
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_suffix_features.rcbuffer->pybuffer);
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_suffix_raw.rcbuffer->pybuffer);
+  __pyx_L2:;
+  __Pyx_XDECREF((PyObject *)__pyx_v_raw);
+  __Pyx_XDECREF((PyObject *)__pyx_v_suffix_raw);
+  __Pyx_XDECREF((PyObject *)__pyx_v_suffix_features);
+  __Pyx_XDECREF((PyObject *)__pyx_v_running_features);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_raw_mv, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_suffix_raw_mv, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_suffix_features_mv, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_running_features_mv, 1);
+  __Pyx_XGIVEREF(__pyx_r);
+  __Pyx_RefNannyFinishContext();
+  return __pyx_r;
+}
+
+/* "sketch_kernels.pyx":103
  * 
  * 
  * def build_sketch_matrix(double[:, :, ::1] window_blocks,             # <<<<<<<<<<<<<<
@@ -20024,16 +21091,16 @@ static PyObject *__pyx_pf_14sketch_kernels_compute_series_dots(CYTHON_UNUSED PyO
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_14sketch_kernels_3build_sketch_matrix(PyObject *__pyx_self, 
+static PyObject *__pyx_pw_14sketch_kernels_5build_sketch_matrix(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-PyDoc_STRVAR(__pyx_doc_14sketch_kernels_2build_sketch_matrix, "Compute series_dots, raw, and normalized sketch matrix.");
-static PyMethodDef __pyx_mdef_14sketch_kernels_3build_sketch_matrix = {"build_sketch_matrix", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_14sketch_kernels_3build_sketch_matrix, __Pyx_METH_FASTCALL|METH_KEYWORDS, __pyx_doc_14sketch_kernels_2build_sketch_matrix};
-static PyObject *__pyx_pw_14sketch_kernels_3build_sketch_matrix(PyObject *__pyx_self, 
+PyDoc_STRVAR(__pyx_doc_14sketch_kernels_4build_sketch_matrix, "Compute series_dots, raw, and normalized sketch matrix.");
+static PyMethodDef __pyx_mdef_14sketch_kernels_5build_sketch_matrix = {"build_sketch_matrix", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_14sketch_kernels_5build_sketch_matrix, __Pyx_METH_FASTCALL|METH_KEYWORDS, __pyx_doc_14sketch_kernels_4build_sketch_matrix};
+static PyObject *__pyx_pw_14sketch_kernels_5build_sketch_matrix(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -20089,7 +21156,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[0]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 36, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
         else goto __pyx_L5_argtuple_error;
         CYTHON_FALLTHROUGH;
         case  1:
@@ -20097,9 +21164,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[1]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 36, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("build_sketch_matrix", 1, 5, 5, 1); __PYX_ERR(0, 36, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("build_sketch_matrix", 1, 5, 5, 1); __PYX_ERR(0, 103, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  2:
@@ -20107,9 +21174,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[2]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 36, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("build_sketch_matrix", 1, 5, 5, 2); __PYX_ERR(0, 36, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("build_sketch_matrix", 1, 5, 5, 2); __PYX_ERR(0, 103, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  3:
@@ -20117,9 +21184,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[3]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 36, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("build_sketch_matrix", 1, 5, 5, 3); __PYX_ERR(0, 36, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("build_sketch_matrix", 1, 5, 5, 3); __PYX_ERR(0, 103, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  4:
@@ -20127,14 +21194,14 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[4]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 36, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("build_sketch_matrix", 1, 5, 5, 4); __PYX_ERR(0, 36, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("build_sketch_matrix", 1, 5, 5, 4); __PYX_ERR(0, 103, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
         const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "build_sketch_matrix") < 0)) __PYX_ERR(0, 36, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "build_sketch_matrix") < 0)) __PYX_ERR(0, 103, __pyx_L3_error)
       }
     } else if (unlikely(__pyx_nargs != 5)) {
       goto __pyx_L5_argtuple_error;
@@ -20145,15 +21212,15 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       values[3] = __Pyx_Arg_FASTCALL(__pyx_args, 3);
       values[4] = __Pyx_Arg_FASTCALL(__pyx_args, 4);
     }
-    __pyx_v_window_blocks = __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_window_blocks.memview)) __PYX_ERR(0, 36, __pyx_L3_error)
-    __pyx_v_weights = __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_weights.memview)) __PYX_ERR(0, 37, __pyx_L3_error)
-    __pyx_v_mean_vec = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mean_vec.memview)) __PYX_ERR(0, 38, __pyx_L3_error)
-    __pyx_v_random_sums = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_random_sums.memview)) __PYX_ERR(0, 39, __pyx_L3_error)
-    __pyx_v_norm_mode = __Pyx_PyInt_As_int(values[4]); if (unlikely((__pyx_v_norm_mode == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 40, __pyx_L3_error)
+    __pyx_v_window_blocks = __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_window_blocks.memview)) __PYX_ERR(0, 103, __pyx_L3_error)
+    __pyx_v_weights = __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_weights.memview)) __PYX_ERR(0, 104, __pyx_L3_error)
+    __pyx_v_mean_vec = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mean_vec.memview)) __PYX_ERR(0, 105, __pyx_L3_error)
+    __pyx_v_random_sums = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_random_sums.memview)) __PYX_ERR(0, 106, __pyx_L3_error)
+    __pyx_v_norm_mode = __Pyx_PyInt_As_int(values[4]); if (unlikely((__pyx_v_norm_mode == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 107, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("build_sketch_matrix", 1, 5, 5, __pyx_nargs); __PYX_ERR(0, 36, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("build_sketch_matrix", 1, 5, 5, __pyx_nargs); __PYX_ERR(0, 103, __pyx_L3_error)
   __pyx_L6_skip:;
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
@@ -20171,7 +21238,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_14sketch_kernels_2build_sketch_matrix(__pyx_self, __pyx_v_window_blocks, __pyx_v_weights, __pyx_v_mean_vec, __pyx_v_random_sums, __pyx_v_norm_mode);
+  __pyx_r = __pyx_pf_14sketch_kernels_4build_sketch_matrix(__pyx_self, __pyx_v_window_blocks, __pyx_v_weights, __pyx_v_mean_vec, __pyx_v_random_sums, __pyx_v_norm_mode);
 
   /* function exit code */
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_window_blocks, 1);
@@ -20188,7 +21255,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_window_blocks, __Pyx_memviewslice __pyx_v_weights, __Pyx_memviewslice __pyx_v_mean_vec, __Pyx_memviewslice __pyx_v_random_sums, int __pyx_v_norm_mode) {
+static PyObject *__pyx_pf_14sketch_kernels_4build_sketch_matrix(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_window_blocks, __Pyx_memviewslice __pyx_v_weights, __Pyx_memviewslice __pyx_v_mean_vec, __Pyx_memviewslice __pyx_v_random_sums, int __pyx_v_norm_mode) {
   Py_ssize_t __pyx_v_n_series;
   Py_ssize_t __pyx_v_n_basic;
   Py_ssize_t __pyx_v_basic_window;
@@ -20268,7 +21335,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
   __pyx_pybuffernd_norm.data = NULL;
   __pyx_pybuffernd_norm.rcbuffer = &__pyx_pybuffer_norm;
 
-  /* "sketch_kernels.pyx":42
+  /* "sketch_kernels.pyx":109
  *                         int norm_mode):
  *     """Compute series_dots, raw, and normalized sketch matrix."""
  *     cdef Py_ssize_t n_series = window_blocks.shape[0]             # <<<<<<<<<<<<<<
@@ -20277,7 +21344,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
   __pyx_v_n_series = (__pyx_v_window_blocks.shape[0]);
 
-  /* "sketch_kernels.pyx":43
+  /* "sketch_kernels.pyx":110
  *     """Compute series_dots, raw, and normalized sketch matrix."""
  *     cdef Py_ssize_t n_series = window_blocks.shape[0]
  *     cdef Py_ssize_t n_basic = window_blocks.shape[1]             # <<<<<<<<<<<<<<
@@ -20286,7 +21353,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
   __pyx_v_n_basic = (__pyx_v_window_blocks.shape[1]);
 
-  /* "sketch_kernels.pyx":44
+  /* "sketch_kernels.pyx":111
  *     cdef Py_ssize_t n_series = window_blocks.shape[0]
  *     cdef Py_ssize_t n_basic = window_blocks.shape[1]
  *     cdef Py_ssize_t basic_window = window_blocks.shape[2]             # <<<<<<<<<<<<<<
@@ -20295,7 +21362,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
   __pyx_v_basic_window = (__pyx_v_window_blocks.shape[2]);
 
-  /* "sketch_kernels.pyx":45
+  /* "sketch_kernels.pyx":112
  *     cdef Py_ssize_t n_basic = window_blocks.shape[1]
  *     cdef Py_ssize_t basic_window = window_blocks.shape[2]
  *     cdef Py_ssize_t w_basic = weights.shape[0]             # <<<<<<<<<<<<<<
@@ -20304,7 +21371,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
   __pyx_v_w_basic = (__pyx_v_weights.shape[0]);
 
-  /* "sketch_kernels.pyx":46
+  /* "sketch_kernels.pyx":113
  *     cdef Py_ssize_t basic_window = window_blocks.shape[2]
  *     cdef Py_ssize_t w_basic = weights.shape[0]
  *     cdef Py_ssize_t n_vectors = weights.shape[1]             # <<<<<<<<<<<<<<
@@ -20313,7 +21380,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
   __pyx_v_n_vectors = (__pyx_v_weights.shape[1]);
 
-  /* "sketch_kernels.pyx":47
+  /* "sketch_kernels.pyx":114
  *     cdef Py_ssize_t w_basic = weights.shape[0]
  *     cdef Py_ssize_t n_vectors = weights.shape[1]
  *     cdef Py_ssize_t w_window = weights.shape[2]             # <<<<<<<<<<<<<<
@@ -20322,7 +21389,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
   __pyx_v_w_window = (__pyx_v_weights.shape[2]);
 
-  /* "sketch_kernels.pyx":49
+  /* "sketch_kernels.pyx":116
  *     cdef Py_ssize_t w_window = weights.shape[2]
  * 
  *     if w_basic != n_basic or w_window != basic_window:             # <<<<<<<<<<<<<<
@@ -20340,20 +21407,20 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
   __pyx_L4_bool_binop_done:;
   if (unlikely(__pyx_t_1)) {
 
-    /* "sketch_kernels.pyx":50
+    /* "sketch_kernels.pyx":117
  * 
  *     if w_basic != n_basic or w_window != basic_window:
  *         raise ValueError("weights shape mismatch")             # <<<<<<<<<<<<<<
  * 
  *     cdef np.ndarray[np.float64_t, ndim=3] dots = np.empty(
  */
-    __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__11, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 50, __pyx_L1_error)
+    __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__11, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 117, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
     __Pyx_Raise(__pyx_t_3, 0, 0, 0);
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-    __PYX_ERR(0, 50, __pyx_L1_error)
+    __PYX_ERR(0, 117, __pyx_L1_error)
 
-    /* "sketch_kernels.pyx":49
+    /* "sketch_kernels.pyx":116
  *     cdef Py_ssize_t w_window = weights.shape[2]
  * 
  *     if w_basic != n_basic or w_window != basic_window:             # <<<<<<<<<<<<<<
@@ -20362,93 +21429,93 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
   }
 
-  /* "sketch_kernels.pyx":52
+  /* "sketch_kernels.pyx":119
  *         raise ValueError("weights shape mismatch")
  * 
  *     cdef np.ndarray[np.float64_t, ndim=3] dots = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_basic, n_vectors),
  *         dtype=np.float64,
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 52, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 119, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 52, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 119, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
 
-  /* "sketch_kernels.pyx":53
+  /* "sketch_kernels.pyx":120
  * 
  *     cdef np.ndarray[np.float64_t, ndim=3] dots = np.empty(
  *         (n_series, n_basic, n_vectors),             # <<<<<<<<<<<<<<
  *         dtype=np.float64,
  *     )
  */
-  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 53, __pyx_L1_error)
+  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 120, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_n_basic); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 53, __pyx_L1_error)
+  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_n_basic); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 120, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 53, __pyx_L1_error)
+  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 120, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_7 = PyTuple_New(3); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 53, __pyx_L1_error)
+  __pyx_t_7 = PyTuple_New(3); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 120, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_GIVEREF(__pyx_t_3);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_3)) __PYX_ERR(0, 53, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_3)) __PYX_ERR(0, 120, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 1, __pyx_t_5)) __PYX_ERR(0, 53, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 1, __pyx_t_5)) __PYX_ERR(0, 120, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_6);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 2, __pyx_t_6)) __PYX_ERR(0, 53, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 2, __pyx_t_6)) __PYX_ERR(0, 120, __pyx_L1_error);
   __pyx_t_3 = 0;
   __pyx_t_5 = 0;
   __pyx_t_6 = 0;
 
-  /* "sketch_kernels.pyx":52
+  /* "sketch_kernels.pyx":119
  *         raise ValueError("weights shape mismatch")
  * 
  *     cdef np.ndarray[np.float64_t, ndim=3] dots = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_basic, n_vectors),
  *         dtype=np.float64,
  */
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 52, __pyx_L1_error)
+  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 119, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_GIVEREF(__pyx_t_7);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_7)) __PYX_ERR(0, 52, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_7)) __PYX_ERR(0, 119, __pyx_L1_error);
   __pyx_t_7 = 0;
 
-  /* "sketch_kernels.pyx":54
+  /* "sketch_kernels.pyx":121
  *     cdef np.ndarray[np.float64_t, ndim=3] dots = np.empty(
  *         (n_series, n_basic, n_vectors),
  *         dtype=np.float64,             # <<<<<<<<<<<<<<
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(
  */
-  __pyx_t_7 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 54, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 121, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 54, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 121, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_float64); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 54, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_float64); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 121, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_t_7, __pyx_n_s_dtype, __pyx_t_3) < 0) __PYX_ERR(0, 54, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_7, __pyx_n_s_dtype, __pyx_t_3) < 0) __PYX_ERR(0, 121, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
 
-  /* "sketch_kernels.pyx":52
+  /* "sketch_kernels.pyx":119
  *         raise ValueError("weights shape mismatch")
  * 
  *     cdef np.ndarray[np.float64_t, ndim=3] dots = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_basic, n_vectors),
  *         dtype=np.float64,
  */
-  __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_6, __pyx_t_7); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 52, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_6, __pyx_t_7); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 119, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  if (!(likely(((__pyx_t_3) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_3, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 52, __pyx_L1_error)
+  if (!(likely(((__pyx_t_3) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_3, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 119, __pyx_L1_error)
   __pyx_t_8 = ((PyArrayObject *)__pyx_t_3);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
     if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_dots.rcbuffer->pybuffer, (PyObject*)__pyx_t_8, &__Pyx_TypeInfo_nn___pyx_t_5numpy_float64_t, PyBUF_FORMAT| PyBUF_STRIDES, 3, 0, __pyx_stack) == -1)) {
       __pyx_v_dots = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_dots.rcbuffer->pybuffer.buf = NULL;
-      __PYX_ERR(0, 52, __pyx_L1_error)
+      __PYX_ERR(0, 119, __pyx_L1_error)
     } else {__pyx_pybuffernd_dots.diminfo[0].strides = __pyx_pybuffernd_dots.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_dots.diminfo[0].shape = __pyx_pybuffernd_dots.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_dots.diminfo[1].strides = __pyx_pybuffernd_dots.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_dots.diminfo[1].shape = __pyx_pybuffernd_dots.rcbuffer->pybuffer.shape[1]; __pyx_pybuffernd_dots.diminfo[2].strides = __pyx_pybuffernd_dots.rcbuffer->pybuffer.strides[2]; __pyx_pybuffernd_dots.diminfo[2].shape = __pyx_pybuffernd_dots.rcbuffer->pybuffer.shape[2];
     }
   }
@@ -20456,88 +21523,88 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
   __pyx_v_dots = ((PyArrayObject *)__pyx_t_3);
   __pyx_t_3 = 0;
 
-  /* "sketch_kernels.pyx":56
+  /* "sketch_kernels.pyx":123
  *         dtype=np.float64,
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 56, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 123, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_empty); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 56, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_empty); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 123, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
 
-  /* "sketch_kernels.pyx":57
+  /* "sketch_kernels.pyx":124
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(
  *         (n_series, n_vectors),             # <<<<<<<<<<<<<<
  *         dtype=np.float64,
  *     )
  */
-  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 57, __pyx_L1_error)
+  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 124, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 57, __pyx_L1_error)
+  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 124, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 57, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 124, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_3);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_3)) __PYX_ERR(0, 57, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_3)) __PYX_ERR(0, 124, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_6);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_t_6)) __PYX_ERR(0, 57, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_t_6)) __PYX_ERR(0, 124, __pyx_L1_error);
   __pyx_t_3 = 0;
   __pyx_t_6 = 0;
 
-  /* "sketch_kernels.pyx":56
+  /* "sketch_kernels.pyx":123
  *         dtype=np.float64,
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 56, __pyx_L1_error)
+  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 123, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_GIVEREF(__pyx_t_4);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_4)) __PYX_ERR(0, 56, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_4)) __PYX_ERR(0, 123, __pyx_L1_error);
   __pyx_t_4 = 0;
 
-  /* "sketch_kernels.pyx":58
+  /* "sketch_kernels.pyx":125
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(
  *         (n_series, n_vectors),
  *         dtype=np.float64,             # <<<<<<<<<<<<<<
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(
  */
-  __pyx_t_4 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 58, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 125, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 58, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 125, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_float64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 58, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_float64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 125, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  if (PyDict_SetItem(__pyx_t_4, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 58, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_4, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 125, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
 
-  /* "sketch_kernels.pyx":56
+  /* "sketch_kernels.pyx":123
  *         dtype=np.float64,
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_7, __pyx_t_6, __pyx_t_4); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 56, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_7, __pyx_t_6, __pyx_t_4); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 123, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  if (!(likely(((__pyx_t_5) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_5, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 56, __pyx_L1_error)
+  if (!(likely(((__pyx_t_5) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_5, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 123, __pyx_L1_error)
   __pyx_t_9 = ((PyArrayObject *)__pyx_t_5);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
     if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_raw.rcbuffer->pybuffer, (PyObject*)__pyx_t_9, &__Pyx_TypeInfo_nn___pyx_t_5numpy_float64_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
       __pyx_v_raw = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_raw.rcbuffer->pybuffer.buf = NULL;
-      __PYX_ERR(0, 56, __pyx_L1_error)
+      __PYX_ERR(0, 123, __pyx_L1_error)
     } else {__pyx_pybuffernd_raw.diminfo[0].strides = __pyx_pybuffernd_raw.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_raw.diminfo[0].shape = __pyx_pybuffernd_raw.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_raw.diminfo[1].strides = __pyx_pybuffernd_raw.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_raw.diminfo[1].shape = __pyx_pybuffernd_raw.rcbuffer->pybuffer.shape[1];
     }
   }
@@ -20545,88 +21612,88 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
   __pyx_v_raw = ((PyArrayObject *)__pyx_t_5);
   __pyx_t_5 = 0;
 
-  /* "sketch_kernels.pyx":60
+  /* "sketch_kernels.pyx":127
  *         dtype=np.float64,
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 60, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 127, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 60, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 127, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
 
-  /* "sketch_kernels.pyx":61
+  /* "sketch_kernels.pyx":128
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(
  *         (n_series, n_vectors),             # <<<<<<<<<<<<<<
  *         dtype=np.float64,
  *     )
  */
-  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 61, __pyx_L1_error)
+  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 128, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 61, __pyx_L1_error)
+  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 128, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_7 = PyTuple_New(2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 61, __pyx_L1_error)
+  __pyx_t_7 = PyTuple_New(2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 128, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_5)) __PYX_ERR(0, 61, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_5)) __PYX_ERR(0, 128, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_6);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 1, __pyx_t_6)) __PYX_ERR(0, 61, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 1, __pyx_t_6)) __PYX_ERR(0, 128, __pyx_L1_error);
   __pyx_t_5 = 0;
   __pyx_t_6 = 0;
 
-  /* "sketch_kernels.pyx":60
+  /* "sketch_kernels.pyx":127
  *         dtype=np.float64,
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 60, __pyx_L1_error)
+  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 127, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_GIVEREF(__pyx_t_7);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_7)) __PYX_ERR(0, 60, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_7)) __PYX_ERR(0, 127, __pyx_L1_error);
   __pyx_t_7 = 0;
 
-  /* "sketch_kernels.pyx":62
+  /* "sketch_kernels.pyx":129
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(
  *         (n_series, n_vectors),
  *         dtype=np.float64,             # <<<<<<<<<<<<<<
  *     )
  *     if norm_mode == 1:
  */
-  __pyx_t_7 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 62, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 129, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 62, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 129, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_float64); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 62, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_float64); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 129, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_t_7, __pyx_n_s_dtype, __pyx_t_3) < 0) __PYX_ERR(0, 62, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_7, __pyx_n_s_dtype, __pyx_t_3) < 0) __PYX_ERR(0, 129, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
 
-  /* "sketch_kernels.pyx":60
+  /* "sketch_kernels.pyx":127
  *         dtype=np.float64,
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_6, __pyx_t_7); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 60, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_6, __pyx_t_7); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 127, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  if (!(likely(((__pyx_t_3) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_3, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 60, __pyx_L1_error)
+  if (!(likely(((__pyx_t_3) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_3, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 127, __pyx_L1_error)
   __pyx_t_10 = ((PyArrayObject *)__pyx_t_3);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
     if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_norm.rcbuffer->pybuffer, (PyObject*)__pyx_t_10, &__Pyx_TypeInfo_nn___pyx_t_5numpy_float64_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
       __pyx_v_norm = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_norm.rcbuffer->pybuffer.buf = NULL;
-      __PYX_ERR(0, 60, __pyx_L1_error)
+      __PYX_ERR(0, 127, __pyx_L1_error)
     } else {__pyx_pybuffernd_norm.diminfo[0].strides = __pyx_pybuffernd_norm.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_norm.diminfo[0].shape = __pyx_pybuffernd_norm.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_norm.diminfo[1].strides = __pyx_pybuffernd_norm.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_norm.diminfo[1].shape = __pyx_pybuffernd_norm.rcbuffer->pybuffer.shape[1];
     }
   }
@@ -20634,7 +21701,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
   __pyx_v_norm = ((PyArrayObject *)__pyx_t_3);
   __pyx_t_3 = 0;
 
-  /* "sketch_kernels.pyx":64
+  /* "sketch_kernels.pyx":131
  *         dtype=np.float64,
  *     )
  *     if norm_mode == 1:             # <<<<<<<<<<<<<<
@@ -20644,7 +21711,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
   __pyx_t_1 = (__pyx_v_norm_mode == 1);
   if (__pyx_t_1) {
 
-    /* "sketch_kernels.pyx":65
+    /* "sketch_kernels.pyx":132
  *     )
  *     if norm_mode == 1:
  *         if mean_vec.shape[0] != n_series or random_sums.shape[0] != n_vectors:             # <<<<<<<<<<<<<<
@@ -20662,20 +21729,20 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
     __pyx_L8_bool_binop_done:;
     if (unlikely(__pyx_t_1)) {
 
-      /* "sketch_kernels.pyx":66
+      /* "sketch_kernels.pyx":133
  *     if norm_mode == 1:
  *         if mean_vec.shape[0] != n_series or random_sums.shape[0] != n_vectors:
  *             raise ValueError("mean_vec/random_sums shape mismatch")             # <<<<<<<<<<<<<<
  * 
  *     cdef double[:, :, ::1] dots_mv = dots
  */
-      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__12, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 66, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__12, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 133, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
       __Pyx_Raise(__pyx_t_3, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-      __PYX_ERR(0, 66, __pyx_L1_error)
+      __PYX_ERR(0, 133, __pyx_L1_error)
 
-      /* "sketch_kernels.pyx":65
+      /* "sketch_kernels.pyx":132
  *     )
  *     if norm_mode == 1:
  *         if mean_vec.shape[0] != n_series or random_sums.shape[0] != n_vectors:             # <<<<<<<<<<<<<<
@@ -20684,7 +21751,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
     }
 
-    /* "sketch_kernels.pyx":64
+    /* "sketch_kernels.pyx":131
  *         dtype=np.float64,
  *     )
  *     if norm_mode == 1:             # <<<<<<<<<<<<<<
@@ -20693,43 +21760,43 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
   }
 
-  /* "sketch_kernels.pyx":68
+  /* "sketch_kernels.pyx":135
  *             raise ValueError("mean_vec/random_sums shape mismatch")
  * 
  *     cdef double[:, :, ::1] dots_mv = dots             # <<<<<<<<<<<<<<
  *     cdef double[:, ::1] raw_mv = raw
  *     cdef double[:, ::1] norm_mv = norm
  */
-  __pyx_t_11 = __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(((PyObject *)__pyx_v_dots), PyBUF_WRITABLE); if (unlikely(!__pyx_t_11.memview)) __PYX_ERR(0, 68, __pyx_L1_error)
+  __pyx_t_11 = __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(((PyObject *)__pyx_v_dots), PyBUF_WRITABLE); if (unlikely(!__pyx_t_11.memview)) __PYX_ERR(0, 135, __pyx_L1_error)
   __pyx_v_dots_mv = __pyx_t_11;
   __pyx_t_11.memview = NULL;
   __pyx_t_11.data = NULL;
 
-  /* "sketch_kernels.pyx":69
+  /* "sketch_kernels.pyx":136
  * 
  *     cdef double[:, :, ::1] dots_mv = dots
  *     cdef double[:, ::1] raw_mv = raw             # <<<<<<<<<<<<<<
  *     cdef double[:, ::1] norm_mv = norm
  * 
  */
-  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(((PyObject *)__pyx_v_raw), PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 69, __pyx_L1_error)
+  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(((PyObject *)__pyx_v_raw), PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 136, __pyx_L1_error)
   __pyx_v_raw_mv = __pyx_t_12;
   __pyx_t_12.memview = NULL;
   __pyx_t_12.data = NULL;
 
-  /* "sketch_kernels.pyx":70
+  /* "sketch_kernels.pyx":137
  *     cdef double[:, :, ::1] dots_mv = dots
  *     cdef double[:, ::1] raw_mv = raw
  *     cdef double[:, ::1] norm_mv = norm             # <<<<<<<<<<<<<<
  * 
  *     cdef Py_ssize_t s, b, v, w
  */
-  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(((PyObject *)__pyx_v_norm), PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 70, __pyx_L1_error)
+  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(((PyObject *)__pyx_v_norm), PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 137, __pyx_L1_error)
   __pyx_v_norm_mv = __pyx_t_12;
   __pyx_t_12.memview = NULL;
   __pyx_t_12.data = NULL;
 
-  /* "sketch_kernels.pyx":75
+  /* "sketch_kernels.pyx":142
  *     cdef double acc, mean, var_acc, denom, centered, mu_value, adj
  * 
  *     with nogil:             # <<<<<<<<<<<<<<
@@ -20745,7 +21812,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
       #endif
       /*try:*/ {
 
-        /* "sketch_kernels.pyx":76
+        /* "sketch_kernels.pyx":143
  * 
  *     with nogil:
  *         for s in range(n_series):             # <<<<<<<<<<<<<<
@@ -20757,7 +21824,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
         for (__pyx_t_15 = 0; __pyx_t_15 < __pyx_t_14; __pyx_t_15+=1) {
           __pyx_v_s = __pyx_t_15;
 
-          /* "sketch_kernels.pyx":77
+          /* "sketch_kernels.pyx":144
  *     with nogil:
  *         for s in range(n_series):
  *             for b in range(n_basic):             # <<<<<<<<<<<<<<
@@ -20769,7 +21836,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
           for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
             __pyx_v_b = __pyx_t_18;
 
-            /* "sketch_kernels.pyx":78
+            /* "sketch_kernels.pyx":145
  *         for s in range(n_series):
  *             for b in range(n_basic):
  *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -20781,7 +21848,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
             for (__pyx_t_21 = 0; __pyx_t_21 < __pyx_t_20; __pyx_t_21+=1) {
               __pyx_v_v = __pyx_t_21;
 
-              /* "sketch_kernels.pyx":79
+              /* "sketch_kernels.pyx":146
  *             for b in range(n_basic):
  *                 for v in range(n_vectors):
  *                     acc = 0.0             # <<<<<<<<<<<<<<
@@ -20790,7 +21857,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
               __pyx_v_acc = 0.0;
 
-              /* "sketch_kernels.pyx":80
+              /* "sketch_kernels.pyx":147
  *                 for v in range(n_vectors):
  *                     acc = 0.0
  *                     for w in range(basic_window):             # <<<<<<<<<<<<<<
@@ -20802,7 +21869,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
               for (__pyx_t_24 = 0; __pyx_t_24 < __pyx_t_23; __pyx_t_24+=1) {
                 __pyx_v_w = __pyx_t_24;
 
-                /* "sketch_kernels.pyx":81
+                /* "sketch_kernels.pyx":148
  *                     acc = 0.0
  *                     for w in range(basic_window):
  *                         acc += window_blocks[s, b, w] * weights[b, v, w]             # <<<<<<<<<<<<<<
@@ -20818,7 +21885,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
                 __pyx_v_acc = (__pyx_v_acc + ((*((double *) ( /* dim=2 */ ((char *) (((double *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_window_blocks.data + __pyx_t_25 * __pyx_v_window_blocks.strides[0]) ) + __pyx_t_26 * __pyx_v_window_blocks.strides[1]) )) + __pyx_t_27)) ))) * (*((double *) ( /* dim=2 */ ((char *) (((double *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_weights.data + __pyx_t_28 * __pyx_v_weights.strides[0]) ) + __pyx_t_29 * __pyx_v_weights.strides[1]) )) + __pyx_t_30)) )))));
               }
 
-              /* "sketch_kernels.pyx":82
+              /* "sketch_kernels.pyx":149
  *                     for w in range(basic_window):
  *                         acc += window_blocks[s, b, w] * weights[b, v, w]
  *                     dots_mv[s, b, v] = acc             # <<<<<<<<<<<<<<
@@ -20832,7 +21899,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
             }
           }
 
-          /* "sketch_kernels.pyx":83
+          /* "sketch_kernels.pyx":150
  *                         acc += window_blocks[s, b, w] * weights[b, v, w]
  *                     dots_mv[s, b, v] = acc
  *             for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -20844,7 +21911,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
           for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
             __pyx_v_v = __pyx_t_18;
 
-            /* "sketch_kernels.pyx":84
+            /* "sketch_kernels.pyx":151
  *                     dots_mv[s, b, v] = acc
  *             for v in range(n_vectors):
  *                 acc = 0.0             # <<<<<<<<<<<<<<
@@ -20853,7 +21920,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
             __pyx_v_acc = 0.0;
 
-            /* "sketch_kernels.pyx":85
+            /* "sketch_kernels.pyx":152
  *             for v in range(n_vectors):
  *                 acc = 0.0
  *                 for b in range(n_basic):             # <<<<<<<<<<<<<<
@@ -20865,7 +21932,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
             for (__pyx_t_21 = 0; __pyx_t_21 < __pyx_t_20; __pyx_t_21+=1) {
               __pyx_v_b = __pyx_t_21;
 
-              /* "sketch_kernels.pyx":86
+              /* "sketch_kernels.pyx":153
  *                 acc = 0.0
  *                 for b in range(n_basic):
  *                     acc += dots_mv[s, b, v]             # <<<<<<<<<<<<<<
@@ -20878,7 +21945,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
               __pyx_v_acc = (__pyx_v_acc + (*((double *) ( /* dim=2 */ ((char *) (((double *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_dots_mv.data + __pyx_t_28 * __pyx_v_dots_mv.strides[0]) ) + __pyx_t_29 * __pyx_v_dots_mv.strides[1]) )) + __pyx_t_30)) ))));
             }
 
-            /* "sketch_kernels.pyx":87
+            /* "sketch_kernels.pyx":154
  *                 for b in range(n_basic):
  *                     acc += dots_mv[s, b, v]
  *                 raw_mv[s, v] = acc             # <<<<<<<<<<<<<<
@@ -20890,17 +21957,17 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
             *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_30 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_29)) )) = __pyx_v_acc;
           }
 
-          /* "sketch_kernels.pyx":89
+          /* "sketch_kernels.pyx":156
  *                 raw_mv[s, v] = acc
  * 
  *             if norm_mode == 1:             # <<<<<<<<<<<<<<
  *                 mu_value = mean_vec[s]
  *                 denom = 0.0
  */
-          __pyx_t_1 = (__pyx_v_norm_mode == 1);
-          if (__pyx_t_1) {
+          switch (__pyx_v_norm_mode) {
+            case 1:
 
-            /* "sketch_kernels.pyx":90
+            /* "sketch_kernels.pyx":157
  * 
  *             if norm_mode == 1:
  *                 mu_value = mean_vec[s]             # <<<<<<<<<<<<<<
@@ -20910,7 +21977,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
             __pyx_t_29 = __pyx_v_s;
             __pyx_v_mu_value = (*((double *) ( /* dim=0 */ (__pyx_v_mean_vec.data + __pyx_t_29 * __pyx_v_mean_vec.strides[0]) )));
 
-            /* "sketch_kernels.pyx":91
+            /* "sketch_kernels.pyx":158
  *             if norm_mode == 1:
  *                 mu_value = mean_vec[s]
  *                 denom = 0.0             # <<<<<<<<<<<<<<
@@ -20919,7 +21986,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
             __pyx_v_denom = 0.0;
 
-            /* "sketch_kernels.pyx":92
+            /* "sketch_kernels.pyx":159
  *                 mu_value = mean_vec[s]
  *                 denom = 0.0
  *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -20931,7 +21998,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
             for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
               __pyx_v_v = __pyx_t_18;
 
-              /* "sketch_kernels.pyx":93
+              /* "sketch_kernels.pyx":160
  *                 denom = 0.0
  *                 for v in range(n_vectors):
  *                     adj = raw_mv[s, v] - mu_value * random_sums[v]             # <<<<<<<<<<<<<<
@@ -20943,7 +22010,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
               __pyx_t_28 = __pyx_v_v;
               __pyx_v_adj = ((*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_29 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_30)) ))) - (__pyx_v_mu_value * (*((double *) ( /* dim=0 */ (__pyx_v_random_sums.data + __pyx_t_28 * __pyx_v_random_sums.strides[0]) )))));
 
-              /* "sketch_kernels.pyx":94
+              /* "sketch_kernels.pyx":161
  *                 for v in range(n_vectors):
  *                     adj = raw_mv[s, v] - mu_value * random_sums[v]
  *                     denom += adj * adj             # <<<<<<<<<<<<<<
@@ -20953,7 +22020,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
               __pyx_v_denom = (__pyx_v_denom + (__pyx_v_adj * __pyx_v_adj));
             }
 
-            /* "sketch_kernels.pyx":95
+            /* "sketch_kernels.pyx":162
  *                     adj = raw_mv[s, v] - mu_value * random_sums[v]
  *                     denom += adj * adj
  *                 denom = sqrt(denom)             # <<<<<<<<<<<<<<
@@ -20962,7 +22029,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
             __pyx_v_denom = sqrt(__pyx_v_denom);
 
-            /* "sketch_kernels.pyx":96
+            /* "sketch_kernels.pyx":163
  *                     denom += adj * adj
  *                 denom = sqrt(denom)
  *                 if denom <= 0.0 or denom != denom:             # <<<<<<<<<<<<<<
@@ -20973,14 +22040,14 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
             if (!__pyx_t_2) {
             } else {
               __pyx_t_1 = __pyx_t_2;
-              goto __pyx_L29_bool_binop_done;
+              goto __pyx_L28_bool_binop_done;
             }
             __pyx_t_2 = (__pyx_v_denom != __pyx_v_denom);
             __pyx_t_1 = __pyx_t_2;
-            __pyx_L29_bool_binop_done:;
+            __pyx_L28_bool_binop_done:;
             if (__pyx_t_1) {
 
-              /* "sketch_kernels.pyx":97
+              /* "sketch_kernels.pyx":164
  *                 denom = sqrt(denom)
  *                 if denom <= 0.0 or denom != denom:
  *                     for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -20992,7 +22059,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
               for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
                 __pyx_v_v = __pyx_t_18;
 
-                /* "sketch_kernels.pyx":98
+                /* "sketch_kernels.pyx":165
  *                 if denom <= 0.0 or denom != denom:
  *                     for v in range(n_vectors):
  *                         norm_mv[s, v] = 0.0             # <<<<<<<<<<<<<<
@@ -21004,17 +22071,17 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
                 *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_norm_mv.data + __pyx_t_28 * __pyx_v_norm_mv.strides[0]) )) + __pyx_t_30)) )) = 0.0;
               }
 
-              /* "sketch_kernels.pyx":96
+              /* "sketch_kernels.pyx":163
  *                     denom += adj * adj
  *                 denom = sqrt(denom)
  *                 if denom <= 0.0 or denom != denom:             # <<<<<<<<<<<<<<
  *                     for v in range(n_vectors):
  *                         norm_mv[s, v] = 0.0
  */
-              goto __pyx_L28;
+              goto __pyx_L27;
             }
 
-            /* "sketch_kernels.pyx":100
+            /* "sketch_kernels.pyx":167
  *                         norm_mv[s, v] = 0.0
  *                 else:
  *                     for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -21027,54 +22094,53 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
               for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
                 __pyx_v_v = __pyx_t_18;
 
-                /* "sketch_kernels.pyx":101
+                /* "sketch_kernels.pyx":168
  *                 else:
  *                     for v in range(n_vectors):
  *                         adj = raw_mv[s, v] - mu_value * random_sums[v]             # <<<<<<<<<<<<<<
  *                         norm_mv[s, v] = adj / denom
- *             else:
+ *             elif norm_mode == 2:
  */
                 __pyx_t_30 = __pyx_v_s;
                 __pyx_t_28 = __pyx_v_v;
                 __pyx_t_29 = __pyx_v_v;
                 __pyx_v_adj = ((*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_30 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_28)) ))) - (__pyx_v_mu_value * (*((double *) ( /* dim=0 */ (__pyx_v_random_sums.data + __pyx_t_29 * __pyx_v_random_sums.strides[0]) )))));
 
-                /* "sketch_kernels.pyx":102
+                /* "sketch_kernels.pyx":169
  *                     for v in range(n_vectors):
  *                         adj = raw_mv[s, v] - mu_value * random_sums[v]
  *                         norm_mv[s, v] = adj / denom             # <<<<<<<<<<<<<<
- *             else:
- *                 mean = 0.0
+ *             elif norm_mode == 2:
+ *                 # (2026-07-22) "mean" sketch_norm: mean-center only, no
  */
                 __pyx_t_29 = __pyx_v_s;
                 __pyx_t_28 = __pyx_v_v;
                 *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_norm_mv.data + __pyx_t_29 * __pyx_v_norm_mv.strides[0]) )) + __pyx_t_28)) )) = (__pyx_v_adj / __pyx_v_denom);
               }
             }
-            __pyx_L28:;
+            __pyx_L27:;
 
-            /* "sketch_kernels.pyx":89
+            /* "sketch_kernels.pyx":156
  *                 raw_mv[s, v] = acc
  * 
  *             if norm_mode == 1:             # <<<<<<<<<<<<<<
  *                 mu_value = mean_vec[s]
  *                 denom = 0.0
  */
-            goto __pyx_L25;
-          }
+            break;
+            case 2:
 
-          /* "sketch_kernels.pyx":104
- *                         norm_mv[s, v] = adj / denom
- *             else:
+            /* "sketch_kernels.pyx":177
+ *                 # "lsh_mag_dot" entries), for backends designed to use L2
+ *                 # distance rather than cosine similarity.
  *                 mean = 0.0             # <<<<<<<<<<<<<<
  *                 for v in range(n_vectors):
  *                     mean += raw_mv[s, v]
  */
-          /*else*/ {
             __pyx_v_mean = 0.0;
 
-            /* "sketch_kernels.pyx":105
- *             else:
+            /* "sketch_kernels.pyx":178
+ *                 # distance rather than cosine similarity.
  *                 mean = 0.0
  *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
  *                     mean += raw_mv[s, v]
@@ -21085,7 +22151,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
             for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
               __pyx_v_v = __pyx_t_18;
 
-              /* "sketch_kernels.pyx":106
+              /* "sketch_kernels.pyx":179
  *                 mean = 0.0
  *                 for v in range(n_vectors):
  *                     mean += raw_mv[s, v]             # <<<<<<<<<<<<<<
@@ -21097,7 +22163,104 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
               __pyx_v_mean = (__pyx_v_mean + (*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_28 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_29)) ))));
             }
 
-            /* "sketch_kernels.pyx":107
+            /* "sketch_kernels.pyx":180
+ *                 for v in range(n_vectors):
+ *                     mean += raw_mv[s, v]
+ *                 if n_vectors > 0:             # <<<<<<<<<<<<<<
+ *                     mean /= n_vectors
+ *                 for v in range(n_vectors):
+ */
+            __pyx_t_1 = (__pyx_v_n_vectors > 0);
+            if (__pyx_t_1) {
+
+              /* "sketch_kernels.pyx":181
+ *                     mean += raw_mv[s, v]
+ *                 if n_vectors > 0:
+ *                     mean /= n_vectors             # <<<<<<<<<<<<<<
+ *                 for v in range(n_vectors):
+ *                     norm_mv[s, v] = raw_mv[s, v] - mean
+ */
+              __pyx_v_mean = (__pyx_v_mean / __pyx_v_n_vectors);
+
+              /* "sketch_kernels.pyx":180
+ *                 for v in range(n_vectors):
+ *                     mean += raw_mv[s, v]
+ *                 if n_vectors > 0:             # <<<<<<<<<<<<<<
+ *                     mean /= n_vectors
+ *                 for v in range(n_vectors):
+ */
+            }
+
+            /* "sketch_kernels.pyx":182
+ *                 if n_vectors > 0:
+ *                     mean /= n_vectors
+ *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
+ *                     norm_mv[s, v] = raw_mv[s, v] - mean
+ *             else:
+ */
+            __pyx_t_16 = __pyx_v_n_vectors;
+            __pyx_t_17 = __pyx_t_16;
+            for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
+              __pyx_v_v = __pyx_t_18;
+
+              /* "sketch_kernels.pyx":183
+ *                     mean /= n_vectors
+ *                 for v in range(n_vectors):
+ *                     norm_mv[s, v] = raw_mv[s, v] - mean             # <<<<<<<<<<<<<<
+ *             else:
+ *                 mean = 0.0
+ */
+              __pyx_t_29 = __pyx_v_s;
+              __pyx_t_28 = __pyx_v_v;
+              __pyx_t_30 = __pyx_v_s;
+              __pyx_t_27 = __pyx_v_v;
+              *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_norm_mv.data + __pyx_t_30 * __pyx_v_norm_mv.strides[0]) )) + __pyx_t_27)) )) = ((*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_29 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_28)) ))) - __pyx_v_mean);
+            }
+
+            /* "sketch_kernels.pyx":170
+ *                         adj = raw_mv[s, v] - mu_value * random_sums[v]
+ *                         norm_mv[s, v] = adj / denom
+ *             elif norm_mode == 2:             # <<<<<<<<<<<<<<
+ *                 # (2026-07-22) "mean" sketch_norm: mean-center only, no
+ *                 # rescale -- deliberately preserves the raw sketch's own
+ */
+            break;
+            default:
+
+            /* "sketch_kernels.pyx":185
+ *                     norm_mv[s, v] = raw_mv[s, v] - mean
+ *             else:
+ *                 mean = 0.0             # <<<<<<<<<<<<<<
+ *                 for v in range(n_vectors):
+ *                     mean += raw_mv[s, v]
+ */
+            __pyx_v_mean = 0.0;
+
+            /* "sketch_kernels.pyx":186
+ *             else:
+ *                 mean = 0.0
+ *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
+ *                     mean += raw_mv[s, v]
+ *                 if n_vectors > 0:
+ */
+            __pyx_t_16 = __pyx_v_n_vectors;
+            __pyx_t_17 = __pyx_t_16;
+            for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
+              __pyx_v_v = __pyx_t_18;
+
+              /* "sketch_kernels.pyx":187
+ *                 mean = 0.0
+ *                 for v in range(n_vectors):
+ *                     mean += raw_mv[s, v]             # <<<<<<<<<<<<<<
+ *                 if n_vectors > 0:
+ *                     mean /= n_vectors
+ */
+              __pyx_t_28 = __pyx_v_s;
+              __pyx_t_29 = __pyx_v_v;
+              __pyx_v_mean = (__pyx_v_mean + (*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_28 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_29)) ))));
+            }
+
+            /* "sketch_kernels.pyx":188
  *                 for v in range(n_vectors):
  *                     mean += raw_mv[s, v]
  *                 if n_vectors > 0:             # <<<<<<<<<<<<<<
@@ -21107,7 +22270,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
             __pyx_t_1 = (__pyx_v_n_vectors > 0);
             if (__pyx_t_1) {
 
-              /* "sketch_kernels.pyx":108
+              /* "sketch_kernels.pyx":189
  *                     mean += raw_mv[s, v]
  *                 if n_vectors > 0:
  *                     mean /= n_vectors             # <<<<<<<<<<<<<<
@@ -21116,7 +22279,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
               __pyx_v_mean = (__pyx_v_mean / __pyx_v_n_vectors);
 
-              /* "sketch_kernels.pyx":107
+              /* "sketch_kernels.pyx":188
  *                 for v in range(n_vectors):
  *                     mean += raw_mv[s, v]
  *                 if n_vectors > 0:             # <<<<<<<<<<<<<<
@@ -21125,7 +22288,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
             }
 
-            /* "sketch_kernels.pyx":110
+            /* "sketch_kernels.pyx":191
  *                     mean /= n_vectors
  * 
  *                 var_acc = 0.0             # <<<<<<<<<<<<<<
@@ -21134,7 +22297,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
             __pyx_v_var_acc = 0.0;
 
-            /* "sketch_kernels.pyx":111
+            /* "sketch_kernels.pyx":192
  * 
  *                 var_acc = 0.0
  *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -21146,7 +22309,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
             for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
               __pyx_v_v = __pyx_t_18;
 
-              /* "sketch_kernels.pyx":112
+              /* "sketch_kernels.pyx":193
  *                 var_acc = 0.0
  *                 for v in range(n_vectors):
  *                     centered = raw_mv[s, v] - mean             # <<<<<<<<<<<<<<
@@ -21157,7 +22320,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
               __pyx_t_28 = __pyx_v_v;
               __pyx_v_centered = ((*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_29 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_28)) ))) - __pyx_v_mean);
 
-              /* "sketch_kernels.pyx":113
+              /* "sketch_kernels.pyx":194
  *                 for v in range(n_vectors):
  *                     centered = raw_mv[s, v] - mean
  *                     var_acc += centered * centered             # <<<<<<<<<<<<<<
@@ -21167,7 +22330,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
               __pyx_v_var_acc = (__pyx_v_var_acc + (__pyx_v_centered * __pyx_v_centered));
             }
 
-            /* "sketch_kernels.pyx":115
+            /* "sketch_kernels.pyx":196
  *                     var_acc += centered * centered
  * 
  *                 denom = sqrt(var_acc / n_vectors) if n_vectors > 0 else 0.0             # <<<<<<<<<<<<<<
@@ -21182,7 +22345,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
             }
             __pyx_v_denom = __pyx_t_31;
 
-            /* "sketch_kernels.pyx":117
+            /* "sketch_kernels.pyx":198
  *                 denom = sqrt(var_acc / n_vectors) if n_vectors > 0 else 0.0
  * 
  *                 if denom <= 0.0 or denom != denom:             # <<<<<<<<<<<<<<
@@ -21193,14 +22356,14 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
             if (!__pyx_t_2) {
             } else {
               __pyx_t_1 = __pyx_t_2;
-              goto __pyx_L41_bool_binop_done;
+              goto __pyx_L45_bool_binop_done;
             }
             __pyx_t_2 = (__pyx_v_denom != __pyx_v_denom);
             __pyx_t_1 = __pyx_t_2;
-            __pyx_L41_bool_binop_done:;
+            __pyx_L45_bool_binop_done:;
             if (__pyx_t_1) {
 
-              /* "sketch_kernels.pyx":118
+              /* "sketch_kernels.pyx":199
  * 
  *                 if denom <= 0.0 or denom != denom:
  *                     for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -21212,7 +22375,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
               for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
                 __pyx_v_v = __pyx_t_18;
 
-                /* "sketch_kernels.pyx":119
+                /* "sketch_kernels.pyx":200
  *                 if denom <= 0.0 or denom != denom:
  *                     for v in range(n_vectors):
  *                         norm_mv[s, v] = 0.0             # <<<<<<<<<<<<<<
@@ -21224,17 +22387,17 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
                 *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_norm_mv.data + __pyx_t_28 * __pyx_v_norm_mv.strides[0]) )) + __pyx_t_29)) )) = 0.0;
               }
 
-              /* "sketch_kernels.pyx":117
+              /* "sketch_kernels.pyx":198
  *                 denom = sqrt(var_acc / n_vectors) if n_vectors > 0 else 0.0
  * 
  *                 if denom <= 0.0 or denom != denom:             # <<<<<<<<<<<<<<
  *                     for v in range(n_vectors):
  *                         norm_mv[s, v] = 0.0
  */
-              goto __pyx_L40;
+              goto __pyx_L44;
             }
 
-            /* "sketch_kernels.pyx":121
+            /* "sketch_kernels.pyx":202
  *                         norm_mv[s, v] = 0.0
  *                 else:
  *                     for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -21247,7 +22410,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
               for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
                 __pyx_v_v = __pyx_t_18;
 
-                /* "sketch_kernels.pyx":122
+                /* "sketch_kernels.pyx":203
  *                 else:
  *                     for v in range(n_vectors):
  *                         centered = raw_mv[s, v] - mean             # <<<<<<<<<<<<<<
@@ -21258,7 +22421,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
                 __pyx_t_28 = __pyx_v_v;
                 __pyx_v_centered = ((*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_29 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_28)) ))) - __pyx_v_mean);
 
-                /* "sketch_kernels.pyx":123
+                /* "sketch_kernels.pyx":204
  *                     for v in range(n_vectors):
  *                         centered = raw_mv[s, v] - mean
  *                         norm_mv[s, v] = centered / denom             # <<<<<<<<<<<<<<
@@ -21270,13 +22433,13 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
                 *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_norm_mv.data + __pyx_t_28 * __pyx_v_norm_mv.strides[0]) )) + __pyx_t_29)) )) = (__pyx_v_centered / __pyx_v_denom);
               }
             }
-            __pyx_L40:;
+            __pyx_L44:;
+            break;
           }
-          __pyx_L25:;
         }
       }
 
-      /* "sketch_kernels.pyx":75
+      /* "sketch_kernels.pyx":142
  *     cdef double acc, mean, var_acc, denom, centered, mu_value, adj
  * 
  *     with nogil:             # <<<<<<<<<<<<<<
@@ -21295,7 +22458,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
       }
   }
 
-  /* "sketch_kernels.pyx":125
+  /* "sketch_kernels.pyx":206
  *                         norm_mv[s, v] = centered / denom
  * 
  *     return dots, raw, norm             # <<<<<<<<<<<<<<
@@ -21303,22 +22466,22 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  * 
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_3 = PyTuple_New(3); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 125, __pyx_L1_error)
+  __pyx_t_3 = PyTuple_New(3); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 206, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_INCREF((PyObject *)__pyx_v_dots);
   __Pyx_GIVEREF((PyObject *)__pyx_v_dots);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, ((PyObject *)__pyx_v_dots))) __PYX_ERR(0, 125, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, ((PyObject *)__pyx_v_dots))) __PYX_ERR(0, 206, __pyx_L1_error);
   __Pyx_INCREF((PyObject *)__pyx_v_raw);
   __Pyx_GIVEREF((PyObject *)__pyx_v_raw);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 1, ((PyObject *)__pyx_v_raw))) __PYX_ERR(0, 125, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 1, ((PyObject *)__pyx_v_raw))) __PYX_ERR(0, 206, __pyx_L1_error);
   __Pyx_INCREF((PyObject *)__pyx_v_norm);
   __Pyx_GIVEREF((PyObject *)__pyx_v_norm);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 2, ((PyObject *)__pyx_v_norm))) __PYX_ERR(0, 125, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 2, ((PyObject *)__pyx_v_norm))) __PYX_ERR(0, 206, __pyx_L1_error);
   __pyx_r = __pyx_t_3;
   __pyx_t_3 = 0;
   goto __pyx_L0;
 
-  /* "sketch_kernels.pyx":36
+  /* "sketch_kernels.pyx":103
  * 
  * 
  * def build_sketch_matrix(double[:, :, ::1] window_blocks,             # <<<<<<<<<<<<<<
@@ -21362,7 +22525,7 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
   return __pyx_r;
 }
 
-/* "sketch_kernels.pyx":128
+/* "sketch_kernels.pyx":209
  * 
  * 
  * def apply_orth_and_normalize(double[:, ::1] raw_matrix,             # <<<<<<<<<<<<<<
@@ -21371,16 +22534,16 @@ static PyObject *__pyx_pf_14sketch_kernels_2build_sketch_matrix(CYTHON_UNUSED Py
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_14sketch_kernels_5apply_orth_and_normalize(PyObject *__pyx_self, 
+static PyObject *__pyx_pw_14sketch_kernels_7apply_orth_and_normalize(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-PyDoc_STRVAR(__pyx_doc_14sketch_kernels_4apply_orth_and_normalize, "Normalize a raw sketch matrix without orthogonal transforms.");
-static PyMethodDef __pyx_mdef_14sketch_kernels_5apply_orth_and_normalize = {"apply_orth_and_normalize", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_14sketch_kernels_5apply_orth_and_normalize, __Pyx_METH_FASTCALL|METH_KEYWORDS, __pyx_doc_14sketch_kernels_4apply_orth_and_normalize};
-static PyObject *__pyx_pw_14sketch_kernels_5apply_orth_and_normalize(PyObject *__pyx_self, 
+PyDoc_STRVAR(__pyx_doc_14sketch_kernels_6apply_orth_and_normalize, "Normalize a raw sketch matrix without orthogonal transforms.");
+static PyMethodDef __pyx_mdef_14sketch_kernels_7apply_orth_and_normalize = {"apply_orth_and_normalize", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_14sketch_kernels_7apply_orth_and_normalize, __Pyx_METH_FASTCALL|METH_KEYWORDS, __pyx_doc_14sketch_kernels_6apply_orth_and_normalize};
+static PyObject *__pyx_pw_14sketch_kernels_7apply_orth_and_normalize(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -21433,7 +22596,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[0]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 128, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 209, __pyx_L3_error)
         else goto __pyx_L5_argtuple_error;
         CYTHON_FALLTHROUGH;
         case  1:
@@ -21441,9 +22604,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[1]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 128, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 209, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("apply_orth_and_normalize", 1, 4, 4, 1); __PYX_ERR(0, 128, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("apply_orth_and_normalize", 1, 4, 4, 1); __PYX_ERR(0, 209, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  2:
@@ -21451,9 +22614,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[2]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 128, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 209, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("apply_orth_and_normalize", 1, 4, 4, 2); __PYX_ERR(0, 128, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("apply_orth_and_normalize", 1, 4, 4, 2); __PYX_ERR(0, 209, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  3:
@@ -21461,14 +22624,14 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[3]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 128, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 209, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("apply_orth_and_normalize", 1, 4, 4, 3); __PYX_ERR(0, 128, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("apply_orth_and_normalize", 1, 4, 4, 3); __PYX_ERR(0, 209, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
         const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "apply_orth_and_normalize") < 0)) __PYX_ERR(0, 128, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "apply_orth_and_normalize") < 0)) __PYX_ERR(0, 209, __pyx_L3_error)
       }
     } else if (unlikely(__pyx_nargs != 4)) {
       goto __pyx_L5_argtuple_error;
@@ -21478,14 +22641,14 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       values[2] = __Pyx_Arg_FASTCALL(__pyx_args, 2);
       values[3] = __Pyx_Arg_FASTCALL(__pyx_args, 3);
     }
-    __pyx_v_raw_matrix = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_raw_matrix.memview)) __PYX_ERR(0, 128, __pyx_L3_error)
-    __pyx_v_mean_vec = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mean_vec.memview)) __PYX_ERR(0, 129, __pyx_L3_error)
-    __pyx_v_random_sums = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_random_sums.memview)) __PYX_ERR(0, 130, __pyx_L3_error)
-    __pyx_v_norm_mode = __Pyx_PyInt_As_int(values[3]); if (unlikely((__pyx_v_norm_mode == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 131, __pyx_L3_error)
+    __pyx_v_raw_matrix = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_raw_matrix.memview)) __PYX_ERR(0, 209, __pyx_L3_error)
+    __pyx_v_mean_vec = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mean_vec.memview)) __PYX_ERR(0, 210, __pyx_L3_error)
+    __pyx_v_random_sums = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_random_sums.memview)) __PYX_ERR(0, 211, __pyx_L3_error)
+    __pyx_v_norm_mode = __Pyx_PyInt_As_int(values[3]); if (unlikely((__pyx_v_norm_mode == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 212, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("apply_orth_and_normalize", 1, 4, 4, __pyx_nargs); __PYX_ERR(0, 128, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("apply_orth_and_normalize", 1, 4, 4, __pyx_nargs); __PYX_ERR(0, 209, __pyx_L3_error)
   __pyx_L6_skip:;
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
@@ -21502,7 +22665,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_14sketch_kernels_4apply_orth_and_normalize(__pyx_self, __pyx_v_raw_matrix, __pyx_v_mean_vec, __pyx_v_random_sums, __pyx_v_norm_mode);
+  __pyx_r = __pyx_pf_14sketch_kernels_6apply_orth_and_normalize(__pyx_self, __pyx_v_raw_matrix, __pyx_v_mean_vec, __pyx_v_random_sums, __pyx_v_norm_mode);
 
   /* function exit code */
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_raw_matrix, 1);
@@ -21518,7 +22681,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_raw_matrix, __Pyx_memviewslice __pyx_v_mean_vec, __Pyx_memviewslice __pyx_v_random_sums, int __pyx_v_norm_mode) {
+static PyObject *__pyx_pf_14sketch_kernels_6apply_orth_and_normalize(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_raw_matrix, __Pyx_memviewslice __pyx_v_mean_vec, __Pyx_memviewslice __pyx_v_random_sums, int __pyx_v_norm_mode) {
   Py_ssize_t __pyx_v_n_series;
   Py_ssize_t __pyx_v_n_vectors;
   PyArrayObject *__pyx_v_raw = 0;
@@ -21573,7 +22736,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
   __pyx_pybuffernd_norm.data = NULL;
   __pyx_pybuffernd_norm.rcbuffer = &__pyx_pybuffer_norm;
 
-  /* "sketch_kernels.pyx":133
+  /* "sketch_kernels.pyx":214
  *                              int norm_mode):
  *     """Normalize a raw sketch matrix without orthogonal transforms."""
  *     cdef Py_ssize_t n_series = raw_matrix.shape[0]             # <<<<<<<<<<<<<<
@@ -21582,7 +22745,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
  */
   __pyx_v_n_series = (__pyx_v_raw_matrix.shape[0]);
 
-  /* "sketch_kernels.pyx":134
+  /* "sketch_kernels.pyx":215
  *     """Normalize a raw sketch matrix without orthogonal transforms."""
  *     cdef Py_ssize_t n_series = raw_matrix.shape[0]
  *     cdef Py_ssize_t n_vectors = raw_matrix.shape[1]             # <<<<<<<<<<<<<<
@@ -21591,88 +22754,88 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
  */
   __pyx_v_n_vectors = (__pyx_v_raw_matrix.shape[1]);
 
-  /* "sketch_kernels.pyx":136
+  /* "sketch_kernels.pyx":217
  *     cdef Py_ssize_t n_vectors = raw_matrix.shape[1]
  * 
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 136, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 217, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_empty); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 136, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_empty); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 217, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
 
-  /* "sketch_kernels.pyx":137
+  /* "sketch_kernels.pyx":218
  * 
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(
  *         (n_series, n_vectors),             # <<<<<<<<<<<<<<
  *         dtype=np.float64,
  *     )
  */
-  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 137, __pyx_L1_error)
+  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 218, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 137, __pyx_L1_error)
+  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 218, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 137, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 218, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_1)) __PYX_ERR(0, 137, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_1)) __PYX_ERR(0, 218, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_3);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_t_3)) __PYX_ERR(0, 137, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_t_3)) __PYX_ERR(0, 218, __pyx_L1_error);
   __pyx_t_1 = 0;
   __pyx_t_3 = 0;
 
-  /* "sketch_kernels.pyx":136
+  /* "sketch_kernels.pyx":217
  *     cdef Py_ssize_t n_vectors = raw_matrix.shape[1]
  * 
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 136, __pyx_L1_error)
+  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 217, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_GIVEREF(__pyx_t_4);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_4)) __PYX_ERR(0, 136, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_4)) __PYX_ERR(0, 217, __pyx_L1_error);
   __pyx_t_4 = 0;
 
-  /* "sketch_kernels.pyx":138
+  /* "sketch_kernels.pyx":219
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(
  *         (n_series, n_vectors),
  *         dtype=np.float64,             # <<<<<<<<<<<<<<
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(
  */
-  __pyx_t_4 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 138, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 219, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 138, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 219, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_float64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 138, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_float64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 219, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  if (PyDict_SetItem(__pyx_t_4, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 138, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_4, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 219, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
 
-  /* "sketch_kernels.pyx":136
+  /* "sketch_kernels.pyx":217
  *     cdef Py_ssize_t n_vectors = raw_matrix.shape[1]
  * 
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_3, __pyx_t_4); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 136, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_3, __pyx_t_4); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 217, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  if (!(likely(((__pyx_t_5) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_5, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 136, __pyx_L1_error)
+  if (!(likely(((__pyx_t_5) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_5, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 217, __pyx_L1_error)
   __pyx_t_6 = ((PyArrayObject *)__pyx_t_5);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
     if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_raw.rcbuffer->pybuffer, (PyObject*)__pyx_t_6, &__Pyx_TypeInfo_nn___pyx_t_5numpy_float64_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
       __pyx_v_raw = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_raw.rcbuffer->pybuffer.buf = NULL;
-      __PYX_ERR(0, 136, __pyx_L1_error)
+      __PYX_ERR(0, 217, __pyx_L1_error)
     } else {__pyx_pybuffernd_raw.diminfo[0].strides = __pyx_pybuffernd_raw.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_raw.diminfo[0].shape = __pyx_pybuffernd_raw.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_raw.diminfo[1].strides = __pyx_pybuffernd_raw.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_raw.diminfo[1].shape = __pyx_pybuffernd_raw.rcbuffer->pybuffer.shape[1];
     }
   }
@@ -21680,88 +22843,88 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
   __pyx_v_raw = ((PyArrayObject *)__pyx_t_5);
   __pyx_t_5 = 0;
 
-  /* "sketch_kernels.pyx":140
+  /* "sketch_kernels.pyx":221
  *         dtype=np.float64,
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 140, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 221, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 140, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 221, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
 
-  /* "sketch_kernels.pyx":141
+  /* "sketch_kernels.pyx":222
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(
  *         (n_series, n_vectors),             # <<<<<<<<<<<<<<
  *         dtype=np.float64,
  *     )
  */
-  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 141, __pyx_L1_error)
+  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 222, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 141, __pyx_L1_error)
+  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 222, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_2 = PyTuple_New(2); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 141, __pyx_L1_error)
+  __pyx_t_2 = PyTuple_New(2); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 222, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 0, __pyx_t_5)) __PYX_ERR(0, 141, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 0, __pyx_t_5)) __PYX_ERR(0, 222, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_3);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 1, __pyx_t_3)) __PYX_ERR(0, 141, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 1, __pyx_t_3)) __PYX_ERR(0, 222, __pyx_L1_error);
   __pyx_t_5 = 0;
   __pyx_t_3 = 0;
 
-  /* "sketch_kernels.pyx":140
+  /* "sketch_kernels.pyx":221
  *         dtype=np.float64,
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 140, __pyx_L1_error)
+  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 221, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_2)) __PYX_ERR(0, 140, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_2)) __PYX_ERR(0, 221, __pyx_L1_error);
   __pyx_t_2 = 0;
 
-  /* "sketch_kernels.pyx":142
+  /* "sketch_kernels.pyx":223
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(
  *         (n_series, n_vectors),
  *         dtype=np.float64,             # <<<<<<<<<<<<<<
  *     )
  *     cdef double[:, ::1] raw_mv = raw
  */
-  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 142, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 223, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 142, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 223, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_float64); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 142, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_float64); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 223, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_1) < 0) __PYX_ERR(0, 142, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_1) < 0) __PYX_ERR(0, 223, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
 
-  /* "sketch_kernels.pyx":140
+  /* "sketch_kernels.pyx":221
  *         dtype=np.float64,
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_3, __pyx_t_2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 140, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_3, __pyx_t_2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 221, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  if (!(likely(((__pyx_t_1) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_1, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 140, __pyx_L1_error)
+  if (!(likely(((__pyx_t_1) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_1, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 221, __pyx_L1_error)
   __pyx_t_7 = ((PyArrayObject *)__pyx_t_1);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
     if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_norm.rcbuffer->pybuffer, (PyObject*)__pyx_t_7, &__Pyx_TypeInfo_nn___pyx_t_5numpy_float64_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
       __pyx_v_norm = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_norm.rcbuffer->pybuffer.buf = NULL;
-      __PYX_ERR(0, 140, __pyx_L1_error)
+      __PYX_ERR(0, 221, __pyx_L1_error)
     } else {__pyx_pybuffernd_norm.diminfo[0].strides = __pyx_pybuffernd_norm.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_norm.diminfo[0].shape = __pyx_pybuffernd_norm.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_norm.diminfo[1].strides = __pyx_pybuffernd_norm.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_norm.diminfo[1].shape = __pyx_pybuffernd_norm.rcbuffer->pybuffer.shape[1];
     }
   }
@@ -21769,31 +22932,31 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
   __pyx_v_norm = ((PyArrayObject *)__pyx_t_1);
   __pyx_t_1 = 0;
 
-  /* "sketch_kernels.pyx":144
+  /* "sketch_kernels.pyx":225
  *         dtype=np.float64,
  *     )
  *     cdef double[:, ::1] raw_mv = raw             # <<<<<<<<<<<<<<
  *     cdef double[:, ::1] norm_mv = norm
  *     cdef Py_ssize_t s, v
  */
-  __pyx_t_8 = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(((PyObject *)__pyx_v_raw), PyBUF_WRITABLE); if (unlikely(!__pyx_t_8.memview)) __PYX_ERR(0, 144, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(((PyObject *)__pyx_v_raw), PyBUF_WRITABLE); if (unlikely(!__pyx_t_8.memview)) __PYX_ERR(0, 225, __pyx_L1_error)
   __pyx_v_raw_mv = __pyx_t_8;
   __pyx_t_8.memview = NULL;
   __pyx_t_8.data = NULL;
 
-  /* "sketch_kernels.pyx":145
+  /* "sketch_kernels.pyx":226
  *     )
  *     cdef double[:, ::1] raw_mv = raw
  *     cdef double[:, ::1] norm_mv = norm             # <<<<<<<<<<<<<<
  *     cdef Py_ssize_t s, v
  *     cdef double mean, var_acc, denom, centered, mu_value, adj
  */
-  __pyx_t_8 = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(((PyObject *)__pyx_v_norm), PyBUF_WRITABLE); if (unlikely(!__pyx_t_8.memview)) __PYX_ERR(0, 145, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(((PyObject *)__pyx_v_norm), PyBUF_WRITABLE); if (unlikely(!__pyx_t_8.memview)) __PYX_ERR(0, 226, __pyx_L1_error)
   __pyx_v_norm_mv = __pyx_t_8;
   __pyx_t_8.memview = NULL;
   __pyx_t_8.data = NULL;
 
-  /* "sketch_kernels.pyx":149
+  /* "sketch_kernels.pyx":230
  *     cdef double mean, var_acc, denom, centered, mu_value, adj
  * 
  *     if norm_mode == 1:             # <<<<<<<<<<<<<<
@@ -21803,7 +22966,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
   __pyx_t_9 = (__pyx_v_norm_mode == 1);
   if (__pyx_t_9) {
 
-    /* "sketch_kernels.pyx":150
+    /* "sketch_kernels.pyx":231
  * 
  *     if norm_mode == 1:
  *         if mean_vec.shape[0] != n_series or random_sums.shape[0] != n_vectors:             # <<<<<<<<<<<<<<
@@ -21821,20 +22984,20 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
     __pyx_L5_bool_binop_done:;
     if (unlikely(__pyx_t_9)) {
 
-      /* "sketch_kernels.pyx":151
+      /* "sketch_kernels.pyx":232
  *     if norm_mode == 1:
  *         if mean_vec.shape[0] != n_series or random_sums.shape[0] != n_vectors:
  *             raise ValueError("mean_vec/random_sums shape mismatch")             # <<<<<<<<<<<<<<
  * 
  *     with nogil:
  */
-      __pyx_t_1 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__12, NULL); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 151, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__12, NULL); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 232, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       __Pyx_Raise(__pyx_t_1, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-      __PYX_ERR(0, 151, __pyx_L1_error)
+      __PYX_ERR(0, 232, __pyx_L1_error)
 
-      /* "sketch_kernels.pyx":150
+      /* "sketch_kernels.pyx":231
  * 
  *     if norm_mode == 1:
  *         if mean_vec.shape[0] != n_series or random_sums.shape[0] != n_vectors:             # <<<<<<<<<<<<<<
@@ -21843,7 +23006,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
  */
     }
 
-    /* "sketch_kernels.pyx":149
+    /* "sketch_kernels.pyx":230
  *     cdef double mean, var_acc, denom, centered, mu_value, adj
  * 
  *     if norm_mode == 1:             # <<<<<<<<<<<<<<
@@ -21852,7 +23015,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
  */
   }
 
-  /* "sketch_kernels.pyx":153
+  /* "sketch_kernels.pyx":234
  *             raise ValueError("mean_vec/random_sums shape mismatch")
  * 
  *     with nogil:             # <<<<<<<<<<<<<<
@@ -21868,7 +23031,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
       #endif
       /*try:*/ {
 
-        /* "sketch_kernels.pyx":154
+        /* "sketch_kernels.pyx":235
  * 
  *     with nogil:
  *         for s in range(n_series):             # <<<<<<<<<<<<<<
@@ -21880,7 +23043,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
         for (__pyx_t_13 = 0; __pyx_t_13 < __pyx_t_12; __pyx_t_13+=1) {
           __pyx_v_s = __pyx_t_13;
 
-          /* "sketch_kernels.pyx":155
+          /* "sketch_kernels.pyx":236
  *     with nogil:
  *         for s in range(n_series):
  *             for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -21892,7 +23055,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
           for (__pyx_t_16 = 0; __pyx_t_16 < __pyx_t_15; __pyx_t_16+=1) {
             __pyx_v_v = __pyx_t_16;
 
-            /* "sketch_kernels.pyx":156
+            /* "sketch_kernels.pyx":237
  *         for s in range(n_series):
  *             for v in range(n_vectors):
  *                 raw_mv[s, v] = raw_matrix[s, v]             # <<<<<<<<<<<<<<
@@ -21906,17 +23069,17 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
             *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_19 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_20)) )) = (*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_matrix.data + __pyx_t_17 * __pyx_v_raw_matrix.strides[0]) )) + __pyx_t_18)) )));
           }
 
-          /* "sketch_kernels.pyx":158
+          /* "sketch_kernels.pyx":239
  *                 raw_mv[s, v] = raw_matrix[s, v]
  * 
  *             if norm_mode == 1:             # <<<<<<<<<<<<<<
  *                 mu_value = mean_vec[s]
  *                 denom = 0.0
  */
-          __pyx_t_9 = (__pyx_v_norm_mode == 1);
-          if (__pyx_t_9) {
+          switch (__pyx_v_norm_mode) {
+            case 1:
 
-            /* "sketch_kernels.pyx":159
+            /* "sketch_kernels.pyx":240
  * 
  *             if norm_mode == 1:
  *                 mu_value = mean_vec[s]             # <<<<<<<<<<<<<<
@@ -21926,7 +23089,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
             __pyx_t_18 = __pyx_v_s;
             __pyx_v_mu_value = (*((double *) ( /* dim=0 */ (__pyx_v_mean_vec.data + __pyx_t_18 * __pyx_v_mean_vec.strides[0]) )));
 
-            /* "sketch_kernels.pyx":160
+            /* "sketch_kernels.pyx":241
  *             if norm_mode == 1:
  *                 mu_value = mean_vec[s]
  *                 denom = 0.0             # <<<<<<<<<<<<<<
@@ -21935,7 +23098,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
  */
             __pyx_v_denom = 0.0;
 
-            /* "sketch_kernels.pyx":161
+            /* "sketch_kernels.pyx":242
  *                 mu_value = mean_vec[s]
  *                 denom = 0.0
  *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -21947,7 +23110,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
             for (__pyx_t_16 = 0; __pyx_t_16 < __pyx_t_15; __pyx_t_16+=1) {
               __pyx_v_v = __pyx_t_16;
 
-              /* "sketch_kernels.pyx":162
+              /* "sketch_kernels.pyx":243
  *                 denom = 0.0
  *                 for v in range(n_vectors):
  *                     adj = raw_mv[s, v] - mu_value * random_sums[v]             # <<<<<<<<<<<<<<
@@ -21959,7 +23122,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
               __pyx_t_20 = __pyx_v_v;
               __pyx_v_adj = ((*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_18 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_17)) ))) - (__pyx_v_mu_value * (*((double *) ( /* dim=0 */ (__pyx_v_random_sums.data + __pyx_t_20 * __pyx_v_random_sums.strides[0]) )))));
 
-              /* "sketch_kernels.pyx":163
+              /* "sketch_kernels.pyx":244
  *                 for v in range(n_vectors):
  *                     adj = raw_mv[s, v] - mu_value * random_sums[v]
  *                     denom += adj * adj             # <<<<<<<<<<<<<<
@@ -21969,7 +23132,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
               __pyx_v_denom = (__pyx_v_denom + (__pyx_v_adj * __pyx_v_adj));
             }
 
-            /* "sketch_kernels.pyx":164
+            /* "sketch_kernels.pyx":245
  *                     adj = raw_mv[s, v] - mu_value * random_sums[v]
  *                     denom += adj * adj
  *                 denom = sqrt(denom)             # <<<<<<<<<<<<<<
@@ -21978,7 +23141,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
  */
             __pyx_v_denom = sqrt(__pyx_v_denom);
 
-            /* "sketch_kernels.pyx":165
+            /* "sketch_kernels.pyx":246
  *                     denom += adj * adj
  *                 denom = sqrt(denom)
  *                 if denom <= 0.0 or denom != denom:             # <<<<<<<<<<<<<<
@@ -21989,14 +23152,14 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
             if (!__pyx_t_10) {
             } else {
               __pyx_t_9 = __pyx_t_10;
-              goto __pyx_L18_bool_binop_done;
+              goto __pyx_L17_bool_binop_done;
             }
             __pyx_t_10 = (__pyx_v_denom != __pyx_v_denom);
             __pyx_t_9 = __pyx_t_10;
-            __pyx_L18_bool_binop_done:;
+            __pyx_L17_bool_binop_done:;
             if (__pyx_t_9) {
 
-              /* "sketch_kernels.pyx":166
+              /* "sketch_kernels.pyx":247
  *                 denom = sqrt(denom)
  *                 if denom <= 0.0 or denom != denom:
  *                     for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -22008,7 +23171,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
               for (__pyx_t_16 = 0; __pyx_t_16 < __pyx_t_15; __pyx_t_16+=1) {
                 __pyx_v_v = __pyx_t_16;
 
-                /* "sketch_kernels.pyx":167
+                /* "sketch_kernels.pyx":248
  *                 if denom <= 0.0 or denom != denom:
  *                     for v in range(n_vectors):
  *                         norm_mv[s, v] = 0.0             # <<<<<<<<<<<<<<
@@ -22020,17 +23183,17 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
                 *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_norm_mv.data + __pyx_t_20 * __pyx_v_norm_mv.strides[0]) )) + __pyx_t_17)) )) = 0.0;
               }
 
-              /* "sketch_kernels.pyx":165
+              /* "sketch_kernels.pyx":246
  *                     denom += adj * adj
  *                 denom = sqrt(denom)
  *                 if denom <= 0.0 or denom != denom:             # <<<<<<<<<<<<<<
  *                     for v in range(n_vectors):
  *                         norm_mv[s, v] = 0.0
  */
-              goto __pyx_L17;
+              goto __pyx_L16;
             }
 
-            /* "sketch_kernels.pyx":169
+            /* "sketch_kernels.pyx":250
  *                         norm_mv[s, v] = 0.0
  *                 else:
  *                     for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -22043,54 +23206,53 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
               for (__pyx_t_16 = 0; __pyx_t_16 < __pyx_t_15; __pyx_t_16+=1) {
                 __pyx_v_v = __pyx_t_16;
 
-                /* "sketch_kernels.pyx":170
+                /* "sketch_kernels.pyx":251
  *                 else:
  *                     for v in range(n_vectors):
  *                         adj = raw_mv[s, v] - mu_value * random_sums[v]             # <<<<<<<<<<<<<<
  *                         norm_mv[s, v] = adj / denom
- *             else:
+ *             elif norm_mode == 2:
  */
                 __pyx_t_17 = __pyx_v_s;
                 __pyx_t_20 = __pyx_v_v;
                 __pyx_t_18 = __pyx_v_v;
                 __pyx_v_adj = ((*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_17 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_20)) ))) - (__pyx_v_mu_value * (*((double *) ( /* dim=0 */ (__pyx_v_random_sums.data + __pyx_t_18 * __pyx_v_random_sums.strides[0]) )))));
 
-                /* "sketch_kernels.pyx":171
+                /* "sketch_kernels.pyx":252
  *                     for v in range(n_vectors):
  *                         adj = raw_mv[s, v] - mu_value * random_sums[v]
  *                         norm_mv[s, v] = adj / denom             # <<<<<<<<<<<<<<
- *             else:
- *                 mean = 0.0
+ *             elif norm_mode == 2:
+ *                 # (2026-07-22) "mean" sketch_norm -- see the identical branch
  */
                 __pyx_t_18 = __pyx_v_s;
                 __pyx_t_20 = __pyx_v_v;
                 *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_norm_mv.data + __pyx_t_18 * __pyx_v_norm_mv.strides[0]) )) + __pyx_t_20)) )) = (__pyx_v_adj / __pyx_v_denom);
               }
             }
-            __pyx_L17:;
+            __pyx_L16:;
 
-            /* "sketch_kernels.pyx":158
+            /* "sketch_kernels.pyx":239
  *                 raw_mv[s, v] = raw_matrix[s, v]
  * 
  *             if norm_mode == 1:             # <<<<<<<<<<<<<<
  *                 mu_value = mean_vec[s]
  *                 denom = 0.0
  */
-            goto __pyx_L14;
-          }
+            break;
+            case 2:
 
-          /* "sketch_kernels.pyx":173
- *                         norm_mv[s, v] = adj / denom
- *             else:
+            /* "sketch_kernels.pyx":256
+ *                 # (2026-07-22) "mean" sketch_norm -- see the identical branch
+ *                 # in build_sketch_matrix for the full rationale.
  *                 mean = 0.0             # <<<<<<<<<<<<<<
  *                 for v in range(n_vectors):
  *                     mean += raw_mv[s, v]
  */
-          /*else*/ {
             __pyx_v_mean = 0.0;
 
-            /* "sketch_kernels.pyx":174
- *             else:
+            /* "sketch_kernels.pyx":257
+ *                 # in build_sketch_matrix for the full rationale.
  *                 mean = 0.0
  *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
  *                     mean += raw_mv[s, v]
@@ -22101,7 +23263,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
             for (__pyx_t_16 = 0; __pyx_t_16 < __pyx_t_15; __pyx_t_16+=1) {
               __pyx_v_v = __pyx_t_16;
 
-              /* "sketch_kernels.pyx":175
+              /* "sketch_kernels.pyx":258
  *                 mean = 0.0
  *                 for v in range(n_vectors):
  *                     mean += raw_mv[s, v]             # <<<<<<<<<<<<<<
@@ -22113,7 +23275,104 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
               __pyx_v_mean = (__pyx_v_mean + (*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_20 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_18)) ))));
             }
 
-            /* "sketch_kernels.pyx":176
+            /* "sketch_kernels.pyx":259
+ *                 for v in range(n_vectors):
+ *                     mean += raw_mv[s, v]
+ *                 if n_vectors > 0:             # <<<<<<<<<<<<<<
+ *                     mean /= n_vectors
+ *                 for v in range(n_vectors):
+ */
+            __pyx_t_9 = (__pyx_v_n_vectors > 0);
+            if (__pyx_t_9) {
+
+              /* "sketch_kernels.pyx":260
+ *                     mean += raw_mv[s, v]
+ *                 if n_vectors > 0:
+ *                     mean /= n_vectors             # <<<<<<<<<<<<<<
+ *                 for v in range(n_vectors):
+ *                     norm_mv[s, v] = raw_mv[s, v] - mean
+ */
+              __pyx_v_mean = (__pyx_v_mean / __pyx_v_n_vectors);
+
+              /* "sketch_kernels.pyx":259
+ *                 for v in range(n_vectors):
+ *                     mean += raw_mv[s, v]
+ *                 if n_vectors > 0:             # <<<<<<<<<<<<<<
+ *                     mean /= n_vectors
+ *                 for v in range(n_vectors):
+ */
+            }
+
+            /* "sketch_kernels.pyx":261
+ *                 if n_vectors > 0:
+ *                     mean /= n_vectors
+ *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
+ *                     norm_mv[s, v] = raw_mv[s, v] - mean
+ *             else:
+ */
+            __pyx_t_14 = __pyx_v_n_vectors;
+            __pyx_t_15 = __pyx_t_14;
+            for (__pyx_t_16 = 0; __pyx_t_16 < __pyx_t_15; __pyx_t_16+=1) {
+              __pyx_v_v = __pyx_t_16;
+
+              /* "sketch_kernels.pyx":262
+ *                     mean /= n_vectors
+ *                 for v in range(n_vectors):
+ *                     norm_mv[s, v] = raw_mv[s, v] - mean             # <<<<<<<<<<<<<<
+ *             else:
+ *                 mean = 0.0
+ */
+              __pyx_t_18 = __pyx_v_s;
+              __pyx_t_20 = __pyx_v_v;
+              __pyx_t_17 = __pyx_v_s;
+              __pyx_t_19 = __pyx_v_v;
+              *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_norm_mv.data + __pyx_t_17 * __pyx_v_norm_mv.strides[0]) )) + __pyx_t_19)) )) = ((*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_18 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_20)) ))) - __pyx_v_mean);
+            }
+
+            /* "sketch_kernels.pyx":253
+ *                         adj = raw_mv[s, v] - mu_value * random_sums[v]
+ *                         norm_mv[s, v] = adj / denom
+ *             elif norm_mode == 2:             # <<<<<<<<<<<<<<
+ *                 # (2026-07-22) "mean" sketch_norm -- see the identical branch
+ *                 # in build_sketch_matrix for the full rationale.
+ */
+            break;
+            default:
+
+            /* "sketch_kernels.pyx":264
+ *                     norm_mv[s, v] = raw_mv[s, v] - mean
+ *             else:
+ *                 mean = 0.0             # <<<<<<<<<<<<<<
+ *                 for v in range(n_vectors):
+ *                     mean += raw_mv[s, v]
+ */
+            __pyx_v_mean = 0.0;
+
+            /* "sketch_kernels.pyx":265
+ *             else:
+ *                 mean = 0.0
+ *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
+ *                     mean += raw_mv[s, v]
+ *                 if n_vectors > 0:
+ */
+            __pyx_t_14 = __pyx_v_n_vectors;
+            __pyx_t_15 = __pyx_t_14;
+            for (__pyx_t_16 = 0; __pyx_t_16 < __pyx_t_15; __pyx_t_16+=1) {
+              __pyx_v_v = __pyx_t_16;
+
+              /* "sketch_kernels.pyx":266
+ *                 mean = 0.0
+ *                 for v in range(n_vectors):
+ *                     mean += raw_mv[s, v]             # <<<<<<<<<<<<<<
+ *                 if n_vectors > 0:
+ *                     mean /= n_vectors
+ */
+              __pyx_t_20 = __pyx_v_s;
+              __pyx_t_18 = __pyx_v_v;
+              __pyx_v_mean = (__pyx_v_mean + (*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_20 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_18)) ))));
+            }
+
+            /* "sketch_kernels.pyx":267
  *                 for v in range(n_vectors):
  *                     mean += raw_mv[s, v]
  *                 if n_vectors > 0:             # <<<<<<<<<<<<<<
@@ -22123,7 +23382,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
             __pyx_t_9 = (__pyx_v_n_vectors > 0);
             if (__pyx_t_9) {
 
-              /* "sketch_kernels.pyx":177
+              /* "sketch_kernels.pyx":268
  *                     mean += raw_mv[s, v]
  *                 if n_vectors > 0:
  *                     mean /= n_vectors             # <<<<<<<<<<<<<<
@@ -22132,7 +23391,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
  */
               __pyx_v_mean = (__pyx_v_mean / __pyx_v_n_vectors);
 
-              /* "sketch_kernels.pyx":176
+              /* "sketch_kernels.pyx":267
  *                 for v in range(n_vectors):
  *                     mean += raw_mv[s, v]
  *                 if n_vectors > 0:             # <<<<<<<<<<<<<<
@@ -22141,7 +23400,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
  */
             }
 
-            /* "sketch_kernels.pyx":179
+            /* "sketch_kernels.pyx":270
  *                     mean /= n_vectors
  * 
  *                 var_acc = 0.0             # <<<<<<<<<<<<<<
@@ -22150,7 +23409,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
  */
             __pyx_v_var_acc = 0.0;
 
-            /* "sketch_kernels.pyx":180
+            /* "sketch_kernels.pyx":271
  * 
  *                 var_acc = 0.0
  *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -22162,7 +23421,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
             for (__pyx_t_16 = 0; __pyx_t_16 < __pyx_t_15; __pyx_t_16+=1) {
               __pyx_v_v = __pyx_t_16;
 
-              /* "sketch_kernels.pyx":181
+              /* "sketch_kernels.pyx":272
  *                 var_acc = 0.0
  *                 for v in range(n_vectors):
  *                     centered = raw_mv[s, v] - mean             # <<<<<<<<<<<<<<
@@ -22173,7 +23432,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
               __pyx_t_20 = __pyx_v_v;
               __pyx_v_centered = ((*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_18 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_20)) ))) - __pyx_v_mean);
 
-              /* "sketch_kernels.pyx":182
+              /* "sketch_kernels.pyx":273
  *                 for v in range(n_vectors):
  *                     centered = raw_mv[s, v] - mean
  *                     var_acc += centered * centered             # <<<<<<<<<<<<<<
@@ -22183,7 +23442,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
               __pyx_v_var_acc = (__pyx_v_var_acc + (__pyx_v_centered * __pyx_v_centered));
             }
 
-            /* "sketch_kernels.pyx":184
+            /* "sketch_kernels.pyx":275
  *                     var_acc += centered * centered
  * 
  *                 denom = sqrt(var_acc / n_vectors) if n_vectors > 0 else 0.0             # <<<<<<<<<<<<<<
@@ -22198,7 +23457,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
             }
             __pyx_v_denom = __pyx_t_21;
 
-            /* "sketch_kernels.pyx":186
+            /* "sketch_kernels.pyx":277
  *                 denom = sqrt(var_acc / n_vectors) if n_vectors > 0 else 0.0
  * 
  *                 if denom <= 0.0 or denom != denom:             # <<<<<<<<<<<<<<
@@ -22209,14 +23468,14 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
             if (!__pyx_t_10) {
             } else {
               __pyx_t_9 = __pyx_t_10;
-              goto __pyx_L30_bool_binop_done;
+              goto __pyx_L34_bool_binop_done;
             }
             __pyx_t_10 = (__pyx_v_denom != __pyx_v_denom);
             __pyx_t_9 = __pyx_t_10;
-            __pyx_L30_bool_binop_done:;
+            __pyx_L34_bool_binop_done:;
             if (__pyx_t_9) {
 
-              /* "sketch_kernels.pyx":187
+              /* "sketch_kernels.pyx":278
  * 
  *                 if denom <= 0.0 or denom != denom:
  *                     for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -22228,7 +23487,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
               for (__pyx_t_16 = 0; __pyx_t_16 < __pyx_t_15; __pyx_t_16+=1) {
                 __pyx_v_v = __pyx_t_16;
 
-                /* "sketch_kernels.pyx":188
+                /* "sketch_kernels.pyx":279
  *                 if denom <= 0.0 or denom != denom:
  *                     for v in range(n_vectors):
  *                         norm_mv[s, v] = 0.0             # <<<<<<<<<<<<<<
@@ -22240,17 +23499,17 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
                 *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_norm_mv.data + __pyx_t_20 * __pyx_v_norm_mv.strides[0]) )) + __pyx_t_18)) )) = 0.0;
               }
 
-              /* "sketch_kernels.pyx":186
+              /* "sketch_kernels.pyx":277
  *                 denom = sqrt(var_acc / n_vectors) if n_vectors > 0 else 0.0
  * 
  *                 if denom <= 0.0 or denom != denom:             # <<<<<<<<<<<<<<
  *                     for v in range(n_vectors):
  *                         norm_mv[s, v] = 0.0
  */
-              goto __pyx_L29;
+              goto __pyx_L33;
             }
 
-            /* "sketch_kernels.pyx":190
+            /* "sketch_kernels.pyx":281
  *                         norm_mv[s, v] = 0.0
  *                 else:
  *                     for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -22263,7 +23522,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
               for (__pyx_t_16 = 0; __pyx_t_16 < __pyx_t_15; __pyx_t_16+=1) {
                 __pyx_v_v = __pyx_t_16;
 
-                /* "sketch_kernels.pyx":191
+                /* "sketch_kernels.pyx":282
  *                 else:
  *                     for v in range(n_vectors):
  *                         centered = raw_mv[s, v] - mean             # <<<<<<<<<<<<<<
@@ -22274,7 +23533,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
                 __pyx_t_20 = __pyx_v_v;
                 __pyx_v_centered = ((*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_18 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_20)) ))) - __pyx_v_mean);
 
-                /* "sketch_kernels.pyx":192
+                /* "sketch_kernels.pyx":283
  *                     for v in range(n_vectors):
  *                         centered = raw_mv[s, v] - mean
  *                         norm_mv[s, v] = centered / denom             # <<<<<<<<<<<<<<
@@ -22286,13 +23545,13 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
                 *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_norm_mv.data + __pyx_t_20 * __pyx_v_norm_mv.strides[0]) )) + __pyx_t_18)) )) = (__pyx_v_centered / __pyx_v_denom);
               }
             }
-            __pyx_L29:;
+            __pyx_L33:;
+            break;
           }
-          __pyx_L14:;
         }
       }
 
-      /* "sketch_kernels.pyx":153
+      /* "sketch_kernels.pyx":234
  *             raise ValueError("mean_vec/random_sums shape mismatch")
  * 
  *     with nogil:             # <<<<<<<<<<<<<<
@@ -22311,7 +23570,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
       }
   }
 
-  /* "sketch_kernels.pyx":194
+  /* "sketch_kernels.pyx":285
  *                         norm_mv[s, v] = centered / denom
  * 
  *     return raw, norm             # <<<<<<<<<<<<<<
@@ -22319,19 +23578,19 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
  * 
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = PyTuple_New(2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 194, __pyx_L1_error)
+  __pyx_t_1 = PyTuple_New(2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 285, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_INCREF((PyObject *)__pyx_v_raw);
   __Pyx_GIVEREF((PyObject *)__pyx_v_raw);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_1, 0, ((PyObject *)__pyx_v_raw))) __PYX_ERR(0, 194, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_1, 0, ((PyObject *)__pyx_v_raw))) __PYX_ERR(0, 285, __pyx_L1_error);
   __Pyx_INCREF((PyObject *)__pyx_v_norm);
   __Pyx_GIVEREF((PyObject *)__pyx_v_norm);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_1, 1, ((PyObject *)__pyx_v_norm))) __PYX_ERR(0, 194, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_1, 1, ((PyObject *)__pyx_v_norm))) __PYX_ERR(0, 285, __pyx_L1_error);
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
   goto __pyx_L0;
 
-  /* "sketch_kernels.pyx":128
+  /* "sketch_kernels.pyx":209
  * 
  * 
  * def apply_orth_and_normalize(double[:, ::1] raw_matrix,             # <<<<<<<<<<<<<<
@@ -22370,7 +23629,7 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
   return __pyx_r;
 }
 
-/* "sketch_kernels.pyx":197
+/* "sketch_kernels.pyx":288
  * 
  * 
  * def incremental_combine_and_normalize(double[:, :, ::1] base_dots,             # <<<<<<<<<<<<<<
@@ -22379,16 +23638,16 @@ static PyObject *__pyx_pf_14sketch_kernels_4apply_orth_and_normalize(CYTHON_UNUS
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_14sketch_kernels_7incremental_combine_and_normalize(PyObject *__pyx_self, 
+static PyObject *__pyx_pw_14sketch_kernels_9incremental_combine_and_normalize(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-PyDoc_STRVAR(__pyx_doc_14sketch_kernels_6incremental_combine_and_normalize, "Build the next incremental dot cache and normalized sketch in one pass.");
-static PyMethodDef __pyx_mdef_14sketch_kernels_7incremental_combine_and_normalize = {"incremental_combine_and_normalize", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_14sketch_kernels_7incremental_combine_and_normalize, __Pyx_METH_FASTCALL|METH_KEYWORDS, __pyx_doc_14sketch_kernels_6incremental_combine_and_normalize};
-static PyObject *__pyx_pw_14sketch_kernels_7incremental_combine_and_normalize(PyObject *__pyx_self, 
+PyDoc_STRVAR(__pyx_doc_14sketch_kernels_8incremental_combine_and_normalize, "Build the next incremental dot cache and normalized sketch in one pass.");
+static PyMethodDef __pyx_mdef_14sketch_kernels_9incremental_combine_and_normalize = {"incremental_combine_and_normalize", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_14sketch_kernels_9incremental_combine_and_normalize, __Pyx_METH_FASTCALL|METH_KEYWORDS, __pyx_doc_14sketch_kernels_8incremental_combine_and_normalize};
+static PyObject *__pyx_pw_14sketch_kernels_9incremental_combine_and_normalize(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -22453,7 +23712,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[0]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 197, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 288, __pyx_L3_error)
         else goto __pyx_L5_argtuple_error;
         CYTHON_FALLTHROUGH;
         case  1:
@@ -22461,9 +23720,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[1]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 197, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 288, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("incremental_combine_and_normalize", 1, 8, 8, 1); __PYX_ERR(0, 197, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("incremental_combine_and_normalize", 1, 8, 8, 1); __PYX_ERR(0, 288, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  2:
@@ -22471,9 +23730,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[2]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 197, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 288, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("incremental_combine_and_normalize", 1, 8, 8, 2); __PYX_ERR(0, 197, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("incremental_combine_and_normalize", 1, 8, 8, 2); __PYX_ERR(0, 288, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  3:
@@ -22481,9 +23740,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[3]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 197, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 288, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("incremental_combine_and_normalize", 1, 8, 8, 3); __PYX_ERR(0, 197, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("incremental_combine_and_normalize", 1, 8, 8, 3); __PYX_ERR(0, 288, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  4:
@@ -22491,9 +23750,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[4]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 197, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 288, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("incremental_combine_and_normalize", 1, 8, 8, 4); __PYX_ERR(0, 197, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("incremental_combine_and_normalize", 1, 8, 8, 4); __PYX_ERR(0, 288, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  5:
@@ -22501,9 +23760,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[5]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 197, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 288, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("incremental_combine_and_normalize", 1, 8, 8, 5); __PYX_ERR(0, 197, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("incremental_combine_and_normalize", 1, 8, 8, 5); __PYX_ERR(0, 288, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  6:
@@ -22511,9 +23770,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[6]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 197, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 288, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("incremental_combine_and_normalize", 1, 8, 8, 6); __PYX_ERR(0, 197, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("incremental_combine_and_normalize", 1, 8, 8, 6); __PYX_ERR(0, 288, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  7:
@@ -22521,14 +23780,14 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[7]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 197, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 288, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("incremental_combine_and_normalize", 1, 8, 8, 7); __PYX_ERR(0, 197, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("incremental_combine_and_normalize", 1, 8, 8, 7); __PYX_ERR(0, 288, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
         const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "incremental_combine_and_normalize") < 0)) __PYX_ERR(0, 197, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "incremental_combine_and_normalize") < 0)) __PYX_ERR(0, 288, __pyx_L3_error)
       }
     } else if (unlikely(__pyx_nargs != 8)) {
       goto __pyx_L5_argtuple_error;
@@ -22542,18 +23801,18 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       values[6] = __Pyx_Arg_FASTCALL(__pyx_args, 6);
       values[7] = __Pyx_Arg_FASTCALL(__pyx_args, 7);
     }
-    __pyx_v_base_dots = __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_base_dots.memview)) __PYX_ERR(0, 197, __pyx_L3_error)
-    __pyx_v_diff_toggle = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_diff_toggle.memview)) __PYX_ERR(0, 198, __pyx_L3_error)
-    __pyx_v_new_blocks = __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_new_blocks.memview)) __PYX_ERR(0, 199, __pyx_L3_error)
-    __pyx_v_weights = __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_weights.memview)) __PYX_ERR(0, 200, __pyx_L3_error)
-    __pyx_v_mean_vec = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mean_vec.memview)) __PYX_ERR(0, 201, __pyx_L3_error)
-    __pyx_v_random_sums = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_random_sums.memview)) __PYX_ERR(0, 202, __pyx_L3_error)
-    __pyx_v_norm_mode = __Pyx_PyInt_As_int(values[6]); if (unlikely((__pyx_v_norm_mode == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 203, __pyx_L3_error)
-    __pyx_v_apply_diff = __Pyx_PyInt_As_int(values[7]); if (unlikely((__pyx_v_apply_diff == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 204, __pyx_L3_error)
+    __pyx_v_base_dots = __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_base_dots.memview)) __PYX_ERR(0, 288, __pyx_L3_error)
+    __pyx_v_diff_toggle = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_diff_toggle.memview)) __PYX_ERR(0, 289, __pyx_L3_error)
+    __pyx_v_new_blocks = __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_new_blocks.memview)) __PYX_ERR(0, 290, __pyx_L3_error)
+    __pyx_v_weights = __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_weights.memview)) __PYX_ERR(0, 291, __pyx_L3_error)
+    __pyx_v_mean_vec = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mean_vec.memview)) __PYX_ERR(0, 292, __pyx_L3_error)
+    __pyx_v_random_sums = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_random_sums.memview)) __PYX_ERR(0, 293, __pyx_L3_error)
+    __pyx_v_norm_mode = __Pyx_PyInt_As_int(values[6]); if (unlikely((__pyx_v_norm_mode == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 294, __pyx_L3_error)
+    __pyx_v_apply_diff = __Pyx_PyInt_As_int(values[7]); if (unlikely((__pyx_v_apply_diff == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 295, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("incremental_combine_and_normalize", 1, 8, 8, __pyx_nargs); __PYX_ERR(0, 197, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("incremental_combine_and_normalize", 1, 8, 8, __pyx_nargs); __PYX_ERR(0, 288, __pyx_L3_error)
   __pyx_L6_skip:;
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
@@ -22573,7 +23832,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(__pyx_self, __pyx_v_base_dots, __pyx_v_diff_toggle, __pyx_v_new_blocks, __pyx_v_weights, __pyx_v_mean_vec, __pyx_v_random_sums, __pyx_v_norm_mode, __pyx_v_apply_diff);
+  __pyx_r = __pyx_pf_14sketch_kernels_8incremental_combine_and_normalize(__pyx_self, __pyx_v_base_dots, __pyx_v_diff_toggle, __pyx_v_new_blocks, __pyx_v_weights, __pyx_v_mean_vec, __pyx_v_random_sums, __pyx_v_norm_mode, __pyx_v_apply_diff);
 
   /* function exit code */
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_base_dots, 1);
@@ -22592,7 +23851,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_base_dots, __Pyx_memviewslice __pyx_v_diff_toggle, __Pyx_memviewslice __pyx_v_new_blocks, __Pyx_memviewslice __pyx_v_weights, __Pyx_memviewslice __pyx_v_mean_vec, __Pyx_memviewslice __pyx_v_random_sums, int __pyx_v_norm_mode, int __pyx_v_apply_diff) {
+static PyObject *__pyx_pf_14sketch_kernels_8incremental_combine_and_normalize(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_base_dots, __Pyx_memviewslice __pyx_v_diff_toggle, __Pyx_memviewslice __pyx_v_new_blocks, __Pyx_memviewslice __pyx_v_weights, __Pyx_memviewslice __pyx_v_mean_vec, __Pyx_memviewslice __pyx_v_random_sums, int __pyx_v_norm_mode, int __pyx_v_apply_diff) {
   Py_ssize_t __pyx_v_n_series;
   Py_ssize_t __pyx_v_n_base;
   Py_ssize_t __pyx_v_n_vectors;
@@ -22676,7 +23935,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
   __pyx_pybuffernd_norm.data = NULL;
   __pyx_pybuffernd_norm.rcbuffer = &__pyx_pybuffer_norm;
 
-  /* "sketch_kernels.pyx":206
+  /* "sketch_kernels.pyx":297
  *                                       int apply_diff):
  *     """Build the next incremental dot cache and normalized sketch in one pass."""
  *     cdef Py_ssize_t n_series = base_dots.shape[0]             # <<<<<<<<<<<<<<
@@ -22685,7 +23944,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
   __pyx_v_n_series = (__pyx_v_base_dots.shape[0]);
 
-  /* "sketch_kernels.pyx":207
+  /* "sketch_kernels.pyx":298
  *     """Build the next incremental dot cache and normalized sketch in one pass."""
  *     cdef Py_ssize_t n_series = base_dots.shape[0]
  *     cdef Py_ssize_t n_base = base_dots.shape[1]             # <<<<<<<<<<<<<<
@@ -22694,7 +23953,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
   __pyx_v_n_base = (__pyx_v_base_dots.shape[1]);
 
-  /* "sketch_kernels.pyx":208
+  /* "sketch_kernels.pyx":299
  *     cdef Py_ssize_t n_series = base_dots.shape[0]
  *     cdef Py_ssize_t n_base = base_dots.shape[1]
  *     cdef Py_ssize_t n_vectors = base_dots.shape[2]             # <<<<<<<<<<<<<<
@@ -22703,7 +23962,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
   __pyx_v_n_vectors = (__pyx_v_base_dots.shape[2]);
 
-  /* "sketch_kernels.pyx":209
+  /* "sketch_kernels.pyx":300
  *     cdef Py_ssize_t n_base = base_dots.shape[1]
  *     cdef Py_ssize_t n_vectors = base_dots.shape[2]
  *     cdef Py_ssize_t n_new = new_blocks.shape[1]             # <<<<<<<<<<<<<<
@@ -22712,19 +23971,19 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
   __pyx_v_n_new = (__pyx_v_new_blocks.shape[1]);
 
-  /* "sketch_kernels.pyx":210
+  /* "sketch_kernels.pyx":301
  *     cdef Py_ssize_t n_vectors = base_dots.shape[2]
  *     cdef Py_ssize_t n_new = new_blocks.shape[1]
  *     cdef Py_ssize_t basic_window = new_blocks.shape[2] if new_blocks.ndim == 3 else 0             # <<<<<<<<<<<<<<
  *     cdef Py_ssize_t w_basic = weights.shape[0]
  *     cdef Py_ssize_t w_vectors = weights.shape[1]
  */
-  __pyx_t_2 = __pyx_memoryview_fromslice(__pyx_v_new_blocks, 3, (PyObject *(*)(char *)) __pyx_memview_get_double, (int (*)(char *, PyObject *)) __pyx_memview_set_double, 0);; if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 210, __pyx_L1_error)
+  __pyx_t_2 = __pyx_memoryview_fromslice(__pyx_v_new_blocks, 3, (PyObject *(*)(char *)) __pyx_memview_get_double, (int (*)(char *, PyObject *)) __pyx_memview_set_double, 0);; if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_ndim); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 210, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_ndim); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_4 = (__Pyx_PyInt_BoolEqObjC(__pyx_t_3, __pyx_int_3, 3, 0)); if (unlikely((__pyx_t_4 < 0))) __PYX_ERR(0, 210, __pyx_L1_error)
+  __pyx_t_4 = (__Pyx_PyInt_BoolEqObjC(__pyx_t_3, __pyx_int_3, 3, 0)); if (unlikely((__pyx_t_4 < 0))) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   if (__pyx_t_4) {
     __pyx_t_1 = (__pyx_v_new_blocks.shape[2]);
@@ -22733,7 +23992,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
   }
   __pyx_v_basic_window = __pyx_t_1;
 
-  /* "sketch_kernels.pyx":211
+  /* "sketch_kernels.pyx":302
  *     cdef Py_ssize_t n_new = new_blocks.shape[1]
  *     cdef Py_ssize_t basic_window = new_blocks.shape[2] if new_blocks.ndim == 3 else 0
  *     cdef Py_ssize_t w_basic = weights.shape[0]             # <<<<<<<<<<<<<<
@@ -22742,7 +24001,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
   __pyx_v_w_basic = (__pyx_v_weights.shape[0]);
 
-  /* "sketch_kernels.pyx":212
+  /* "sketch_kernels.pyx":303
  *     cdef Py_ssize_t basic_window = new_blocks.shape[2] if new_blocks.ndim == 3 else 0
  *     cdef Py_ssize_t w_basic = weights.shape[0]
  *     cdef Py_ssize_t w_vectors = weights.shape[1]             # <<<<<<<<<<<<<<
@@ -22751,19 +24010,19 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
   __pyx_v_w_vectors = (__pyx_v_weights.shape[1]);
 
-  /* "sketch_kernels.pyx":213
+  /* "sketch_kernels.pyx":304
  *     cdef Py_ssize_t w_basic = weights.shape[0]
  *     cdef Py_ssize_t w_vectors = weights.shape[1]
  *     cdef Py_ssize_t w_window = weights.shape[2] if weights.ndim == 3 else 0             # <<<<<<<<<<<<<<
  *     cdef Py_ssize_t total_basic = n_base + n_new
  * 
  */
-  __pyx_t_3 = __pyx_memoryview_fromslice(__pyx_v_weights, 3, (PyObject *(*)(char *)) __pyx_memview_get_double, (int (*)(char *, PyObject *)) __pyx_memview_set_double, 0);; if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 213, __pyx_L1_error)
+  __pyx_t_3 = __pyx_memoryview_fromslice(__pyx_v_weights, 3, (PyObject *(*)(char *)) __pyx_memview_get_double, (int (*)(char *, PyObject *)) __pyx_memview_set_double, 0);; if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 304, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_ndim); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 213, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_ndim); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 304, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_4 = (__Pyx_PyInt_BoolEqObjC(__pyx_t_2, __pyx_int_3, 3, 0)); if (unlikely((__pyx_t_4 < 0))) __PYX_ERR(0, 213, __pyx_L1_error)
+  __pyx_t_4 = (__Pyx_PyInt_BoolEqObjC(__pyx_t_2, __pyx_int_3, 3, 0)); if (unlikely((__pyx_t_4 < 0))) __PYX_ERR(0, 304, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   if (__pyx_t_4) {
     __pyx_t_1 = (__pyx_v_weights.shape[2]);
@@ -22772,7 +24031,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
   }
   __pyx_v_w_window = __pyx_t_1;
 
-  /* "sketch_kernels.pyx":214
+  /* "sketch_kernels.pyx":305
  *     cdef Py_ssize_t w_vectors = weights.shape[1]
  *     cdef Py_ssize_t w_window = weights.shape[2] if weights.ndim == 3 else 0
  *     cdef Py_ssize_t total_basic = n_base + n_new             # <<<<<<<<<<<<<<
@@ -22781,7 +24040,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
   __pyx_v_total_basic = (__pyx_v_n_base + __pyx_v_n_new);
 
-  /* "sketch_kernels.pyx":216
+  /* "sketch_kernels.pyx":307
  *     cdef Py_ssize_t total_basic = n_base + n_new
  * 
  *     if w_basic != n_new or (n_new > 0 and (w_vectors != n_vectors or w_window != basic_window)):             # <<<<<<<<<<<<<<
@@ -22811,20 +24070,20 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
   __pyx_L4_bool_binop_done:;
   if (unlikely(__pyx_t_4)) {
 
-    /* "sketch_kernels.pyx":217
+    /* "sketch_kernels.pyx":308
  * 
  *     if w_basic != n_new or (n_new > 0 and (w_vectors != n_vectors or w_window != basic_window)):
  *         raise ValueError("incremental weights shape mismatch")             # <<<<<<<<<<<<<<
  *     if apply_diff and n_base > 0 and (diff_toggle.shape[0] < n_base or diff_toggle.shape[1] != n_vectors):
  *         raise ValueError("diff_toggle shape mismatch")
  */
-    __pyx_t_2 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__13, NULL); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 217, __pyx_L1_error)
+    __pyx_t_2 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__13, NULL); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 308, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_2);
     __Pyx_Raise(__pyx_t_2, 0, 0, 0);
     __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-    __PYX_ERR(0, 217, __pyx_L1_error)
+    __PYX_ERR(0, 308, __pyx_L1_error)
 
-    /* "sketch_kernels.pyx":216
+    /* "sketch_kernels.pyx":307
  *     cdef Py_ssize_t total_basic = n_base + n_new
  * 
  *     if w_basic != n_new or (n_new > 0 and (w_vectors != n_vectors or w_window != basic_window)):             # <<<<<<<<<<<<<<
@@ -22833,7 +24092,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
   }
 
-  /* "sketch_kernels.pyx":218
+  /* "sketch_kernels.pyx":309
  *     if w_basic != n_new or (n_new > 0 and (w_vectors != n_vectors or w_window != basic_window)):
  *         raise ValueError("incremental weights shape mismatch")
  *     if apply_diff and n_base > 0 and (diff_toggle.shape[0] < n_base or diff_toggle.shape[1] != n_vectors):             # <<<<<<<<<<<<<<
@@ -22863,20 +24122,20 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
   __pyx_L9_bool_binop_done:;
   if (unlikely(__pyx_t_4)) {
 
-    /* "sketch_kernels.pyx":219
+    /* "sketch_kernels.pyx":310
  *         raise ValueError("incremental weights shape mismatch")
  *     if apply_diff and n_base > 0 and (diff_toggle.shape[0] < n_base or diff_toggle.shape[1] != n_vectors):
  *         raise ValueError("diff_toggle shape mismatch")             # <<<<<<<<<<<<<<
  *     if norm_mode == 1:
  *         if mean_vec.shape[0] != n_series or random_sums.shape[0] != n_vectors:
  */
-    __pyx_t_2 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__14, NULL); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 219, __pyx_L1_error)
+    __pyx_t_2 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__14, NULL); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 310, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_2);
     __Pyx_Raise(__pyx_t_2, 0, 0, 0);
     __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-    __PYX_ERR(0, 219, __pyx_L1_error)
+    __PYX_ERR(0, 310, __pyx_L1_error)
 
-    /* "sketch_kernels.pyx":218
+    /* "sketch_kernels.pyx":309
  *     if w_basic != n_new or (n_new > 0 and (w_vectors != n_vectors or w_window != basic_window)):
  *         raise ValueError("incremental weights shape mismatch")
  *     if apply_diff and n_base > 0 and (diff_toggle.shape[0] < n_base or diff_toggle.shape[1] != n_vectors):             # <<<<<<<<<<<<<<
@@ -22885,7 +24144,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
   }
 
-  /* "sketch_kernels.pyx":220
+  /* "sketch_kernels.pyx":311
  *     if apply_diff and n_base > 0 and (diff_toggle.shape[0] < n_base or diff_toggle.shape[1] != n_vectors):
  *         raise ValueError("diff_toggle shape mismatch")
  *     if norm_mode == 1:             # <<<<<<<<<<<<<<
@@ -22895,7 +24154,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
   __pyx_t_4 = (__pyx_v_norm_mode == 1);
   if (__pyx_t_4) {
 
-    /* "sketch_kernels.pyx":221
+    /* "sketch_kernels.pyx":312
  *         raise ValueError("diff_toggle shape mismatch")
  *     if norm_mode == 1:
  *         if mean_vec.shape[0] != n_series or random_sums.shape[0] != n_vectors:             # <<<<<<<<<<<<<<
@@ -22913,20 +24172,20 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
     __pyx_L15_bool_binop_done:;
     if (unlikely(__pyx_t_4)) {
 
-      /* "sketch_kernels.pyx":222
+      /* "sketch_kernels.pyx":313
  *     if norm_mode == 1:
  *         if mean_vec.shape[0] != n_series or random_sums.shape[0] != n_vectors:
  *             raise ValueError("mean_vec/random_sums shape mismatch")             # <<<<<<<<<<<<<<
  * 
  *     cdef np.ndarray[np.float64_t, ndim=3] updated = np.empty(
  */
-      __pyx_t_2 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__12, NULL); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 222, __pyx_L1_error)
+      __pyx_t_2 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__12, NULL); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 313, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_2);
       __Pyx_Raise(__pyx_t_2, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-      __PYX_ERR(0, 222, __pyx_L1_error)
+      __PYX_ERR(0, 313, __pyx_L1_error)
 
-      /* "sketch_kernels.pyx":221
+      /* "sketch_kernels.pyx":312
  *         raise ValueError("diff_toggle shape mismatch")
  *     if norm_mode == 1:
  *         if mean_vec.shape[0] != n_series or random_sums.shape[0] != n_vectors:             # <<<<<<<<<<<<<<
@@ -22935,7 +24194,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
     }
 
-    /* "sketch_kernels.pyx":220
+    /* "sketch_kernels.pyx":311
  *     if apply_diff and n_base > 0 and (diff_toggle.shape[0] < n_base or diff_toggle.shape[1] != n_vectors):
  *         raise ValueError("diff_toggle shape mismatch")
  *     if norm_mode == 1:             # <<<<<<<<<<<<<<
@@ -22944,93 +24203,93 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
   }
 
-  /* "sketch_kernels.pyx":224
+  /* "sketch_kernels.pyx":315
  *             raise ValueError("mean_vec/random_sums shape mismatch")
  * 
  *     cdef np.ndarray[np.float64_t, ndim=3] updated = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, total_basic, n_vectors),
  *         dtype=np.float64,
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 224, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 315, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_empty); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 224, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_empty); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 315, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
-  /* "sketch_kernels.pyx":225
+  /* "sketch_kernels.pyx":316
  * 
  *     cdef np.ndarray[np.float64_t, ndim=3] updated = np.empty(
  *         (n_series, total_basic, n_vectors),             # <<<<<<<<<<<<<<
  *         dtype=np.float64,
  *     )
  */
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 225, __pyx_L1_error)
+  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 316, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_total_basic); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 225, __pyx_L1_error)
+  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_total_basic); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 316, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 225, __pyx_L1_error)
+  __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 316, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_8 = PyTuple_New(3); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 225, __pyx_L1_error)
+  __pyx_t_8 = PyTuple_New(3); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 316, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_8, 0, __pyx_t_2)) __PYX_ERR(0, 225, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_8, 0, __pyx_t_2)) __PYX_ERR(0, 316, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_6);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_8, 1, __pyx_t_6)) __PYX_ERR(0, 225, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_8, 1, __pyx_t_6)) __PYX_ERR(0, 316, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_7);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_8, 2, __pyx_t_7)) __PYX_ERR(0, 225, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_8, 2, __pyx_t_7)) __PYX_ERR(0, 316, __pyx_L1_error);
   __pyx_t_2 = 0;
   __pyx_t_6 = 0;
   __pyx_t_7 = 0;
 
-  /* "sketch_kernels.pyx":224
+  /* "sketch_kernels.pyx":315
  *             raise ValueError("mean_vec/random_sums shape mismatch")
  * 
  *     cdef np.ndarray[np.float64_t, ndim=3] updated = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, total_basic, n_vectors),
  *         dtype=np.float64,
  */
-  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 224, __pyx_L1_error)
+  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 315, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_GIVEREF(__pyx_t_8);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_8)) __PYX_ERR(0, 224, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_8)) __PYX_ERR(0, 315, __pyx_L1_error);
   __pyx_t_8 = 0;
 
-  /* "sketch_kernels.pyx":226
+  /* "sketch_kernels.pyx":317
  *     cdef np.ndarray[np.float64_t, ndim=3] updated = np.empty(
  *         (n_series, total_basic, n_vectors),
  *         dtype=np.float64,             # <<<<<<<<<<<<<<
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(
  */
-  __pyx_t_8 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 226, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 317, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 226, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 317, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_float64); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 226, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_float64); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 317, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (PyDict_SetItem(__pyx_t_8, __pyx_n_s_dtype, __pyx_t_2) < 0) __PYX_ERR(0, 226, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_8, __pyx_n_s_dtype, __pyx_t_2) < 0) __PYX_ERR(0, 317, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
-  /* "sketch_kernels.pyx":224
+  /* "sketch_kernels.pyx":315
  *             raise ValueError("mean_vec/random_sums shape mismatch")
  * 
  *     cdef np.ndarray[np.float64_t, ndim=3] updated = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, total_basic, n_vectors),
  *         dtype=np.float64,
  */
-  __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_7, __pyx_t_8); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 224, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_7, __pyx_t_8); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 315, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  if (!(likely(((__pyx_t_2) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_2, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 224, __pyx_L1_error)
+  if (!(likely(((__pyx_t_2) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_2, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 315, __pyx_L1_error)
   __pyx_t_9 = ((PyArrayObject *)__pyx_t_2);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
     if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_updated.rcbuffer->pybuffer, (PyObject*)__pyx_t_9, &__Pyx_TypeInfo_nn___pyx_t_5numpy_float64_t, PyBUF_FORMAT| PyBUF_STRIDES, 3, 0, __pyx_stack) == -1)) {
       __pyx_v_updated = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_updated.rcbuffer->pybuffer.buf = NULL;
-      __PYX_ERR(0, 224, __pyx_L1_error)
+      __PYX_ERR(0, 315, __pyx_L1_error)
     } else {__pyx_pybuffernd_updated.diminfo[0].strides = __pyx_pybuffernd_updated.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_updated.diminfo[0].shape = __pyx_pybuffernd_updated.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_updated.diminfo[1].strides = __pyx_pybuffernd_updated.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_updated.diminfo[1].shape = __pyx_pybuffernd_updated.rcbuffer->pybuffer.shape[1]; __pyx_pybuffernd_updated.diminfo[2].strides = __pyx_pybuffernd_updated.rcbuffer->pybuffer.strides[2]; __pyx_pybuffernd_updated.diminfo[2].shape = __pyx_pybuffernd_updated.rcbuffer->pybuffer.shape[2];
     }
   }
@@ -23038,88 +24297,88 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
   __pyx_v_updated = ((PyArrayObject *)__pyx_t_2);
   __pyx_t_2 = 0;
 
-  /* "sketch_kernels.pyx":228
+  /* "sketch_kernels.pyx":319
  *         dtype=np.float64,
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 228, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 319, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_empty); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 228, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_empty); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 319, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
-  /* "sketch_kernels.pyx":229
+  /* "sketch_kernels.pyx":320
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(
  *         (n_series, n_vectors),             # <<<<<<<<<<<<<<
  *         dtype=np.float64,
  *     )
  */
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 229, __pyx_L1_error)
+  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 320, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 229, __pyx_L1_error)
+  __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 320, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_3 = PyTuple_New(2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 229, __pyx_L1_error)
+  __pyx_t_3 = PyTuple_New(2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 320, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_2)) __PYX_ERR(0, 229, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_2)) __PYX_ERR(0, 320, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_7);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 1, __pyx_t_7)) __PYX_ERR(0, 229, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 1, __pyx_t_7)) __PYX_ERR(0, 320, __pyx_L1_error);
   __pyx_t_2 = 0;
   __pyx_t_7 = 0;
 
-  /* "sketch_kernels.pyx":228
+  /* "sketch_kernels.pyx":319
  *         dtype=np.float64,
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 228, __pyx_L1_error)
+  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 319, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_GIVEREF(__pyx_t_3);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_3)) __PYX_ERR(0, 228, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_3)) __PYX_ERR(0, 319, __pyx_L1_error);
   __pyx_t_3 = 0;
 
-  /* "sketch_kernels.pyx":230
+  /* "sketch_kernels.pyx":321
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(
  *         (n_series, n_vectors),
  *         dtype=np.float64,             # <<<<<<<<<<<<<<
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(
  */
-  __pyx_t_3 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 230, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 321, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 230, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 321, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_float64); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 230, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_float64); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 321, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  if (PyDict_SetItem(__pyx_t_3, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 230, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_3, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 321, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
 
-  /* "sketch_kernels.pyx":228
+  /* "sketch_kernels.pyx":319
  *         dtype=np.float64,
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] raw = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_8, __pyx_t_7, __pyx_t_3); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 228, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_8, __pyx_t_7, __pyx_t_3); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 319, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  if (!(likely(((__pyx_t_6) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_6, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 228, __pyx_L1_error)
+  if (!(likely(((__pyx_t_6) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_6, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 319, __pyx_L1_error)
   __pyx_t_10 = ((PyArrayObject *)__pyx_t_6);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
     if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_raw.rcbuffer->pybuffer, (PyObject*)__pyx_t_10, &__Pyx_TypeInfo_nn___pyx_t_5numpy_float64_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
       __pyx_v_raw = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_raw.rcbuffer->pybuffer.buf = NULL;
-      __PYX_ERR(0, 228, __pyx_L1_error)
+      __PYX_ERR(0, 319, __pyx_L1_error)
     } else {__pyx_pybuffernd_raw.diminfo[0].strides = __pyx_pybuffernd_raw.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_raw.diminfo[0].shape = __pyx_pybuffernd_raw.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_raw.diminfo[1].strides = __pyx_pybuffernd_raw.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_raw.diminfo[1].shape = __pyx_pybuffernd_raw.rcbuffer->pybuffer.shape[1];
     }
   }
@@ -23127,88 +24386,88 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
   __pyx_v_raw = ((PyArrayObject *)__pyx_t_6);
   __pyx_t_6 = 0;
 
-  /* "sketch_kernels.pyx":232
+  /* "sketch_kernels.pyx":323
  *         dtype=np.float64,
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 232, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 323, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_empty); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 232, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_empty); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 323, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
 
-  /* "sketch_kernels.pyx":233
+  /* "sketch_kernels.pyx":324
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(
  *         (n_series, n_vectors),             # <<<<<<<<<<<<<<
  *         dtype=np.float64,
  *     )
  */
-  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 233, __pyx_L1_error)
+  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 324, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 233, __pyx_L1_error)
+  __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_n_vectors); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 324, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_8 = PyTuple_New(2); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 233, __pyx_L1_error)
+  __pyx_t_8 = PyTuple_New(2); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 324, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_GIVEREF(__pyx_t_6);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_8, 0, __pyx_t_6)) __PYX_ERR(0, 233, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_8, 0, __pyx_t_6)) __PYX_ERR(0, 324, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_7);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_8, 1, __pyx_t_7)) __PYX_ERR(0, 233, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_8, 1, __pyx_t_7)) __PYX_ERR(0, 324, __pyx_L1_error);
   __pyx_t_6 = 0;
   __pyx_t_7 = 0;
 
-  /* "sketch_kernels.pyx":232
+  /* "sketch_kernels.pyx":323
  *         dtype=np.float64,
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 232, __pyx_L1_error)
+  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 323, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_GIVEREF(__pyx_t_8);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_8)) __PYX_ERR(0, 232, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_8)) __PYX_ERR(0, 323, __pyx_L1_error);
   __pyx_t_8 = 0;
 
-  /* "sketch_kernels.pyx":234
+  /* "sketch_kernels.pyx":325
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(
  *         (n_series, n_vectors),
  *         dtype=np.float64,             # <<<<<<<<<<<<<<
  *     )
  * 
  */
-  __pyx_t_8 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 234, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 325, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 234, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 325, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_float64); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 234, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_float64); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 325, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (PyDict_SetItem(__pyx_t_8, __pyx_n_s_dtype, __pyx_t_2) < 0) __PYX_ERR(0, 234, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_8, __pyx_n_s_dtype, __pyx_t_2) < 0) __PYX_ERR(0, 325, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
-  /* "sketch_kernels.pyx":232
+  /* "sketch_kernels.pyx":323
  *         dtype=np.float64,
  *     )
  *     cdef np.ndarray[np.float64_t, ndim=2] norm = np.empty(             # <<<<<<<<<<<<<<
  *         (n_series, n_vectors),
  *         dtype=np.float64,
  */
-  __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_7, __pyx_t_8); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 232, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_7, __pyx_t_8); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 323, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  if (!(likely(((__pyx_t_2) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_2, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 232, __pyx_L1_error)
+  if (!(likely(((__pyx_t_2) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_2, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 323, __pyx_L1_error)
   __pyx_t_11 = ((PyArrayObject *)__pyx_t_2);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
     if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_norm.rcbuffer->pybuffer, (PyObject*)__pyx_t_11, &__Pyx_TypeInfo_nn___pyx_t_5numpy_float64_t, PyBUF_FORMAT| PyBUF_STRIDES, 2, 0, __pyx_stack) == -1)) {
       __pyx_v_norm = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_norm.rcbuffer->pybuffer.buf = NULL;
-      __PYX_ERR(0, 232, __pyx_L1_error)
+      __PYX_ERR(0, 323, __pyx_L1_error)
     } else {__pyx_pybuffernd_norm.diminfo[0].strides = __pyx_pybuffernd_norm.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_norm.diminfo[0].shape = __pyx_pybuffernd_norm.rcbuffer->pybuffer.shape[0]; __pyx_pybuffernd_norm.diminfo[1].strides = __pyx_pybuffernd_norm.rcbuffer->pybuffer.strides[1]; __pyx_pybuffernd_norm.diminfo[1].shape = __pyx_pybuffernd_norm.rcbuffer->pybuffer.shape[1];
     }
   }
@@ -23216,43 +24475,43 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
   __pyx_v_norm = ((PyArrayObject *)__pyx_t_2);
   __pyx_t_2 = 0;
 
-  /* "sketch_kernels.pyx":237
+  /* "sketch_kernels.pyx":328
  *     )
  * 
  *     cdef double[:, :, ::1] updated_mv = updated             # <<<<<<<<<<<<<<
  *     cdef double[:, ::1] raw_mv = raw
  *     cdef double[:, ::1] norm_mv = norm
  */
-  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(((PyObject *)__pyx_v_updated), PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 237, __pyx_L1_error)
+  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_d_d_dc_double(((PyObject *)__pyx_v_updated), PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 328, __pyx_L1_error)
   __pyx_v_updated_mv = __pyx_t_12;
   __pyx_t_12.memview = NULL;
   __pyx_t_12.data = NULL;
 
-  /* "sketch_kernels.pyx":238
+  /* "sketch_kernels.pyx":329
  * 
  *     cdef double[:, :, ::1] updated_mv = updated
  *     cdef double[:, ::1] raw_mv = raw             # <<<<<<<<<<<<<<
  *     cdef double[:, ::1] norm_mv = norm
  *     cdef Py_ssize_t s, b, v, w
  */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(((PyObject *)__pyx_v_raw), PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 238, __pyx_L1_error)
+  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(((PyObject *)__pyx_v_raw), PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 329, __pyx_L1_error)
   __pyx_v_raw_mv = __pyx_t_13;
   __pyx_t_13.memview = NULL;
   __pyx_t_13.data = NULL;
 
-  /* "sketch_kernels.pyx":239
+  /* "sketch_kernels.pyx":330
  *     cdef double[:, :, ::1] updated_mv = updated
  *     cdef double[:, ::1] raw_mv = raw
  *     cdef double[:, ::1] norm_mv = norm             # <<<<<<<<<<<<<<
  *     cdef Py_ssize_t s, b, v, w
  *     cdef double acc, mean, var_acc, denom, centered, mu_value, adj, val
  */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(((PyObject *)__pyx_v_norm), PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 239, __pyx_L1_error)
+  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(((PyObject *)__pyx_v_norm), PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 330, __pyx_L1_error)
   __pyx_v_norm_mv = __pyx_t_13;
   __pyx_t_13.memview = NULL;
   __pyx_t_13.data = NULL;
 
-  /* "sketch_kernels.pyx":243
+  /* "sketch_kernels.pyx":334
  *     cdef double acc, mean, var_acc, denom, centered, mu_value, adj, val
  * 
  *     with nogil:             # <<<<<<<<<<<<<<
@@ -23268,7 +24527,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
       #endif
       /*try:*/ {
 
-        /* "sketch_kernels.pyx":244
+        /* "sketch_kernels.pyx":335
  * 
  *     with nogil:
  *         for s in range(n_series):             # <<<<<<<<<<<<<<
@@ -23280,7 +24539,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
         for (__pyx_t_15 = 0; __pyx_t_15 < __pyx_t_14; __pyx_t_15+=1) {
           __pyx_v_s = __pyx_t_15;
 
-          /* "sketch_kernels.pyx":245
+          /* "sketch_kernels.pyx":336
  *     with nogil:
  *         for s in range(n_series):
  *             for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -23292,7 +24551,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
           for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
             __pyx_v_v = __pyx_t_18;
 
-            /* "sketch_kernels.pyx":246
+            /* "sketch_kernels.pyx":337
  *         for s in range(n_series):
  *             for v in range(n_vectors):
  *                 raw_mv[s, v] = 0.0             # <<<<<<<<<<<<<<
@@ -23304,7 +24563,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
             *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_19 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_20)) )) = 0.0;
           }
 
-          /* "sketch_kernels.pyx":248
+          /* "sketch_kernels.pyx":339
  *                 raw_mv[s, v] = 0.0
  * 
  *             for b in range(n_base):             # <<<<<<<<<<<<<<
@@ -23316,7 +24575,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
           for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
             __pyx_v_b = __pyx_t_18;
 
-            /* "sketch_kernels.pyx":249
+            /* "sketch_kernels.pyx":340
  * 
  *             for b in range(n_base):
  *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -23328,7 +24587,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
             for (__pyx_t_23 = 0; __pyx_t_23 < __pyx_t_22; __pyx_t_23+=1) {
               __pyx_v_v = __pyx_t_23;
 
-              /* "sketch_kernels.pyx":250
+              /* "sketch_kernels.pyx":341
  *             for b in range(n_base):
  *                 for v in range(n_vectors):
  *                     val = base_dots[s, b, v]             # <<<<<<<<<<<<<<
@@ -23340,7 +24599,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
               __pyx_t_24 = __pyx_v_v;
               __pyx_v_val = (*((double *) ( /* dim=2 */ ((char *) (((double *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_base_dots.data + __pyx_t_20 * __pyx_v_base_dots.strides[0]) ) + __pyx_t_19 * __pyx_v_base_dots.strides[1]) )) + __pyx_t_24)) )));
 
-              /* "sketch_kernels.pyx":251
+              /* "sketch_kernels.pyx":342
  *                 for v in range(n_vectors):
  *                     val = base_dots[s, b, v]
  *                     if apply_diff:             # <<<<<<<<<<<<<<
@@ -23350,7 +24609,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
               __pyx_t_4 = (__pyx_v_apply_diff != 0);
               if (__pyx_t_4) {
 
-                /* "sketch_kernels.pyx":252
+                /* "sketch_kernels.pyx":343
  *                     val = base_dots[s, b, v]
  *                     if apply_diff:
  *                         val = val * diff_toggle[b, v]             # <<<<<<<<<<<<<<
@@ -23361,7 +24620,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
                 __pyx_t_19 = __pyx_v_v;
                 __pyx_v_val = (__pyx_v_val * (*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_diff_toggle.data + __pyx_t_24 * __pyx_v_diff_toggle.strides[0]) )) + __pyx_t_19)) ))));
 
-                /* "sketch_kernels.pyx":251
+                /* "sketch_kernels.pyx":342
  *                 for v in range(n_vectors):
  *                     val = base_dots[s, b, v]
  *                     if apply_diff:             # <<<<<<<<<<<<<<
@@ -23370,7 +24629,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
               }
 
-              /* "sketch_kernels.pyx":253
+              /* "sketch_kernels.pyx":344
  *                     if apply_diff:
  *                         val = val * diff_toggle[b, v]
  *                     updated_mv[s, b, v] = val             # <<<<<<<<<<<<<<
@@ -23382,7 +24641,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
               __pyx_t_20 = __pyx_v_v;
               *((double *) ( /* dim=2 */ ((char *) (((double *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_updated_mv.data + __pyx_t_19 * __pyx_v_updated_mv.strides[0]) ) + __pyx_t_24 * __pyx_v_updated_mv.strides[1]) )) + __pyx_t_20)) )) = __pyx_v_val;
 
-              /* "sketch_kernels.pyx":254
+              /* "sketch_kernels.pyx":345
  *                         val = val * diff_toggle[b, v]
  *                     updated_mv[s, b, v] = val
  *                     raw_mv[s, v] += val             # <<<<<<<<<<<<<<
@@ -23395,7 +24654,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
             }
           }
 
-          /* "sketch_kernels.pyx":256
+          /* "sketch_kernels.pyx":347
  *                     raw_mv[s, v] += val
  * 
  *             for b in range(n_new):             # <<<<<<<<<<<<<<
@@ -23407,7 +24666,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
           for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
             __pyx_v_b = __pyx_t_18;
 
-            /* "sketch_kernels.pyx":257
+            /* "sketch_kernels.pyx":348
  * 
  *             for b in range(n_new):
  *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -23419,7 +24678,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
             for (__pyx_t_23 = 0; __pyx_t_23 < __pyx_t_22; __pyx_t_23+=1) {
               __pyx_v_v = __pyx_t_23;
 
-              /* "sketch_kernels.pyx":258
+              /* "sketch_kernels.pyx":349
  *             for b in range(n_new):
  *                 for v in range(n_vectors):
  *                     acc = 0.0             # <<<<<<<<<<<<<<
@@ -23428,7 +24687,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
               __pyx_v_acc = 0.0;
 
-              /* "sketch_kernels.pyx":259
+              /* "sketch_kernels.pyx":350
  *                 for v in range(n_vectors):
  *                     acc = 0.0
  *                     for w in range(basic_window):             # <<<<<<<<<<<<<<
@@ -23440,7 +24699,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
               for (__pyx_t_27 = 0; __pyx_t_27 < __pyx_t_26; __pyx_t_27+=1) {
                 __pyx_v_w = __pyx_t_27;
 
-                /* "sketch_kernels.pyx":260
+                /* "sketch_kernels.pyx":351
  *                     acc = 0.0
  *                     for w in range(basic_window):
  *                         acc += new_blocks[s, b, w] * weights[b, v, w]             # <<<<<<<<<<<<<<
@@ -23456,7 +24715,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
                 __pyx_v_acc = (__pyx_v_acc + ((*((double *) ( /* dim=2 */ ((char *) (((double *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_new_blocks.data + __pyx_t_24 * __pyx_v_new_blocks.strides[0]) ) + __pyx_t_20 * __pyx_v_new_blocks.strides[1]) )) + __pyx_t_19)) ))) * (*((double *) ( /* dim=2 */ ((char *) (((double *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_weights.data + __pyx_t_28 * __pyx_v_weights.strides[0]) ) + __pyx_t_29 * __pyx_v_weights.strides[1]) )) + __pyx_t_30)) )))));
               }
 
-              /* "sketch_kernels.pyx":261
+              /* "sketch_kernels.pyx":352
  *                     for w in range(basic_window):
  *                         acc += new_blocks[s, b, w] * weights[b, v, w]
  *                     updated_mv[s, n_base + b, v] = acc             # <<<<<<<<<<<<<<
@@ -23468,7 +24727,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
               __pyx_t_28 = __pyx_v_v;
               *((double *) ( /* dim=2 */ ((char *) (((double *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_updated_mv.data + __pyx_t_30 * __pyx_v_updated_mv.strides[0]) ) + __pyx_t_29 * __pyx_v_updated_mv.strides[1]) )) + __pyx_t_28)) )) = __pyx_v_acc;
 
-              /* "sketch_kernels.pyx":262
+              /* "sketch_kernels.pyx":353
  *                         acc += new_blocks[s, b, w] * weights[b, v, w]
  *                     updated_mv[s, n_base + b, v] = acc
  *                     raw_mv[s, v] += acc             # <<<<<<<<<<<<<<
@@ -23481,17 +24740,17 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
             }
           }
 
-          /* "sketch_kernels.pyx":264
+          /* "sketch_kernels.pyx":355
  *                     raw_mv[s, v] += acc
  * 
  *             if norm_mode == 1:             # <<<<<<<<<<<<<<
  *                 mu_value = mean_vec[s]
  *                 denom = 0.0
  */
-          __pyx_t_4 = (__pyx_v_norm_mode == 1);
-          if (__pyx_t_4) {
+          switch (__pyx_v_norm_mode) {
+            case 1:
 
-            /* "sketch_kernels.pyx":265
+            /* "sketch_kernels.pyx":356
  * 
  *             if norm_mode == 1:
  *                 mu_value = mean_vec[s]             # <<<<<<<<<<<<<<
@@ -23501,7 +24760,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
             __pyx_t_29 = __pyx_v_s;
             __pyx_v_mu_value = (*((double *) ( /* dim=0 */ (__pyx_v_mean_vec.data + __pyx_t_29 * __pyx_v_mean_vec.strides[0]) )));
 
-            /* "sketch_kernels.pyx":266
+            /* "sketch_kernels.pyx":357
  *             if norm_mode == 1:
  *                 mu_value = mean_vec[s]
  *                 denom = 0.0             # <<<<<<<<<<<<<<
@@ -23510,7 +24769,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
             __pyx_v_denom = 0.0;
 
-            /* "sketch_kernels.pyx":267
+            /* "sketch_kernels.pyx":358
  *                 mu_value = mean_vec[s]
  *                 denom = 0.0
  *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -23522,7 +24781,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
             for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
               __pyx_v_v = __pyx_t_18;
 
-              /* "sketch_kernels.pyx":268
+              /* "sketch_kernels.pyx":359
  *                 denom = 0.0
  *                 for v in range(n_vectors):
  *                     adj = raw_mv[s, v] - mu_value * random_sums[v]             # <<<<<<<<<<<<<<
@@ -23534,7 +24793,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
               __pyx_t_30 = __pyx_v_v;
               __pyx_v_adj = ((*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_29 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_28)) ))) - (__pyx_v_mu_value * (*((double *) ( /* dim=0 */ (__pyx_v_random_sums.data + __pyx_t_30 * __pyx_v_random_sums.strides[0]) )))));
 
-              /* "sketch_kernels.pyx":269
+              /* "sketch_kernels.pyx":360
  *                 for v in range(n_vectors):
  *                     adj = raw_mv[s, v] - mu_value * random_sums[v]
  *                     denom += adj * adj             # <<<<<<<<<<<<<<
@@ -23544,7 +24803,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
               __pyx_v_denom = (__pyx_v_denom + (__pyx_v_adj * __pyx_v_adj));
             }
 
-            /* "sketch_kernels.pyx":270
+            /* "sketch_kernels.pyx":361
  *                     adj = raw_mv[s, v] - mu_value * random_sums[v]
  *                     denom += adj * adj
  *                 denom = sqrt(denom)             # <<<<<<<<<<<<<<
@@ -23553,7 +24812,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
             __pyx_v_denom = sqrt(__pyx_v_denom);
 
-            /* "sketch_kernels.pyx":271
+            /* "sketch_kernels.pyx":362
  *                     denom += adj * adj
  *                 denom = sqrt(denom)
  *                 if denom <= 0.0 or denom != denom:             # <<<<<<<<<<<<<<
@@ -23564,14 +24823,14 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
             if (!__pyx_t_5) {
             } else {
               __pyx_t_4 = __pyx_t_5;
-              goto __pyx_L39_bool_binop_done;
+              goto __pyx_L38_bool_binop_done;
             }
             __pyx_t_5 = (__pyx_v_denom != __pyx_v_denom);
             __pyx_t_4 = __pyx_t_5;
-            __pyx_L39_bool_binop_done:;
+            __pyx_L38_bool_binop_done:;
             if (__pyx_t_4) {
 
-              /* "sketch_kernels.pyx":272
+              /* "sketch_kernels.pyx":363
  *                 denom = sqrt(denom)
  *                 if denom <= 0.0 or denom != denom:
  *                     for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -23583,7 +24842,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
               for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
                 __pyx_v_v = __pyx_t_18;
 
-                /* "sketch_kernels.pyx":273
+                /* "sketch_kernels.pyx":364
  *                 if denom <= 0.0 or denom != denom:
  *                     for v in range(n_vectors):
  *                         norm_mv[s, v] = 0.0             # <<<<<<<<<<<<<<
@@ -23595,17 +24854,17 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
                 *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_norm_mv.data + __pyx_t_30 * __pyx_v_norm_mv.strides[0]) )) + __pyx_t_28)) )) = 0.0;
               }
 
-              /* "sketch_kernels.pyx":271
+              /* "sketch_kernels.pyx":362
  *                     denom += adj * adj
  *                 denom = sqrt(denom)
  *                 if denom <= 0.0 or denom != denom:             # <<<<<<<<<<<<<<
  *                     for v in range(n_vectors):
  *                         norm_mv[s, v] = 0.0
  */
-              goto __pyx_L38;
+              goto __pyx_L37;
             }
 
-            /* "sketch_kernels.pyx":275
+            /* "sketch_kernels.pyx":366
  *                         norm_mv[s, v] = 0.0
  *                 else:
  *                     for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -23618,54 +24877,53 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
               for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
                 __pyx_v_v = __pyx_t_18;
 
-                /* "sketch_kernels.pyx":276
+                /* "sketch_kernels.pyx":367
  *                 else:
  *                     for v in range(n_vectors):
  *                         adj = raw_mv[s, v] - mu_value * random_sums[v]             # <<<<<<<<<<<<<<
  *                         norm_mv[s, v] = adj / denom
- *             else:
+ *             elif norm_mode == 2:
  */
                 __pyx_t_28 = __pyx_v_s;
                 __pyx_t_30 = __pyx_v_v;
                 __pyx_t_29 = __pyx_v_v;
                 __pyx_v_adj = ((*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_28 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_30)) ))) - (__pyx_v_mu_value * (*((double *) ( /* dim=0 */ (__pyx_v_random_sums.data + __pyx_t_29 * __pyx_v_random_sums.strides[0]) )))));
 
-                /* "sketch_kernels.pyx":277
+                /* "sketch_kernels.pyx":368
  *                     for v in range(n_vectors):
  *                         adj = raw_mv[s, v] - mu_value * random_sums[v]
  *                         norm_mv[s, v] = adj / denom             # <<<<<<<<<<<<<<
- *             else:
- *                 mean = 0.0
+ *             elif norm_mode == 2:
+ *                 # (2026-07-22) "mean" sketch_norm -- see the identical branch
  */
                 __pyx_t_29 = __pyx_v_s;
                 __pyx_t_30 = __pyx_v_v;
                 *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_norm_mv.data + __pyx_t_29 * __pyx_v_norm_mv.strides[0]) )) + __pyx_t_30)) )) = (__pyx_v_adj / __pyx_v_denom);
               }
             }
-            __pyx_L38:;
+            __pyx_L37:;
 
-            /* "sketch_kernels.pyx":264
+            /* "sketch_kernels.pyx":355
  *                     raw_mv[s, v] += acc
  * 
  *             if norm_mode == 1:             # <<<<<<<<<<<<<<
  *                 mu_value = mean_vec[s]
  *                 denom = 0.0
  */
-            goto __pyx_L35;
-          }
+            break;
+            case 2:
 
-          /* "sketch_kernels.pyx":279
- *                         norm_mv[s, v] = adj / denom
- *             else:
+            /* "sketch_kernels.pyx":372
+ *                 # (2026-07-22) "mean" sketch_norm -- see the identical branch
+ *                 # in build_sketch_matrix for the full rationale.
  *                 mean = 0.0             # <<<<<<<<<<<<<<
  *                 for v in range(n_vectors):
  *                     mean += raw_mv[s, v]
  */
-          /*else*/ {
             __pyx_v_mean = 0.0;
 
-            /* "sketch_kernels.pyx":280
- *             else:
+            /* "sketch_kernels.pyx":373
+ *                 # in build_sketch_matrix for the full rationale.
  *                 mean = 0.0
  *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
  *                     mean += raw_mv[s, v]
@@ -23676,7 +24934,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
             for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
               __pyx_v_v = __pyx_t_18;
 
-              /* "sketch_kernels.pyx":281
+              /* "sketch_kernels.pyx":374
  *                 mean = 0.0
  *                 for v in range(n_vectors):
  *                     mean += raw_mv[s, v]             # <<<<<<<<<<<<<<
@@ -23688,7 +24946,104 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
               __pyx_v_mean = (__pyx_v_mean + (*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_30 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_29)) ))));
             }
 
-            /* "sketch_kernels.pyx":282
+            /* "sketch_kernels.pyx":375
+ *                 for v in range(n_vectors):
+ *                     mean += raw_mv[s, v]
+ *                 if n_vectors > 0:             # <<<<<<<<<<<<<<
+ *                     mean /= n_vectors
+ *                 for v in range(n_vectors):
+ */
+            __pyx_t_4 = (__pyx_v_n_vectors > 0);
+            if (__pyx_t_4) {
+
+              /* "sketch_kernels.pyx":376
+ *                     mean += raw_mv[s, v]
+ *                 if n_vectors > 0:
+ *                     mean /= n_vectors             # <<<<<<<<<<<<<<
+ *                 for v in range(n_vectors):
+ *                     norm_mv[s, v] = raw_mv[s, v] - mean
+ */
+              __pyx_v_mean = (__pyx_v_mean / __pyx_v_n_vectors);
+
+              /* "sketch_kernels.pyx":375
+ *                 for v in range(n_vectors):
+ *                     mean += raw_mv[s, v]
+ *                 if n_vectors > 0:             # <<<<<<<<<<<<<<
+ *                     mean /= n_vectors
+ *                 for v in range(n_vectors):
+ */
+            }
+
+            /* "sketch_kernels.pyx":377
+ *                 if n_vectors > 0:
+ *                     mean /= n_vectors
+ *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
+ *                     norm_mv[s, v] = raw_mv[s, v] - mean
+ *             else:
+ */
+            __pyx_t_16 = __pyx_v_n_vectors;
+            __pyx_t_17 = __pyx_t_16;
+            for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
+              __pyx_v_v = __pyx_t_18;
+
+              /* "sketch_kernels.pyx":378
+ *                     mean /= n_vectors
+ *                 for v in range(n_vectors):
+ *                     norm_mv[s, v] = raw_mv[s, v] - mean             # <<<<<<<<<<<<<<
+ *             else:
+ *                 mean = 0.0
+ */
+              __pyx_t_29 = __pyx_v_s;
+              __pyx_t_30 = __pyx_v_v;
+              __pyx_t_28 = __pyx_v_s;
+              __pyx_t_19 = __pyx_v_v;
+              *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_norm_mv.data + __pyx_t_28 * __pyx_v_norm_mv.strides[0]) )) + __pyx_t_19)) )) = ((*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_29 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_30)) ))) - __pyx_v_mean);
+            }
+
+            /* "sketch_kernels.pyx":369
+ *                         adj = raw_mv[s, v] - mu_value * random_sums[v]
+ *                         norm_mv[s, v] = adj / denom
+ *             elif norm_mode == 2:             # <<<<<<<<<<<<<<
+ *                 # (2026-07-22) "mean" sketch_norm -- see the identical branch
+ *                 # in build_sketch_matrix for the full rationale.
+ */
+            break;
+            default:
+
+            /* "sketch_kernels.pyx":380
+ *                     norm_mv[s, v] = raw_mv[s, v] - mean
+ *             else:
+ *                 mean = 0.0             # <<<<<<<<<<<<<<
+ *                 for v in range(n_vectors):
+ *                     mean += raw_mv[s, v]
+ */
+            __pyx_v_mean = 0.0;
+
+            /* "sketch_kernels.pyx":381
+ *             else:
+ *                 mean = 0.0
+ *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
+ *                     mean += raw_mv[s, v]
+ *                 if n_vectors > 0:
+ */
+            __pyx_t_16 = __pyx_v_n_vectors;
+            __pyx_t_17 = __pyx_t_16;
+            for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
+              __pyx_v_v = __pyx_t_18;
+
+              /* "sketch_kernels.pyx":382
+ *                 mean = 0.0
+ *                 for v in range(n_vectors):
+ *                     mean += raw_mv[s, v]             # <<<<<<<<<<<<<<
+ *                 if n_vectors > 0:
+ *                     mean /= n_vectors
+ */
+              __pyx_t_30 = __pyx_v_s;
+              __pyx_t_29 = __pyx_v_v;
+              __pyx_v_mean = (__pyx_v_mean + (*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_30 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_29)) ))));
+            }
+
+            /* "sketch_kernels.pyx":383
  *                 for v in range(n_vectors):
  *                     mean += raw_mv[s, v]
  *                 if n_vectors > 0:             # <<<<<<<<<<<<<<
@@ -23698,7 +25053,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
             __pyx_t_4 = (__pyx_v_n_vectors > 0);
             if (__pyx_t_4) {
 
-              /* "sketch_kernels.pyx":283
+              /* "sketch_kernels.pyx":384
  *                     mean += raw_mv[s, v]
  *                 if n_vectors > 0:
  *                     mean /= n_vectors             # <<<<<<<<<<<<<<
@@ -23707,7 +25062,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
               __pyx_v_mean = (__pyx_v_mean / __pyx_v_n_vectors);
 
-              /* "sketch_kernels.pyx":282
+              /* "sketch_kernels.pyx":383
  *                 for v in range(n_vectors):
  *                     mean += raw_mv[s, v]
  *                 if n_vectors > 0:             # <<<<<<<<<<<<<<
@@ -23716,7 +25071,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
             }
 
-            /* "sketch_kernels.pyx":285
+            /* "sketch_kernels.pyx":386
  *                     mean /= n_vectors
  * 
  *                 var_acc = 0.0             # <<<<<<<<<<<<<<
@@ -23725,7 +25080,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
             __pyx_v_var_acc = 0.0;
 
-            /* "sketch_kernels.pyx":286
+            /* "sketch_kernels.pyx":387
  * 
  *                 var_acc = 0.0
  *                 for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -23737,7 +25092,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
             for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
               __pyx_v_v = __pyx_t_18;
 
-              /* "sketch_kernels.pyx":287
+              /* "sketch_kernels.pyx":388
  *                 var_acc = 0.0
  *                 for v in range(n_vectors):
  *                     centered = raw_mv[s, v] - mean             # <<<<<<<<<<<<<<
@@ -23748,7 +25103,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
               __pyx_t_30 = __pyx_v_v;
               __pyx_v_centered = ((*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_29 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_30)) ))) - __pyx_v_mean);
 
-              /* "sketch_kernels.pyx":288
+              /* "sketch_kernels.pyx":389
  *                 for v in range(n_vectors):
  *                     centered = raw_mv[s, v] - mean
  *                     var_acc += centered * centered             # <<<<<<<<<<<<<<
@@ -23758,7 +25113,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
               __pyx_v_var_acc = (__pyx_v_var_acc + (__pyx_v_centered * __pyx_v_centered));
             }
 
-            /* "sketch_kernels.pyx":290
+            /* "sketch_kernels.pyx":391
  *                     var_acc += centered * centered
  * 
  *                 denom = sqrt(var_acc / n_vectors) if n_vectors > 0 else 0.0             # <<<<<<<<<<<<<<
@@ -23773,7 +25128,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
             }
             __pyx_v_denom = __pyx_t_31;
 
-            /* "sketch_kernels.pyx":291
+            /* "sketch_kernels.pyx":392
  * 
  *                 denom = sqrt(var_acc / n_vectors) if n_vectors > 0 else 0.0
  *                 if denom <= 0.0 or denom != denom:             # <<<<<<<<<<<<<<
@@ -23784,14 +25139,14 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
             if (!__pyx_t_5) {
             } else {
               __pyx_t_4 = __pyx_t_5;
-              goto __pyx_L51_bool_binop_done;
+              goto __pyx_L55_bool_binop_done;
             }
             __pyx_t_5 = (__pyx_v_denom != __pyx_v_denom);
             __pyx_t_4 = __pyx_t_5;
-            __pyx_L51_bool_binop_done:;
+            __pyx_L55_bool_binop_done:;
             if (__pyx_t_4) {
 
-              /* "sketch_kernels.pyx":292
+              /* "sketch_kernels.pyx":393
  *                 denom = sqrt(var_acc / n_vectors) if n_vectors > 0 else 0.0
  *                 if denom <= 0.0 or denom != denom:
  *                     for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -23803,7 +25158,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
               for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
                 __pyx_v_v = __pyx_t_18;
 
-                /* "sketch_kernels.pyx":293
+                /* "sketch_kernels.pyx":394
  *                 if denom <= 0.0 or denom != denom:
  *                     for v in range(n_vectors):
  *                         norm_mv[s, v] = 0.0             # <<<<<<<<<<<<<<
@@ -23815,17 +25170,17 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
                 *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_norm_mv.data + __pyx_t_30 * __pyx_v_norm_mv.strides[0]) )) + __pyx_t_29)) )) = 0.0;
               }
 
-              /* "sketch_kernels.pyx":291
+              /* "sketch_kernels.pyx":392
  * 
  *                 denom = sqrt(var_acc / n_vectors) if n_vectors > 0 else 0.0
  *                 if denom <= 0.0 or denom != denom:             # <<<<<<<<<<<<<<
  *                     for v in range(n_vectors):
  *                         norm_mv[s, v] = 0.0
  */
-              goto __pyx_L50;
+              goto __pyx_L54;
             }
 
-            /* "sketch_kernels.pyx":295
+            /* "sketch_kernels.pyx":396
  *                         norm_mv[s, v] = 0.0
  *                 else:
  *                     for v in range(n_vectors):             # <<<<<<<<<<<<<<
@@ -23838,7 +25193,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
               for (__pyx_t_18 = 0; __pyx_t_18 < __pyx_t_17; __pyx_t_18+=1) {
                 __pyx_v_v = __pyx_t_18;
 
-                /* "sketch_kernels.pyx":296
+                /* "sketch_kernels.pyx":397
  *                 else:
  *                     for v in range(n_vectors):
  *                         centered = raw_mv[s, v] - mean             # <<<<<<<<<<<<<<
@@ -23849,7 +25204,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
                 __pyx_t_30 = __pyx_v_v;
                 __pyx_v_centered = ((*((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_raw_mv.data + __pyx_t_29 * __pyx_v_raw_mv.strides[0]) )) + __pyx_t_30)) ))) - __pyx_v_mean);
 
-                /* "sketch_kernels.pyx":297
+                /* "sketch_kernels.pyx":398
  *                     for v in range(n_vectors):
  *                         centered = raw_mv[s, v] - mean
  *                         norm_mv[s, v] = centered / denom             # <<<<<<<<<<<<<<
@@ -23861,13 +25216,13 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
                 *((double *) ( /* dim=1 */ ((char *) (((double *) ( /* dim=0 */ (__pyx_v_norm_mv.data + __pyx_t_30 * __pyx_v_norm_mv.strides[0]) )) + __pyx_t_29)) )) = (__pyx_v_centered / __pyx_v_denom);
               }
             }
-            __pyx_L50:;
+            __pyx_L54:;
+            break;
           }
-          __pyx_L35:;
         }
       }
 
-      /* "sketch_kernels.pyx":243
+      /* "sketch_kernels.pyx":334
  *     cdef double acc, mean, var_acc, denom, centered, mu_value, adj, val
  * 
  *     with nogil:             # <<<<<<<<<<<<<<
@@ -23886,7 +25241,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
       }
   }
 
-  /* "sketch_kernels.pyx":299
+  /* "sketch_kernels.pyx":400
  *                         norm_mv[s, v] = centered / denom
  * 
  *     return updated, raw, norm             # <<<<<<<<<<<<<<
@@ -23894,22 +25249,22 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  * 
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_2 = PyTuple_New(3); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 299, __pyx_L1_error)
+  __pyx_t_2 = PyTuple_New(3); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 400, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_INCREF((PyObject *)__pyx_v_updated);
   __Pyx_GIVEREF((PyObject *)__pyx_v_updated);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 0, ((PyObject *)__pyx_v_updated))) __PYX_ERR(0, 299, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 0, ((PyObject *)__pyx_v_updated))) __PYX_ERR(0, 400, __pyx_L1_error);
   __Pyx_INCREF((PyObject *)__pyx_v_raw);
   __Pyx_GIVEREF((PyObject *)__pyx_v_raw);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 1, ((PyObject *)__pyx_v_raw))) __PYX_ERR(0, 299, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 1, ((PyObject *)__pyx_v_raw))) __PYX_ERR(0, 400, __pyx_L1_error);
   __Pyx_INCREF((PyObject *)__pyx_v_norm);
   __Pyx_GIVEREF((PyObject *)__pyx_v_norm);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 2, ((PyObject *)__pyx_v_norm))) __PYX_ERR(0, 299, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 2, ((PyObject *)__pyx_v_norm))) __PYX_ERR(0, 400, __pyx_L1_error);
   __pyx_r = __pyx_t_2;
   __pyx_t_2 = 0;
   goto __pyx_L0;
 
-  /* "sketch_kernels.pyx":197
+  /* "sketch_kernels.pyx":288
  * 
  * 
  * def incremental_combine_and_normalize(double[:, :, ::1] base_dots,             # <<<<<<<<<<<<<<
@@ -23953,7 +25308,7 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
   return __pyx_r;
 }
 
-/* "sketch_kernels.pyx":302
+/* "sketch_kernels.pyx":403
  * 
  * 
  * def compute_constant_flags(double[:] sum1,             # <<<<<<<<<<<<<<
@@ -23962,16 +25317,16 @@ static PyObject *__pyx_pf_14sketch_kernels_6incremental_combine_and_normalize(CY
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_14sketch_kernels_9compute_constant_flags(PyObject *__pyx_self, 
+static PyObject *__pyx_pw_14sketch_kernels_11compute_constant_flags(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-PyDoc_STRVAR(__pyx_doc_14sketch_kernels_8compute_constant_flags, "Compute near-constant and spiked flags from raw moment sums.");
-static PyMethodDef __pyx_mdef_14sketch_kernels_9compute_constant_flags = {"compute_constant_flags", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_14sketch_kernels_9compute_constant_flags, __Pyx_METH_FASTCALL|METH_KEYWORDS, __pyx_doc_14sketch_kernels_8compute_constant_flags};
-static PyObject *__pyx_pw_14sketch_kernels_9compute_constant_flags(PyObject *__pyx_self, 
+PyDoc_STRVAR(__pyx_doc_14sketch_kernels_10compute_constant_flags, "Compute near-constant and spiked flags from raw moment sums.");
+static PyMethodDef __pyx_mdef_14sketch_kernels_11compute_constant_flags = {"compute_constant_flags", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_14sketch_kernels_11compute_constant_flags, __Pyx_METH_FASTCALL|METH_KEYWORDS, __pyx_doc_14sketch_kernels_10compute_constant_flags};
+static PyObject *__pyx_pw_14sketch_kernels_11compute_constant_flags(PyObject *__pyx_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 #else
@@ -24033,7 +25388,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[0]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 302, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 403, __pyx_L3_error)
         else goto __pyx_L5_argtuple_error;
         CYTHON_FALLTHROUGH;
         case  1:
@@ -24041,9 +25396,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[1]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 302, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 403, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("compute_constant_flags", 0, 5, 7, 1); __PYX_ERR(0, 302, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("compute_constant_flags", 0, 5, 7, 1); __PYX_ERR(0, 403, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  2:
@@ -24051,9 +25406,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[2]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 302, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 403, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("compute_constant_flags", 0, 5, 7, 2); __PYX_ERR(0, 302, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("compute_constant_flags", 0, 5, 7, 2); __PYX_ERR(0, 403, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  3:
@@ -24061,9 +25416,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[3]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 302, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 403, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("compute_constant_flags", 0, 5, 7, 3); __PYX_ERR(0, 302, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("compute_constant_flags", 0, 5, 7, 3); __PYX_ERR(0, 403, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  4:
@@ -24071,28 +25426,28 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[4]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 302, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 403, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("compute_constant_flags", 0, 5, 7, 4); __PYX_ERR(0, 302, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("compute_constant_flags", 0, 5, 7, 4); __PYX_ERR(0, 403, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  5:
         if (kw_args > 0) {
           PyObject* value = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_std_thresh);
           if (value) { values[5] = __Pyx_Arg_NewRef_FASTCALL(value); kw_args--; }
-          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 302, __pyx_L3_error)
+          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 403, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  6:
         if (kw_args > 0) {
           PyObject* value = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_kurt_thresh);
           if (value) { values[6] = __Pyx_Arg_NewRef_FASTCALL(value); kw_args--; }
-          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 302, __pyx_L3_error)
+          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 403, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
         const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "compute_constant_flags") < 0)) __PYX_ERR(0, 302, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "compute_constant_flags") < 0)) __PYX_ERR(0, 403, __pyx_L3_error)
       }
     } else {
       switch (__pyx_nargs) {
@@ -24109,25 +25464,25 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
         default: goto __pyx_L5_argtuple_error;
       }
     }
-    __pyx_v_sum1 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_sum1.memview)) __PYX_ERR(0, 302, __pyx_L3_error)
-    __pyx_v_sum2 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_sum2.memview)) __PYX_ERR(0, 303, __pyx_L3_error)
-    __pyx_v_sum3 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_sum3.memview)) __PYX_ERR(0, 304, __pyx_L3_error)
-    __pyx_v_sum4 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_sum4.memview)) __PYX_ERR(0, 305, __pyx_L3_error)
-    __pyx_v_n = __Pyx_PyInt_As_long(values[4]); if (unlikely((__pyx_v_n == (long)-1) && PyErr_Occurred())) __PYX_ERR(0, 306, __pyx_L3_error)
+    __pyx_v_sum1 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_sum1.memview)) __PYX_ERR(0, 403, __pyx_L3_error)
+    __pyx_v_sum2 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_sum2.memview)) __PYX_ERR(0, 404, __pyx_L3_error)
+    __pyx_v_sum3 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_sum3.memview)) __PYX_ERR(0, 405, __pyx_L3_error)
+    __pyx_v_sum4 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_sum4.memview)) __PYX_ERR(0, 406, __pyx_L3_error)
+    __pyx_v_n = __Pyx_PyInt_As_long(values[4]); if (unlikely((__pyx_v_n == (long)-1) && PyErr_Occurred())) __PYX_ERR(0, 407, __pyx_L3_error)
     if (values[5]) {
-      __pyx_v_std_thresh = __pyx_PyFloat_AsDouble(values[5]); if (unlikely((__pyx_v_std_thresh == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 307, __pyx_L3_error)
+      __pyx_v_std_thresh = __pyx_PyFloat_AsDouble(values[5]); if (unlikely((__pyx_v_std_thresh == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 408, __pyx_L3_error)
     } else {
       __pyx_v_std_thresh = ((double)((double)1e-3));
     }
     if (values[6]) {
-      __pyx_v_kurt_thresh = __pyx_PyFloat_AsDouble(values[6]); if (unlikely((__pyx_v_kurt_thresh == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 308, __pyx_L3_error)
+      __pyx_v_kurt_thresh = __pyx_PyFloat_AsDouble(values[6]); if (unlikely((__pyx_v_kurt_thresh == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 409, __pyx_L3_error)
     } else {
       __pyx_v_kurt_thresh = ((double)((double)5.0));
     }
   }
   goto __pyx_L6_skip;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("compute_constant_flags", 0, 5, 7, __pyx_nargs); __PYX_ERR(0, 302, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("compute_constant_flags", 0, 5, 7, __pyx_nargs); __PYX_ERR(0, 403, __pyx_L3_error)
   __pyx_L6_skip:;
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
@@ -24145,7 +25500,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_14sketch_kernels_8compute_constant_flags(__pyx_self, __pyx_v_sum1, __pyx_v_sum2, __pyx_v_sum3, __pyx_v_sum4, __pyx_v_n, __pyx_v_std_thresh, __pyx_v_kurt_thresh);
+  __pyx_r = __pyx_pf_14sketch_kernels_10compute_constant_flags(__pyx_self, __pyx_v_sum1, __pyx_v_sum2, __pyx_v_sum3, __pyx_v_sum4, __pyx_v_n, __pyx_v_std_thresh, __pyx_v_kurt_thresh);
 
   /* function exit code */
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_sum1, 1);
@@ -24162,7 +25517,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_sum1, __Pyx_memviewslice __pyx_v_sum2, __Pyx_memviewslice __pyx_v_sum3, __Pyx_memviewslice __pyx_v_sum4, long __pyx_v_n, double __pyx_v_std_thresh, double __pyx_v_kurt_thresh) {
+static PyObject *__pyx_pf_14sketch_kernels_10compute_constant_flags(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_sum1, __Pyx_memviewslice __pyx_v_sum2, __Pyx_memviewslice __pyx_v_sum3, __Pyx_memviewslice __pyx_v_sum4, long __pyx_v_n, double __pyx_v_std_thresh, double __pyx_v_kurt_thresh) {
   Py_ssize_t __pyx_v_n_series;
   PyArrayObject *__pyx_v_const_flags = 0;
   PyArrayObject *__pyx_v_spiked_flags = 0;
@@ -24212,7 +25567,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
   __pyx_pybuffernd_spiked_flags.data = NULL;
   __pyx_pybuffernd_spiked_flags.rcbuffer = &__pyx_pybuffer_spiked_flags;
 
-  /* "sketch_kernels.pyx":310
+  /* "sketch_kernels.pyx":411
  *                            double kurt_thresh=5.0):
  *     """Compute near-constant and spiked flags from raw moment sums."""
  *     cdef Py_ssize_t n_series = sum1.shape[0]             # <<<<<<<<<<<<<<
@@ -24221,78 +25576,78 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
   __pyx_v_n_series = (__pyx_v_sum1.shape[0]);
 
-  /* "sketch_kernels.pyx":311
+  /* "sketch_kernels.pyx":412
  *     """Compute near-constant and spiked flags from raw moment sums."""
  *     cdef Py_ssize_t n_series = sum1.shape[0]
  *     cdef np.ndarray[np.uint8_t, ndim=1] const_flags = np.empty(             # <<<<<<<<<<<<<<
  *         n_series,
  *         dtype=np.uint8,
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 311, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 412, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_empty); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 311, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_empty); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 412, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
 
-  /* "sketch_kernels.pyx":312
+  /* "sketch_kernels.pyx":413
  *     cdef Py_ssize_t n_series = sum1.shape[0]
  *     cdef np.ndarray[np.uint8_t, ndim=1] const_flags = np.empty(
  *         n_series,             # <<<<<<<<<<<<<<
  *         dtype=np.uint8,
  *     )
  */
-  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 312, __pyx_L1_error)
+  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 413, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
 
-  /* "sketch_kernels.pyx":311
+  /* "sketch_kernels.pyx":412
  *     """Compute near-constant and spiked flags from raw moment sums."""
  *     cdef Py_ssize_t n_series = sum1.shape[0]
  *     cdef np.ndarray[np.uint8_t, ndim=1] const_flags = np.empty(             # <<<<<<<<<<<<<<
  *         n_series,
  *         dtype=np.uint8,
  */
-  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 311, __pyx_L1_error)
+  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 412, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_GIVEREF(__pyx_t_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_1)) __PYX_ERR(0, 311, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_1)) __PYX_ERR(0, 412, __pyx_L1_error);
   __pyx_t_1 = 0;
 
-  /* "sketch_kernels.pyx":313
+  /* "sketch_kernels.pyx":414
  *     cdef np.ndarray[np.uint8_t, ndim=1] const_flags = np.empty(
  *         n_series,
  *         dtype=np.uint8,             # <<<<<<<<<<<<<<
  *     )
  *     cdef np.ndarray[np.uint8_t, ndim=1] spiked_flags = np.empty(
  */
-  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 313, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 414, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 313, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 414, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_uint8); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 313, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_uint8); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 414, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 313, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 414, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
 
-  /* "sketch_kernels.pyx":311
+  /* "sketch_kernels.pyx":412
  *     """Compute near-constant and spiked flags from raw moment sums."""
  *     cdef Py_ssize_t n_series = sum1.shape[0]
  *     cdef np.ndarray[np.uint8_t, ndim=1] const_flags = np.empty(             # <<<<<<<<<<<<<<
  *         n_series,
  *         dtype=np.uint8,
  */
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_3, __pyx_t_1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 311, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_3, __pyx_t_1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 412, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  if (!(likely(((__pyx_t_5) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_5, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 311, __pyx_L1_error)
+  if (!(likely(((__pyx_t_5) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_5, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 412, __pyx_L1_error)
   __pyx_t_6 = ((PyArrayObject *)__pyx_t_5);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
     if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_const_flags.rcbuffer->pybuffer, (PyObject*)__pyx_t_6, &__Pyx_TypeInfo_nn___pyx_t_5numpy_uint8_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) {
       __pyx_v_const_flags = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_const_flags.rcbuffer->pybuffer.buf = NULL;
-      __PYX_ERR(0, 311, __pyx_L1_error)
+      __PYX_ERR(0, 412, __pyx_L1_error)
     } else {__pyx_pybuffernd_const_flags.diminfo[0].strides = __pyx_pybuffernd_const_flags.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_const_flags.diminfo[0].shape = __pyx_pybuffernd_const_flags.rcbuffer->pybuffer.shape[0];
     }
   }
@@ -24300,78 +25655,78 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
   __pyx_v_const_flags = ((PyArrayObject *)__pyx_t_5);
   __pyx_t_5 = 0;
 
-  /* "sketch_kernels.pyx":315
+  /* "sketch_kernels.pyx":416
  *         dtype=np.uint8,
  *     )
  *     cdef np.ndarray[np.uint8_t, ndim=1] spiked_flags = np.empty(             # <<<<<<<<<<<<<<
  *         n_series,
  *         dtype=np.uint8,
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 315, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 416, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_empty); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 315, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_empty); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 416, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
 
-  /* "sketch_kernels.pyx":316
+  /* "sketch_kernels.pyx":417
  *     )
  *     cdef np.ndarray[np.uint8_t, ndim=1] spiked_flags = np.empty(
  *         n_series,             # <<<<<<<<<<<<<<
  *         dtype=np.uint8,
  *     )
  */
-  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 316, __pyx_L1_error)
+  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_n_series); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 417, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
 
-  /* "sketch_kernels.pyx":315
+  /* "sketch_kernels.pyx":416
  *         dtype=np.uint8,
  *     )
  *     cdef np.ndarray[np.uint8_t, ndim=1] spiked_flags = np.empty(             # <<<<<<<<<<<<<<
  *         n_series,
  *         dtype=np.uint8,
  */
-  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 315, __pyx_L1_error)
+  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 416, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_5)) __PYX_ERR(0, 315, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_5)) __PYX_ERR(0, 416, __pyx_L1_error);
   __pyx_t_5 = 0;
 
-  /* "sketch_kernels.pyx":317
+  /* "sketch_kernels.pyx":418
  *     cdef np.ndarray[np.uint8_t, ndim=1] spiked_flags = np.empty(
  *         n_series,
  *         dtype=np.uint8,             # <<<<<<<<<<<<<<
  *     )
  *     cdef unsigned char[:] const_mv = const_flags
  */
-  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 317, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 418, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 317, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 418, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_uint8); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 317, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_uint8); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 418, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_4) < 0) __PYX_ERR(0, 317, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_4) < 0) __PYX_ERR(0, 418, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
 
-  /* "sketch_kernels.pyx":315
+  /* "sketch_kernels.pyx":416
  *         dtype=np.uint8,
  *     )
  *     cdef np.ndarray[np.uint8_t, ndim=1] spiked_flags = np.empty(             # <<<<<<<<<<<<<<
  *         n_series,
  *         dtype=np.uint8,
  */
-  __pyx_t_4 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_3, __pyx_t_5); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 315, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_3, __pyx_t_5); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 416, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (!(likely(((__pyx_t_4) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_4, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 315, __pyx_L1_error)
+  if (!(likely(((__pyx_t_4) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_4, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 416, __pyx_L1_error)
   __pyx_t_7 = ((PyArrayObject *)__pyx_t_4);
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
     if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_spiked_flags.rcbuffer->pybuffer, (PyObject*)__pyx_t_7, &__Pyx_TypeInfo_nn___pyx_t_5numpy_uint8_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) {
       __pyx_v_spiked_flags = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_spiked_flags.rcbuffer->pybuffer.buf = NULL;
-      __PYX_ERR(0, 315, __pyx_L1_error)
+      __PYX_ERR(0, 416, __pyx_L1_error)
     } else {__pyx_pybuffernd_spiked_flags.diminfo[0].strides = __pyx_pybuffernd_spiked_flags.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_spiked_flags.diminfo[0].shape = __pyx_pybuffernd_spiked_flags.rcbuffer->pybuffer.shape[0];
     }
   }
@@ -24379,31 +25734,31 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
   __pyx_v_spiked_flags = ((PyArrayObject *)__pyx_t_4);
   __pyx_t_4 = 0;
 
-  /* "sketch_kernels.pyx":319
+  /* "sketch_kernels.pyx":420
  *         dtype=np.uint8,
  *     )
  *     cdef unsigned char[:] const_mv = const_flags             # <<<<<<<<<<<<<<
  *     cdef unsigned char[:] spiked_mv = spiked_flags
  *     cdef Py_ssize_t i
  */
-  __pyx_t_8 = __Pyx_PyObject_to_MemoryviewSlice_ds_unsigned_char(((PyObject *)__pyx_v_const_flags), PyBUF_WRITABLE); if (unlikely(!__pyx_t_8.memview)) __PYX_ERR(0, 319, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_to_MemoryviewSlice_ds_unsigned_char(((PyObject *)__pyx_v_const_flags), PyBUF_WRITABLE); if (unlikely(!__pyx_t_8.memview)) __PYX_ERR(0, 420, __pyx_L1_error)
   __pyx_v_const_mv = __pyx_t_8;
   __pyx_t_8.memview = NULL;
   __pyx_t_8.data = NULL;
 
-  /* "sketch_kernels.pyx":320
+  /* "sketch_kernels.pyx":421
  *     )
  *     cdef unsigned char[:] const_mv = const_flags
  *     cdef unsigned char[:] spiked_mv = spiked_flags             # <<<<<<<<<<<<<<
  *     cdef Py_ssize_t i
  *     cdef double mean, var_sum, mu4_sum, var, kurt
  */
-  __pyx_t_8 = __Pyx_PyObject_to_MemoryviewSlice_ds_unsigned_char(((PyObject *)__pyx_v_spiked_flags), PyBUF_WRITABLE); if (unlikely(!__pyx_t_8.memview)) __PYX_ERR(0, 320, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_to_MemoryviewSlice_ds_unsigned_char(((PyObject *)__pyx_v_spiked_flags), PyBUF_WRITABLE); if (unlikely(!__pyx_t_8.memview)) __PYX_ERR(0, 421, __pyx_L1_error)
   __pyx_v_spiked_mv = __pyx_t_8;
   __pyx_t_8.memview = NULL;
   __pyx_t_8.data = NULL;
 
-  /* "sketch_kernels.pyx":323
+  /* "sketch_kernels.pyx":424
  *     cdef Py_ssize_t i
  *     cdef double mean, var_sum, mu4_sum, var, kurt
  *     cdef double n_d = <double>n             # <<<<<<<<<<<<<<
@@ -24412,7 +25767,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
   __pyx_v_n_d = ((double)__pyx_v_n);
 
-  /* "sketch_kernels.pyx":324
+  /* "sketch_kernels.pyx":425
  *     cdef double mean, var_sum, mu4_sum, var, kurt
  *     cdef double n_d = <double>n
  *     cdef double var_thresh = std_thresh * std_thresh * n_d             # <<<<<<<<<<<<<<
@@ -24421,7 +25776,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
   __pyx_v_var_thresh = ((__pyx_v_std_thresh * __pyx_v_std_thresh) * __pyx_v_n_d);
 
-  /* "sketch_kernels.pyx":326
+  /* "sketch_kernels.pyx":427
  *     cdef double var_thresh = std_thresh * std_thresh * n_d
  * 
  *     with nogil:             # <<<<<<<<<<<<<<
@@ -24437,7 +25792,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
       #endif
       /*try:*/ {
 
-        /* "sketch_kernels.pyx":327
+        /* "sketch_kernels.pyx":428
  * 
  *     with nogil:
  *         for i in range(n_series):             # <<<<<<<<<<<<<<
@@ -24449,7 +25804,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
         for (__pyx_t_11 = 0; __pyx_t_11 < __pyx_t_10; __pyx_t_11+=1) {
           __pyx_v_i = __pyx_t_11;
 
-          /* "sketch_kernels.pyx":328
+          /* "sketch_kernels.pyx":429
  *     with nogil:
  *         for i in range(n_series):
  *             if n <= 0:             # <<<<<<<<<<<<<<
@@ -24459,7 +25814,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
           __pyx_t_12 = (__pyx_v_n <= 0);
           if (__pyx_t_12) {
 
-            /* "sketch_kernels.pyx":329
+            /* "sketch_kernels.pyx":430
  *         for i in range(n_series):
  *             if n <= 0:
  *                 const_mv[i] = 1             # <<<<<<<<<<<<<<
@@ -24469,7 +25824,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
             __pyx_t_13 = __pyx_v_i;
             *((unsigned char *) ( /* dim=0 */ (__pyx_v_const_mv.data + __pyx_t_13 * __pyx_v_const_mv.strides[0]) )) = 1;
 
-            /* "sketch_kernels.pyx":330
+            /* "sketch_kernels.pyx":431
  *             if n <= 0:
  *                 const_mv[i] = 1
  *                 spiked_mv[i] = 0             # <<<<<<<<<<<<<<
@@ -24479,7 +25834,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
             __pyx_t_13 = __pyx_v_i;
             *((unsigned char *) ( /* dim=0 */ (__pyx_v_spiked_mv.data + __pyx_t_13 * __pyx_v_spiked_mv.strides[0]) )) = 0;
 
-            /* "sketch_kernels.pyx":331
+            /* "sketch_kernels.pyx":432
  *                 const_mv[i] = 1
  *                 spiked_mv[i] = 0
  *                 continue             # <<<<<<<<<<<<<<
@@ -24488,7 +25843,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
             goto __pyx_L6_continue;
 
-            /* "sketch_kernels.pyx":328
+            /* "sketch_kernels.pyx":429
  *     with nogil:
  *         for i in range(n_series):
  *             if n <= 0:             # <<<<<<<<<<<<<<
@@ -24497,7 +25852,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
           }
 
-          /* "sketch_kernels.pyx":332
+          /* "sketch_kernels.pyx":433
  *                 spiked_mv[i] = 0
  *                 continue
  *             mean = sum1[i] / n_d             # <<<<<<<<<<<<<<
@@ -24507,7 +25862,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
           __pyx_t_13 = __pyx_v_i;
           __pyx_v_mean = ((*((double *) ( /* dim=0 */ (__pyx_v_sum1.data + __pyx_t_13 * __pyx_v_sum1.strides[0]) ))) / __pyx_v_n_d);
 
-          /* "sketch_kernels.pyx":333
+          /* "sketch_kernels.pyx":434
  *                 continue
  *             mean = sum1[i] / n_d
  *             var_sum = sum2[i] - (sum1[i] * sum1[i]) / n_d             # <<<<<<<<<<<<<<
@@ -24519,7 +25874,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
           __pyx_t_15 = __pyx_v_i;
           __pyx_v_var_sum = ((*((double *) ( /* dim=0 */ (__pyx_v_sum2.data + __pyx_t_13 * __pyx_v_sum2.strides[0]) ))) - (((*((double *) ( /* dim=0 */ (__pyx_v_sum1.data + __pyx_t_14 * __pyx_v_sum1.strides[0]) ))) * (*((double *) ( /* dim=0 */ (__pyx_v_sum1.data + __pyx_t_15 * __pyx_v_sum1.strides[0]) )))) / __pyx_v_n_d));
 
-          /* "sketch_kernels.pyx":334
+          /* "sketch_kernels.pyx":435
  *             mean = sum1[i] / n_d
  *             var_sum = sum2[i] - (sum1[i] * sum1[i]) / n_d
  *             if var_sum < 0.0:             # <<<<<<<<<<<<<<
@@ -24529,7 +25884,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
           __pyx_t_12 = (__pyx_v_var_sum < 0.0);
           if (__pyx_t_12) {
 
-            /* "sketch_kernels.pyx":335
+            /* "sketch_kernels.pyx":436
  *             var_sum = sum2[i] - (sum1[i] * sum1[i]) / n_d
  *             if var_sum < 0.0:
  *                 var_sum = 0.0             # <<<<<<<<<<<<<<
@@ -24538,7 +25893,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
             __pyx_v_var_sum = 0.0;
 
-            /* "sketch_kernels.pyx":334
+            /* "sketch_kernels.pyx":435
  *             mean = sum1[i] / n_d
  *             var_sum = sum2[i] - (sum1[i] * sum1[i]) / n_d
  *             if var_sum < 0.0:             # <<<<<<<<<<<<<<
@@ -24547,7 +25902,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
           }
 
-          /* "sketch_kernels.pyx":336
+          /* "sketch_kernels.pyx":437
  *             if var_sum < 0.0:
  *                 var_sum = 0.0
  *             if var_sum <= var_thresh:             # <<<<<<<<<<<<<<
@@ -24557,7 +25912,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
           __pyx_t_12 = (__pyx_v_var_sum <= __pyx_v_var_thresh);
           if (__pyx_t_12) {
 
-            /* "sketch_kernels.pyx":337
+            /* "sketch_kernels.pyx":438
  *                 var_sum = 0.0
  *             if var_sum <= var_thresh:
  *                 const_mv[i] = 1             # <<<<<<<<<<<<<<
@@ -24567,7 +25922,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
             __pyx_t_15 = __pyx_v_i;
             *((unsigned char *) ( /* dim=0 */ (__pyx_v_const_mv.data + __pyx_t_15 * __pyx_v_const_mv.strides[0]) )) = 1;
 
-            /* "sketch_kernels.pyx":336
+            /* "sketch_kernels.pyx":437
  *             if var_sum < 0.0:
  *                 var_sum = 0.0
  *             if var_sum <= var_thresh:             # <<<<<<<<<<<<<<
@@ -24577,7 +25932,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
             goto __pyx_L10;
           }
 
-          /* "sketch_kernels.pyx":339
+          /* "sketch_kernels.pyx":440
  *                 const_mv[i] = 1
  *             else:
  *                 const_mv[i] = 0             # <<<<<<<<<<<<<<
@@ -24590,7 +25945,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
           }
           __pyx_L10:;
 
-          /* "sketch_kernels.pyx":341
+          /* "sketch_kernels.pyx":442
  *                 const_mv[i] = 0
  * 
  *             if var_sum <= 0.0:             # <<<<<<<<<<<<<<
@@ -24600,7 +25955,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
           __pyx_t_12 = (__pyx_v_var_sum <= 0.0);
           if (__pyx_t_12) {
 
-            /* "sketch_kernels.pyx":342
+            /* "sketch_kernels.pyx":443
  * 
  *             if var_sum <= 0.0:
  *                 spiked_mv[i] = 0             # <<<<<<<<<<<<<<
@@ -24610,7 +25965,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
             __pyx_t_15 = __pyx_v_i;
             *((unsigned char *) ( /* dim=0 */ (__pyx_v_spiked_mv.data + __pyx_t_15 * __pyx_v_spiked_mv.strides[0]) )) = 0;
 
-            /* "sketch_kernels.pyx":343
+            /* "sketch_kernels.pyx":444
  *             if var_sum <= 0.0:
  *                 spiked_mv[i] = 0
  *                 continue             # <<<<<<<<<<<<<<
@@ -24619,7 +25974,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
             goto __pyx_L6_continue;
 
-            /* "sketch_kernels.pyx":341
+            /* "sketch_kernels.pyx":442
  *                 const_mv[i] = 0
  * 
  *             if var_sum <= 0.0:             # <<<<<<<<<<<<<<
@@ -24628,7 +25983,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
           }
 
-          /* "sketch_kernels.pyx":345
+          /* "sketch_kernels.pyx":446
  *                 continue
  *             mu4_sum = (
  *                 sum4[i]             # <<<<<<<<<<<<<<
@@ -24637,7 +25992,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
           __pyx_t_15 = __pyx_v_i;
 
-          /* "sketch_kernels.pyx":346
+          /* "sketch_kernels.pyx":447
  *             mu4_sum = (
  *                 sum4[i]
  *                 - 4.0 * mean * sum3[i]             # <<<<<<<<<<<<<<
@@ -24646,7 +26001,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
           __pyx_t_14 = __pyx_v_i;
 
-          /* "sketch_kernels.pyx":347
+          /* "sketch_kernels.pyx":448
  *                 sum4[i]
  *                 - 4.0 * mean * sum3[i]
  *                 + 6.0 * (mean * mean) * sum2[i]             # <<<<<<<<<<<<<<
@@ -24655,7 +26010,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
           __pyx_t_13 = __pyx_v_i;
 
-          /* "sketch_kernels.pyx":348
+          /* "sketch_kernels.pyx":449
  *                 - 4.0 * mean * sum3[i]
  *                 + 6.0 * (mean * mean) * sum2[i]
  *                 - 4.0 * (mean * mean * mean) * sum1[i]             # <<<<<<<<<<<<<<
@@ -24664,7 +26019,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
           __pyx_t_16 = __pyx_v_i;
 
-          /* "sketch_kernels.pyx":349
+          /* "sketch_kernels.pyx":450
  *                 + 6.0 * (mean * mean) * sum2[i]
  *                 - 4.0 * (mean * mean * mean) * sum1[i]
  *                 + n_d * (mean * mean * mean * mean)             # <<<<<<<<<<<<<<
@@ -24673,7 +26028,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
           __pyx_v_mu4_sum = (((((*((double *) ( /* dim=0 */ (__pyx_v_sum4.data + __pyx_t_15 * __pyx_v_sum4.strides[0]) ))) - ((4.0 * __pyx_v_mean) * (*((double *) ( /* dim=0 */ (__pyx_v_sum3.data + __pyx_t_14 * __pyx_v_sum3.strides[0]) ))))) + ((6.0 * (__pyx_v_mean * __pyx_v_mean)) * (*((double *) ( /* dim=0 */ (__pyx_v_sum2.data + __pyx_t_13 * __pyx_v_sum2.strides[0]) ))))) - ((4.0 * ((__pyx_v_mean * __pyx_v_mean) * __pyx_v_mean)) * (*((double *) ( /* dim=0 */ (__pyx_v_sum1.data + __pyx_t_16 * __pyx_v_sum1.strides[0]) ))))) + (__pyx_v_n_d * (((__pyx_v_mean * __pyx_v_mean) * __pyx_v_mean) * __pyx_v_mean)));
 
-          /* "sketch_kernels.pyx":351
+          /* "sketch_kernels.pyx":452
  *                 + n_d * (mean * mean * mean * mean)
  *             )
  *             var = var_sum / n_d             # <<<<<<<<<<<<<<
@@ -24682,7 +26037,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
           __pyx_v_var = (__pyx_v_var_sum / __pyx_v_n_d);
 
-          /* "sketch_kernels.pyx":352
+          /* "sketch_kernels.pyx":453
  *             )
  *             var = var_sum / n_d
  *             if var <= 0.0:             # <<<<<<<<<<<<<<
@@ -24692,7 +26047,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
           __pyx_t_12 = (__pyx_v_var <= 0.0);
           if (__pyx_t_12) {
 
-            /* "sketch_kernels.pyx":353
+            /* "sketch_kernels.pyx":454
  *             var = var_sum / n_d
  *             if var <= 0.0:
  *                 spiked_mv[i] = 0             # <<<<<<<<<<<<<<
@@ -24702,7 +26057,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
             __pyx_t_16 = __pyx_v_i;
             *((unsigned char *) ( /* dim=0 */ (__pyx_v_spiked_mv.data + __pyx_t_16 * __pyx_v_spiked_mv.strides[0]) )) = 0;
 
-            /* "sketch_kernels.pyx":354
+            /* "sketch_kernels.pyx":455
  *             if var <= 0.0:
  *                 spiked_mv[i] = 0
  *                 continue             # <<<<<<<<<<<<<<
@@ -24711,7 +26066,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
             goto __pyx_L6_continue;
 
-            /* "sketch_kernels.pyx":352
+            /* "sketch_kernels.pyx":453
  *             )
  *             var = var_sum / n_d
  *             if var <= 0.0:             # <<<<<<<<<<<<<<
@@ -24720,7 +26075,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
           }
 
-          /* "sketch_kernels.pyx":355
+          /* "sketch_kernels.pyx":456
  *                 spiked_mv[i] = 0
  *                 continue
  *             kurt = (mu4_sum / n_d) / (var * var) - 3.0             # <<<<<<<<<<<<<<
@@ -24729,7 +26084,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
  */
           __pyx_v_kurt = (((__pyx_v_mu4_sum / __pyx_v_n_d) / (__pyx_v_var * __pyx_v_var)) - 3.0);
 
-          /* "sketch_kernels.pyx":356
+          /* "sketch_kernels.pyx":457
  *                 continue
  *             kurt = (mu4_sum / n_d) / (var * var) - 3.0
  *             spiked_mv[i] = 1 if kurt > kurt_thresh else 0             # <<<<<<<<<<<<<<
@@ -24748,7 +26103,7 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
         }
       }
 
-      /* "sketch_kernels.pyx":326
+      /* "sketch_kernels.pyx":427
  *     cdef double var_thresh = std_thresh * std_thresh * n_d
  * 
  *     with nogil:             # <<<<<<<<<<<<<<
@@ -24767,25 +26122,25 @@ static PyObject *__pyx_pf_14sketch_kernels_8compute_constant_flags(CYTHON_UNUSED
       }
   }
 
-  /* "sketch_kernels.pyx":358
+  /* "sketch_kernels.pyx":459
  *             spiked_mv[i] = 1 if kurt > kurt_thresh else 0
  * 
  *     return const_flags, spiked_flags             # <<<<<<<<<<<<<<
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 358, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 459, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_INCREF((PyObject *)__pyx_v_const_flags);
   __Pyx_GIVEREF((PyObject *)__pyx_v_const_flags);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, ((PyObject *)__pyx_v_const_flags))) __PYX_ERR(0, 358, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, ((PyObject *)__pyx_v_const_flags))) __PYX_ERR(0, 459, __pyx_L1_error);
   __Pyx_INCREF((PyObject *)__pyx_v_spiked_flags);
   __Pyx_GIVEREF((PyObject *)__pyx_v_spiked_flags);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, ((PyObject *)__pyx_v_spiked_flags))) __PYX_ERR(0, 358, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, ((PyObject *)__pyx_v_spiked_flags))) __PYX_ERR(0, 459, __pyx_L1_error);
   __pyx_r = __pyx_t_4;
   __pyx_t_4 = 0;
   goto __pyx_L0;
 
-  /* "sketch_kernels.pyx":302
+  /* "sketch_kernels.pyx":403
  * 
  * 
  * def compute_constant_flags(double[:] sum1,             # <<<<<<<<<<<<<<
@@ -25820,7 +27175,7 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_View_MemoryView, __pyx_k_View_MemoryView, sizeof(__pyx_k_View_MemoryView), 0, 0, 1, 1},
     {&__pyx_kp_u__2, __pyx_k__2, sizeof(__pyx_k__2), 0, 1, 0, 0},
     {&__pyx_n_s__3, __pyx_k__3, sizeof(__pyx_k__3), 0, 0, 1, 1},
-    {&__pyx_n_s__36, __pyx_k__36, sizeof(__pyx_k__36), 0, 0, 1, 1},
+    {&__pyx_n_s__38, __pyx_k__38, sizeof(__pyx_k__38), 0, 0, 1, 1},
     {&__pyx_kp_u__6, __pyx_k__6, sizeof(__pyx_k__6), 0, 1, 0, 0},
     {&__pyx_kp_u__7, __pyx_k__7, sizeof(__pyx_k__7), 0, 1, 0, 0},
     {&__pyx_n_s_abc, __pyx_k_abc, sizeof(__pyx_k_abc), 0, 0, 1, 1},
@@ -25834,7 +27189,9 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_b, __pyx_k_b, sizeof(__pyx_k_b), 0, 0, 1, 1},
     {&__pyx_n_s_base, __pyx_k_base, sizeof(__pyx_k_base), 0, 0, 1, 1},
     {&__pyx_n_s_base_dots, __pyx_k_base_dots, sizeof(__pyx_k_base_dots), 0, 0, 1, 1},
+    {&__pyx_n_s_basic_dots, __pyx_k_basic_dots, sizeof(__pyx_k_basic_dots), 0, 0, 1, 1},
     {&__pyx_n_s_basic_window, __pyx_k_basic_window, sizeof(__pyx_k_basic_window), 0, 0, 1, 1},
+    {&__pyx_n_s_build_multi_suffix_raw, __pyx_k_build_multi_suffix_raw, sizeof(__pyx_k_build_multi_suffix_raw), 0, 0, 1, 1},
     {&__pyx_n_s_build_sketch_matrix, __pyx_k_build_sketch_matrix, sizeof(__pyx_k_build_sketch_matrix), 0, 0, 1, 1},
     {&__pyx_n_s_c, __pyx_k_c, sizeof(__pyx_k_c), 0, 0, 1, 1},
     {&__pyx_n_u_c, __pyx_k_c, sizeof(__pyx_k_c), 0, 1, 0, 1},
@@ -25865,6 +27222,9 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_encode, __pyx_k_encode, sizeof(__pyx_k_encode), 0, 0, 1, 1},
     {&__pyx_n_s_enumerate, __pyx_k_enumerate, sizeof(__pyx_k_enumerate), 0, 0, 1, 1},
     {&__pyx_n_s_error, __pyx_k_error, sizeof(__pyx_k_error), 0, 0, 1, 1},
+    {&__pyx_n_s_feat_basic, __pyx_k_feat_basic, sizeof(__pyx_k_feat_basic), 0, 0, 1, 1},
+    {&__pyx_n_s_feat_series, __pyx_k_feat_series, sizeof(__pyx_k_feat_series), 0, 0, 1, 1},
+    {&__pyx_n_s_feature_sums, __pyx_k_feature_sums, sizeof(__pyx_k_feature_sums), 0, 0, 1, 1},
     {&__pyx_n_s_flags, __pyx_k_flags, sizeof(__pyx_k_flags), 0, 0, 1, 1},
     {&__pyx_n_s_float64, __pyx_k_float64, sizeof(__pyx_k_float64), 0, 0, 1, 1},
     {&__pyx_n_s_format, __pyx_k_format, sizeof(__pyx_k_format), 0, 0, 1, 1},
@@ -25874,6 +27234,7 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_getstate, __pyx_k_getstate, sizeof(__pyx_k_getstate), 0, 0, 1, 1},
     {&__pyx_kp_u_got, __pyx_k_got, sizeof(__pyx_k_got), 0, 1, 0, 0},
     {&__pyx_kp_u_got_differing_extents_in_dimensi, __pyx_k_got_differing_extents_in_dimensi, sizeof(__pyx_k_got_differing_extents_in_dimensi), 0, 1, 0, 0},
+    {&__pyx_n_s_have_features, __pyx_k_have_features, sizeof(__pyx_k_have_features), 0, 0, 1, 1},
     {&__pyx_n_s_i, __pyx_k_i, sizeof(__pyx_k_i), 0, 0, 1, 1},
     {&__pyx_n_s_id, __pyx_k_id, sizeof(__pyx_k_id), 0, 0, 1, 1},
     {&__pyx_n_s_import, __pyx_k_import, sizeof(__pyx_k_import), 0, 0, 1, 1},
@@ -25885,6 +27246,7 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_kp_u_isenabled, __pyx_k_isenabled, sizeof(__pyx_k_isenabled), 0, 1, 0, 0},
     {&__pyx_n_s_itemsize, __pyx_k_itemsize, sizeof(__pyx_k_itemsize), 0, 0, 1, 1},
     {&__pyx_kp_s_itemsize_0_for_cython_array, __pyx_k_itemsize_0_for_cython_array, sizeof(__pyx_k_itemsize_0_for_cython_array), 0, 0, 1, 0},
+    {&__pyx_n_s_j, __pyx_k_j, sizeof(__pyx_k_j), 0, 0, 1, 1},
     {&__pyx_n_s_kurt, __pyx_k_kurt, sizeof(__pyx_k_kurt), 0, 0, 1, 1},
     {&__pyx_n_s_kurt_thresh, __pyx_k_kurt_thresh, sizeof(__pyx_k_kurt_thresh), 0, 0, 1, 1},
     {&__pyx_n_s_main, __pyx_k_main, sizeof(__pyx_k_main), 0, 0, 1, 1},
@@ -25900,6 +27262,7 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_n_basic, __pyx_k_n_basic, sizeof(__pyx_k_n_basic), 0, 0, 1, 1},
     {&__pyx_n_s_n_d, __pyx_k_n_d, sizeof(__pyx_k_n_d), 0, 0, 1, 1},
     {&__pyx_n_s_n_new, __pyx_k_n_new, sizeof(__pyx_k_n_new), 0, 0, 1, 1},
+    {&__pyx_n_s_n_offsets, __pyx_k_n_offsets, sizeof(__pyx_k_n_offsets), 0, 0, 1, 1},
     {&__pyx_n_s_n_series, __pyx_k_n_series, sizeof(__pyx_k_n_series), 0, 0, 1, 1},
     {&__pyx_n_s_n_vectors, __pyx_k_n_vectors, sizeof(__pyx_k_n_vectors), 0, 0, 1, 1},
     {&__pyx_n_s_name, __pyx_k_name, sizeof(__pyx_k_name), 0, 0, 1, 1},
@@ -25916,6 +27279,7 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_kp_u_numpy_core_multiarray_failed_to, __pyx_k_numpy_core_multiarray_failed_to, sizeof(__pyx_k_numpy_core_multiarray_failed_to), 0, 1, 0, 0},
     {&__pyx_kp_u_numpy_core_umath_failed_to_impor, __pyx_k_numpy_core_umath_failed_to_impor, sizeof(__pyx_k_numpy_core_umath_failed_to_impor), 0, 1, 0, 0},
     {&__pyx_n_s_obj, __pyx_k_obj, sizeof(__pyx_k_obj), 0, 0, 1, 1},
+    {&__pyx_n_s_offsets_desc, __pyx_k_offsets_desc, sizeof(__pyx_k_offsets_desc), 0, 0, 1, 1},
     {&__pyx_n_s_out, __pyx_k_out, sizeof(__pyx_k_out), 0, 0, 1, 1},
     {&__pyx_n_s_out_mv, __pyx_k_out_mv, sizeof(__pyx_k_out_mv), 0, 0, 1, 1},
     {&__pyx_n_s_pack, __pyx_k_pack, sizeof(__pyx_k_pack), 0, 0, 1, 1},
@@ -25936,6 +27300,8 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_reduce_cython, __pyx_k_reduce_cython, sizeof(__pyx_k_reduce_cython), 0, 0, 1, 1},
     {&__pyx_n_s_reduce_ex, __pyx_k_reduce_ex, sizeof(__pyx_k_reduce_ex), 0, 0, 1, 1},
     {&__pyx_n_s_register, __pyx_k_register, sizeof(__pyx_k_register), 0, 0, 1, 1},
+    {&__pyx_n_s_running_features, __pyx_k_running_features, sizeof(__pyx_k_running_features), 0, 0, 1, 1},
+    {&__pyx_n_s_running_features_mv, __pyx_k_running_features_mv, sizeof(__pyx_k_running_features_mv), 0, 0, 1, 1},
     {&__pyx_n_s_s, __pyx_k_s, sizeof(__pyx_k_s), 0, 0, 1, 1},
     {&__pyx_n_s_setstate, __pyx_k_setstate, sizeof(__pyx_k_setstate), 0, 0, 1, 1},
     {&__pyx_n_s_setstate_cython, __pyx_k_setstate_cython, sizeof(__pyx_k_setstate_cython), 0, 0, 1, 1},
@@ -25955,6 +27321,10 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_kp_s_strided_and_indirect, __pyx_k_strided_and_indirect, sizeof(__pyx_k_strided_and_indirect), 0, 0, 1, 0},
     {&__pyx_kp_s_stringsource, __pyx_k_stringsource, sizeof(__pyx_k_stringsource), 0, 0, 1, 0},
     {&__pyx_n_s_struct, __pyx_k_struct, sizeof(__pyx_k_struct), 0, 0, 1, 1},
+    {&__pyx_n_s_suffix_features, __pyx_k_suffix_features, sizeof(__pyx_k_suffix_features), 0, 0, 1, 1},
+    {&__pyx_n_s_suffix_features_mv, __pyx_k_suffix_features_mv, sizeof(__pyx_k_suffix_features_mv), 0, 0, 1, 1},
+    {&__pyx_n_s_suffix_raw, __pyx_k_suffix_raw, sizeof(__pyx_k_suffix_raw), 0, 0, 1, 1},
+    {&__pyx_n_s_suffix_raw_mv, __pyx_k_suffix_raw_mv, sizeof(__pyx_k_suffix_raw_mv), 0, 0, 1, 1},
     {&__pyx_n_s_sum1, __pyx_k_sum1, sizeof(__pyx_k_sum1), 0, 0, 1, 1},
     {&__pyx_n_s_sum2, __pyx_k_sum2, sizeof(__pyx_k_sum2), 0, 0, 1, 1},
     {&__pyx_n_s_sum3, __pyx_k_sum3, sizeof(__pyx_k_sum3), 0, 0, 1, 1},
@@ -25983,6 +27353,7 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_weights, __pyx_k_weights, sizeof(__pyx_k_weights), 0, 0, 1, 1},
     {&__pyx_kp_u_weights_shape_mismatch, __pyx_k_weights_shape_mismatch, sizeof(__pyx_k_weights_shape_mismatch), 0, 1, 0, 0},
     {&__pyx_n_s_window_blocks, __pyx_k_window_blocks, sizeof(__pyx_k_window_blocks), 0, 0, 1, 1},
+    {&__pyx_n_s_zeros, __pyx_k_zeros, sizeof(__pyx_k_zeros), 0, 0, 1, 1},
     {0, 0, 0, 0, 0, 0, 0}
   };
   return __Pyx_InitStrings(__pyx_string_tab);
@@ -26079,36 +27450,36 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
   __Pyx_GOTREF(__pyx_tuple__11);
   __Pyx_GIVEREF(__pyx_tuple__11);
 
-  /* "sketch_kernels.pyx":66
+  /* "sketch_kernels.pyx":133
  *     if norm_mode == 1:
  *         if mean_vec.shape[0] != n_series or random_sums.shape[0] != n_vectors:
  *             raise ValueError("mean_vec/random_sums shape mismatch")             # <<<<<<<<<<<<<<
  * 
  *     cdef double[:, :, ::1] dots_mv = dots
  */
-  __pyx_tuple__12 = PyTuple_Pack(1, __pyx_kp_u_mean_vec_random_sums_shape_misma); if (unlikely(!__pyx_tuple__12)) __PYX_ERR(0, 66, __pyx_L1_error)
+  __pyx_tuple__12 = PyTuple_Pack(1, __pyx_kp_u_mean_vec_random_sums_shape_misma); if (unlikely(!__pyx_tuple__12)) __PYX_ERR(0, 133, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__12);
   __Pyx_GIVEREF(__pyx_tuple__12);
 
-  /* "sketch_kernels.pyx":217
+  /* "sketch_kernels.pyx":308
  * 
  *     if w_basic != n_new or (n_new > 0 and (w_vectors != n_vectors or w_window != basic_window)):
  *         raise ValueError("incremental weights shape mismatch")             # <<<<<<<<<<<<<<
  *     if apply_diff and n_base > 0 and (diff_toggle.shape[0] < n_base or diff_toggle.shape[1] != n_vectors):
  *         raise ValueError("diff_toggle shape mismatch")
  */
-  __pyx_tuple__13 = PyTuple_Pack(1, __pyx_kp_u_incremental_weights_shape_mismat); if (unlikely(!__pyx_tuple__13)) __PYX_ERR(0, 217, __pyx_L1_error)
+  __pyx_tuple__13 = PyTuple_Pack(1, __pyx_kp_u_incremental_weights_shape_mismat); if (unlikely(!__pyx_tuple__13)) __PYX_ERR(0, 308, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__13);
   __Pyx_GIVEREF(__pyx_tuple__13);
 
-  /* "sketch_kernels.pyx":219
+  /* "sketch_kernels.pyx":310
  *         raise ValueError("incremental weights shape mismatch")
  *     if apply_diff and n_base > 0 and (diff_toggle.shape[0] < n_base or diff_toggle.shape[1] != n_vectors):
  *         raise ValueError("diff_toggle shape mismatch")             # <<<<<<<<<<<<<<
  *     if norm_mode == 1:
  *         if mean_vec.shape[0] != n_series or random_sums.shape[0] != n_vectors:
  */
-  __pyx_tuple__14 = PyTuple_Pack(1, __pyx_kp_u_diff_toggle_shape_mismatch); if (unlikely(!__pyx_tuple__14)) __PYX_ERR(0, 219, __pyx_L1_error)
+  __pyx_tuple__14 = PyTuple_Pack(1, __pyx_kp_u_diff_toggle_shape_mismatch); if (unlikely(!__pyx_tuple__14)) __PYX_ERR(0, 310, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__14);
   __Pyx_GIVEREF(__pyx_tuple__14);
 
@@ -26225,53 +27596,65 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
   __Pyx_GIVEREF(__pyx_tuple__26);
   __pyx_codeobj__27 = (PyObject*)__Pyx_PyCode_New(2, 0, 0, 14, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_sketch_kernels_pyx, __pyx_n_s_compute_series_dots, 10, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__27)) __PYX_ERR(0, 10, __pyx_L1_error)
 
-  /* "sketch_kernels.pyx":36
+  /* "sketch_kernels.pyx":44
+ * # their sketch from the trailing basic-window blocks of the max window's
+ * # already-computed basicDots, instead of recomputing from scratch.
+ * def build_multi_suffix_raw(double[:, :, ::1] basic_dots,             # <<<<<<<<<<<<<<
+ *                            double[:, ::1] feature_sums,
+ *                            long[:] offsets_desc):
+ */
+  __pyx_tuple__28 = PyTuple_Pack(22, __pyx_n_s_basic_dots, __pyx_n_s_feature_sums, __pyx_n_s_offsets_desc, __pyx_n_s_n_series, __pyx_n_s_n_basic, __pyx_n_s_n_vectors, __pyx_n_s_n_offsets, __pyx_n_s_feat_series, __pyx_n_s_feat_basic, __pyx_n_s_s, __pyx_n_s_b, __pyx_n_s_v, __pyx_n_s_j, __pyx_n_s_have_features, __pyx_n_s_raw, __pyx_n_s_suffix_raw, __pyx_n_s_suffix_features, __pyx_n_s_running_features, __pyx_n_s_raw_mv, __pyx_n_s_suffix_raw_mv, __pyx_n_s_suffix_features_mv, __pyx_n_s_running_features_mv); if (unlikely(!__pyx_tuple__28)) __PYX_ERR(0, 44, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__28);
+  __Pyx_GIVEREF(__pyx_tuple__28);
+  __pyx_codeobj__29 = (PyObject*)__Pyx_PyCode_New(3, 0, 0, 22, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__28, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_sketch_kernels_pyx, __pyx_n_s_build_multi_suffix_raw, 44, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__29)) __PYX_ERR(0, 44, __pyx_L1_error)
+
+  /* "sketch_kernels.pyx":103
  * 
  * 
  * def build_sketch_matrix(double[:, :, ::1] window_blocks,             # <<<<<<<<<<<<<<
  *                         double[:, :, ::1] weights,
  *                         double[:] mean_vec,
  */
-  __pyx_tuple__28 = PyTuple_Pack(28, __pyx_n_s_window_blocks, __pyx_n_s_weights, __pyx_n_s_mean_vec, __pyx_n_s_random_sums, __pyx_n_s_norm_mode, __pyx_n_s_n_series, __pyx_n_s_n_basic, __pyx_n_s_basic_window, __pyx_n_s_w_basic, __pyx_n_s_n_vectors, __pyx_n_s_w_window, __pyx_n_s_dots, __pyx_n_s_raw, __pyx_n_s_norm, __pyx_n_s_dots_mv, __pyx_n_s_raw_mv, __pyx_n_s_norm_mv, __pyx_n_s_s, __pyx_n_s_b, __pyx_n_s_v, __pyx_n_s_w, __pyx_n_s_acc, __pyx_n_s_mean, __pyx_n_s_var_acc, __pyx_n_s_denom, __pyx_n_s_centered, __pyx_n_s_mu_value, __pyx_n_s_adj); if (unlikely(!__pyx_tuple__28)) __PYX_ERR(0, 36, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__28);
-  __Pyx_GIVEREF(__pyx_tuple__28);
-  __pyx_codeobj__29 = (PyObject*)__Pyx_PyCode_New(5, 0, 0, 28, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__28, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_sketch_kernels_pyx, __pyx_n_s_build_sketch_matrix, 36, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__29)) __PYX_ERR(0, 36, __pyx_L1_error)
+  __pyx_tuple__30 = PyTuple_Pack(28, __pyx_n_s_window_blocks, __pyx_n_s_weights, __pyx_n_s_mean_vec, __pyx_n_s_random_sums, __pyx_n_s_norm_mode, __pyx_n_s_n_series, __pyx_n_s_n_basic, __pyx_n_s_basic_window, __pyx_n_s_w_basic, __pyx_n_s_n_vectors, __pyx_n_s_w_window, __pyx_n_s_dots, __pyx_n_s_raw, __pyx_n_s_norm, __pyx_n_s_dots_mv, __pyx_n_s_raw_mv, __pyx_n_s_norm_mv, __pyx_n_s_s, __pyx_n_s_b, __pyx_n_s_v, __pyx_n_s_w, __pyx_n_s_acc, __pyx_n_s_mean, __pyx_n_s_var_acc, __pyx_n_s_denom, __pyx_n_s_centered, __pyx_n_s_mu_value, __pyx_n_s_adj); if (unlikely(!__pyx_tuple__30)) __PYX_ERR(0, 103, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__30);
+  __Pyx_GIVEREF(__pyx_tuple__30);
+  __pyx_codeobj__31 = (PyObject*)__Pyx_PyCode_New(5, 0, 0, 28, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__30, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_sketch_kernels_pyx, __pyx_n_s_build_sketch_matrix, 103, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__31)) __PYX_ERR(0, 103, __pyx_L1_error)
 
-  /* "sketch_kernels.pyx":128
+  /* "sketch_kernels.pyx":209
  * 
  * 
  * def apply_orth_and_normalize(double[:, ::1] raw_matrix,             # <<<<<<<<<<<<<<
  *                              double[:] mean_vec,
  *                              double[:] random_sums,
  */
-  __pyx_tuple__30 = PyTuple_Pack(18, __pyx_n_s_raw_matrix, __pyx_n_s_mean_vec, __pyx_n_s_random_sums, __pyx_n_s_norm_mode, __pyx_n_s_n_series, __pyx_n_s_n_vectors, __pyx_n_s_raw, __pyx_n_s_norm, __pyx_n_s_raw_mv, __pyx_n_s_norm_mv, __pyx_n_s_s, __pyx_n_s_v, __pyx_n_s_mean, __pyx_n_s_var_acc, __pyx_n_s_denom, __pyx_n_s_centered, __pyx_n_s_mu_value, __pyx_n_s_adj); if (unlikely(!__pyx_tuple__30)) __PYX_ERR(0, 128, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__30);
-  __Pyx_GIVEREF(__pyx_tuple__30);
-  __pyx_codeobj__31 = (PyObject*)__Pyx_PyCode_New(4, 0, 0, 18, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__30, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_sketch_kernels_pyx, __pyx_n_s_apply_orth_and_normalize, 128, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__31)) __PYX_ERR(0, 128, __pyx_L1_error)
+  __pyx_tuple__32 = PyTuple_Pack(18, __pyx_n_s_raw_matrix, __pyx_n_s_mean_vec, __pyx_n_s_random_sums, __pyx_n_s_norm_mode, __pyx_n_s_n_series, __pyx_n_s_n_vectors, __pyx_n_s_raw, __pyx_n_s_norm, __pyx_n_s_raw_mv, __pyx_n_s_norm_mv, __pyx_n_s_s, __pyx_n_s_v, __pyx_n_s_mean, __pyx_n_s_var_acc, __pyx_n_s_denom, __pyx_n_s_centered, __pyx_n_s_mu_value, __pyx_n_s_adj); if (unlikely(!__pyx_tuple__32)) __PYX_ERR(0, 209, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__32);
+  __Pyx_GIVEREF(__pyx_tuple__32);
+  __pyx_codeobj__33 = (PyObject*)__Pyx_PyCode_New(4, 0, 0, 18, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__32, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_sketch_kernels_pyx, __pyx_n_s_apply_orth_and_normalize, 209, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__33)) __PYX_ERR(0, 209, __pyx_L1_error)
 
-  /* "sketch_kernels.pyx":197
+  /* "sketch_kernels.pyx":288
  * 
  * 
  * def incremental_combine_and_normalize(double[:, :, ::1] base_dots,             # <<<<<<<<<<<<<<
  *                                       double[:, ::1] diff_toggle,
  *                                       double[:, :, ::1] new_blocks,
  */
-  __pyx_tuple__32 = PyTuple_Pack(35, __pyx_n_s_base_dots, __pyx_n_s_diff_toggle, __pyx_n_s_new_blocks, __pyx_n_s_weights, __pyx_n_s_mean_vec, __pyx_n_s_random_sums, __pyx_n_s_norm_mode, __pyx_n_s_apply_diff, __pyx_n_s_n_series, __pyx_n_s_n_base, __pyx_n_s_n_vectors, __pyx_n_s_n_new, __pyx_n_s_basic_window, __pyx_n_s_w_basic, __pyx_n_s_w_vectors, __pyx_n_s_w_window, __pyx_n_s_total_basic, __pyx_n_s_updated, __pyx_n_s_raw, __pyx_n_s_norm, __pyx_n_s_updated_mv, __pyx_n_s_raw_mv, __pyx_n_s_norm_mv, __pyx_n_s_s, __pyx_n_s_b, __pyx_n_s_v, __pyx_n_s_w, __pyx_n_s_acc, __pyx_n_s_mean, __pyx_n_s_var_acc, __pyx_n_s_denom, __pyx_n_s_centered, __pyx_n_s_mu_value, __pyx_n_s_adj, __pyx_n_s_val); if (unlikely(!__pyx_tuple__32)) __PYX_ERR(0, 197, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__32);
-  __Pyx_GIVEREF(__pyx_tuple__32);
-  __pyx_codeobj__33 = (PyObject*)__Pyx_PyCode_New(8, 0, 0, 35, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__32, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_sketch_kernels_pyx, __pyx_n_s_incremental_combine_and_normaliz, 197, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__33)) __PYX_ERR(0, 197, __pyx_L1_error)
+  __pyx_tuple__34 = PyTuple_Pack(35, __pyx_n_s_base_dots, __pyx_n_s_diff_toggle, __pyx_n_s_new_blocks, __pyx_n_s_weights, __pyx_n_s_mean_vec, __pyx_n_s_random_sums, __pyx_n_s_norm_mode, __pyx_n_s_apply_diff, __pyx_n_s_n_series, __pyx_n_s_n_base, __pyx_n_s_n_vectors, __pyx_n_s_n_new, __pyx_n_s_basic_window, __pyx_n_s_w_basic, __pyx_n_s_w_vectors, __pyx_n_s_w_window, __pyx_n_s_total_basic, __pyx_n_s_updated, __pyx_n_s_raw, __pyx_n_s_norm, __pyx_n_s_updated_mv, __pyx_n_s_raw_mv, __pyx_n_s_norm_mv, __pyx_n_s_s, __pyx_n_s_b, __pyx_n_s_v, __pyx_n_s_w, __pyx_n_s_acc, __pyx_n_s_mean, __pyx_n_s_var_acc, __pyx_n_s_denom, __pyx_n_s_centered, __pyx_n_s_mu_value, __pyx_n_s_adj, __pyx_n_s_val); if (unlikely(!__pyx_tuple__34)) __PYX_ERR(0, 288, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__34);
+  __Pyx_GIVEREF(__pyx_tuple__34);
+  __pyx_codeobj__35 = (PyObject*)__Pyx_PyCode_New(8, 0, 0, 35, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__34, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_sketch_kernels_pyx, __pyx_n_s_incremental_combine_and_normaliz, 288, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__35)) __PYX_ERR(0, 288, __pyx_L1_error)
 
-  /* "sketch_kernels.pyx":302
+  /* "sketch_kernels.pyx":403
  * 
  * 
  * def compute_constant_flags(double[:] sum1,             # <<<<<<<<<<<<<<
  *                            double[:] sum2,
  *                            double[:] sum3,
  */
-  __pyx_tuple__34 = PyTuple_Pack(20, __pyx_n_s_sum1, __pyx_n_s_sum2, __pyx_n_s_sum3, __pyx_n_s_sum4, __pyx_n_s_n, __pyx_n_s_std_thresh, __pyx_n_s_kurt_thresh, __pyx_n_s_n_series, __pyx_n_s_const_flags, __pyx_n_s_spiked_flags, __pyx_n_s_const_mv, __pyx_n_s_spiked_mv, __pyx_n_s_i, __pyx_n_s_mean, __pyx_n_s_var_sum, __pyx_n_s_mu4_sum, __pyx_n_s_var, __pyx_n_s_kurt, __pyx_n_s_n_d, __pyx_n_s_var_thresh); if (unlikely(!__pyx_tuple__34)) __PYX_ERR(0, 302, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__34);
-  __Pyx_GIVEREF(__pyx_tuple__34);
-  __pyx_codeobj__35 = (PyObject*)__Pyx_PyCode_New(7, 0, 0, 20, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__34, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_sketch_kernels_pyx, __pyx_n_s_compute_constant_flags, 302, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__35)) __PYX_ERR(0, 302, __pyx_L1_error)
+  __pyx_tuple__36 = PyTuple_Pack(20, __pyx_n_s_sum1, __pyx_n_s_sum2, __pyx_n_s_sum3, __pyx_n_s_sum4, __pyx_n_s_n, __pyx_n_s_std_thresh, __pyx_n_s_kurt_thresh, __pyx_n_s_n_series, __pyx_n_s_const_flags, __pyx_n_s_spiked_flags, __pyx_n_s_const_mv, __pyx_n_s_spiked_mv, __pyx_n_s_i, __pyx_n_s_mean, __pyx_n_s_var_sum, __pyx_n_s_mu4_sum, __pyx_n_s_var, __pyx_n_s_kurt, __pyx_n_s_n_d, __pyx_n_s_var_thresh); if (unlikely(!__pyx_tuple__36)) __PYX_ERR(0, 403, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__36);
+  __Pyx_GIVEREF(__pyx_tuple__36);
+  __pyx_codeobj__37 = (PyObject*)__Pyx_PyCode_New(7, 0, 0, 20, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__36, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_sketch_kernels_pyx, __pyx_n_s_compute_constant_flags, 403, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__37)) __PYX_ERR(0, 403, __pyx_L1_error)
   __Pyx_RefNannyFinishContext();
   return 0;
   __pyx_L1_error:;
@@ -27394,82 +28777,94 @@ if (!__Pyx_RefNanny) {
   if (PyDict_SetItem(__pyx_d, __pyx_n_s_compute_series_dots, __pyx_t_7) < 0) __PYX_ERR(0, 10, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
 
-  /* "sketch_kernels.pyx":36
+  /* "sketch_kernels.pyx":44
+ * # their sketch from the trailing basic-window blocks of the max window's
+ * # already-computed basicDots, instead of recomputing from scratch.
+ * def build_multi_suffix_raw(double[:, :, ::1] basic_dots,             # <<<<<<<<<<<<<<
+ *                            double[:, ::1] feature_sums,
+ *                            long[:] offsets_desc):
+ */
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_14sketch_kernels_3build_multi_suffix_raw, 0, __pyx_n_s_build_multi_suffix_raw, NULL, __pyx_n_s_sketch_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__29)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 44, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_build_multi_suffix_raw, __pyx_t_7) < 0) __PYX_ERR(0, 44, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+
+  /* "sketch_kernels.pyx":103
  * 
  * 
  * def build_sketch_matrix(double[:, :, ::1] window_blocks,             # <<<<<<<<<<<<<<
  *                         double[:, :, ::1] weights,
  *                         double[:] mean_vec,
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_14sketch_kernels_3build_sketch_matrix, 0, __pyx_n_s_build_sketch_matrix, NULL, __pyx_n_s_sketch_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__29)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 36, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_14sketch_kernels_5build_sketch_matrix, 0, __pyx_n_s_build_sketch_matrix, NULL, __pyx_n_s_sketch_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__31)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 103, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_build_sketch_matrix, __pyx_t_7) < 0) __PYX_ERR(0, 36, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_build_sketch_matrix, __pyx_t_7) < 0) __PYX_ERR(0, 103, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
 
-  /* "sketch_kernels.pyx":128
+  /* "sketch_kernels.pyx":209
  * 
  * 
  * def apply_orth_and_normalize(double[:, ::1] raw_matrix,             # <<<<<<<<<<<<<<
  *                              double[:] mean_vec,
  *                              double[:] random_sums,
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_14sketch_kernels_5apply_orth_and_normalize, 0, __pyx_n_s_apply_orth_and_normalize, NULL, __pyx_n_s_sketch_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__31)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 128, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_14sketch_kernels_7apply_orth_and_normalize, 0, __pyx_n_s_apply_orth_and_normalize, NULL, __pyx_n_s_sketch_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__33)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 209, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_apply_orth_and_normalize, __pyx_t_7) < 0) __PYX_ERR(0, 128, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_apply_orth_and_normalize, __pyx_t_7) < 0) __PYX_ERR(0, 209, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
 
-  /* "sketch_kernels.pyx":197
+  /* "sketch_kernels.pyx":288
  * 
  * 
  * def incremental_combine_and_normalize(double[:, :, ::1] base_dots,             # <<<<<<<<<<<<<<
  *                                       double[:, ::1] diff_toggle,
  *                                       double[:, :, ::1] new_blocks,
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_14sketch_kernels_7incremental_combine_and_normalize, 0, __pyx_n_s_incremental_combine_and_normaliz, NULL, __pyx_n_s_sketch_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__33)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 197, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_14sketch_kernels_9incremental_combine_and_normalize, 0, __pyx_n_s_incremental_combine_and_normaliz, NULL, __pyx_n_s_sketch_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__35)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 288, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_incremental_combine_and_normaliz, __pyx_t_7) < 0) __PYX_ERR(0, 197, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_incremental_combine_and_normaliz, __pyx_t_7) < 0) __PYX_ERR(0, 288, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
 
-  /* "sketch_kernels.pyx":307
+  /* "sketch_kernels.pyx":408
  *                            double[:] sum4,
  *                            long n,
  *                            double std_thresh=1e-3,             # <<<<<<<<<<<<<<
  *                            double kurt_thresh=5.0):
  *     """Compute near-constant and spiked flags from raw moment sums."""
  */
-  __pyx_t_7 = PyFloat_FromDouble(((double)1e-3)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 307, __pyx_L1_error)
+  __pyx_t_7 = PyFloat_FromDouble(((double)1e-3)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 408, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
 
-  /* "sketch_kernels.pyx":308
+  /* "sketch_kernels.pyx":409
  *                            long n,
  *                            double std_thresh=1e-3,
  *                            double kurt_thresh=5.0):             # <<<<<<<<<<<<<<
  *     """Compute near-constant and spiked flags from raw moment sums."""
  *     cdef Py_ssize_t n_series = sum1.shape[0]
  */
-  __pyx_t_4 = PyFloat_FromDouble(((double)5.0)); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 308, __pyx_L1_error)
+  __pyx_t_4 = PyFloat_FromDouble(((double)5.0)); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 409, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
 
-  /* "sketch_kernels.pyx":302
+  /* "sketch_kernels.pyx":403
  * 
  * 
  * def compute_constant_flags(double[:] sum1,             # <<<<<<<<<<<<<<
  *                            double[:] sum2,
  *                            double[:] sum3,
  */
-  __pyx_t_5 = PyTuple_New(2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 302, __pyx_L1_error)
+  __pyx_t_5 = PyTuple_New(2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 403, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_GIVEREF(__pyx_t_7);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_7)) __PYX_ERR(0, 302, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_7)) __PYX_ERR(0, 403, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_4);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 1, __pyx_t_4)) __PYX_ERR(0, 302, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 1, __pyx_t_4)) __PYX_ERR(0, 403, __pyx_L1_error);
   __pyx_t_7 = 0;
   __pyx_t_4 = 0;
-  __pyx_t_4 = __Pyx_CyFunction_New(&__pyx_mdef_14sketch_kernels_9compute_constant_flags, 0, __pyx_n_s_compute_constant_flags, NULL, __pyx_n_s_sketch_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__35)); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 302, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_CyFunction_New(&__pyx_mdef_14sketch_kernels_11compute_constant_flags, 0, __pyx_n_s_compute_constant_flags, NULL, __pyx_n_s_sketch_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__37)); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 403, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_CyFunction_SetDefaultsTuple(__pyx_t_4, __pyx_t_5);
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_compute_constant_flags, __pyx_t_4) < 0) __PYX_ERR(0, 302, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_compute_constant_flags, __pyx_t_4) < 0) __PYX_ERR(0, 403, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
 
   /* "sketch_kernels.pyx":1
@@ -33131,6 +34526,52 @@ __pyx_fail:
 }
 
 /* ObjectToMemviewSlice */
+  static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(PyObject *obj, int writable_flag) {
+    __Pyx_memviewslice result = { 0, 0, { 0 }, { 0 }, { 0 } };
+    __Pyx_BufFmt_StackElem stack[1];
+    int axes_specs[] = { (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_FOLLOW), (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_CONTIG) };
+    int retcode;
+    if (obj == Py_None) {
+        result.memview = (struct __pyx_memoryview_obj *) Py_None;
+        return result;
+    }
+    retcode = __Pyx_ValidateAndInit_memviewslice(axes_specs, __Pyx_IS_C_CONTIG,
+                                                 (PyBUF_C_CONTIGUOUS | PyBUF_FORMAT) | writable_flag, 2,
+                                                 &__Pyx_TypeInfo_double, stack,
+                                                 &result, obj);
+    if (unlikely(retcode == -1))
+        goto __pyx_fail;
+    return result;
+__pyx_fail:
+    result.memview = NULL;
+    result.data = NULL;
+    return result;
+}
+
+/* ObjectToMemviewSlice */
+  static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_ds_long(PyObject *obj, int writable_flag) {
+    __Pyx_memviewslice result = { 0, 0, { 0 }, { 0 }, { 0 } };
+    __Pyx_BufFmt_StackElem stack[1];
+    int axes_specs[] = { (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED) };
+    int retcode;
+    if (obj == Py_None) {
+        result.memview = (struct __pyx_memoryview_obj *) Py_None;
+        return result;
+    }
+    retcode = __Pyx_ValidateAndInit_memviewslice(axes_specs, 0,
+                                                 PyBUF_RECORDS_RO | writable_flag, 1,
+                                                 &__Pyx_TypeInfo_long, stack,
+                                                 &result, obj);
+    if (unlikely(retcode == -1))
+        goto __pyx_fail;
+    return result;
+__pyx_fail:
+    result.memview = NULL;
+    result.data = NULL;
+    return result;
+}
+
+/* ObjectToMemviewSlice */
   static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_ds_double(PyObject *obj, int writable_flag) {
     __Pyx_memviewslice result = { 0, 0, { 0 }, { 0 }, { 0 } };
     __Pyx_BufFmt_StackElem stack[1];
@@ -33174,29 +34615,6 @@ __pyx_fail:
         }\
         return (target_type) value;\
     }
-
-/* ObjectToMemviewSlice */
-  static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_d_dc_double(PyObject *obj, int writable_flag) {
-    __Pyx_memviewslice result = { 0, 0, { 0 }, { 0 }, { 0 } };
-    __Pyx_BufFmt_StackElem stack[1];
-    int axes_specs[] = { (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_FOLLOW), (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_CONTIG) };
-    int retcode;
-    if (obj == Py_None) {
-        result.memview = (struct __pyx_memoryview_obj *) Py_None;
-        return result;
-    }
-    retcode = __Pyx_ValidateAndInit_memviewslice(axes_specs, __Pyx_IS_C_CONTIG,
-                                                 (PyBUF_C_CONTIGUOUS | PyBUF_FORMAT) | writable_flag, 2,
-                                                 &__Pyx_TypeInfo_double, stack,
-                                                 &result, obj);
-    if (unlikely(retcode == -1))
-        goto __pyx_fail;
-    return result;
-__pyx_fail:
-    result.memview = NULL;
-    result.data = NULL;
-    return result;
-}
 
 /* MemviewDtypeToObject */
   static CYTHON_INLINE PyObject *__pyx_memview_get_double(const char *itemp) {
@@ -34700,7 +36118,7 @@ __Pyx_PyType_GetName(PyTypeObject* tp)
     if (unlikely(name == NULL) || unlikely(!PyUnicode_Check(name))) {
         PyErr_Clear();
         Py_XDECREF(name);
-        name = __Pyx_NewRef(__pyx_n_s__36);
+        name = __Pyx_NewRef(__pyx_n_s__38);
     }
     return name;
 }

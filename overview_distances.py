@@ -645,8 +645,6 @@ def _run_corrtrack_distances(param_combo, train_data, ids, output_dir):
             window_step=window_step,
             n_vectors=n_vectors,
             n_lags=n_lags,
-            grid_dimension=1,
-            cell_size=1,
             seed=seed,
             seed_toggle=seed_toggle,
             freq_threshold=0,

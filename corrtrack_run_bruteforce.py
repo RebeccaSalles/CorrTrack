@@ -2,6 +2,7 @@ import os
 import argparse
 import importlib
 import importlib.util
+import json
 import numpy as np
 from pathlib import Path
 from typing import Callable
@@ -36,6 +37,7 @@ DEFAULT_NEG_CORR = getattr(_DEFAULT_EXEC_CFG, "NEG_CORR", False)
 DEFAULT_MONITOR = getattr(_DEFAULT_EXEC_CFG, "MONITOR", True)
 DEFAULT_TRACK_MIN_DIST = getattr(_DEFAULT_EXEC_CFG, "TRACK_MIN_DIST", True)
 DEFAULT_BASELINE_MODE = getattr(_DEFAULT_EXEC_CFG, "BASELINE_MODE", "bruteforce")
+DEFAULT_VALIDATION_METRIC = getattr(_DEFAULT_EXEC_CFG, "VALIDATION_METRIC", "pearson")
 DEFAULT_TRAIN_RATIO = getattr(_DEFAULT_EXEC_CFG, "TRAIN_RATIO", 0.3)
 DEFAULT_OPTIM_TUNING_MODE = "sampling"
 DEFAULT_ARTIFACT_MODE = getattr(_DEFAULT_EXEC_CFG, "ARTIFACT_MODE", "iterative")
@@ -67,6 +69,7 @@ NEG_CORR = DEFAULT_NEG_CORR
 MONITOR = DEFAULT_MONITOR
 TRACK_MIN_DIST = DEFAULT_TRACK_MIN_DIST
 BASELINE_MODE = DEFAULT_BASELINE_MODE
+VALIDATION_METRIC = DEFAULT_VALIDATION_METRIC
 TRAIN_RATIO = DEFAULT_TRAIN_RATIO
 OPTIM_TUNING_MODE = DEFAULT_OPTIM_TUNING_MODE
 ARTIFACT_MODE = DEFAULT_ARTIFACT_MODE
@@ -85,6 +88,30 @@ OBS_MODE = DEFAULT_OBS_MODE
 
 def _load_dataset_config(config_path: Path):
     return _load_module(config_path, "experiment_dataset")
+
+
+def _load_tuned_validation_metric(optim_dir: str):
+    """Read validation_metric from the hyperopt step's own best_params_
+    corrtrack.json, if present -- lets the brute-force ground-truth
+    baseline automatically match whatever metric hyperopt actually tuned
+    for, instead of requiring --validation-metric to be kept in manual sync
+    across corrtrack_run_bruteforce.py/experiment_run_exec_param.py/
+    experiment_run_param_grid.py by hand. Returns None (falls back to the
+    CLI/config default) if the file doesn't exist yet (e.g. brute-force run
+    standalone, before any hyperparameter search), can't be parsed, or
+    predates this field being recorded."""
+    params_path = os.path.join(optim_dir, "best_params_corrtrack.json")
+    if not os.path.isfile(params_path):
+        return None
+    try:
+        with open(params_path, "r", encoding="utf-8") as fp:
+            params = json.load(fp)
+    except (OSError, ValueError):
+        return None
+    value = params.get("validation_metric")
+    if not value or (isinstance(value, float) and value != value):  # NaN from a CSV-sourced JSON
+        return None
+    return str(value)
 
 
 def _coerce_optional_bool(value):
@@ -175,6 +202,7 @@ def build_base_config():
         "parallel_validation": PARALLEL_VALIDATION,
         "max_workers": MAX_WORKERS,
         "baseline_mode": BASELINE_MODE,
+        "validation_metric": VALIDATION_METRIC,
         "monitor": MONITOR,
         "track_min_dist": TRACK_MIN_DIST,
         "artifact_mode": ARTIFACT_MODE,
@@ -294,6 +322,15 @@ def parse_args():
     )
     parser.add_argument("--train-ratio", type=float, default=None)
     parser.add_argument(
+        "--validation-metric",
+        choices=("pearson", "spearman", "kendall", "dist_corr"),
+        default=None,
+        help="Validation metric for the brute-force ground-truth baseline. Must match the "
+        "main run's --validation-metric for recall/precision comparisons and wall-clock "
+        "baselines to be meaningful -- otherwise this baseline validates a different "
+        "notion of 'correlated' than the tuned run does.",
+    )
+    parser.add_argument(
         "--artifact-mode",
         choices=("iterative", "final", "buffered"),
         default=None,
@@ -362,6 +399,7 @@ def main():
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
     global EXEC_MODE, NEG_CORR, MONITOR, TRACK_MIN_DIST, BASELINE_MODE, ARTIFACT_MODE, ARTIFACT_BUFFER_MAX_ROWS, ARTIFACT_MERGE_MODE, SAVE_ONLY_REQUIRED_ARTIFACTS, SAVE_MAXLAG_ARTIFACTS
     global DATA_LOADER, RESULT_FOLDER, MAX_WORKERS, VERBOSE, TESTING, TRAIN_RATIO, OPTIM_TUNING_MODE
+    global VALIDATION_METRIC
 
     RESULT_FOLDER = _resolve_cfg_value(args.result_folder, cfg_dataset, "RESULT_FOLDER", DEFAULT_RESULT_FOLDER)
     WINDOW_SIZE = _resolve_cfg_value(args.window_size, cfg_exec, "WINDOW_SIZE", DEFAULT_WINDOW_SIZE)
@@ -386,6 +424,9 @@ def main():
         args.track_min_dist, cfg_exec, "TRACK_MIN_DIST", DEFAULT_TRACK_MIN_DIST
     )
     BASELINE_MODE = _resolve_cfg_value(args.baseline_mode, cfg_exec, "BASELINE_MODE", DEFAULT_BASELINE_MODE)
+    VALIDATION_METRIC = _resolve_cfg_value(
+        args.validation_metric, cfg_exec, "VALIDATION_METRIC", DEFAULT_VALIDATION_METRIC
+    )
     TRAIN_RATIO = _resolve_cfg_value(args.train_ratio, cfg_exec, "TRAIN_RATIO", DEFAULT_TRAIN_RATIO)
     OPTIM_TUNING_MODE = "sampling"
     ARTIFACT_MODE = _resolve_cfg_value(args.artifact_mode, cfg_exec, "ARTIFACT_MODE", DEFAULT_ARTIFACT_MODE)
@@ -436,6 +477,17 @@ def main():
                 output_dir = os.path.join("correlation", RESULT_FOLDER, dataset_id, config_folder())
                 os.makedirs(output_dir, exist_ok=True)
 
+                dataset_base_config = dict(base_config)
+                if args.validation_metric is None:
+                    # No explicit --validation-metric override: prefer
+                    # whatever the hyperparameter-search step actually
+                    # tuned for over this script's own CLI/config default,
+                    # so the ground-truth baseline can never silently
+                    # validate a different metric than the tuned run does.
+                    tuned_metric = _load_tuned_validation_metric(os.path.join(output_dir, "optim"))
+                    if tuned_metric is not None:
+                        dataset_base_config["validation_metric"] = tuned_metric
+
                 metadata = {
                     "alg": "bf",
                     "mode": "bf",
@@ -449,7 +501,7 @@ def main():
                     dataset_id,
                     test_data,
                     ids_n_var,
-                    base_config,
+                    dataset_base_config,
                     output_csv,
                     metadata=metadata,
                     recall_by_window=True,

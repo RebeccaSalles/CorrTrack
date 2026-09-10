@@ -7,7 +7,7 @@ import numpy as np
 from pathlib import Path
 from typing import Callable
 
-from library_corrtrack_parallel import CorrTrack_optimize
+from library_corrtrack_parallel import CorrTrack_optimize, recommend_proxy_pair_row_budget
 
 
 def _load_module(config_path: Path, name: str):
@@ -55,7 +55,22 @@ DEFAULT_SPEEDUP_NEAR_RATIO = getattr(_DEFAULT_EXEC_CFG, "SPEEDUP_NEAR_RATIO", 0.
 DEFAULT_TRAIN_RATIO = getattr(_DEFAULT_EXEC_CFG, "TRAIN_RATIO", 0.3)
 DEFAULT_OPTIM_TUNING_MODE = "sampling"
 DEFAULT_OPTIM_PROXY_ANCHOR_COUNT = getattr(_DEFAULT_EXEC_CFG, "OPTIM_PROXY_ANCHOR_COUNT", 64)
-DEFAULT_OPTIM_PROXY_MAX_PAIR_ROWS = getattr(_DEFAULT_EXEC_CFG, "OPTIM_PROXY_MAX_PAIR_ROWS", 250000)
+# (2026-09-03) max_pair_rows/distance_cache_max_rows are no longer flat constants here (there
+# used to be a DEFAULT_OPTIM_PROXY_MAX_PAIR_ROWS / DEFAULT_OPTIM_PROXY_DISTANCE_CACHE_MAX_ROWS
+# pair right where OPTIM_PROXY_PAIR_ROW_HARD_CEILING is now) -- main()'s per-dataset loop
+# computes both directly from the real (m, L) via recommend_proxy_pair_row_budget, because a
+# single fixed number silently truncates anchor sampling at some (m, L) (a fixed 50,000
+# affords less than one full anchor's own pair universe at m=150, L=32, ~709K pairs/anchor)
+# while being needlessly small at others. OPTIM_PROXY_PAIR_ROW_HARD_CEILING is the one number
+# in this whole chain that's a genuine resource-budget choice (not derivable from theory) --
+# raise or lower it based on your own available memory/time, not m/L. (CorrTrack_optimize's
+# own constructor still has its own internal literal fallback -- 250000 -- for any caller that
+# builds it directly, bypassing this per-dataset computation entirely.)
+DEFAULT_OPTIM_PROXY_PAIR_ROW_HARD_CEILING = getattr(
+    _DEFAULT_EXEC_CFG,
+    "OPTIM_PROXY_PAIR_ROW_HARD_CEILING",
+    20_000_000,
+)
 DEFAULT_OPTIM_PROXY_RANDOM_SEED = getattr(_DEFAULT_EXEC_CFG, "OPTIM_PROXY_RANDOM_SEED", 2468)
 DEFAULT_OPTIM_PROXY_BOOTSTRAP_ENABLED = getattr(_DEFAULT_EXEC_CFG, "OPTIM_PROXY_BOOTSTRAP_ENABLED", True)
 DEFAULT_OPTIM_PROXY_BOOTSTRAP_REPEATS = getattr(_DEFAULT_EXEC_CFG, "OPTIM_PROXY_BOOTSTRAP_REPEATS", 1000)
@@ -68,11 +83,6 @@ DEFAULT_OPTIM_PROXY_BOOTSTRAP_MIN_GT_EVENTS = getattr(
     _DEFAULT_EXEC_CFG,
     "OPTIM_PROXY_BOOTSTRAP_MIN_GT_EVENTS",
     30,
-)
-DEFAULT_OPTIM_PROXY_DISTANCE_CACHE_MAX_ROWS = getattr(
-    _DEFAULT_EXEC_CFG,
-    "OPTIM_PROXY_DISTANCE_CACHE_MAX_ROWS",
-    250000,
 )
 DEFAULT_OPTIM_PROXY_ADAPTIVE_ANCHORS_ENABLED = getattr(
     _DEFAULT_EXEC_CFG,
@@ -158,16 +168,21 @@ N_LAGS = DEFAULT_N_LAGS
 CORR_THRESHOLD = DEFAULT_CORR_THRESHOLD
 TRAIN_RATIO = DEFAULT_TRAIN_RATIO
 OPTIM_TUNING_MODE = DEFAULT_OPTIM_TUNING_MODE
+OPTIM_PROXY_PAIR_ROW_HARD_CEILING = DEFAULT_OPTIM_PROXY_PAIR_ROW_HARD_CEILING
 OPTIM_PROXY_CONFIG = {
     "anchor_count": DEFAULT_OPTIM_PROXY_ANCHOR_COUNT,
-    "max_pair_rows": DEFAULT_OPTIM_PROXY_MAX_PAIR_ROWS,
+    # (2026-09-03) "max_pair_rows"/"distance_cache_max_rows" are intentionally absent here --
+    # main()'s per-dataset loop always computes and sets both directly from the real (m, L)
+    # via recommend_proxy_pair_row_budget, before this dict is ever used to build a
+    # CorrTrack_optimize. If this module-level dict is ever used directly by some OTHER
+    # caller instead, CorrTrack_optimize's own constructor supplies a safe literal fallback
+    # (250000 for each) when a key is simply missing.
     "random_seed": DEFAULT_OPTIM_PROXY_RANDOM_SEED,
     "bootstrap_enabled": DEFAULT_OPTIM_PROXY_BOOTSTRAP_ENABLED,
     "bootstrap_repeats": DEFAULT_OPTIM_PROXY_BOOTSTRAP_REPEATS,
     "bootstrap_confidence_level": DEFAULT_OPTIM_PROXY_BOOTSTRAP_CONFIDENCE_LEVEL,
     "bootstrap_min_gt_events": DEFAULT_OPTIM_PROXY_BOOTSTRAP_MIN_GT_EVENTS,
     "eval_mode": "cached_distances",
-    "distance_cache_max_rows": DEFAULT_OPTIM_PROXY_DISTANCE_CACHE_MAX_ROWS,
     "adaptive_anchor_enabled": DEFAULT_OPTIM_PROXY_ADAPTIVE_ANCHORS_ENABLED,
     "max_anchor_count": DEFAULT_OPTIM_PROXY_MAX_ANCHOR_COUNT,
     "anchor_expand_factor": DEFAULT_OPTIM_PROXY_ANCHOR_EXPAND_FACTOR,
@@ -468,7 +483,7 @@ def main():
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
     global EXEC_MODE, NEG_CORR, ARTIFACT_MODE, ARTIFACT_BUFFER_MAX_ROWS, ARTIFACT_MERGE_MODE, SAVE_ONLY_REQUIRED_ARTIFACTS, SAVE_MAXLAG_ARTIFACTS
-    global TARGET_RECALL, RECALL_FALLBACK_NEAR_RATIO, SPEEDUP_NEAR_RATIO, TRAIN_RATIO, OPTIM_TUNING_MODE, OPTIM_PROXY_CONFIG, PARAM_GRID, DATA_LOADER, RESULT_FOLDER, MAX_WORKERS, CANDIDATE_BUCKET_WIDTH, CANDIDATE_BLOCK_SIZE_STEPS, CANDIDATE_BLOCK_INDEX_DIMS, CANDIDATE_N_PIVOTS, CANDIDATE_N_PROBE_PIVOTS, CANDIDATE_PIVOT_SELECTION, CANDIDATE_PIVOT_SEED, CANDIDATE_SIMILARITY, CANDIDATE_COSINE_THRESHOLD, CANDIDATE_HAMMING_Z, CANDIDATE_HAMMING_HMAX, CANDIDATE_HAMMING_GROUPS, CANDIDATE_FILTER_HAMMING, CANDIDATE_FILTER_COSINE
+    global TARGET_RECALL, RECALL_FALLBACK_NEAR_RATIO, SPEEDUP_NEAR_RATIO, TRAIN_RATIO, OPTIM_TUNING_MODE, OPTIM_PROXY_CONFIG, OPTIM_PROXY_PAIR_ROW_HARD_CEILING, PARAM_GRID, DATA_LOADER, RESULT_FOLDER, MAX_WORKERS, CANDIDATE_BUCKET_WIDTH, CANDIDATE_BLOCK_SIZE_STEPS, CANDIDATE_BLOCK_INDEX_DIMS, CANDIDATE_N_PIVOTS, CANDIDATE_N_PROBE_PIVOTS, CANDIDATE_PIVOT_SELECTION, CANDIDATE_PIVOT_SEED, CANDIDATE_SIMILARITY, CANDIDATE_COSINE_THRESHOLD, CANDIDATE_HAMMING_Z, CANDIDATE_HAMMING_HMAX, CANDIDATE_HAMMING_GROUPS, CANDIDATE_FILTER_HAMMING, CANDIDATE_FILTER_COSINE
     global VERBOSE, TESTING, HYBRID_VALIDATION, HYBRID_VALIDATION_MIN_REPEAT_RATE, HYBRID_VALIDATION_DISABLE_RATE, HYBRID_VALIDATION_EMA_ALPHA, HYBRID_VALIDATION_MIN_CANDIDATES
 
     RESULT_FOLDER = _resolve_cfg_value(args.result_folder, cfg_dataset, "RESULT_FOLDER", DEFAULT_RESULT_FOLDER)
@@ -531,12 +546,8 @@ def main():
             "OPTIM_PROXY_ANCHOR_COUNT",
             DEFAULT_OPTIM_PROXY_ANCHOR_COUNT,
         ),
-        "max_pair_rows": _resolve_cfg_value(
-            None,
-            cfg_exec,
-            "OPTIM_PROXY_MAX_PAIR_ROWS",
-            DEFAULT_OPTIM_PROXY_MAX_PAIR_ROWS,
-        ),
+        # "max_pair_rows" intentionally absent -- computed per-dataset below, from the real
+        # (m, L), via recommend_proxy_pair_row_budget.
         "random_seed": _resolve_cfg_value(
             None,
             cfg_exec,
@@ -568,12 +579,9 @@ def main():
             DEFAULT_OPTIM_PROXY_BOOTSTRAP_MIN_GT_EVENTS,
         ),
         "eval_mode": "cached_distances",
-        "distance_cache_max_rows": _resolve_cfg_value(
-            None,
-            cfg_exec,
-            "OPTIM_PROXY_DISTANCE_CACHE_MAX_ROWS",
-            DEFAULT_OPTIM_PROXY_DISTANCE_CACHE_MAX_ROWS,
-        ),
+        # "distance_cache_max_rows" intentionally absent -- computed per-dataset below,
+        # sized to match "max_pair_rows" (no reason for the cache to be smaller than the
+        # reference it's caching).
         "adaptive_anchor_enabled": _resolve_cfg_value(
             None,
             cfg_exec,
@@ -611,6 +619,12 @@ def main():
             DEFAULT_OPTIM_PROXY_CANDIDATE_RATE_CLOSE_TOLERANCE,
         ),
     }
+    OPTIM_PROXY_PAIR_ROW_HARD_CEILING = _resolve_cfg_value(
+        None,
+        cfg_exec,
+        "OPTIM_PROXY_PAIR_ROW_HARD_CEILING",
+        DEFAULT_OPTIM_PROXY_PAIR_ROW_HARD_CEILING,
+    )
     MAX_WORKERS = _resolve_cfg_value(None, cfg_exec, "MAX_WORKERS", DEFAULT_MAX_WORKERS)
     CANDIDATE_BUCKET_WIDTH = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_BUCKET_WIDTH", DEFAULT_CANDIDATE_BUCKET_WIDTH)
     CANDIDATE_BLOCK_SIZE_STEPS = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_BLOCK_SIZE_STEPS", DEFAULT_CANDIDATE_BLOCK_SIZE_STEPS)
@@ -648,6 +662,34 @@ def main():
                 dataset_id = f"{slug}_{n_var}_{n_year}"
                 train_data, ids_n_var = prepare_training_data(data, ids, n_year, n_var, TRAIN_RATIO)
 
+                # (2026-09-03) max_pair_rows/distance_cache_max_rows are now sized to the
+                # REAL (m, L) for this specific dataset iteration, not a single flat guess --
+                # see recommend_proxy_pair_row_budget's docstring for why a fixed number
+                # silently truncates anchor sampling at some scales while being needlessly
+                # small at others. Sized for OPTIM_PROXY_CONFIG's own max_anchor_count (the
+                # adaptive-expansion ceiling), bounded by OPTIM_PROXY_PAIR_ROW_HARD_CEILING.
+                _proxy_max_pair_rows, _proxy_est_pairs_per_anchor, _proxy_anchors_affordable = recommend_proxy_pair_row_budget(
+                    n_var, N_LAGS, WINDOW_STEP,
+                    max_anchor_count=OPTIM_PROXY_CONFIG["max_anchor_count"],
+                    hard_ceiling=OPTIM_PROXY_PAIR_ROW_HARD_CEILING,
+                )
+                dataset_proxy_config = dict(OPTIM_PROXY_CONFIG)
+                dataset_proxy_config["max_pair_rows"] = _proxy_max_pair_rows
+                dataset_proxy_config["distance_cache_max_rows"] = _proxy_max_pair_rows
+                if _proxy_anchors_affordable < OPTIM_PROXY_CONFIG["max_anchor_count"]:
+                    # visible, not silent: the hard ceiling (not the anchor target) is what's
+                    # limiting statistical power for this (m, L) -- a real trade-off worth
+                    # seeing, not something to discover only via an "anchors truncated" note
+                    # deep in a results CSV.
+                    print(
+                        f"[proxy] {dataset_id}: OPTIM_PROXY_PAIR_ROW_HARD_CEILING "
+                        f"({OPTIM_PROXY_PAIR_ROW_HARD_CEILING:,}) affords only "
+                        f"{_proxy_anchors_affordable} of the requested "
+                        f"{OPTIM_PROXY_CONFIG['max_anchor_count']} max anchors "
+                        f"({_proxy_est_pairs_per_anchor:,} pair rows/anchor at m={n_var}, "
+                        f"n_lags={N_LAGS}, window_step={WINDOW_STEP})."
+                    )
+
                 output_dir = os.path.join(
                     "correlation",
                     RESULT_FOLDER,
@@ -671,9 +713,6 @@ def main():
                         False,
                         exec=EXEC_MODE,
                         max_workers=MAX_WORKERS,
-                        candidate_bucket_width=CANDIDATE_BUCKET_WIDTH,
-                        candidate_block_size_steps=CANDIDATE_BLOCK_SIZE_STEPS,
-                        candidate_block_index_dims=CANDIDATE_BLOCK_INDEX_DIMS,
                         candidate_similarity=CANDIDATE_SIMILARITY,
                         candidate_cosine_threshold=CANDIDATE_COSINE_THRESHOLD,
                         hybrid_validation=HYBRID_VALIDATION,
@@ -692,7 +731,7 @@ def main():
                         artifact_merge_mode=ARTIFACT_MERGE_MODE,
                         save_only_required_artifacts=SAVE_ONLY_REQUIRED_ARTIFACTS,
                         save_maxlag_artifacts=SAVE_MAXLAG_ARTIFACTS,
-                        proxy_config=OPTIM_PROXY_CONFIG,
+                        proxy_config=dataset_proxy_config,
                     )
 
                     output_prefix = os.path.join(output_dir, f"corrtrack_optim_{dataset_id}")

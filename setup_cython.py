@@ -12,13 +12,19 @@ extensions = [
         "candidate_kernels",
         ["candidate_kernels.pyx"],
         include_dirs=[np.get_include()],
-        extra_compile_args=["-fopenmp"],
-        extra_link_args=["-fopenmp"],
+        extra_compile_args=["-fopenmp", "-O3", "-march=native", "-ffast-math"],
+        # (2026-07-30) -march=native -ffast-math lets gcc auto-vectorize the
+        # new distance_corr_sketch_proxy_cy's sin()/cos() calls into glibc's
+        # SIMD vector-math variants (libmvec), which need an explicit -lm
+        # link (glibc >= 2.22 ships libmvec inside libm) -- without it the
+        # extension fails to import with "undefined symbol: _ZGVdN4v_sin".
+        extra_link_args=["-fopenmp", "-lm"],
     ),
     Extension(
         "sketch_kernels",
         ["sketch_kernels.pyx"],
         include_dirs=[np.get_include()],
+        extra_compile_args=["-O3", "-march=native", "-ffast-math"],
     ),
     Extension(
         "partition_kernels",

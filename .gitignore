@@ -1,4 +1,28 @@
-datasets/examples/asos-airports/fr-wind_direction.csv
-datasets/examples/asos-airports/fr-air_temperature.csv
-datasets/examples/asos-airports/fr-wind_direction.csv
-datasets/examples/asos-airports/fr-air_temperature.csv
+# Python bytecode / caches
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+
+# Editor / OS cruft
+*.Zone.Identifier
+*:Zone.Identifier
+.DS_Store
+
+# Cython build tree (setup_cython.py build_ext --inplace)
+/build/
+
+# Local development notes (kept private)
+/docs/
+/tasks/
+
+# Large local datasets and experiment outputs (not part of the source release)
+/tmp_artifacts/
+/correlation/
+/datasets/synth_outputs/
+/datasets/examples/asos-airports/fr-air_temperature.csv
+/datasets/examples/asos-airports/fr-wind_direction.csv

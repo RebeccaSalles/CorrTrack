@@ -33,6 +33,73 @@ def compute_series_dots(double[:, :, ::1] window_blocks,
     return out
 
 
+# (2026-07-28) Ported from corrtrack_release_multiwinsizes as part of the
+# roadmap's part 3 (merge multi-window-size support into corrtrack_release_dev).
+# See README_multi_window_sizes.md and docs/implementation_log.md's 2026-07-28
+# entries. Computes the max-window raw sketch once, plus requested SUFFIX raw
+# sketches (each a partial sum from a given basic-window offset through the
+# last basic window) in the same pass -- lets shorter window sizes derive
+# their sketch from the trailing basic-window blocks of the max window's
+# already-computed basicDots, instead of recomputing from scratch.
+def build_multi_suffix_raw(double[:, :, ::1] basic_dots,
+                           double[:, ::1] feature_sums,
+                           long[:] offsets_desc):
+    """Build max-window raw sketch and requested suffix raw sketches.
+
+    offsets_desc must be sorted descending. Each offset is a basic-window
+    position; the returned suffix at position i is the sum from
+    offsets_desc[i] through the last basic window.
+    """
+    cdef Py_ssize_t n_series = basic_dots.shape[0]
+    cdef Py_ssize_t n_basic = basic_dots.shape[1]
+    cdef Py_ssize_t n_vectors = basic_dots.shape[2]
+    cdef Py_ssize_t n_offsets = offsets_desc.shape[0]
+    cdef Py_ssize_t feat_series = feature_sums.shape[0]
+    cdef Py_ssize_t feat_basic = feature_sums.shape[1]
+    cdef Py_ssize_t s, b, v, j
+    cdef bint have_features = feat_series == n_series and feat_basic >= n_basic
+
+    cdef np.ndarray[np.float64_t, ndim=2] raw = np.zeros(
+        (n_series, n_vectors),
+        dtype=np.float64,
+    )
+    cdef np.ndarray[np.float64_t, ndim=3] suffix_raw = np.empty(
+        (n_offsets, n_series, n_vectors),
+        dtype=np.float64,
+    )
+    cdef np.ndarray[np.float64_t, ndim=2] suffix_features = np.zeros(
+        (n_offsets, n_series),
+        dtype=np.float64,
+    )
+    cdef np.ndarray[np.float64_t, ndim=1] running_features = np.zeros(
+        n_series,
+        dtype=np.float64,
+    )
+
+    cdef double[:, ::1] raw_mv = raw
+    cdef double[:, :, ::1] suffix_raw_mv = suffix_raw
+    cdef double[:, ::1] suffix_features_mv = suffix_features
+    cdef double[:] running_features_mv = running_features
+
+    with nogil:
+        j = 0
+        for b in range(n_basic - 1, -1, -1):
+            for s in range(n_series):
+                for v in range(n_vectors):
+                    raw_mv[s, v] += basic_dots[s, b, v]
+                if have_features:
+                    running_features_mv[s] += feature_sums[s, b]
+
+            while j < n_offsets and offsets_desc[j] == b:
+                for s in range(n_series):
+                    for v in range(n_vectors):
+                        suffix_raw_mv[j, s, v] = raw_mv[s, v]
+                    suffix_features_mv[j, s] = running_features_mv[s]
+                j += 1
+
+    return raw, suffix_raw, suffix_features
+
+
 def build_sketch_matrix(double[:, :, ::1] window_blocks,
                         double[:, :, ::1] weights,
                         double[:] mean_vec,
@@ -100,6 +167,20 @@ def build_sketch_matrix(double[:, :, ::1] window_blocks,
                     for v in range(n_vectors):
                         adj = raw_mv[s, v] - mu_value * random_sums[v]
                         norm_mv[s, v] = adj / denom
+            elif norm_mode == 2:
+                # (2026-07-22) "mean" sketch_norm: mean-center only, no
+                # rescale -- deliberately preserves the raw sketch's own
+                # magnitude (verified to carry real, useful correlation
+                # signal beyond direction alone; see docs/implementation_log.md,
+                # "lsh_mag_dot" entries), for backends designed to use L2
+                # distance rather than cosine similarity.
+                mean = 0.0
+                for v in range(n_vectors):
+                    mean += raw_mv[s, v]
+                if n_vectors > 0:
+                    mean /= n_vectors
+                for v in range(n_vectors):
+                    norm_mv[s, v] = raw_mv[s, v] - mean
             else:
                 mean = 0.0
                 for v in range(n_vectors):
@@ -169,6 +250,16 @@ def apply_orth_and_normalize(double[:, ::1] raw_matrix,
                     for v in range(n_vectors):
                         adj = raw_mv[s, v] - mu_value * random_sums[v]
                         norm_mv[s, v] = adj / denom
+            elif norm_mode == 2:
+                # (2026-07-22) "mean" sketch_norm -- see the identical branch
+                # in build_sketch_matrix for the full rationale.
+                mean = 0.0
+                for v in range(n_vectors):
+                    mean += raw_mv[s, v]
+                if n_vectors > 0:
+                    mean /= n_vectors
+                for v in range(n_vectors):
+                    norm_mv[s, v] = raw_mv[s, v] - mean
             else:
                 mean = 0.0
                 for v in range(n_vectors):
@@ -275,6 +366,16 @@ def incremental_combine_and_normalize(double[:, :, ::1] base_dots,
                     for v in range(n_vectors):
                         adj = raw_mv[s, v] - mu_value * random_sums[v]
                         norm_mv[s, v] = adj / denom
+            elif norm_mode == 2:
+                # (2026-07-22) "mean" sketch_norm -- see the identical branch
+                # in build_sketch_matrix for the full rationale.
+                mean = 0.0
+                for v in range(n_vectors):
+                    mean += raw_mv[s, v]
+                if n_vectors > 0:
+                    mean /= n_vectors
+                for v in range(n_vectors):
+                    norm_mv[s, v] = raw_mv[s, v] - mean
             else:
                 mean = 0.0
                 for v in range(n_vectors):

@@ -3,7 +3,7 @@ import json
 import math
 import csv
 from bisect import bisect_left, bisect_right
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional, Any, Union
 
 import numpy as np
 
@@ -54,7 +54,7 @@ def _build_stem(
     corr_sign: str,
     threshold: float,
     template_len: int,
-    num_templates: int,
+    num_templates: Union[int, str],
     window_step: int,
     max_lag: Optional[int],
     base_proc: Optional[Dict[str, Any]],
@@ -284,10 +284,17 @@ def _apply_sign_to_template(
     yw: np.ndarray,
     r_xy: float,
     desired_sign: int,
+    diff_space: bool = False,
 ) -> Tuple[np.ndarray, float]:
     """
     Mirror y around its mean when sign must be flipped.
     This preserves y mean/std and approximately flips corr(x,y) sign.
+    Mirroring around the mean negates every increment too (diff(2c - y) =
+    -diff(y)), so the same level-space flip is valid regardless of which
+    space r_xy/r_new is measured in -- only the reported statistic's
+    representation (diff_space) needs to match how r_xy was computed by
+    the caller, so nonstationary (increment-controlled) pairs report an
+    honest increment-space correlation rather than a level-space one.
     """
     current_sign = +1 if r_xy >= 0.0 else -1
     if current_sign == desired_sign:
@@ -295,7 +302,10 @@ def _apply_sign_to_template(
 
     mean_y = float(np.mean(yw, dtype=np.float64))
     yw_flipped = (2.0 * mean_y - yw.astype(np.float64, copy=False)).astype(np.float32)
-    r_new = _pearson_raw(xw, yw_flipped)
+    if diff_space:
+        r_new = _pearson_raw(np.diff(xw.astype(np.float64, copy=False)), np.diff(yw_flipped.astype(np.float64, copy=False)))
+    else:
+        r_new = _pearson_raw(xw, yw_flipped)
     return yw_flipped, r_new
 
 
@@ -307,6 +317,31 @@ def _pearson_raw(x: np.ndarray, y: np.ndarray) -> float:
     if r < -1.0:
         r = -1.0
     return float(r)
+
+
+def _apply_continuity_shift(
+    segment: np.ndarray,
+    prev_value: float,
+    sigma: float,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """
+    (2026-08-24) Shift a freshly-generated nonstationary template by a
+    constant so it continues from the host series' own value just before
+    the splice point, plus one ordinary fresh step, instead of jumping
+    from whatever level the template happened to start at. Translation-
+    invariant (diff(x + c) == diff(x)), so this preserves the controlled
+    injected correlation exactly -- it only replaces the artificial
+    splice-boundary discontinuity with a step statistically
+    indistinguishable from any other step in the series. Empirically, the
+    unshifted discontinuity averaged ~30x a typical step (see
+    docs/implementation_log.md's 2026-08-24 entry) and was the dominant
+    cause of injected pairs failing to validate as correlated even though
+    _sample_base_correlated_template's own acceptance check always passed.
+    """
+    boundary_step = float(rng.normal(0.0, sigma))
+    offset = (prev_value + boundary_step) - float(segment[0])
+    return (segment.astype(np.float64, copy=False) + offset).astype(np.float32, copy=False)
 
 
 def _sample_base_correlated_template(
@@ -321,10 +356,54 @@ def _sample_base_correlated_template(
     Draw correlated windows whose marginal stats follow the configured base process.
     """
     min_std = 1e-3
+    nonstat = _stationarity_tag(base_proc) == "nonstat"
     for _ in range(max_attempts):
         base = _gen_base_series(2, length, base_proc, rng)
         x_raw = base[0].astype(np.float64, copy=False)
         y_raw = base[1].astype(np.float64, copy=False)
+
+        if nonstat:
+            # (2026-08-24) Coupling LEVELS the way the stationary branch
+            # below does assumes step-scale and window-scale track
+            # together -- true for stationary processes, false for a
+            # unit-root process, where window-level std grows with window
+            # length while per-step innovation variance stays fixed. That
+            # mismatch made the injected correlation collapse under
+            # differencing as window length grew (empirically measured:
+            # diff-space |r| fell from ~0.79 at p=32 to ~0.44 at p=512 for
+            # a random walk, well below corr_threshold=0.7 -- see
+            # docs/implementation_log.md's 2026-08-24 entry). Couple the
+            # STEPS instead (constant scale regardless of window length)
+            # and cumsum back to levels, so the controlled correlation
+            # lives in the increments by construction -- coherent with
+            # validating this data under preprocess=True, the regime this
+            # generator's own nonstationary types are meant to be used
+            # under (raw-level Pearson on unit-root series is dominated by
+            # spurious correlation, per the same log entry).
+            x_diffs = np.diff(x_raw)
+            y_diffs_ref = np.diff(y_raw)
+            mxd = float(x_diffs.mean())
+            sxd = float(x_diffs.std())
+            myd = float(y_diffs_ref.mean())
+            syd = float(y_diffs_ref.std())
+            if sxd < min_std or syd < min_std:
+                continue
+
+            x_diffs_norm = (x_diffs - mxd) / sxd
+            eps = rng.normal(0.0, 1.0, size=length - 1)
+            r_star = threshold + rng.random() * (1.0 - threshold)
+            r_star = min(r_star, 1.0)
+            sign = _choose_sign(corr_sign, rng)
+            noise_scale = math.sqrt(max(0.0, 1.0 - r_star * r_star))
+            y_diffs_corr = sign * r_star * x_diffs_norm + noise_scale * eps
+            y_diffs = myd + syd * y_diffs_corr
+
+            xw = x_raw.astype(np.float32, copy=False)
+            yw = (float(y_raw[0]) + np.concatenate(([0.0], np.cumsum(y_diffs)))).astype(np.float32, copy=False)
+            r = _pearson_raw(x_diffs.astype(np.float32, copy=False), y_diffs.astype(np.float32, copy=False))
+            if abs(r) >= threshold:
+                return xw, yw, r
+            continue
 
         mx = float(x_raw.mean())
         sx = float(x_raw.std())
@@ -404,6 +483,12 @@ def _normalize_max_lag(max_lag: Optional[int]) -> Optional[int]:
     return lag
 
 
+def _num_templates_arg_type(value: str) -> Union[int, str]:
+    if value.strip().lower() == "auto":
+        return "auto"
+    return int(value)
+
+
 def _candidate_partner_starts(
     slots: List[int],
     start: int,
@@ -441,6 +526,28 @@ def _max_nonoverlap_slots_per_series(
     return 1 + max(0, (n - length) // gap)
 
 
+def resolve_pair_goal(m: int, n: int, z: float, template_len: int, window_step: int) -> int:
+    """
+    Single source of truth for make_corr_dataset's own pair_goal
+    computation -- also needed by datasets/synth_loader.py's cache-stem
+    builder, so num_templates="auto" resolves to the IDENTICAL value both
+    when computing the cache lookup path and when make_corr_dataset
+    actually generates/saves the file. Duplicating this formula in two
+    places would risk exactly the stem mismatch (cache permanently
+    missing) it exists to avoid.
+    """
+    p = int(template_len)
+    window_step = _normalize_window_step(window_step)
+    slots_total = m * len(range(0, n - p + 1, window_step))
+    max_slots_per_series = _max_nonoverlap_slots_per_series(n, p, window_step)
+    max_pairs = (m * max_slots_per_series) // 2
+    pair_target = int(z * m * n // (2 * p))
+    pair_goal = min(pair_target, max_pairs)
+    if pair_goal <= 0 or slots_total < 2:
+        pair_goal = 0
+    return pair_goal
+
+
 def make_corr_dataset(
     save_dir: str,
     m: int,
@@ -449,7 +556,7 @@ def make_corr_dataset(
     w: int,
     *,
     template_len: Optional[int] = None,
-    num_templates: int = 4,
+    num_templates: Union[int, str] = 4,
     threshold: float = 0.7,
     corr_sign: str = "pos",  # "pos" | "neg" | "both"
     base_proc: Optional[Dict[str, Any]] = None,
@@ -471,6 +578,12 @@ def make_corr_dataset(
       - Injected windows remain non-overlapping within each series.
       - Templates are sampled from the base process so marginals match the background.
       - w is the evaluation window length and must be divisible by p (p defaults to w).
+      - num_templates="auto" sizes the template pool to the actual number of pairs
+        that will be placed, so every placement gets its own never-reused template --
+        avoids "phantom" correlation between unrelated series that happen to share a
+        template at overlapping positions (see docs/implementation_log.md's
+        2026-08-24 (c) entry). An explicit int below that count is rejected rather
+        than silently under-templated.
     """
     assert 0.0 <= z <= 1.0, "z must be in [0,1]"
     assert w > 0 and n > 0, "w and n must be positive"
@@ -491,6 +604,8 @@ def make_corr_dataset(
     # Base data
     X = _gen_base_series(m, n, base_proc, rng)  # shape (m, n)
     _apply_volatility_equalizer(X, volatility_equalizer, w)
+    nonstat = _stationarity_tag(base_proc) == "nonstat"
+    proc_sigma = float((base_proc or {}).get("sigma", 1.0))
 
     # Prepare step-aligned candidate starts. Non-overlap is enforced lazily by
     # retiring overlapping starts on a series after each placement.
@@ -498,15 +613,32 @@ def make_corr_dataset(
         list(range(0, n - p + 1, window_step)) for _ in range(m)
     ]
     slots_total = sum(len(s) for s in slots_by_series)
-    max_slots_per_series = _max_nonoverlap_slots_per_series(n, p, window_step)
-    max_pairs = (m * max_slots_per_series) // 2
+    pair_goal = resolve_pair_goal(m, n, z, p, window_step)
+    pair_target = int(z * m * n // (2 * p))  # kept for meta.json reporting only; pair_goal (above) is authoritative
 
-    pair_target = int(z * m * n // (2 * p))
-    pair_goal = min(pair_target, max_pairs)
-    if pair_goal <= 0 or slots_total < 2:
-        pair_goal = 0
+    # (2026-08-24) num_templates="auto" resolves to pair_goal -- one
+    # never-reused template per placement, eliminating the template-reuse
+    # collision problem entirely (see docs/implementation_log.md's
+    # 2026-08-24 (c) entry: unrelated series drawing a role from the same
+    # template at overlapping positions show real, unintended correlation
+    # with each other; confirmed present regardless of base_proc). An
+    # explicit int below pair_goal is rejected rather than silently
+    # under-templated, since that reintroduces exactly this problem.
+    if isinstance(num_templates, str):
+        if num_templates.strip().lower() != "auto":
+            raise ValueError(f"num_templates string value must be 'auto', got {num_templates!r}")
+        num_templates = pair_goal
+    elif num_templates < pair_goal:
+        raise ValueError(
+            f"num_templates={num_templates} is less than pair_goal={pair_goal} -- this "
+            f"would reuse templates across unrelated series pairs, which creates real "
+            f"but unintended correlation between them (see docs/implementation_log.md's "
+            f"2026-08-24 (c) entry). Pass num_templates='auto' to size this correctly, "
+            f"or set num_templates >= {pair_goal} explicitly."
+        )
 
     templates = _make_base_templates(num_templates, p, threshold, corr_sign, base_proc, rng)
+    template_order = rng.permutation(len(templates)) if templates else np.empty(0, dtype=np.int64)
 
     correlated_rows: List[Tuple[str, str, int, int, float]] = []
     pairs_used = 0
@@ -553,10 +685,22 @@ def make_corr_dataset(
         partner_slots = partner_slot_sets[partner_idx]
         start2 = int(partner_slots[int(rng.integers(0, len(partner_slots)))])
 
-        tpl = templates[int(rng.integers(0, len(templates)))]
+        # (2026-08-24) Draw without replacement -- template_order was
+        # pre-shuffled once, and pairs_used increments exactly once per
+        # successful placement, so each placement gets a distinct template
+        # index (guaranteed available since len(templates) >= pair_goal).
+        tpl = templates[int(template_order[pairs_used])]
         xw, yw, r_tpl = tpl
         desired_sign = _target_sign_for_pair(corr_sign, pairs_used, pair_goal, rng)
-        yw_use, r_use = _apply_sign_to_template(xw, yw, r_tpl, desired_sign)
+        yw_use, r_use = _apply_sign_to_template(
+            xw, yw, r_tpl, desired_sign, diff_space=nonstat
+        )
+
+        if nonstat:
+            if start1 > 0:
+                xw = _apply_continuity_shift(xw, float(X[i1, start1 - 1]), proc_sigma, rng)
+            if start2 > 0:
+                yw_use = _apply_continuity_shift(yw_use, float(X[i2, start2 - 1]), proc_sigma, rng)
 
         X[i1, start1 : start1 + p] = xw
         X[i2, start2 : start2 + p] = yw_use
@@ -638,6 +782,545 @@ def make_corr_dataset(
     }
 
 
+# ======================================================================
+# Density-deterministic generator (2026-09-10)
+# ----------------------------------------------------------------------
+# `make_density_targeted_dataset` takes a TARGET EFFECTIVE TUPLE DENSITY
+# (bf_correlated / bf_tested) plus the exact evaluation config, and builds
+# a dataset whose measured density hits the target within a tight
+# tolerance -- deterministically for a given (target, seed, base_proc,
+# corr_sign, n_epochs, duty) -- together with the EXACT ground-truth
+# (pair, lag, window, signed_r) set by construction, so a full brute-force
+# pass is no longer needed per cell.  See
+# ~/.claude/plans/misty-stargazing-liskov.md for the full design.
+# ======================================================================
+
+def _a_from_r(r: float) -> float:
+    """Loading a such that two equal-loading members correlate at |r|:
+    r = a^2 / (a^2 + 1)  =>  a = sqrt(r / (1 - r))."""
+    r = min(max(float(r), 1e-6), 1.0 - 1e-6)
+    return math.sqrt(r / (1.0 - r))
+
+
+def _gen_shared_driver_signal(n: int, sigma_smooth: float,
+                              rng: np.random.Generator) -> np.ndarray:
+    """Unit-variance (near-)white noise. Used as a group's shared driver c_group:
+    its autocorrelation is ~0 at every nonzero lag, so a within-group pair is
+    correlated at exactly one lag bucket (|o_i - o_j|) and -- crucially -- two
+    INDEPENDENT group drivers stay windowed-uncorrelated over the evaluation window
+    (a driver with a longer correlation length makes independent instances
+    windowed-correlated above threshold: a hard geometric incompatibility at the
+    window / step sizes this experiment uses, verified empirically)."""
+    raw = rng.standard_normal(n)
+    if float(sigma_smooth) > 0.4:
+        pad = int(math.ceil(4.0 * sigma_smooth))
+        k = np.arange(-pad, pad + 1, dtype=np.float64)
+        kern = np.exp(-0.5 * (k / float(sigma_smooth)) ** 2)
+        kern /= kern.sum()
+        raw = np.convolve(np.concatenate([raw[:pad][::-1], raw, raw[-pad:][::-1]]),
+                          kern, mode="same")[pad:pad + n]
+    c = (raw - raw.mean()) / (raw.std() + 1e-12)
+    return c.astype(np.float64)
+
+
+def _build_group_schedule(n_groups: int, n_epochs: int, corr_sign: str,
+                          duty: float, seed: int):
+    """Per-group state timeline over `n_epochs` epochs, states in {0, +1, -1}.
+    Deterministic from (group, seed). Every group is ON for the SAME number of
+    epochs (n_on = round(duty * n_epochs)) so effective density stays exact; the
+    schedule only varies which epochs and which signs. For corr_sign='both' at
+    least one group is forced to contain a +<->- sign flip. Returns
+    (states (n_groups, n_epochs) int8, events list)."""
+    rng = np.random.default_rng((int(seed) & 0xFFFFFFFF) ^ 0x5C4ED<<1)
+    if corr_sign == "pos":
+        on_signs = [1]
+    elif corr_sign == "neg":
+        on_signs = [-1]
+    else:
+        on_signs = [1, -1]
+    n_on = max(1, min(n_epochs, round(float(duty) * n_epochs)))
+    states = np.zeros((n_groups, n_epochs), dtype=np.int8)
+    for g in range(n_groups):
+        on_epochs = np.sort(rng.choice(n_epochs, size=n_on, replace=False))
+        signs = rng.choice(on_signs, size=n_on)
+        if len(on_signs) == 2 and g == 0 and n_on >= 2:
+            # force a genuine sign-flip transition in the first group
+            signs[0], signs[1] = 1, -1
+            on_epochs[:2] = np.sort(on_epochs[:2])
+        for e, s in zip(on_epochs, signs):
+            states[g, int(e)] = int(s)
+    events = []
+    for g in range(n_groups):
+        for e in range(1, n_epochs):
+            if states[g, e] != states[g, e - 1]:
+                events.append({"group": int(g), "epoch": int(e),
+                               "from": int(states[g, e - 1]), "to": int(states[g, e])})
+    return states, events
+
+
+def _canonical_gt_row(cur_s, hist_s, t1, t2, w):
+    """(current, historical) -> canonical (later-start first, id-sorted tie), matching
+    library_corrtrack_parallel._normalize_bf_key / _canonicalize_rows."""
+    if t1 < t2 or (t1 == t2 and cur_s > hist_s):
+        return (hist_s, cur_s, t2, t1, w)
+    return (cur_s, hist_s, t1, t2, w)
+
+
+def make_density_targeted_dataset(
+    m: int,
+    n: int,
+    *,
+    target_density: float,
+    corr_threshold: float,
+    window_size: int,
+    window_step: int,
+    n_lags: int,
+    n_eval_steps: int,
+    base_proc: Optional[Dict[str, Any]] = None,
+    preprocess: bool = False,
+    lag_band: int = 4,
+    corr_sign: str = "pos",
+    n_epochs: int = 6,
+    duty: float = 1.0,
+    r_max: float = 0.99,
+    corr_margin: float = 0.03,
+    near_threshold_fraction: float = 0.05,
+    loading_skew: str = "high",
+    seed: int = 7,
+    tolerance: float = 0.15,
+    save_dir: Optional[str] = None,
+    verify_bf: bool = True,
+    _max_correction_regens: int = 3,
+):
+    """Generate an (m, n) dataset whose brute-force effective tuple density
+    (correlated (pair,lag,window) tuples / all tested tuples) equals
+    `target_density` within `tolerance`, with the exact ground-truth set
+    returned. See the module comment above and the plan file.
+
+    Returns a dict:
+      data            (n, m+1) float32 -- col 0 is a 1..n index, cols 1..m the series
+      ids             ["s1".."sm"]
+      gt_rows         (K, 5) int64  canonical [s1,s2,t1,t2,w] over ALL eval windows
+      gt_corrs        (K,)  float64 signed
+      analytic_density, verified_density, group_size, n_groups, lag_band_measured,
+      schedule, events, rho_hist, meta_json (if save_dir), ...
+    """
+    corr_sign = str(corr_sign).lower()
+    if corr_sign not in ("pos", "neg", "both"):
+        raise ValueError("corr_sign must be 'pos' | 'neg' | 'both'")
+    step = _normalize_window_step(window_step)
+    w = int(window_size)
+    L_test = n_lags // step + 1
+    if L_test < 1:
+        raise ValueError("n_lags // window_step + 1 must be >= 1")
+    b = int(max(1, min(lag_band, L_test)))
+    n_on = max(1, min(n_epochs, round(float(duty) * n_epochs)))
+    on_frac = n_on / float(n_epochs)
+    total_pairs = m * (m - 1) / 2.0
+    max_windows = (n - w) // step + 1
+    if max_windows < 1:
+        raise ValueError("n too short for even one evaluation window")
+    n_eval = int(min(int(n_eval_steps), max_windows))
+
+    # Candidates_BF tests, per full step: C(m,2) synchronous tuples + m*m per NONZERO lag
+    # bucket (every ordered (current, history) pair, self-pairs included). This is the
+    # denominator the sweep's effective density (bf_correlated / bf_tested) divides by,
+    # so the generator must target it -- NOT the (unordered, one-lag-per-pair) count.
+    tested_per_step = total_pairs + m * m * (L_test - 1)
+    # exact tested-tuple count Candidates_BF accumulates over the first n_eval windows
+    # (lag bucket k is only available from window k onward): C(m,2)*n_eval synchronous
+    # + m^2 * sum_{k=1}^{L_test-1} (n_eval - k) lagged. Used when verify_bf is off.
+    _lag_terms = sum(max(0, n_eval - k) for k in range(1, L_test))
+    tested_total_est = float(total_pairs) * n_eval + float(m) * m * _lag_terms
+
+    # ---- solve (n_groups, group_size) from the analytic density formula ----
+    # Canonical (unordered, deduped) planted tuples per full step ~= ng * C(g,2) * on_frac,
+    # so d_exact(ng, g) = ng * g*(g-1)/2 * on_frac / tested_per_step, valid for ng*g <= m.
+    # Search the (ng, g) grid: ng distinct groups of g series each, the rest uncorrelated.
+    # g=2 with small ng recovers the sparse "disjoint pairs" regime; a big single group
+    # (ng=1, g up to m) recovers the dense regime -- one mechanism, no special cases.
+    def _d_exact(ng, gg):
+        if gg < 2 or ng < 1 or ng * gg > m:
+            return 0.0
+        return ng * gg * (gg - 1) / 2.0 * on_frac / tested_per_step
+
+    def _solve_ng_g(target, model_gain=1.0):
+        want = target / max(model_gain, 1e-6)
+        best, best_err = (1, 2), float("inf")
+        for gg in range(2, m + 1):
+            for ng in range(1, m // gg + 1):
+                err = abs(_d_exact(ng, gg) - want)
+                if err < best_err:
+                    best, best_err = (ng, gg), err
+            if _d_exact(1, gg) > want and gg > 2:
+                break   # larger g only overshoots further
+        return best
+
+    n_groups_target, g = _solve_ng_g(target_density)
+
+    rng = np.random.default_rng(int(seed) & 0xFFFFFFFF)
+
+    # ---- shared-signal smoothing width ----
+    # The shared driver c_group is white. A driver whose windowed autocorrelation
+    # stayed >= corr_threshold across a lag *band* of width b*step would necessarily
+    # have a correlation length ~b*step, and at the window / step sizes this experiment
+    # uses (w ~ 8*step) that makes two INDEPENDENT group drivers windowed-correlated
+    # well above threshold -- verified empirically, a hard geometric incompatibility,
+    # not a tuning issue. So each correlated pair is planted at exactly ONE lag bucket
+    # (|o_i - o_j|), and `lag_band` instead controls how widely member offsets are
+    # spread within a group (jitter over b consecutive buckets) so different
+    # within-group pairs sit at different lags spanning b buckets collectively.
+    sigma_c = 0.0
+
+    def _win_std(sig):
+        """sqrt of the mean windowed variance (in the evaluation space) -- the scale the
+        loading->correlation map is defined against."""
+        s = np.asarray(sig, dtype=np.float64)
+        if preprocess:
+            s = np.diff(s)
+        starts = np.arange(0, max(1, len(s) - w), max(step, (len(s) - w) // 64 or 1))
+        vs = [s[t:t + w].var() for t in starts if t + w <= len(s)]
+        return math.sqrt(max(1e-12, float(np.mean(vs)))) if vs else 1.0
+
+    def _build(ng_local, g_local):
+        _rng = np.random.default_rng((int(seed) & 0xFFFFFFFF) ^ 0xD3117)
+        perm = _rng.permutation(m)
+        ng_local = max(1, min(int(ng_local), m // max(2, int(g_local))))
+        groups = [perm[c * g_local:(c + 1) * g_local].tolist() for c in range(ng_local)]
+        groups = [grp for grp in groups if len(grp) >= 2]
+        n_groups_l = len(groups)
+        states, events = _build_group_schedule(n_groups_l, n_epochs, corr_sign, duty, seed)
+
+        # step-align epoch boundaries so every transition falls on the window grid
+        epoch_len = max(step, (n // n_epochs // step) * step)
+        o_hi = max(0, L_test - b)   # so O_group + (b-1) stays <= L_test - 1
+
+        # per-member idiosyncratic noise, normalised to unit windowed std in the eval space
+        eps = _gen_base_series(m, n, base_proc, _rng).astype(np.float64)
+        for si in range(m):
+            eps[si] /= _win_std(eps[si])
+
+        a_lo = _a_from_r(corr_threshold + corr_margin)
+        a_hi = _a_from_r(r_max)
+
+        def _draw_loadings(k):
+            if loading_skew == "high":
+                a = a_hi - _rng.beta(2.0, 5.0, size=k) * (a_hi - a_lo)
+            elif loading_skew == "low":
+                a = a_hi - _rng.beta(5.0, 2.0, size=k) * (a_hi - a_lo)
+            else:
+                a = _rng.uniform(a_lo, a_hi, size=k)
+            n_near = int(round(near_threshold_fraction * k))
+            if n_near > 0:
+                a[_rng.choice(k, size=n_near, replace=False)] = a_lo
+            return a
+
+        offsets, loadings, group_of, c_signals = {}, {}, {}, []
+        for gi, grp in enumerate(groups):
+            c = _gen_shared_driver_signal(n, sigma_c, _rng)
+            c /= _win_std(c)                       # unit windowed std, same as eps
+            c_signals.append(c)
+            O_group = int(_rng.integers(0, o_hi + 1))
+            a = _draw_loadings(len(grp))
+            for mi_local, si in enumerate(grp):
+                jit = int(_rng.integers(0, b)) if b > 1 else 0
+                offsets[si] = max(0, min(L_test - 1, O_group + jit))
+                loadings[si] = float(a[mi_local])
+                group_of[si] = gi
+
+        # per-group sample-level state timeline. Transitions are SHARP (state changes
+        # exactly on a step-aligned epoch boundary) so the monitor event log is exact;
+        # windows that straddle a transition are inherently ambiguous and are excluded
+        # from the per-window GT / metric on both sides (see _verify).
+        s_samp_by_group = {}
+        for gi in range(len(groups)):
+            ss = np.empty(n, dtype=np.int8)
+            for e_idx in range(n_epochs):
+                lo = e_idx * epoch_len
+                hi = n if e_idx == n_epochs - 1 else (e_idx + 1) * epoch_len
+                ss[lo:hi] = int(states[gi, e_idx])
+            s_samp_by_group[gi] = ss
+
+        # ungrouped series: plain base process
+        X = _gen_base_series(m, n, base_proc, _rng).astype(np.float64)
+        for si in range(m):
+            gi = group_of.get(si)
+            if gi is None:
+                continue
+            o = offsets[si] * step        # offsets are in lag-BUCKET units
+            csig = c_signals[gi]
+            shifted = np.empty(n, dtype=np.float64)
+            shifted[:o] = csig[0]
+            shifted[o:] = csig[:n - o]
+            comp = loadings[si] * shifted
+            ss = s_samp_by_group[gi].astype(np.float64)
+            X[si] = ss * comp + eps[si]
+        return (X, groups, group_of, offsets, loadings, states, events, epoch_len,
+                s_samp_by_group)
+
+    # ---- analytic GT builder over the first `n_eval` evaluated windows ----
+    # Window starts are recorded 1-based by Candidates_BF / CorrTrack, so we add 1.
+    # Vectorised: for a group, the set of valid current-window starts depends only on the
+    # pair's lag bucket (both members share the group state timeline), so it is computed
+    # once per (group, lag) and reused across every pair at that lag.
+    def _analytic_gt(groups, offsets, loadings, s_samp_by_group):
+        starts = np.arange(n_eval, dtype=np.int64) * step        # 0-based current starts
+        rows_blocks, corr_blocks = [], []
+        for gi, grp in enumerate(groups):
+            ss = s_samp_by_group[gi]
+            if not np.any(ss != 0):
+                continue
+            chg = np.flatnonzero(np.diff(ss.astype(np.int64))) + 1   # state-change positions
+
+            def _valid_for_lag(lag0):
+                # current window [t1, t1+w), historical [t1 - lag0*step, ...); the whole
+                # span must be one constant nonzero state.
+                lo = starts - lag0 * step
+                hi = starts + w
+                ok = (lo >= 0) & (hi <= n)
+                lo_c = np.clip(lo, 0, n - 1)
+                s0 = ss[lo_c]
+                ok &= s0 != 0
+                if chg.size:
+                    nc = np.searchsorted(chg, lo_c, side="left")
+                    has_change = (nc < chg.size) & (chg[np.minimum(nc, chg.size - 1)] < hi)
+                    ok &= ~has_change
+                return ok, s0
+
+            lag_cache = {}
+            # collect pairs by (cur, hist, lag0) then emit
+            for ii in range(len(grp)):
+                for jj in range(ii + 1, len(grp)):
+                    si, sj = grp[ii], grp[jj]
+                    off_diff = offsets[si] - offsets[sj]
+                    cur, hist, lag0 = (si, sj, off_diff) if off_diff >= 0 else (sj, si, -off_diff)
+                    if not (0 <= lag0 <= L_test - 1):
+                        continue
+                    r_ij = (loadings[si] * loadings[sj] /
+                            math.sqrt((loadings[si] ** 2 + 1.0) * (loadings[sj] ** 2 + 1.0)))
+                    if lag0 not in lag_cache:
+                        lag_cache[lag0] = _valid_for_lag(lag0)
+                    ok, s0 = lag_cache[lag0]
+                    if not ok.any():
+                        continue
+                    t1 = starts[ok] + 1
+                    t2 = starts[ok] - lag0 * step + 1
+                    sgn = s0[ok]
+                    # canonical: later-start first; here t1 >= t2 (lag0 >= 0), and on the
+                    # t1 == t2 tie order by id. Emit as (cur, hist, t1, t2) then fix ties.
+                    blk = np.empty((t1.size, 5), dtype=np.int64)
+                    blk[:, 0] = cur; blk[:, 1] = hist
+                    blk[:, 2] = t1; blk[:, 3] = t2
+                    blk[:, 4] = w
+                    if lag0 == 0 and cur > hist:
+                        blk[:, [0, 1]] = blk[:, [1, 0]]
+                    rows_blocks.append(blk)
+                    corr_blocks.append(sgn.astype(np.float64) * r_ij)
+        if not rows_blocks:
+            return (np.empty((0, 5), dtype=np.int64), np.empty((0,), dtype=np.float64))
+        return (np.vstack(rows_blocks), np.concatenate(corr_blocks))
+
+    # ---- brute-force verification over exactly the first `n_eval` windows ----
+    def _verify(X):
+        from library_corrtrack_parallel import run_and_log_bruteforce
+        import tempfile
+        span = min(n, w + step * (n_eval - 1))
+        ids = [f"s{i + 1}" for i in range(m)]
+        # run_and_log_bruteforce expects (n_series + 1, n_time): row 0 is a 1..T index.
+        data_row = np.vstack([np.arange(1, span + 1, dtype=np.float64),
+                              X[:, :span].astype(np.float64)])
+        base_config = dict(
+            window_size=w, window_step=step, basic_window=step, n_lags=int(n_lags),
+            corr_threshold=float(corr_threshold), neg_corr=(corr_sign != "pos"),
+            exec="sequential", parallel_sketch=False, parallel_candidates=False,
+            parallel_validation=False, max_workers=0, baseline_mode="bruteforce",
+            monitor=True, track_min_dist=False, artifact_mode="final",
+            save_only_required_artifacts=True, save_maxlag_artifacts=False,
+            verbose=False, testing=False, validation_metric="pearson",
+            preprocess=bool(preprocess),
+        )
+        with tempfile.TemporaryDirectory() as td:
+            rec, _rt, flags = run_and_log_bruteforce(
+                "densgen_verify", data_row, ids, base_config,
+                os.path.join(td, "bf.csv"), metadata={"nodes": 0}, recall_by_window=True,
+            )
+        return rec, flags, span
+
+    # ---- generate, verify, re-solve (ng, g) toward the target (deterministic) ----
+    # Target analytic_density: canonical planted tuples / BF's own tested count. That is
+    # the density the sweep sees when it uses the analytic GT in place of a full BF, and
+    # it is smooth in (ng, g). verified_density (bf_correlated / bf_tested) is reported as
+    # a cross-check but is noisier -- it also counts the transition-straddle windows BF
+    # fires on, which the analytic GT (correctly) excludes as ambiguous. Switching (ng, g)
+    # changes the transition structure so the model gain is not perfectly stable across
+    # attempts; keep the closest-to-target attempt, not necessarily the last.
+    from library_corrtrack_parallel import _canonicalize_rows, _rows_as_void_keys
+    ng = n_groups_target
+    tried = set()
+    best = None
+    for attempt in range(_max_correction_regens + 1):
+        (X, groups, group_of, offsets, loadings, states, events, epoch_len,
+         s_samp_by_group) = _build(ng, g)
+        gt_rows, gt_corrs = _analytic_gt(groups, offsets, loadings, s_samp_by_group)
+        if verify_bf:
+            rec, flags, vspan = _verify(X)
+            bf_tested = rec.get("tested") or 0
+            bf_corr = rec.get("correlated") or 0
+            verified_density = (bf_corr / bf_tested) if bf_tested else 0.0
+            analytic_density = (len(gt_rows) / bf_tested) if bf_tested else 0.0
+        else:
+            rec, flags, vspan = None, None, min(n, w + step * (n_eval - 1))
+            verified_density = float("nan")
+            analytic_density = (len(gt_rows) / tested_total_est) if tested_total_est else 0.0
+        rel = abs(analytic_density - target_density) / max(target_density, 1e-12)
+        snap = dict(X=X, groups=groups, group_of=group_of, offsets=offsets,
+                    loadings=loadings, states=states, events=events, epoch_len=epoch_len,
+                    s_samp_by_group=s_samp_by_group, gt_rows=gt_rows, gt_corrs=gt_corrs,
+                    rec=rec, flags=flags, vspan=vspan, verified_density=verified_density,
+                    analytic_density=analytic_density, rel=rel, g=g, ng=len(groups))
+        if best is None or rel < best["rel"]:
+            best = snap
+        tried.add((ng, g))
+        if rel <= tolerance or attempt == _max_correction_regens or analytic_density <= 0.0:
+            break
+        model_gain = analytic_density / max(_d_exact(len(groups), g), 1e-12)
+        ng_new, g_new = _solve_ng_g(target_density, model_gain=model_gain)
+        if (ng_new, g_new) in tried:
+            break
+        ng, g = ng_new, g_new
+
+    (X, groups, group_of, offsets, loadings, states, events, epoch_len, s_samp_by_group,
+     gt_rows, gt_corrs, rec, flags, vspan, verified_density, analytic_density, g) = (
+        best["X"], best["groups"], best["group_of"], best["offsets"], best["loadings"],
+        best["states"], best["events"], best["epoch_len"], best["s_samp_by_group"],
+        best["gt_rows"], best["gt_corrs"], best["rec"], best["flags"], best["vspan"],
+        best["verified_density"], best["analytic_density"], best["g"])
+
+    # A within-group BF row whose window span straddles a state transition is inherently
+    # ambiguous (partly ON, partly OFF / opposite-sign): the analytic GT never emits those,
+    # and they must not count against precision. Drop them from the BF set before comparing.
+    # Cross-group rows are kept -- any that survive are real false positives.
+    def _determinate_mask(rows):
+        group_arr = np.full(m, -1, dtype=np.int64)
+        for _s, _gi in group_of.items():
+            group_arr[_s] = _gi
+        s1 = rows[:, 0]; s2 = rows[:, 1]
+        lo = np.clip(np.minimum(rows[:, 2], rows[:, 3]) - 1, 0, n - 1)
+        hi = np.clip(np.maximum(rows[:, 2], rows[:, 3]) - 1 + w, 1, n)
+        g1 = group_arr[s1]; g2 = group_arr[s2]
+        same = (g1 == g2) & (g1 >= 0)
+        keep = np.ones(len(rows), dtype=bool)
+        for gi in np.unique(g1[same]) if same.any() else ():
+            ss = s_samp_by_group[gi]
+            chg = np.flatnonzero(np.diff(ss.astype(np.int64))) + 1
+            idx = np.flatnonzero(same & (g1 == gi))
+            if chg.size == 0:
+                continue
+            nc = np.searchsorted(chg, lo[idx], side="left")
+            has_change = (nc < chg.size) & (chg[np.minimum(nc, chg.size - 1)] < hi[idx])
+            keep[idx[has_change]] = False
+        return keep
+
+    gt_precision = gt_recall = float("nan")
+    n_bf_ambiguous = 0
+    if verify_bf:
+        bf_rows, _bf_corrs = flags.correlated_rows()
+        bf_rows_det = bf_rows[_determinate_mask(bf_rows)] if len(bf_rows) else bf_rows
+        gk = set(_rows_as_void_keys(_canonicalize_rows(gt_rows)).tolist()) if len(gt_rows) else set()
+        bk = set(_rows_as_void_keys(_canonicalize_rows(bf_rows_det)).tolist()) if len(bf_rows_det) else set()
+        tp = len(gk & bk)
+        gt_precision = tp / len(bk) if bk else 1.0    # planted / determinate BF-confirmed
+        gt_recall = tp / len(gk) if gk else 1.0       # planted-and-confirmed / planted
+        n_bf_ambiguous = int(len(bf_rows) - len(bf_rows_det))
+        if os.environ.get("DENSGEN_DEBUG"):
+            print(f"[densgen] ng={len(groups)} g={g} GT={len(gt_rows)} BF={len(bf_rows)} "
+                  f"BFdet={len(bf_rows_det)} ambiguous={n_bf_ambiguous} "
+                  f"gt_precision={gt_precision:.4f} gt_recall={gt_recall:.4f} "
+                  f"analytic_d={analytic_density:.3e} verified_d={verified_density:.3e}")
+        if gt_recall < 1.0 - float(near_threshold_fraction) - 0.05:
+            raise RuntimeError(
+                "make_density_targeted_dataset: brute force confirmed only "
+                f"{gt_recall:.1%} of the planted (pair,lag,window) tuples "
+                f"(expected >= {1.0 - near_threshold_fraction - 0.05:.1%}). The loading -> "
+                "correlation construction is not clearing corr_threshold -- check base_proc "
+                "/ preprocess / window_size or raise corr_margin."
+            )
+        if gt_precision < 0.95:
+            raise RuntimeError(
+                "make_density_targeted_dataset: brute force reported "
+                f"{1.0 - gt_precision:.1%} correlated tuples that were not planted "
+                "(spurious cross-group correlation). The shared driver is not windowed-"
+                "decorrelated -- reduce sigma_c or check base_proc."
+            )
+    result = dict(
+        X=X, groups=groups, offsets=offsets, loadings=loadings, states=states,
+        events=events, epoch_len=epoch_len, gt_rows=gt_rows, gt_corrs=gt_corrs,
+        analytic_density=analytic_density, verified_density=verified_density,
+        gt_precision=gt_precision, gt_recall=gt_recall,
+        n_bf_ambiguous=n_bf_ambiguous,
+        g=g, n_groups=len(groups), verify_span=vspan,
+    )
+
+    ids = [f"s{i + 1}" for i in range(m)]
+    data_col = np.zeros((n, m + 1), dtype=np.float32)
+    data_col[:, 0] = np.arange(1, n + 1)
+    data_col[:, 1:] = result["X"].T.astype(np.float32)
+
+    meta = {
+        "mode": "density_targeted",
+        "m": m, "n": n, "window_size": w, "window_step": step, "n_lags": int(n_lags),
+        "n_eval_steps": int(n_eval), "L_test": L_test,
+        "target_density": float(target_density),
+        "analytic_density": float(result["analytic_density"]),
+        "verified_density": (None if math.isnan(result["verified_density"])
+                             else float(result["verified_density"])),
+        "gt_precision": (None if math.isnan(result["gt_precision"])
+                         else float(result["gt_precision"])),
+        "gt_recall": (None if math.isnan(result["gt_recall"])
+                      else float(result["gt_recall"])),
+        "n_bf_ambiguous_windows": int(result["n_bf_ambiguous"]),
+        "group_size": int(result["g"]), "n_groups": int(result["n_groups"]),
+        "lag_band": b, "corr_sign": corr_sign, "n_epochs": int(n_epochs),
+        "duty": float(duty), "on_frac": float(on_frac),
+        "base_proc": base_proc, "preprocess": bool(preprocess),
+        "r_max": float(r_max), "corr_margin": float(corr_margin),
+        "near_threshold_fraction": float(near_threshold_fraction),
+        "loading_skew": loading_skew, "seed": int(seed), "tolerance": float(tolerance),
+        "verify_bf": bool(verify_bf),
+        "schedule": result["states"].tolist(), "events": result["events"],
+        "n_ground_truth_tuples": int(len(result["gt_rows"])),
+    }
+    out = {
+        "data": data_col, "ids": ids,
+        "gt_rows": result["gt_rows"], "gt_corrs": result["gt_corrs"],
+        "analytic_density": result["analytic_density"],
+        "verified_density": result["verified_density"],
+        "gt_precision": result["gt_precision"], "gt_recall": result["gt_recall"],
+        "group_size": result["g"], "n_groups": result["n_groups"],
+        "meta": meta,
+    }
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+        stat_tag = _stationarity_tag(base_proc)
+        proc_tag = str((base_proc or {}).get("type", "ar1")).lower().replace(" ", "_")
+        # density spans ~1e-4..3e-2 -> a 2-decimal tag would collide; use a compact
+        # mantissa-exponent form (e.g. 5.0e-3 -> "d5p0em3") so nearby targets stay distinct
+        _mant, _exp = f"{float(target_density):.1e}".split("e")
+        d_tag = f"{_mant.replace('.', 'p')}e{int(_exp)}".replace("-", "m")
+        pp_tag = "diff" if preprocess else "raw"
+        stem = (f"densgen_{stat_tag}_{proc_tag}_{pp_tag}_m{m}_w{w}_s{step}_lag{n_lags}_"
+                f"d{d_tag}_sign{corr_sign}_lb{b}_e{n_epochs}_"
+                f"duty{_format_rate(duty)}_thr{str(corr_threshold).replace('.', 'p')}_seed{seed}")
+        np.savez_compressed(os.path.join(save_dir, f"{stem}.npz"), data_col)
+        np.savez_compressed(os.path.join(save_dir, f"{stem}_gt.npz"),
+                            rows=result["gt_rows"], corrs=result["gt_corrs"])
+        with open(os.path.join(save_dir, f"{stem}_meta.json"), "w") as f:
+            json.dump(meta, f, indent=2)
+        out["stem"] = stem
+        out["meta_json"] = os.path.join(save_dir, f"{stem}_meta.json")
+    return out
+
+
 def _parse_args():
     import argparse
 
@@ -665,9 +1348,10 @@ def _parse_args():
     )
     p.add_argument(
         "--num-templates",
-        type=int,
+        type=_num_templates_arg_type,
         default=4,
-        help="How many distinct base templates to sample and reuse.",
+        help="How many distinct base templates to use, or 'auto' to size to pair_goal "
+        "(one never-reused template per placement -- avoids template-reuse collisions).",
     )
     p.add_argument(
         "--threshold",

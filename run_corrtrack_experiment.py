@@ -17,8 +17,18 @@ DEFAULT_DATASET_CONFIG = Path(__file__).with_name(
 )
 
 STEPS = [
-    ("Brute-force baseline", "corrtrack_run_bruteforce.py", "brute", False),
+    # (2026-07-31) Brute-force moved after hyperparameter search: nothing
+    # before "compare" actually depends on bf_run.csv (corrtrack_param_
+    # search.py's proxy-anchor tuning is fully self-contained; corrtrack_
+    # run_corrtrack.py only depends on best_params_corrtrack.json), while
+    # corrtrack_run_bruteforce.py now reads validation_metric FROM best_
+    # params_corrtrack.json (when present) so the ground-truth baseline
+    # automatically matches whatever metric hyperopt actually tuned for,
+    # instead of requiring --validation-metric to be kept in manual sync
+    # across three separate config surfaces. See docs/implementation_log.md's
+    # 2026-07-31 entry.
     ("Hyper-parameter search", "corrtrack_param_search.py", "param", True),
+    ("Brute-force baseline", "corrtrack_run_bruteforce.py", "brute", False),
     ("CorrTrack main run", "corrtrack_run_corrtrack.py", "corrtrack", False),
     ("Comparison report", "corrtrack_compare_runs.py", "compare", False),
 ]
@@ -76,6 +86,7 @@ ARG_SPECS: dict[str, tuple[int, set[str]]] = {
     "--track-min-dist": (0, {"brute", "corrtrack", "compare"}),
     "--no-track-min-dist": (0, {"brute", "corrtrack", "compare"}),
     "--baseline-mode": (1, {"brute"}),
+    "--validation-metric": (1, {"brute", "corrtrack"}),
     "--hybrid-validation": (0, {"param", "corrtrack"}),
     "--no-hybrid-validation": (0, {"param", "corrtrack"}),
     "--hybrid-validation-min-repeat-rate": (1, {"param", "corrtrack"}),

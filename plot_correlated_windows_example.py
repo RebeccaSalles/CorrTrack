@@ -3,7 +3,7 @@
 Reproduce the colored correlated-window plot for the synthetic dataset.
 
 Default arguments point to the `synt_stat_corr0p20_m8_w96_s12_signboth_thr0p8_lag48`
-artifacts under `corrtrack_release/tmp_artifacts`, and highlight the first 500
+artifacts under `corrtrack_release_v1.0/tmp_artifacts`, and highlight the first 500
 samples of series S1, S4, and S5. Override paths or plotting scope via CLI flags.
 """
 
@@ -27,7 +27,7 @@ def parse_args() -> argparse.Namespace:
         "--data-npz",
         type=Path,
         default=Path(
-            "corrtrack_release/tmp_artifacts/"
+            "corrtrack_release_v1.0/tmp_artifacts/"
             "synt_stat_corr0p20_m8_w96_s12_signboth_thr0p8_lag48.npz"
         ),
         help="Path to the synthetic dataset NPZ (default: current tmp artifact).",
@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
         "--correlated-csv",
         type=Path,
         default=Path(
-            "corrtrack_release/tmp_artifacts/"
+            "corrtrack_release_v1.0/tmp_artifacts/"
             "synt_stat_corr0p20_m8_w96_s12_signboth_thr0p8_lag48_correlated.csv"
         ),
         help="CSV listing injected correlated windows (default: current tmp artifact).",
@@ -69,7 +69,7 @@ def parse_args() -> argparse.Namespace:
         "--output",
         type=Path,
         default=Path(
-            "corrtrack_release/tmp_artifacts/"
+            "corrtrack_release_v1.0/tmp_artifacts/"
             "correlated_windows_example_colored.png"
         ),
         help="Where to save the plot (default: tmp_artifacts/...colored.png).",

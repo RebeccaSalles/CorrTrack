@@ -48,53 +48,86 @@ DEFAULT_VERBOSE = getattr(_DEFAULT_EXEC_CFG, "VERBOSE", False)
 DEFAULT_TESTING = getattr(_DEFAULT_EXEC_CFG, "TESTING", False)
 DEFAULT_RESULT_FOLDER = None
 DEFAULT_MAX_WORKERS = getattr(_DEFAULT_EXEC_CFG, "MAX_WORKERS", 0)
-DEFAULT_CANDIDATE_BUCKET_WIDTH = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_BUCKET_WIDTH", None)
-DEFAULT_CANDIDATE_BLOCK_SIZE_STEPS = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_BLOCK_SIZE_STEPS", 32)
-DEFAULT_CANDIDATE_BLOCK_INDEX_DIMS = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_BLOCK_INDEX_DIMS", 1)
-DEFAULT_CANDIDATE_N_PIVOTS = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_N_PIVOTS", 8)
-DEFAULT_CANDIDATE_N_PROBE_PIVOTS = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_N_PROBE_PIVOTS", 2)
-DEFAULT_CANDIDATE_PIVOT_SELECTION = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_PIVOT_SELECTION", "random_unit")
-DEFAULT_CANDIDATE_PIVOT_SEED = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_PIVOT_SEED", 2468)
-DEFAULT_CANDIDATE_SIMILARITY = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_SIMILARITY", "l2")
 DEFAULT_CANDIDATE_COSINE_THRESHOLD = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_COSINE_THRESHOLD", None)
-DEFAULT_CANDIDATE_HAMMING_Z = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_HAMMING_Z", 3.0)
-DEFAULT_CANDIDATE_HAMMING_HMAX = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_HAMMING_HMAX", None)
-DEFAULT_CANDIDATE_HAMMING_GROUPS = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_HAMMING_GROUPS", 8)
-DEFAULT_CANDIDATE_FILTER_HAMMING = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_FILTER_HAMMING", True)
-DEFAULT_CANDIDATE_FILTER_COSINE = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_FILTER_COSINE", True)
 DEFAULT_HYBRID_VALIDATION = getattr(_DEFAULT_EXEC_CFG, "HYBRID_VALIDATION", False)
 DEFAULT_HYBRID_VALIDATION_MIN_REPEAT_RATE = getattr(_DEFAULT_EXEC_CFG, "HYBRID_VALIDATION_MIN_REPEAT_RATE", 0.25)
 DEFAULT_HYBRID_VALIDATION_DISABLE_RATE = getattr(_DEFAULT_EXEC_CFG, "HYBRID_VALIDATION_DISABLE_RATE", None)
 DEFAULT_HYBRID_VALIDATION_EMA_ALPHA = getattr(_DEFAULT_EXEC_CFG, "HYBRID_VALIDATION_EMA_ALPHA", 0.25)
 DEFAULT_HYBRID_VALIDATION_MIN_CANDIDATES = getattr(_DEFAULT_EXEC_CFG, "HYBRID_VALIDATION_MIN_CANDIDATES", 256)
-# (2026-07-06) Part 1: Cauchy-Schwarz row-level bound + cone-based
-# block-level bound for candidate_backend="sorted_arrays_bs". Both pruning
-# flags default off (opt-in) -- see docs/implementation_log.md for why
-# (row-level pruning showed ~0 wall-clock benefit in testing; block-level
-# pruning showed a real 4-5x speedup, but only when the data has genuine
-# angular clustering tighter than the correlation threshold).
-DEFAULT_CANDIDATE_BOUND_DIMS = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_BOUND_DIMS", None)
-DEFAULT_CANDIDATE_BOUND_DIM_SELECTION = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_BOUND_DIM_SELECTION", "variance")
-DEFAULT_ENABLE_BLOCK_UB_PRUNING = getattr(_DEFAULT_EXEC_CFG, "ENABLE_BLOCK_UB_PRUNING", False)
-DEFAULT_ENABLE_ROW_UB_PRUNING = getattr(_DEFAULT_EXEC_CFG, "ENABLE_ROW_UB_PRUNING", False)
-# (2026-07-06) Part 1 follow-up: block_similarity_assignment/max_open_blocks
-# -- online "leader" clustering at block-close time, so enable_block_ub_pruning
-# actually has a chance to fire on real (arrival-order-unrelated-to-similarity)
-# streaming data. Off by default -- opt-in, and NOT a clear net win in this
-# session's own benchmarking (real, measured pruning, but still 1.2x-1.5x
-# slower wall-clock at typical n_vectors). See docs/implementation_log.md,
-# "block-level cone pruning: root cause found... then a full flat-array rewrite".
-DEFAULT_BLOCK_SIMILARITY_ASSIGNMENT = getattr(_DEFAULT_EXEC_CFG, "BLOCK_SIMILARITY_ASSIGNMENT", False)
-DEFAULT_MAX_OPEN_BLOCKS = getattr(_DEFAULT_EXEC_CFG, "MAX_OPEN_BLOCKS", 4)
-# (2026-07-06) InstinctIndex -- experimental approximate graph candidate
-# backend (candidate_backend="instinct"). Opt-in only, NOT in the default
-# candidate_backend sweep -- see docs/implementation_log.md, "InstinctIndex:
-# experimental approximate graph backend". These 4 params are inert for
+# Candidate search: two orthogonal parameters.
+#   data_representation: "auto" (default, picks per validation_metric --
+#     pearson->sketch_proj, spearman/kendall->sketch_concordance,
+#     dist_corr->sketch_multichannel), "raw" (no representation, exhaustive
+#     pairwise enumeration), "sketch_proj", "sketch_concordance", or
+#     "sketch_multichannel".
+#   candidate_backend: "auto" (default, resolves to "lsh_approx"),
+#     "lsh_approx", "hamming_exact", or "brute_force".
+DEFAULT_DATA_REPRESENTATION = getattr(_DEFAULT_EXEC_CFG, "DATA_REPRESENTATION", "auto")
+DEFAULT_CANDIDATE_BACKEND = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_BACKEND", "auto")
+# SignLSHBandIndex's band_width auto-sizing target -- see
+# candidate_kernels.pyx's _finalize_sizing.
+DEFAULT_CANDIDATE_LSH_TARGET_OCCUPANCY = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_LSH_TARGET_OCCUPANCY", 3.0)
+# "pearson" (default) stays on the fast Cython path. "spearman"/"kendall"/
+# "dist_corr" route to a dedicated per-row Python path.
+DEFAULT_VALIDATION_METRIC = getattr(_DEFAULT_EXEC_CFG, "VALIDATION_METRIC", "pearson")
+# "naive" (default) or "fast" (exact O(w log w) vs. naive O(w^2), both
+# EXACT) -- only meaningful for validation_metric="dist_corr".
+DEFAULT_DIST_CORR_ALGORITHM = getattr(_DEFAULT_EXEC_CFG, "DIST_CORR_ALGORITHM", "naive")
+# Concordance sketch params -- only meaningful for data_representation=
+# "sketch_concordance".
+DEFAULT_CONCORDANCE_N_GAPS = getattr(_DEFAULT_EXEC_CFG, "CONCORDANCE_N_GAPS", None)
+DEFAULT_CONCORDANCE_TARGET_DIM = getattr(_DEFAULT_EXEC_CFG, "CONCORDANCE_TARGET_DIM", 738)
+DEFAULT_CONCORDANCE_MIN_GAP = getattr(_DEFAULT_EXEC_CFG, "CONCORDANCE_MIN_GAP", 8)
+DEFAULT_CONCORDANCE_MIN_CAPACITY = getattr(_DEFAULT_EXEC_CFG, "CONCORDANCE_MIN_CAPACITY", 16)
+# Config-file-only (no CLI flag), matching distance_corr_sketch_
+# multichannel_gamma's own precedent below.
+DEFAULT_CONCORDANCE_MULTICHANNEL_GAMMA = getattr(
+    _DEFAULT_EXEC_CFG, "CONCORDANCE_MULTICHANNEL_GAMMA", None
+)
+# Distance-correlation sketch params -- only meaningful for data_
+# representation="sketch_multichannel" (requires validation_metric=
+# "dist_corr").
+DEFAULT_DISTANCE_CORR_SKETCH_K = getattr(_DEFAULT_EXEC_CFG, "DISTANCE_CORR_SKETCH_K", 8)
+DEFAULT_DISTANCE_CORR_SKETCH_FREQ_LOW = getattr(_DEFAULT_EXEC_CFG, "DISTANCE_CORR_SKETCH_FREQ_LOW", 0.1)
+DEFAULT_DISTANCE_CORR_SKETCH_FREQ_HIGH = getattr(_DEFAULT_EXEC_CFG, "DISTANCE_CORR_SKETCH_FREQ_HIGH", 10.0)
+DEFAULT_DISTANCE_CORR_SKETCH_FREQ_SEED = getattr(_DEFAULT_EXEC_CFG, "DISTANCE_CORR_SKETCH_FREQ_SEED", 42)
+DEFAULT_DISTANCE_CORR_SKETCH_GATE_TAU = getattr(_DEFAULT_EXEC_CFG, "DISTANCE_CORR_SKETCH_GATE_TAU", None)
+# Config-file-only (no CLI flag), matching candidate_tau/gate_tau's own
+# precedent above.
+DEFAULT_DISTANCE_CORR_SKETCH_MULTICHANNEL_GAMMA = getattr(
+    _DEFAULT_EXEC_CFG, "DISTANCE_CORR_SKETCH_MULTICHANNEL_GAMMA", None
+)
+# Independent tier-2 K^2 gate toggle -- config-file-only (no CLI flag).
+DEFAULT_DISTANCE_CORR_SKETCH_APPLY_TIER2_GATE = getattr(
+    _DEFAULT_EXEC_CFG, "DISTANCE_CORR_SKETCH_APPLY_TIER2_GATE", True
+)
+# Xiao (2017) online Spearman/Kendall validator -- opt-in, APPROXIMATE
+# alternative to the exact per-row scipy validation path.
+DEFAULT_VALIDATION_INCREMENTAL_APPROX = getattr(_DEFAULT_EXEC_CFG, "VALIDATION_INCREMENTAL_APPROX", False)
+DEFAULT_VALIDATION_INCREMENTAL_M1 = getattr(_DEFAULT_EXEC_CFG, "VALIDATION_INCREMENTAL_M1", None)
+DEFAULT_VALIDATION_INCREMENTAL_M2 = getattr(_DEFAULT_EXEC_CFG, "VALIDATION_INCREMENTAL_M2", None)
+DEFAULT_VALIDATION_INCREMENTAL_MAX_AGE_STEPS = getattr(
+    _DEFAULT_EXEC_CFG, "VALIDATION_INCREMENTAL_MAX_AGE_STEPS", 64
+)
+DEFAULT_VALIDATION_INCREMENTAL_CUTPOINT_REFRESH_THRESHOLD = getattr(
+    _DEFAULT_EXEC_CFG, "VALIDATION_INCREMENTAL_CUTPOINT_REFRESH_THRESHOLD", 0.5
+)
+# SignLSHBandIndex (candidate_backend="lsh_approx", the default): precision
+# is exact by construction when CANDIDATE_APPLY_DOT_GAMMA_FILTER=True (the
+# default); recall is an empirical property of the data's sign-bit
+# geometry, not a mathematical guarantee. Inert for every other
+# candidate_backend value.
+DEFAULT_CANDIDATE_LSH_N_BANDS = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_LSH_N_BANDS", 64)
+DEFAULT_CANDIDATE_APPLY_DOT_GAMMA_FILTER = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_APPLY_DOT_GAMMA_FILTER", True)
+# HammingExactIndex (candidate_backend="hamming_exact"): exact packed-bit
+# Hamming pre-filter, no bands/buckets. None auto-derives the Hamming touch
+# threshold from gamma via the SimHash relation on first query; inert for
 # every other candidate_backend value.
-DEFAULT_CANDIDATE_INSTINCT_QUERY_MODE = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_INSTINCT_QUERY_MODE", "hybrid")
-DEFAULT_CANDIDATE_INSTINCT_TOP_K = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_INSTINCT_TOP_K", 256)
-DEFAULT_CANDIDATE_INSTINCT_MIN_CANDIDATES = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_INSTINCT_MIN_CANDIDATES", 64)
-DEFAULT_CANDIDATE_INSTINCT_ENTRY_POINTS = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_INSTINCT_ENTRY_POINTS", 8)
+DEFAULT_CANDIDATE_HAMMING_THRESHOLD = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_HAMMING_THRESHOLD", None)
+# SignLSHBandIndex Hamming pre-filter / budget cap. Opt-in, default off.
+DEFAULT_CANDIDATE_APPLY_HAMMING_FILTER = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_APPLY_HAMMING_FILTER", False)
+DEFAULT_CANDIDATE_HAMMING_FILTER_MAX_FRAC = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_HAMMING_FILTER_MAX_FRAC", 0.40)
+DEFAULT_CANDIDATE_LSH_MAX_CANDIDATES_PER_QUERY = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_LSH_MAX_CANDIDATES_PER_QUERY", 0)
 
 DEFAULT_DATASET_CONFIG = Path(__file__).with_name(
     "experiment_dataset_fr_air_temperature_7_1.py"
@@ -126,35 +159,40 @@ VERBOSE = DEFAULT_VERBOSE
 TESTING = DEFAULT_TESTING
 RESULT_FOLDER = DEFAULT_RESULT_FOLDER
 MAX_WORKERS = DEFAULT_MAX_WORKERS
-CANDIDATE_BUCKET_WIDTH = DEFAULT_CANDIDATE_BUCKET_WIDTH
-CANDIDATE_BLOCK_SIZE_STEPS = DEFAULT_CANDIDATE_BLOCK_SIZE_STEPS
-CANDIDATE_BLOCK_INDEX_DIMS = DEFAULT_CANDIDATE_BLOCK_INDEX_DIMS
-CANDIDATE_N_PIVOTS = DEFAULT_CANDIDATE_N_PIVOTS
-CANDIDATE_N_PROBE_PIVOTS = DEFAULT_CANDIDATE_N_PROBE_PIVOTS
-CANDIDATE_PIVOT_SELECTION = DEFAULT_CANDIDATE_PIVOT_SELECTION
-CANDIDATE_PIVOT_SEED = DEFAULT_CANDIDATE_PIVOT_SEED
-CANDIDATE_SIMILARITY = DEFAULT_CANDIDATE_SIMILARITY
 CANDIDATE_COSINE_THRESHOLD = DEFAULT_CANDIDATE_COSINE_THRESHOLD
-CANDIDATE_HAMMING_Z = DEFAULT_CANDIDATE_HAMMING_Z
-CANDIDATE_HAMMING_HMAX = DEFAULT_CANDIDATE_HAMMING_HMAX
-CANDIDATE_HAMMING_GROUPS = DEFAULT_CANDIDATE_HAMMING_GROUPS
-CANDIDATE_FILTER_HAMMING = DEFAULT_CANDIDATE_FILTER_HAMMING
-CANDIDATE_FILTER_COSINE = DEFAULT_CANDIDATE_FILTER_COSINE
 HYBRID_VALIDATION = DEFAULT_HYBRID_VALIDATION
 HYBRID_VALIDATION_MIN_REPEAT_RATE = DEFAULT_HYBRID_VALIDATION_MIN_REPEAT_RATE
 HYBRID_VALIDATION_DISABLE_RATE = DEFAULT_HYBRID_VALIDATION_DISABLE_RATE
 HYBRID_VALIDATION_EMA_ALPHA = DEFAULT_HYBRID_VALIDATION_EMA_ALPHA
 HYBRID_VALIDATION_MIN_CANDIDATES = DEFAULT_HYBRID_VALIDATION_MIN_CANDIDATES
-CANDIDATE_BOUND_DIMS = DEFAULT_CANDIDATE_BOUND_DIMS
-CANDIDATE_BOUND_DIM_SELECTION = DEFAULT_CANDIDATE_BOUND_DIM_SELECTION
-ENABLE_BLOCK_UB_PRUNING = DEFAULT_ENABLE_BLOCK_UB_PRUNING
-ENABLE_ROW_UB_PRUNING = DEFAULT_ENABLE_ROW_UB_PRUNING
-BLOCK_SIMILARITY_ASSIGNMENT = DEFAULT_BLOCK_SIMILARITY_ASSIGNMENT
-MAX_OPEN_BLOCKS = DEFAULT_MAX_OPEN_BLOCKS
-CANDIDATE_INSTINCT_QUERY_MODE = DEFAULT_CANDIDATE_INSTINCT_QUERY_MODE
-CANDIDATE_INSTINCT_TOP_K = DEFAULT_CANDIDATE_INSTINCT_TOP_K
-CANDIDATE_INSTINCT_MIN_CANDIDATES = DEFAULT_CANDIDATE_INSTINCT_MIN_CANDIDATES
-CANDIDATE_INSTINCT_ENTRY_POINTS = DEFAULT_CANDIDATE_INSTINCT_ENTRY_POINTS
+DATA_REPRESENTATION = DEFAULT_DATA_REPRESENTATION
+CANDIDATE_BACKEND = DEFAULT_CANDIDATE_BACKEND
+CANDIDATE_LSH_TARGET_OCCUPANCY = DEFAULT_CANDIDATE_LSH_TARGET_OCCUPANCY
+VALIDATION_METRIC = DEFAULT_VALIDATION_METRIC
+DIST_CORR_ALGORITHM = DEFAULT_DIST_CORR_ALGORITHM
+CONCORDANCE_N_GAPS = DEFAULT_CONCORDANCE_N_GAPS
+CONCORDANCE_TARGET_DIM = DEFAULT_CONCORDANCE_TARGET_DIM
+CONCORDANCE_MIN_GAP = DEFAULT_CONCORDANCE_MIN_GAP
+CONCORDANCE_MIN_CAPACITY = DEFAULT_CONCORDANCE_MIN_CAPACITY
+CONCORDANCE_MULTICHANNEL_GAMMA = DEFAULT_CONCORDANCE_MULTICHANNEL_GAMMA
+DISTANCE_CORR_SKETCH_K = DEFAULT_DISTANCE_CORR_SKETCH_K
+DISTANCE_CORR_SKETCH_FREQ_LOW = DEFAULT_DISTANCE_CORR_SKETCH_FREQ_LOW
+DISTANCE_CORR_SKETCH_FREQ_HIGH = DEFAULT_DISTANCE_CORR_SKETCH_FREQ_HIGH
+DISTANCE_CORR_SKETCH_FREQ_SEED = DEFAULT_DISTANCE_CORR_SKETCH_FREQ_SEED
+DISTANCE_CORR_SKETCH_GATE_TAU = DEFAULT_DISTANCE_CORR_SKETCH_GATE_TAU
+DISTANCE_CORR_SKETCH_MULTICHANNEL_GAMMA = DEFAULT_DISTANCE_CORR_SKETCH_MULTICHANNEL_GAMMA
+DISTANCE_CORR_SKETCH_APPLY_TIER2_GATE = DEFAULT_DISTANCE_CORR_SKETCH_APPLY_TIER2_GATE
+VALIDATION_INCREMENTAL_APPROX = DEFAULT_VALIDATION_INCREMENTAL_APPROX
+VALIDATION_INCREMENTAL_M1 = DEFAULT_VALIDATION_INCREMENTAL_M1
+VALIDATION_INCREMENTAL_M2 = DEFAULT_VALIDATION_INCREMENTAL_M2
+VALIDATION_INCREMENTAL_MAX_AGE_STEPS = DEFAULT_VALIDATION_INCREMENTAL_MAX_AGE_STEPS
+VALIDATION_INCREMENTAL_CUTPOINT_REFRESH_THRESHOLD = DEFAULT_VALIDATION_INCREMENTAL_CUTPOINT_REFRESH_THRESHOLD
+CANDIDATE_LSH_N_BANDS = DEFAULT_CANDIDATE_LSH_N_BANDS
+CANDIDATE_APPLY_DOT_GAMMA_FILTER = DEFAULT_CANDIDATE_APPLY_DOT_GAMMA_FILTER
+CANDIDATE_HAMMING_THRESHOLD = DEFAULT_CANDIDATE_HAMMING_THRESHOLD
+CANDIDATE_APPLY_HAMMING_FILTER = DEFAULT_CANDIDATE_APPLY_HAMMING_FILTER
+CANDIDATE_HAMMING_FILTER_MAX_FRAC = DEFAULT_CANDIDATE_HAMMING_FILTER_MAX_FRAC
+CANDIDATE_LSH_MAX_CANDIDATES_PER_QUERY = DEFAULT_CANDIDATE_LSH_MAX_CANDIDATES_PER_QUERY
 COUNTRIES = VARIABLES = N_VARS = N_YEARS = None
 MODES = ["corrtrack"]
 DATA_LOADER: Callable[..., tuple[np.ndarray, np.ndarray]] | None = None
@@ -175,6 +213,19 @@ def _coerce_optional_bool(value):
 
 def _any_parallel(*values) -> bool:
     return any(val is True for val in values)
+
+
+def _parse_window_size(value):
+    # (2026-07-30) WINDOW_SIZE itself selects single- vs multi-window
+    # execution now (WINDOW_SIZES dropped) -- "256" -> 256 (plain CorrTrack),
+    # "64,256" -> [64, 256] (CorrTrackMultiWindow). A single-element list
+    # (e.g. "256," or a one-item WINDOW_SIZE list in the config file) is
+    # normalized back to a scalar so it takes the plain-CorrTrack path too.
+    parts = [p.strip() for p in str(value).split(",") if p.strip()]
+    if not parts:
+        raise argparse.ArgumentTypeError(f"invalid --window-size value: {value!r}")
+    sizes = [int(p) for p in parts]
+    return sizes[0] if len(sizes) == 1 else sizes
 
 
 def _resolve_cfg_value(value, cfg, attr, default):
@@ -309,26 +360,40 @@ def build_base_config():
         "parallel_candidates": PARALLEL_CANDIDATES,
         "parallel_validation": PARALLEL_VALIDATION,
         "max_workers": MAX_WORKERS,
-        "candidate_bucket_width": CANDIDATE_BUCKET_WIDTH,
-        "candidate_block_size_steps": CANDIDATE_BLOCK_SIZE_STEPS,
-        "candidate_block_index_dims": CANDIDATE_BLOCK_INDEX_DIMS,
-        "candidate_similarity": CANDIDATE_SIMILARITY,
+        "data_representation": DATA_REPRESENTATION,
+        "candidate_backend": CANDIDATE_BACKEND,
         "candidate_cosine_threshold": CANDIDATE_COSINE_THRESHOLD,
         "hybrid_validation": HYBRID_VALIDATION,
         "hybrid_validation_min_repeat_rate": HYBRID_VALIDATION_MIN_REPEAT_RATE,
         "hybrid_validation_disable_rate": HYBRID_VALIDATION_DISABLE_RATE,
         "hybrid_validation_ema_alpha": HYBRID_VALIDATION_EMA_ALPHA,
         "hybrid_validation_min_candidates": HYBRID_VALIDATION_MIN_CANDIDATES,
-        "candidate_bound_dims": CANDIDATE_BOUND_DIMS,
-        "candidate_bound_dim_selection": CANDIDATE_BOUND_DIM_SELECTION,
-        "enable_block_ub_pruning": ENABLE_BLOCK_UB_PRUNING,
-        "enable_row_ub_pruning": ENABLE_ROW_UB_PRUNING,
-        "block_similarity_assignment": BLOCK_SIMILARITY_ASSIGNMENT,
-        "max_open_blocks": MAX_OPEN_BLOCKS,
-        "candidate_instinct_query_mode": CANDIDATE_INSTINCT_QUERY_MODE,
-        "candidate_instinct_top_k": CANDIDATE_INSTINCT_TOP_K,
-        "candidate_instinct_min_candidates": CANDIDATE_INSTINCT_MIN_CANDIDATES,
-        "candidate_instinct_entry_points": CANDIDATE_INSTINCT_ENTRY_POINTS,
+        "validation_metric": VALIDATION_METRIC,
+        "dist_corr_algorithm": DIST_CORR_ALGORITHM,
+        "concordance_n_gaps": CONCORDANCE_N_GAPS,
+        "concordance_target_dim": CONCORDANCE_TARGET_DIM,
+        "concordance_min_gap": CONCORDANCE_MIN_GAP,
+        "concordance_min_capacity": CONCORDANCE_MIN_CAPACITY,
+        "concordance_multichannel_gamma": CONCORDANCE_MULTICHANNEL_GAMMA,
+        "distance_corr_sketch_k": DISTANCE_CORR_SKETCH_K,
+        "distance_corr_sketch_freq_low": DISTANCE_CORR_SKETCH_FREQ_LOW,
+        "distance_corr_sketch_freq_high": DISTANCE_CORR_SKETCH_FREQ_HIGH,
+        "distance_corr_sketch_freq_seed": DISTANCE_CORR_SKETCH_FREQ_SEED,
+        "distance_corr_sketch_gate_tau": DISTANCE_CORR_SKETCH_GATE_TAU,
+        "distance_corr_sketch_multichannel_gamma": DISTANCE_CORR_SKETCH_MULTICHANNEL_GAMMA,
+        "distance_corr_sketch_apply_tier2_gate": DISTANCE_CORR_SKETCH_APPLY_TIER2_GATE,
+        "validation_incremental_approx": VALIDATION_INCREMENTAL_APPROX,
+        "validation_incremental_m1": VALIDATION_INCREMENTAL_M1,
+        "validation_incremental_m2": VALIDATION_INCREMENTAL_M2,
+        "validation_incremental_max_age_steps": VALIDATION_INCREMENTAL_MAX_AGE_STEPS,
+        "validation_incremental_cutpoint_refresh_threshold": VALIDATION_INCREMENTAL_CUTPOINT_REFRESH_THRESHOLD,
+        "candidate_lsh_n_bands": CANDIDATE_LSH_N_BANDS,
+        "candidate_lsh_target_occupancy": CANDIDATE_LSH_TARGET_OCCUPANCY,
+        "candidate_apply_dot_gamma_filter": CANDIDATE_APPLY_DOT_GAMMA_FILTER,
+        "candidate_hamming_threshold": CANDIDATE_HAMMING_THRESHOLD,
+        "candidate_apply_hamming_filter": CANDIDATE_APPLY_HAMMING_FILTER,
+        "candidate_hamming_filter_max_frac": CANDIDATE_HAMMING_FILTER_MAX_FRAC,
+        "candidate_lsh_max_candidates_per_query": CANDIDATE_LSH_MAX_CANDIDATES_PER_QUERY,
         "monitor": MONITOR,
         "track_min_dist": TRACK_MIN_DIST,
         "artifact_mode": ARTIFACT_MODE,
@@ -367,7 +432,13 @@ def main():
         default=None,
         help="Python path to dataset loader function (module:callable). Overrides config DATA_LOADER.",
     )
-    parser.add_argument("--window-size", type=int, default=None)
+    parser.add_argument(
+        "--window-size",
+        type=_parse_window_size,
+        default=None,
+        help="Single window size (e.g. 256), or a comma-separated list of >=2 sizes "
+        "(e.g. 64,256) to run CorrTrackMultiWindow instead of plain CorrTrack.",
+    )
     parser.add_argument("--window-step", type=int, default=None)
     parser.add_argument("--basic-window", type=int, default=None)
     parser.add_argument("--n-lags", type=int, default=None)
@@ -398,69 +469,203 @@ def main():
     parser.add_argument("--hybrid-validation-ema-alpha", type=float, default=None)
     parser.add_argument("--hybrid-validation-min-candidates", type=int, default=None)
     parser.add_argument(
-        "--candidate-bound-dims",
+        "--data-representation",
+        default=None,
+        help="Sketch representation: 'auto' (default, picks per --validation-metric: sketch_proj "
+        "for pearson, sketch_concordance for spearman/kendall, sketch_multichannel for dist_corr), "
+        "'raw' (no representation -- exhaustive pairwise enumeration; requires "
+        "--candidate-backend auto/brute_force), 'sketch_proj', 'sketch_concordance', or "
+        "'sketch_multichannel'. Orthogonal to --candidate-backend.",
+    )
+    parser.add_argument(
+        "--candidate-backend",
+        default=None,
+        help="Search/index mechanism: 'auto' (default, resolves to lsh_approx), 'lsh_approx', "
+        "'hamming_exact', or 'brute_force' (exhaustive; forces data-representation to 'raw'). "
+        "Orthogonal to --data-representation.",
+    )
+    parser.add_argument(
+        "--candidate-lsh-n-bands",
         type=int,
         default=None,
-        help="Part 1: number of dims used for the Cauchy-Schwarz row bound / cone block bound "
-        "(candidate_backend='sorted_arrays_bs' only). 0 or unset disables both.",
+        help="SignLSHBandIndex: number of independent random bands (OR-retrieval -- a candidate "
+        "is touched if it matches in ANY band). Default 64.",
     )
     parser.add_argument(
-        "--candidate-bound-dim-selection",
-        choices=("variance", "first"),
+        "--candidate-lsh-target-occupancy",
+        type=float,
         default=None,
-        help="How to choose the bound dims: highest-variance (default) or the first N dims.",
+        help="SignLSHBandIndex: target avg entries per bucket used to auto-size "
+        "band_width = ceil(log2(m*L/target_occupancy)), clamped to [3, min(24, n_vectors)]. "
+        "Default 3.0 (unchanged historical behavior).",
     )
-    parser.add_argument("--enable-block-ub-pruning", dest="enable_block_ub_pruning", action="store_true",
-                        help="Part 1: cone/angular block-level pruning. Off by default; only helps when the "
-                        "data has real angular clustering tighter than the correlation threshold.")
-    parser.add_argument("--no-enable-block-ub-pruning", dest="enable_block_ub_pruning", action="store_false")
-    parser.add_argument("--enable-row-ub-pruning", dest="enable_row_ub_pruning", action="store_true",
-                        help="Part 1: Cauchy-Schwarz row-level pruning. Off by default; requires "
-                        "--candidate-bound-dims > 0, and showed ~0 wall-clock benefit in testing.")
-    parser.add_argument("--no-enable-row-ub-pruning", dest="enable_row_ub_pruning", action="store_false")
-    parser.add_argument("--block-similarity-assignment", dest="block_similarity_assignment", action="store_true",
-                        help="Part 1 follow-up: group each closing block's rows by online 'leader' "
-                        "clustering instead of arrival order, so --enable-block-ub-pruning has a real "
-                        "chance to fire. Off by default -- required for block-level pruning to do "
-                        "anything on real streaming data (arrival order is unrelated to similarity), "
-                        "but NOT a confirmed net wall-clock win in this codebase's own benchmarking "
-                        "(real pruning fires, still ~1.2x-1.5x slower at typical n_vectors) -- see "
-                        "docs/implementation_log.md before enabling for a real run.")
-    parser.add_argument("--no-block-similarity-assignment", dest="block_similarity_assignment", action="store_false")
     parser.add_argument(
-        "--max-open-blocks",
+        "--candidate-hamming-threshold",
         type=int,
         default=None,
-        help="Part 1 follow-up: number of concurrent online 'leader' clusters per closing block "
-        "when --block-similarity-assignment is set. Default 4.",
+        help="HammingExactIndex: Hamming-distance touch threshold (bits). Omit to auto-derive "
+        "from gamma via the SimHash relation on first query (recommended). Only meaningful for "
+        "candidate_backend=lsh_hamming_exact.",
     )
     parser.add_argument(
-        "--candidate-instinct-query-mode",
-        choices=("threshold", "topk", "hybrid"),
+        "--candidate-apply-hamming-filter",
+        dest="candidate_apply_hamming_filter",
+        action="store_true",
         default=None,
-        help="InstinctIndex (candidate_backend=instinct) query mode: threshold-only, top-k-only, "
-        "or hybrid (min_candidates floor + threshold). Experimental, approximate backend -- "
-        "see docs/implementation_log.md. Default 'hybrid'.",
+        help="SignLSHBandIndex: cheap full-vector sign-Hamming pre-filter between "
+        "prefiltered_pairs and the real dot product (same packed-bit representation as "
+        "lsh_hamming_exact). Opt-in, default off. See docs/implementation_log.md's "
+        "2026-07-21(a) entry (real dot products cut 33-75%% at recall preserved, max_frac "
+        "0.40-0.45). Only meaningful for candidate_backend=lsh_approx (the default).",
     )
     parser.add_argument(
-        "--candidate-instinct-top-k",
+        "--no-candidate-apply-hamming-filter",
+        dest="candidate_apply_hamming_filter",
+        action="store_false",
+    )
+    parser.add_argument(
+        "--candidate-hamming-filter-max-frac",
+        type=float,
+        default=None,
+        help="SignLSHBandIndex: max fraction of sign bits allowed to differ to survive the "
+        "Hamming pre-filter. Default 0.40. Only meaningful when "
+        "--candidate-apply-hamming-filter is set.",
+    )
+    parser.add_argument(
+        "--candidate-lsh-max-candidates-per-query",
         type=int,
         default=None,
-        help="InstinctIndex: max candidates returned per query in topk/hybrid mode. Default 256.",
+        help="SignLSHBandIndex: per-query candidate examination budget cap (0=unlimited). "
+        "Diagnosed real but data-dependent -- no safe non-zero default found. Only "
+        "meaningful for candidate_backend=lsh_approx (the default).",
     )
     parser.add_argument(
-        "--candidate-instinct-min-candidates",
-        type=int,
+        "--validation-metric",
+        choices=("pearson", "spearman", "kendall", "dist_corr"),
         default=None,
-        help="InstinctIndex: minimum candidates to keep in hybrid mode even below the gamma "
-        "threshold. Default 64.",
+        help="Part 3 (2026-07-28b): validation metric. 'pearson' (default) stays on the fast "
+        "Cython bulk-validation path unchanged; the other three route through a dedicated "
+        "per-row Python path.",
     )
     parser.add_argument(
-        "--candidate-instinct-entry-points",
+        "--dist-corr-algorithm",
+        choices=("naive", "fast"),
+        default=None,
+        help="Part 4 (2026-07-29b): 'naive' (default, O(w^2)) or 'fast' (Huo & Szekely-style "
+        "exact O(w log w) -- both exact, 'fast' only wins wall-clock above ~w=200-256). Only "
+        "meaningful with --validation-metric dist_corr.",
+    )
+    parser.add_argument(
+        "--concordance-n-gaps",
         type=int,
         default=None,
-        help="InstinctIndex: number of graph entry points maintained for best-first search. "
-        "Default 8.",
+        help="Explicit number of fixed multiscale gaps for the concordance sketch. Omit "
+        "(default) to auto-derive from --concordance-target-dim instead, so output "
+        "dimension stays roughly bounded regardless of window size. Only meaningful with "
+        "data-representation=sketch_concordance.",
+    )
+    parser.add_argument(
+        "--concordance-target-dim",
+        type=int,
+        default=None,
+        help="Target output dimension for the concordance sketch (default 738, matching "
+        "GlobalOrdinalTransformer's own default budget) -- n_gaps is derived from this so "
+        "output_dim stays roughly constant across window sizes instead of scaling linearly "
+        "with window_size. Ignored if --concordance-n-gaps is set explicitly.",
+    )
+    parser.add_argument(
+        "--concordance-min-gap",
+        type=int,
+        default=None,
+        help="Default 8 (2026-07-29f: raised from 1 -- gap=1 is both the highest-weight and, "
+        "on autocorrelated real data, the worst tau estimator; see concordance_sketch.py).",
+    )
+    parser.add_argument(
+        "--concordance-min-capacity",
+        type=int,
+        default=None,
+        help="Default 16. Caps the largest usable gap at window_size - min_capacity, keeping "
+        "every gap's per-step sample count (and thus its own cosine estimate's variance) "
+        "bounded -- fixes a real accuracy problem on real data (see concordance_sketch.py's "
+        "multiscale_gaps docstring and docs/implementation_log.md's 2026-07-29(f) entry).",
+    )
+    parser.add_argument(
+        "--distance-corr-sketch-k",
+        type=int,
+        default=None,
+        help="DistanceCorrSketchState (candidate_backend=distance_corr_sketch, requires "
+        "validation_metric=dist_corr): number of random frequencies (a real, swept "
+        "hyperparameter). Default 8 -- a verified sweet spot (reliable, low-variance across "
+        "random-frequency seeds, and cheaper than naive exact dCor even unoptimized in "
+        "Python). See distance_corr_sketch.py's module docstring.",
+    )
+    parser.add_argument(
+        "--distance-corr-sketch-freq-low",
+        type=float,
+        default=None,
+        help="Lower bound of the log-spaced frequency-scale range. Default 0.1.",
+    )
+    parser.add_argument(
+        "--distance-corr-sketch-freq-high",
+        type=float,
+        default=None,
+        help="Upper bound of the log-spaced frequency-scale range. Default 10.0.",
+    )
+    parser.add_argument(
+        "--distance-corr-sketch-freq-seed",
+        type=int,
+        default=None,
+        help="Random seed for the shared frequency set (fixed once per CorrTrack instance, "
+        "like the base sketch's own projection-direction seed). Default 42.",
+    )
+    parser.add_argument(
+        "--validation-incremental-approx",
+        dest="validation_incremental_approx",
+        action="store_true",
+        default=None,
+        help="Part 4 (2026-07-29a/b): Xiao (2017) online Spearman/Kendall validator -- opt-in, "
+        "APPROXIMATE alternative to the exact per-row scipy path. Default off. See "
+        "docs/implementation_log.md's 2026-07-29(a)/(b) entries for measured accuracy "
+        "tradeoffs (0%% mismatch on stationary data, 1.23%%-5.76%% on nonstationary data "
+        "depending on --validation-incremental-cutpoint-refresh-threshold).",
+    )
+    parser.add_argument(
+        "--no-validation-incremental-approx", dest="validation_incremental_approx", action="store_false"
+    )
+    parser.add_argument(
+        "--validation-incremental-m1",
+        type=int,
+        default=None,
+        help="Xiao validator count-matrix size (dim 1). Omit to auto-select (30 for spearman, "
+        "100 for kendall).",
+    )
+    parser.add_argument("--validation-incremental-m2", type=int, default=None, help="Same as m1, dim 2.")
+    parser.add_argument(
+        "--validation-incremental-max-age-steps", type=int, default=None, help="Default 64."
+    )
+    parser.add_argument(
+        "--validation-incremental-cutpoint-refresh-threshold",
+        type=float,
+        default=None,
+        help="HBR-style adaptive cutpoint refresh (2026-07-29b): proactively re-derive cutpoints "
+        "once a pair's window mean drifts this many std devs from where they were last "
+        "derived. Default 0.5. Set to a large value or handle via config as None to disable "
+        "(reactive-only, the original 2026-07-29(a) fallback).",
+    )
+    parser.add_argument(
+        "--candidate-apply-dot-gamma-filter",
+        dest="candidate_apply_dot_gamma_filter",
+        action="store_true",
+        default=None,
+        help="Apply the final full-dot+gamma gate after index retrieval, before validation. "
+        "Only meaningful for candidate_backend=lsh_approx (the default). Default True (recall-safe). "
+        "Disabling it lets every index-retrieved candidate flow straight to validation with "
+        "zero dot products computed at this stage -- widens what validation must filter.",
+    )
+    parser.add_argument(
+        "--no-candidate-apply-dot-gamma-filter",
+        dest="candidate_apply_dot_gamma_filter",
+        action="store_false",
     )
     parser.add_argument(
         "--artifact-mode",
@@ -510,9 +715,8 @@ def main():
         monitor=None,
         track_min_dist=None,
         hybrid_validation=None,
-        enable_block_ub_pruning=None,
-        enable_row_ub_pruning=None,
-        block_similarity_assignment=None,
+        candidate_apply_hamming_filter=None,
+        validation_incremental_approx=None,
         artifact_mode=None,
         artifact_buffer_max_rows=None,
         artifact_merge_mode=None,
@@ -530,7 +734,8 @@ def main():
 
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD, RESULT_FOLDER
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
-    global EXEC_MODE, NEG_CORR, CORR_VAL, MONITOR, TRACK_MIN_DIST, TRAIN_RATIO, OPTIM_TUNING_MODE, ARTIFACT_MODE, ARTIFACT_BUFFER_MAX_ROWS, ARTIFACT_MERGE_MODE, SAVE_ONLY_REQUIRED_ARTIFACTS, SAVE_MAXLAG_ARTIFACTS, DATA_LOADER, MAX_WORKERS, CANDIDATE_BUCKET_WIDTH, CANDIDATE_BLOCK_SIZE_STEPS, CANDIDATE_BLOCK_INDEX_DIMS, CANDIDATE_N_PIVOTS, CANDIDATE_N_PROBE_PIVOTS, CANDIDATE_PIVOT_SELECTION, CANDIDATE_PIVOT_SEED, CANDIDATE_SIMILARITY, CANDIDATE_COSINE_THRESHOLD, CANDIDATE_HAMMING_Z, CANDIDATE_HAMMING_HMAX, CANDIDATE_HAMMING_GROUPS, CANDIDATE_FILTER_HAMMING, CANDIDATE_FILTER_COSINE, HYBRID_VALIDATION, HYBRID_VALIDATION_MIN_REPEAT_RATE, HYBRID_VALIDATION_DISABLE_RATE, HYBRID_VALIDATION_EMA_ALPHA, HYBRID_VALIDATION_MIN_CANDIDATES, CANDIDATE_BOUND_DIMS, CANDIDATE_BOUND_DIM_SELECTION, ENABLE_BLOCK_UB_PRUNING, ENABLE_ROW_UB_PRUNING, BLOCK_SIMILARITY_ASSIGNMENT, MAX_OPEN_BLOCKS, CANDIDATE_INSTINCT_QUERY_MODE, CANDIDATE_INSTINCT_TOP_K, CANDIDATE_INSTINCT_MIN_CANDIDATES, CANDIDATE_INSTINCT_ENTRY_POINTS
+    global EXEC_MODE, NEG_CORR, CORR_VAL, MONITOR, TRACK_MIN_DIST, TRAIN_RATIO, OPTIM_TUNING_MODE, ARTIFACT_MODE, ARTIFACT_BUFFER_MAX_ROWS, ARTIFACT_MERGE_MODE, SAVE_ONLY_REQUIRED_ARTIFACTS, SAVE_MAXLAG_ARTIFACTS, DATA_LOADER, MAX_WORKERS, CANDIDATE_COSINE_THRESHOLD, HYBRID_VALIDATION, HYBRID_VALIDATION_MIN_REPEAT_RATE, HYBRID_VALIDATION_DISABLE_RATE, HYBRID_VALIDATION_EMA_ALPHA, HYBRID_VALIDATION_MIN_CANDIDATES, CANDIDATE_LSH_N_BANDS, CANDIDATE_APPLY_DOT_GAMMA_FILTER, CANDIDATE_HAMMING_THRESHOLD, CANDIDATE_APPLY_HAMMING_FILTER, CANDIDATE_HAMMING_FILTER_MAX_FRAC, CANDIDATE_LSH_MAX_CANDIDATES_PER_QUERY
+    global DATA_REPRESENTATION, CANDIDATE_BACKEND, CANDIDATE_LSH_TARGET_OCCUPANCY, VALIDATION_METRIC, DIST_CORR_ALGORITHM, CONCORDANCE_N_GAPS, CONCORDANCE_TARGET_DIM, CONCORDANCE_MIN_GAP, CONCORDANCE_MIN_CAPACITY, CONCORDANCE_MULTICHANNEL_GAMMA, DISTANCE_CORR_SKETCH_K, DISTANCE_CORR_SKETCH_FREQ_LOW, DISTANCE_CORR_SKETCH_FREQ_HIGH, DISTANCE_CORR_SKETCH_FREQ_SEED, DISTANCE_CORR_SKETCH_GATE_TAU, DISTANCE_CORR_SKETCH_MULTICHANNEL_GAMMA, DISTANCE_CORR_SKETCH_APPLY_TIER2_GATE, VALIDATION_INCREMENTAL_APPROX, VALIDATION_INCREMENTAL_M1, VALIDATION_INCREMENTAL_M2, VALIDATION_INCREMENTAL_MAX_AGE_STEPS, VALIDATION_INCREMENTAL_CUTPOINT_REFRESH_THRESHOLD
     global VERBOSE, TESTING
 
     RESULT_FOLDER = _resolve_cfg_value(args.result_folder, cfg_dataset, "RESULT_FOLDER", DEFAULT_RESULT_FOLDER)
@@ -581,35 +786,40 @@ def main():
         DEFAULT_SAVE_MAXLAG_ARTIFACTS,
     )
     MAX_WORKERS = _resolve_cfg_value(None, cfg_exec, "MAX_WORKERS", DEFAULT_MAX_WORKERS)
-    CANDIDATE_BUCKET_WIDTH = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_BUCKET_WIDTH", DEFAULT_CANDIDATE_BUCKET_WIDTH)
-    CANDIDATE_BLOCK_SIZE_STEPS = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_BLOCK_SIZE_STEPS", DEFAULT_CANDIDATE_BLOCK_SIZE_STEPS)
-    CANDIDATE_BLOCK_INDEX_DIMS = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_BLOCK_INDEX_DIMS", DEFAULT_CANDIDATE_BLOCK_INDEX_DIMS)
-    CANDIDATE_N_PIVOTS = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_N_PIVOTS", DEFAULT_CANDIDATE_N_PIVOTS)
-    CANDIDATE_N_PROBE_PIVOTS = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_N_PROBE_PIVOTS", DEFAULT_CANDIDATE_N_PROBE_PIVOTS)
-    CANDIDATE_PIVOT_SELECTION = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_PIVOT_SELECTION", DEFAULT_CANDIDATE_PIVOT_SELECTION)
-    CANDIDATE_PIVOT_SEED = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_PIVOT_SEED", DEFAULT_CANDIDATE_PIVOT_SEED)
-    CANDIDATE_SIMILARITY = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_SIMILARITY", DEFAULT_CANDIDATE_SIMILARITY)
     CANDIDATE_COSINE_THRESHOLD = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_COSINE_THRESHOLD", DEFAULT_CANDIDATE_COSINE_THRESHOLD)
-    CANDIDATE_HAMMING_Z = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_HAMMING_Z", DEFAULT_CANDIDATE_HAMMING_Z)
-    CANDIDATE_HAMMING_HMAX = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_HAMMING_HMAX", DEFAULT_CANDIDATE_HAMMING_HMAX)
-    CANDIDATE_HAMMING_GROUPS = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_HAMMING_GROUPS", DEFAULT_CANDIDATE_HAMMING_GROUPS)
-    CANDIDATE_FILTER_HAMMING = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_FILTER_HAMMING", DEFAULT_CANDIDATE_FILTER_HAMMING)
-    CANDIDATE_FILTER_COSINE = _resolve_cfg_value(None, cfg_exec, "CANDIDATE_FILTER_COSINE", DEFAULT_CANDIDATE_FILTER_COSINE)
     HYBRID_VALIDATION = _resolve_cfg_value(args.hybrid_validation, cfg_exec, "HYBRID_VALIDATION", DEFAULT_HYBRID_VALIDATION)
     HYBRID_VALIDATION_MIN_REPEAT_RATE = _resolve_cfg_value(args.hybrid_validation_min_repeat_rate, cfg_exec, "HYBRID_VALIDATION_MIN_REPEAT_RATE", DEFAULT_HYBRID_VALIDATION_MIN_REPEAT_RATE)
     HYBRID_VALIDATION_DISABLE_RATE = _resolve_cfg_value(args.hybrid_validation_disable_rate, cfg_exec, "HYBRID_VALIDATION_DISABLE_RATE", DEFAULT_HYBRID_VALIDATION_DISABLE_RATE)
     HYBRID_VALIDATION_EMA_ALPHA = _resolve_cfg_value(args.hybrid_validation_ema_alpha, cfg_exec, "HYBRID_VALIDATION_EMA_ALPHA", DEFAULT_HYBRID_VALIDATION_EMA_ALPHA)
     HYBRID_VALIDATION_MIN_CANDIDATES = _resolve_cfg_value(args.hybrid_validation_min_candidates, cfg_exec, "HYBRID_VALIDATION_MIN_CANDIDATES", DEFAULT_HYBRID_VALIDATION_MIN_CANDIDATES)
-    CANDIDATE_BOUND_DIMS = _resolve_cfg_value(args.candidate_bound_dims, cfg_exec, "CANDIDATE_BOUND_DIMS", DEFAULT_CANDIDATE_BOUND_DIMS)
-    CANDIDATE_BOUND_DIM_SELECTION = _resolve_cfg_value(args.candidate_bound_dim_selection, cfg_exec, "CANDIDATE_BOUND_DIM_SELECTION", DEFAULT_CANDIDATE_BOUND_DIM_SELECTION)
-    ENABLE_BLOCK_UB_PRUNING = _resolve_cfg_value(args.enable_block_ub_pruning, cfg_exec, "ENABLE_BLOCK_UB_PRUNING", DEFAULT_ENABLE_BLOCK_UB_PRUNING)
-    ENABLE_ROW_UB_PRUNING = _resolve_cfg_value(args.enable_row_ub_pruning, cfg_exec, "ENABLE_ROW_UB_PRUNING", DEFAULT_ENABLE_ROW_UB_PRUNING)
-    BLOCK_SIMILARITY_ASSIGNMENT = _resolve_cfg_value(args.block_similarity_assignment, cfg_exec, "BLOCK_SIMILARITY_ASSIGNMENT", DEFAULT_BLOCK_SIMILARITY_ASSIGNMENT)
-    MAX_OPEN_BLOCKS = _resolve_cfg_value(args.max_open_blocks, cfg_exec, "MAX_OPEN_BLOCKS", DEFAULT_MAX_OPEN_BLOCKS)
-    CANDIDATE_INSTINCT_QUERY_MODE = _resolve_cfg_value(args.candidate_instinct_query_mode, cfg_exec, "CANDIDATE_INSTINCT_QUERY_MODE", DEFAULT_CANDIDATE_INSTINCT_QUERY_MODE)
-    CANDIDATE_INSTINCT_TOP_K = _resolve_cfg_value(args.candidate_instinct_top_k, cfg_exec, "CANDIDATE_INSTINCT_TOP_K", DEFAULT_CANDIDATE_INSTINCT_TOP_K)
-    CANDIDATE_INSTINCT_MIN_CANDIDATES = _resolve_cfg_value(args.candidate_instinct_min_candidates, cfg_exec, "CANDIDATE_INSTINCT_MIN_CANDIDATES", DEFAULT_CANDIDATE_INSTINCT_MIN_CANDIDATES)
-    CANDIDATE_INSTINCT_ENTRY_POINTS = _resolve_cfg_value(args.candidate_instinct_entry_points, cfg_exec, "CANDIDATE_INSTINCT_ENTRY_POINTS", DEFAULT_CANDIDATE_INSTINCT_ENTRY_POINTS)
+    DATA_REPRESENTATION = _resolve_cfg_value(args.data_representation, cfg_exec, "DATA_REPRESENTATION", DEFAULT_DATA_REPRESENTATION)
+    CANDIDATE_BACKEND = _resolve_cfg_value(args.candidate_backend, cfg_exec, "CANDIDATE_BACKEND", DEFAULT_CANDIDATE_BACKEND)
+    CANDIDATE_LSH_N_BANDS = _resolve_cfg_value(args.candidate_lsh_n_bands, cfg_exec, "CANDIDATE_LSH_N_BANDS", DEFAULT_CANDIDATE_LSH_N_BANDS)
+    CANDIDATE_LSH_TARGET_OCCUPANCY = _resolve_cfg_value(args.candidate_lsh_target_occupancy, cfg_exec, "CANDIDATE_LSH_TARGET_OCCUPANCY", DEFAULT_CANDIDATE_LSH_TARGET_OCCUPANCY)
+    CANDIDATE_APPLY_DOT_GAMMA_FILTER = _resolve_cfg_value(args.candidate_apply_dot_gamma_filter, cfg_exec, "CANDIDATE_APPLY_DOT_GAMMA_FILTER", DEFAULT_CANDIDATE_APPLY_DOT_GAMMA_FILTER)
+    CANDIDATE_HAMMING_THRESHOLD = _resolve_cfg_value(args.candidate_hamming_threshold, cfg_exec, "CANDIDATE_HAMMING_THRESHOLD", DEFAULT_CANDIDATE_HAMMING_THRESHOLD)
+    CANDIDATE_APPLY_HAMMING_FILTER = _resolve_cfg_value(args.candidate_apply_hamming_filter, cfg_exec, "CANDIDATE_APPLY_HAMMING_FILTER", DEFAULT_CANDIDATE_APPLY_HAMMING_FILTER)
+    CANDIDATE_HAMMING_FILTER_MAX_FRAC = _resolve_cfg_value(args.candidate_hamming_filter_max_frac, cfg_exec, "CANDIDATE_HAMMING_FILTER_MAX_FRAC", DEFAULT_CANDIDATE_HAMMING_FILTER_MAX_FRAC)
+    CANDIDATE_LSH_MAX_CANDIDATES_PER_QUERY = _resolve_cfg_value(args.candidate_lsh_max_candidates_per_query, cfg_exec, "CANDIDATE_LSH_MAX_CANDIDATES_PER_QUERY", DEFAULT_CANDIDATE_LSH_MAX_CANDIDATES_PER_QUERY)
+    VALIDATION_METRIC = _resolve_cfg_value(args.validation_metric, cfg_exec, "VALIDATION_METRIC", DEFAULT_VALIDATION_METRIC)
+    DIST_CORR_ALGORITHM = _resolve_cfg_value(args.dist_corr_algorithm, cfg_exec, "DIST_CORR_ALGORITHM", DEFAULT_DIST_CORR_ALGORITHM)
+    CONCORDANCE_N_GAPS = _resolve_cfg_value(args.concordance_n_gaps, cfg_exec, "CONCORDANCE_N_GAPS", DEFAULT_CONCORDANCE_N_GAPS)
+    CONCORDANCE_TARGET_DIM = _resolve_cfg_value(args.concordance_target_dim, cfg_exec, "CONCORDANCE_TARGET_DIM", DEFAULT_CONCORDANCE_TARGET_DIM)
+    CONCORDANCE_MIN_GAP = _resolve_cfg_value(args.concordance_min_gap, cfg_exec, "CONCORDANCE_MIN_GAP", DEFAULT_CONCORDANCE_MIN_GAP)
+    CONCORDANCE_MIN_CAPACITY = _resolve_cfg_value(args.concordance_min_capacity, cfg_exec, "CONCORDANCE_MIN_CAPACITY", DEFAULT_CONCORDANCE_MIN_CAPACITY)
+    CONCORDANCE_MULTICHANNEL_GAMMA = _resolve_cfg_value(None, cfg_exec, "CONCORDANCE_MULTICHANNEL_GAMMA", DEFAULT_CONCORDANCE_MULTICHANNEL_GAMMA)
+    DISTANCE_CORR_SKETCH_K = _resolve_cfg_value(args.distance_corr_sketch_k, cfg_exec, "DISTANCE_CORR_SKETCH_K", DEFAULT_DISTANCE_CORR_SKETCH_K)
+    DISTANCE_CORR_SKETCH_FREQ_LOW = _resolve_cfg_value(args.distance_corr_sketch_freq_low, cfg_exec, "DISTANCE_CORR_SKETCH_FREQ_LOW", DEFAULT_DISTANCE_CORR_SKETCH_FREQ_LOW)
+    DISTANCE_CORR_SKETCH_FREQ_HIGH = _resolve_cfg_value(args.distance_corr_sketch_freq_high, cfg_exec, "DISTANCE_CORR_SKETCH_FREQ_HIGH", DEFAULT_DISTANCE_CORR_SKETCH_FREQ_HIGH)
+    DISTANCE_CORR_SKETCH_FREQ_SEED = _resolve_cfg_value(args.distance_corr_sketch_freq_seed, cfg_exec, "DISTANCE_CORR_SKETCH_FREQ_SEED", DEFAULT_DISTANCE_CORR_SKETCH_FREQ_SEED)
+    DISTANCE_CORR_SKETCH_GATE_TAU = _resolve_cfg_value(None, cfg_exec, "DISTANCE_CORR_SKETCH_GATE_TAU", DEFAULT_DISTANCE_CORR_SKETCH_GATE_TAU)
+    DISTANCE_CORR_SKETCH_MULTICHANNEL_GAMMA = _resolve_cfg_value(None, cfg_exec, "DISTANCE_CORR_SKETCH_MULTICHANNEL_GAMMA", DEFAULT_DISTANCE_CORR_SKETCH_MULTICHANNEL_GAMMA)
+    DISTANCE_CORR_SKETCH_APPLY_TIER2_GATE = _resolve_cfg_value(None, cfg_exec, "DISTANCE_CORR_SKETCH_APPLY_TIER2_GATE", DEFAULT_DISTANCE_CORR_SKETCH_APPLY_TIER2_GATE)
+    VALIDATION_INCREMENTAL_APPROX = _resolve_cfg_value(args.validation_incremental_approx, cfg_exec, "VALIDATION_INCREMENTAL_APPROX", DEFAULT_VALIDATION_INCREMENTAL_APPROX)
+    VALIDATION_INCREMENTAL_M1 = _resolve_cfg_value(args.validation_incremental_m1, cfg_exec, "VALIDATION_INCREMENTAL_M1", DEFAULT_VALIDATION_INCREMENTAL_M1)
+    VALIDATION_INCREMENTAL_M2 = _resolve_cfg_value(args.validation_incremental_m2, cfg_exec, "VALIDATION_INCREMENTAL_M2", DEFAULT_VALIDATION_INCREMENTAL_M2)
+    VALIDATION_INCREMENTAL_MAX_AGE_STEPS = _resolve_cfg_value(args.validation_incremental_max_age_steps, cfg_exec, "VALIDATION_INCREMENTAL_MAX_AGE_STEPS", DEFAULT_VALIDATION_INCREMENTAL_MAX_AGE_STEPS)
+    VALIDATION_INCREMENTAL_CUTPOINT_REFRESH_THRESHOLD = _resolve_cfg_value(args.validation_incremental_cutpoint_refresh_threshold, cfg_exec, "VALIDATION_INCREMENTAL_CUTPOINT_REFRESH_THRESHOLD", DEFAULT_VALIDATION_INCREMENTAL_CUTPOINT_REFRESH_THRESHOLD)
     VERBOSE = _resolve_cfg_value(args.verbose, cfg_exec, "VERBOSE", DEFAULT_VERBOSE)
     TESTING = _resolve_cfg_value(args.testing, cfg_exec, "TESTING", DEFAULT_TESTING)
     if args.loader:
@@ -618,7 +828,6 @@ def main():
         raise RuntimeError("Dataset loader is not configured. Provide DATA_LOADER in config or --loader option.")
     if RESULT_FOLDER is None:
         raise RuntimeError("Dataset config must define RESULT_FOLDER or provide --result-folder.")
-
     base_config = build_base_config()
 
     for country, var, data, ids in iter_datasets():

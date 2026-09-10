@@ -17,6 +17,27 @@ from collections import defaultdict
 import math
 import warnings
 from scipy.stats import norm
+# (2026-07-31, later) GlobalOrdinalTransformer was removed earlier (see
+# _resolve_candidate_backend's own ValueError for candidate_backend=
+# "global_ordinal_comparisons"); ordinal_distance_threshold's own last
+# caller in this file (single-vector concordance's candidate_tau ->
+# cell_size conversion) was removed in this same pass -- global_ordinal_
+# backend.py itself is left in place (small, harmless, still-documented),
+# but nothing in this file imports from it anymore.
+from xiao_online_correlation import XiaoOnlineCorrState
+from concordance_sketch import (
+    ConcordanceSketchState,
+    ConcordanceMultiGapIndex,
+    derive_concordance_multichannel_gamma_from_corr_threshold,
+)
+from distance_corr_sketch import (
+    DistanceCorrSketchState,
+    DistanceCorrSketchMultiChannelIndex,
+    distance_corr_sketch_proxy,
+    derive_candidate_tau_from_corr_threshold,
+    derive_gate_tau_from_corr_threshold,
+    derive_multichannel_gamma_from_corr_threshold,
+)
 from functools import partial
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Iterable, Iterator, Optional, Sequence
@@ -56,11 +77,20 @@ try:
     _cy_blocked_lazy_index_cls = getattr(_cand_kernels, "BlockedLazyIndex", None)
     _cy_bucketed_multi_index_cls = getattr(_cand_kernels, "BucketedMultiIndex", None)
     _cy_instinct_index_cls = getattr(_cand_kernels, "InstinctIndex", None)
+    _cy_lsh_sign_dot_index_cls = getattr(_cand_kernels, "SignLSHBandIndex", None)
+    _cy_hamming_exact_index_cls = getattr(_cand_kernels, "HammingExactIndex", None)
+    _cy_circular_grouped_index_cls = getattr(_cand_kernels, "CircularGroupedExactIndex", None)
+    _cy_multi_dim_theta_index_cls = getattr(_cand_kernels, "MultiDimThetaIndex", None)
     _cy_enumerate_candidate_rows = getattr(_cand_kernels, "enumerate_candidate_rows", None)
     _cy_fast_corr_and_dist = _cand_kernels.fast_corr_and_dist
+    _cy_fast_corr_and_dist_batch = getattr(_cand_kernels, "fast_corr_and_dist_batch", None)
     _cy_validate_corr_batch = _cand_kernels.validate_corr_batch
     _cy_validate_corr_rows = getattr(_cand_kernels, "validate_corr_rows", None)
+    _cy_validate_corr_rows_nonlinear = getattr(_cand_kernels, "validate_corr_rows_nonlinear", None)
     _cy_hybrid_cache_cls = getattr(_cand_kernels, "HybridValidationCache", None)
+    _cy_kendall_tau = getattr(_cand_kernels, "kendall_tau_cy", None)
+    _cy_spearman_rho = getattr(_cand_kernels, "spearman_rho_cy", None)
+    _cy_distance_correlation_1d_fast = getattr(_cand_kernels, "distance_correlation_1d_fast_cy", None)
     _HAS_CYTHON_KERNELS = True
 except Exception:  # pragma: no cover
     _cy_find_candidate_pairs = None
@@ -78,11 +108,20 @@ except Exception:  # pragma: no cover
     _cy_blocked_lazy_index_cls = None
     _cy_bucketed_multi_index_cls = None
     _cy_instinct_index_cls = None
+    _cy_lsh_sign_dot_index_cls = None
+    _cy_hamming_exact_index_cls = None
+    _cy_circular_grouped_index_cls = None
+    _cy_multi_dim_theta_index_cls = None
     _cy_enumerate_candidate_rows = None
     _cy_fast_corr_and_dist = None
+    _cy_fast_corr_and_dist_batch = None
     _cy_validate_corr_batch = None
     _cy_validate_corr_rows = None
+    _cy_validate_corr_rows_nonlinear = None
     _cy_hybrid_cache_cls = None
+    _cy_kendall_tau = None
+    _cy_spearman_rho = None
+    _cy_distance_correlation_1d_fast = None
     _HAS_CYTHON_KERNELS = False
 
 try:
@@ -91,12 +130,14 @@ try:
     from sketch_kernels import apply_orth_and_normalize as _cy_apply_orth_and_normalize
     from sketch_kernels import incremental_combine_and_normalize as _cy_incremental_combine_and_normalize
     from sketch_kernels import compute_constant_flags as _cy_compute_constant_flags
+    from sketch_kernels import build_multi_suffix_raw as _cy_build_multi_suffix_raw
 except Exception:  # pragma: no cover
     _cy_compute_series_dots = None
     _cy_build_sketch_matrix = None
     _cy_apply_orth_and_normalize = None
     _cy_incremental_combine_and_normalize = None
     _cy_compute_constant_flags = None
+    _cy_build_multi_suffix_raw = None
 
 try:
     from partition_kernels import build_partitions as _cy_build_partitions
@@ -140,19 +181,13 @@ RUN_RESULT_COLUMNS: Sequence[str] = (
     "preprocess",
     "sketch_norm",
     "candidate_backend",
-    "candidate_bucket_width",
-    "candidate_block_size_steps",
-    "candidate_block_index_dims",
-    "candidate_bound_dims",
-    "candidate_bound_dim_selection",
-    "enable_block_ub_pruning",
-    "enable_row_ub_pruning",
-    "block_similarity_assignment",
-    "max_open_blocks",
-    "candidate_instinct_query_mode",
-    "candidate_instinct_top_k",
-    "candidate_instinct_min_candidates",
-    "candidate_instinct_entry_points",
+    "candidate_lsh_n_bands",
+    "candidate_lsh_n_bands_tolerance",
+    "candidate_apply_dot_gamma_filter",
+    "candidate_hamming_threshold",
+    "candidate_apply_hamming_filter",
+    "candidate_hamming_filter_max_frac",
+    "candidate_lsh_max_candidates_per_query",
     "candidate_similarity",
     "candidate_cosine_threshold",
     "candidate_parallel_mode",
@@ -218,6 +253,13 @@ RUN_RESULT_COLUMNS: Sequence[str] = (
     "candidate_search_instinct_best_score_seen",
     "candidate_search_instinct_mean_score_returned",
     "candidate_search_instinct_dead_node_ratio",
+    "candidate_search_lsh_candidates_touched",
+    "candidate_search_lsh_dot_checks",
+    "candidate_search_lsh_candidates_returned",
+    "candidate_search_lsh_query_time",
+    "candidate_search_lsh_num_nodes_total",
+    "candidate_search_lsh_num_nodes_alive",
+    "candidate_search_lsh_dead_node_ratio",
     "pair_min_dist",
     "artifact_path",
 )
@@ -263,21 +305,27 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     "preprocess",
     "sketch_norm",
     "candidate_backend",
-    "candidate_bucket_width",
-    "candidate_block_size_steps",
-    "candidate_block_index_dims",
-    "candidate_bound_dims",
-    "candidate_bound_dim_selection",
-    "enable_block_ub_pruning",
-    "enable_row_ub_pruning",
-    "block_similarity_assignment",
-    "max_open_blocks",
-    "candidate_instinct_query_mode",
-    "candidate_instinct_top_k",
-    "candidate_instinct_min_candidates",
-    "candidate_instinct_entry_points",
+    "validation_metric",
+    "candidate_lsh_n_bands",
+    "candidate_lsh_n_bands_tolerance",
+    # (2026-09-08) Was already being computed into _run_corrtrack_proxy_anchor's own
+    # `record` dict (see that function's "candidate_lsh_target_occupancy" assignment)
+    # but silently dropped on the way to CSV -- _row_from_mapping only ever emits
+    # columns listed here, and this one was missing. A caller reading back a proxy
+    # hyperopt winner's chosen target_occupancy (e.g. to reuse it for the final,
+    # full-length run) needs this column to actually exist in the output.
+    "candidate_lsh_target_occupancy",
+    "candidate_apply_dot_gamma_filter",
+    "candidate_hamming_threshold",
+    "candidate_apply_hamming_filter",
+    "candidate_hamming_filter_max_frac",
+    "candidate_lsh_max_candidates_per_query",
     "candidate_similarity",
     "candidate_cosine_threshold",
+    # (2026-09-10) When a grid sweeps candidate_cosine_threshold_offset (a margin below
+    # corr_threshold) instead of an absolute gamma, this records the offset that won;
+    # candidate_cosine_threshold above still records the resolved absolute value.
+    "candidate_cosine_threshold_offset",
     "candidate_parallel_mode",
     "candidate_key_mode",
     "candidate_key_seed",
@@ -317,6 +365,7 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     "artifact_time",
     "speedup",
     "speedup_ceil",
+    "speedup_oracle",
     "rel_speedup_eff",
     "corr_w_bf",
     "corr_w",
@@ -355,6 +404,13 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     "candidate_search_instinct_best_score_seen",
     "candidate_search_instinct_mean_score_returned",
     "candidate_search_instinct_dead_node_ratio",
+    "candidate_search_lsh_candidates_touched",
+    "candidate_search_lsh_dot_checks",
+    "candidate_search_lsh_candidates_returned",
+    "candidate_search_lsh_query_time",
+    "candidate_search_lsh_num_nodes_total",
+    "candidate_search_lsh_num_nodes_alive",
+    "candidate_search_lsh_dead_node_ratio",
     "corr_prop",
     "waste_val_bf",
     "waste_val",
@@ -494,19 +550,12 @@ COMPARISON_COLUMNS: Sequence[str] = (
     "preprocess",
     "sketch_norm",
     "candidate_backend",
-    "candidate_bucket_width",
-    "candidate_block_size_steps",
-    "candidate_block_index_dims",
-    "candidate_bound_dims",
-    "candidate_bound_dim_selection",
-    "enable_block_ub_pruning",
-    "enable_row_ub_pruning",
-    "block_similarity_assignment",
-    "max_open_blocks",
-    "candidate_instinct_query_mode",
-    "candidate_instinct_top_k",
-    "candidate_instinct_min_candidates",
-    "candidate_instinct_entry_points",
+    "candidate_lsh_n_bands",
+    "candidate_apply_dot_gamma_filter",
+    "candidate_hamming_threshold",
+    "candidate_apply_hamming_filter",
+    "candidate_hamming_filter_max_frac",
+    "candidate_lsh_max_candidates_per_query",
     "candidate_similarity",
     "candidate_cosine_threshold",
     "candidate_parallel_mode",
@@ -545,6 +594,7 @@ COMPARISON_COLUMNS: Sequence[str] = (
     "artifact_time",
     "speedup",
     "speedup_ceil",
+    "speedup_oracle",
     "rel_speedup_eff",
     "corr_w_bf",
     "corr_w",
@@ -583,6 +633,13 @@ COMPARISON_COLUMNS: Sequence[str] = (
     "candidate_search_instinct_best_score_seen",
     "candidate_search_instinct_mean_score_returned",
     "candidate_search_instinct_dead_node_ratio",
+    "candidate_search_lsh_candidates_touched",
+    "candidate_search_lsh_dot_checks",
+    "candidate_search_lsh_candidates_returned",
+    "candidate_search_lsh_query_time",
+    "candidate_search_lsh_num_nodes_total",
+    "candidate_search_lsh_num_nodes_alive",
+    "candidate_search_lsh_dead_node_ratio",
     "corr_prop",
     "waste_val_bf",
     "waste_val",
@@ -888,20 +945,13 @@ def execute_corrtrack_pass(
         "candidate_backend_effective",
         getattr(corrtrack, "candidate_backend", None),
     )
-    record["candidate_bucket_width"] = getattr(corrtrack, "candidate_bucket_width", None)
-    record["candidate_block_size_steps"] = getattr(corrtrack, "candidate_block_size_steps", None)
-    record["candidate_block_index_dims"] = getattr(corrtrack, "candidate_block_index_dims", None)
     # (2026-07-06) Part 1 -- see docs/implementation_log.md.
-    record["candidate_bound_dims"] = getattr(corrtrack, "candidate_bound_dims", None)
-    record["candidate_bound_dim_selection"] = getattr(corrtrack, "candidate_bound_dim_selection", None)
-    record["enable_block_ub_pruning"] = getattr(corrtrack, "enable_block_ub_pruning", None)
-    record["enable_row_ub_pruning"] = getattr(corrtrack, "enable_row_ub_pruning", None)
-    record["block_similarity_assignment"] = getattr(corrtrack, "block_similarity_assignment", None)
-    record["max_open_blocks"] = getattr(corrtrack, "max_open_blocks", None)
-    record["candidate_instinct_query_mode"] = getattr(corrtrack, "candidate_instinct_query_mode", None)
-    record["candidate_instinct_top_k"] = getattr(corrtrack, "candidate_instinct_top_k", None)
-    record["candidate_instinct_min_candidates"] = getattr(corrtrack, "candidate_instinct_min_candidates", None)
-    record["candidate_instinct_entry_points"] = getattr(corrtrack, "candidate_instinct_entry_points", None)
+    record["candidate_lsh_n_bands"] = getattr(corrtrack, "candidate_lsh_n_bands", None)
+    record["candidate_apply_dot_gamma_filter"] = getattr(corrtrack, "candidate_apply_dot_gamma_filter", None)
+    record["candidate_hamming_threshold"] = getattr(corrtrack, "candidate_hamming_threshold", None)
+    record["candidate_apply_hamming_filter"] = getattr(corrtrack, "candidate_apply_hamming_filter", None)
+    record["candidate_hamming_filter_max_frac"] = getattr(corrtrack, "candidate_hamming_filter_max_frac", None)
+    record["candidate_lsh_max_candidates_per_query"] = getattr(corrtrack, "candidate_lsh_max_candidates_per_query", None)
     record.update(_candidate_runtime_record_fields(corrtrack))
     record.update(_candidate_search_record_fields(corrtrack))
     record["candidate_parallel_mode"] = getattr(corrtrack, "candidate_parallel_mode", None)
@@ -1072,7 +1122,13 @@ def execute_corrtrack_pass(
     if artifact_chunked:
         corr_flags = None
     elif recall_by_window:
-        corr_flags = getattr(corrtrack, "correlated", None)
+        # (2026-09-10) Prefer the numeric (rows, corrs) form -- compute_metrics_bf takes it
+        # directly and skips the per-key Python normalization. Falls back to the string dict
+        # for a tracker without the accumulator (e.g. CorrTrackMultiWindow).
+        if hasattr(corrtrack, "correlated_rows") and callable(corrtrack.correlated_rows):
+            corr_flags = NumericCorrelatedFlags(*corrtrack.correlated_rows())
+        else:
+            corr_flags = getattr(corrtrack, "correlated", None)
     else:
         corr_flags = corrtrack.get_correlation_flags(data.shape[1], 0)
 
@@ -1117,19 +1173,25 @@ def run_and_log_bruteforce(
         window_step=base_config["window_step"],
         n_vectors=1,
         n_lags=base_config["n_lags"],
-        grid_dimension=1,
-        cell_size=1,
         seed=None,
         seed_toggle=None,
         corr_threshold=base_config["corr_threshold"],
         neg_corr=base_config.get("neg_corr", False),
-        preprocess=False,
+        # (2026-08-24) Was hardcoded False regardless of base_config --
+        # brute force's ground truth is validated through this same
+        # CorrTrack instance (_get_validated_corr_numeric reading
+        # _get_validation_window_data()), so leaving this hardcoded meant
+        # brute force could never be made consistent with a preprocess=True
+        # online run (fixed or hyperopt-selected) no matter what the caller
+        # asked for. See docs/implementation_log.md.
+        preprocess=_coerce_to_bool(base_config.get("preprocess", False), default=False),
         exec=base_config.get("exec", "thread"),
         max_workers=base_config.get("max_workers", 0),
         parallel_sketch=base_config.get("parallel_sketch"),
         parallel_candidates=base_config.get("parallel_candidates"),
         parallel_validation=base_config.get("parallel_validation"),
         track_min_dist=base_config.get("track_min_dist", True),
+        validation_metric=base_config.get("validation_metric", "pearson"),
     )
     corrtrack.baseline_mode = baseline_mode
 
@@ -1154,7 +1216,7 @@ def run_and_log_bruteforce(
         testing=bool(testing),
         monitor=bool(monitor),
     )
-    record["preprocess"] = False
+    record["preprocess"] = corrtrack.preprocess
     record["seed"] = None
     record["seed_toggle"] = None
     record["sketch_norm"] = getattr(corrtrack, "sketch_norm", None)
@@ -1239,14 +1301,9 @@ def run_and_log_corrtrack(
     run_seed = _to_int(run_params.get("seed"))
     seed_toggle = _to_int(run_params.get("seed_toggle"))
 
-    corrtrack = CorrTrack(
-        window_size=base_config["window_size"],
-        basic_window=base_config.get("basic_window"),
-        window_step=base_config["window_step"],
+    corrtrack_common_kwargs = dict(
         n_vectors=n_vectors,
         n_lags=base_config["n_lags"],
-        grid_dimension=grid_dimension,
-        cell_size=cell_stretch,
         seed=run_seed,
         seed_toggle=seed_toggle,
         freq_threshold=_to_float(run_params.get("freq_threshold")),
@@ -1261,6 +1318,36 @@ def run_and_log_corrtrack(
         track_min_dist=base_config.get("track_min_dist", True),
         **feature_kwargs,
     )
+    window_size_cfg = base_config["window_size"]
+    window_sizes_list = (
+        [int(v) for v in window_size_cfg]
+        if isinstance(window_size_cfg, (list, tuple))
+        else [int(window_size_cfg)]
+    )
+    if len(window_sizes_list) >= 2:
+        # (2026-07-30) WINDOW_SIZE itself now selects single- vs multi-window
+        # execution (WINDOW_SIZES dropped as a separate parameter): a scalar
+        # or single-element list runs plain CorrTrack (unchanged below);
+        # >=2 distinct sizes runs CorrTrackMultiWindow, which shares one
+        # incremental sketch stream across all requested sizes. Verified
+        # (see docs/implementation_log.md's 2026-07-30 entry) that
+        # execute_corrtrack_pass drives CorrTrackMultiWindow transparently --
+        # its .run()/.run_bf() signatures match CorrTrack's exactly, and
+        # __getattr__ forwards every other attribute lookup to the
+        # underlying max-window CorrTrack tracker.
+        corrtrack = CorrTrackMultiWindow(
+            window_sizes=window_sizes_list,
+            basic_window=base_config.get("basic_window"),
+            window_step=base_config["window_step"],
+            **corrtrack_common_kwargs,
+        )
+    else:
+        corrtrack = CorrTrack(
+            window_size=window_sizes_list[0],
+            basic_window=base_config.get("basic_window"),
+            window_step=base_config["window_step"],
+            **corrtrack_common_kwargs,
+        )
 
     if verbose is None:
         verbose = _coerce_to_bool(base_config.get("verbose", False))
@@ -1293,20 +1380,13 @@ def run_and_log_corrtrack(
         "candidate_backend_effective",
         getattr(corrtrack, "candidate_backend", None),
     )
-    record["candidate_bucket_width"] = getattr(corrtrack, "candidate_bucket_width", None)
-    record["candidate_block_size_steps"] = getattr(corrtrack, "candidate_block_size_steps", None)
-    record["candidate_block_index_dims"] = getattr(corrtrack, "candidate_block_index_dims", None)
     # (2026-07-06) Part 1 -- see docs/implementation_log.md.
-    record["candidate_bound_dims"] = getattr(corrtrack, "candidate_bound_dims", None)
-    record["candidate_bound_dim_selection"] = getattr(corrtrack, "candidate_bound_dim_selection", None)
-    record["enable_block_ub_pruning"] = getattr(corrtrack, "enable_block_ub_pruning", None)
-    record["enable_row_ub_pruning"] = getattr(corrtrack, "enable_row_ub_pruning", None)
-    record["block_similarity_assignment"] = getattr(corrtrack, "block_similarity_assignment", None)
-    record["max_open_blocks"] = getattr(corrtrack, "max_open_blocks", None)
-    record["candidate_instinct_query_mode"] = getattr(corrtrack, "candidate_instinct_query_mode", None)
-    record["candidate_instinct_top_k"] = getattr(corrtrack, "candidate_instinct_top_k", None)
-    record["candidate_instinct_min_candidates"] = getattr(corrtrack, "candidate_instinct_min_candidates", None)
-    record["candidate_instinct_entry_points"] = getattr(corrtrack, "candidate_instinct_entry_points", None)
+    record["candidate_lsh_n_bands"] = getattr(corrtrack, "candidate_lsh_n_bands", None)
+    record["candidate_apply_dot_gamma_filter"] = getattr(corrtrack, "candidate_apply_dot_gamma_filter", None)
+    record["candidate_hamming_threshold"] = getattr(corrtrack, "candidate_hamming_threshold", None)
+    record["candidate_apply_hamming_filter"] = getattr(corrtrack, "candidate_apply_hamming_filter", None)
+    record["candidate_hamming_filter_max_frac"] = getattr(corrtrack, "candidate_hamming_filter_max_frac", None)
+    record["candidate_lsh_max_candidates_per_query"] = getattr(corrtrack, "candidate_lsh_max_candidates_per_query", None)
     record.update(_candidate_runtime_record_fields(corrtrack))
     record.update(_candidate_search_record_fields(corrtrack))
     record["candidate_parallel_mode"] = getattr(corrtrack, "candidate_parallel_mode", None)
@@ -1417,6 +1497,39 @@ def _resolve_candidate_backend(value, default="auto"):
         # experimental approximate graph backend".
         "graph": "instinct",
         "instinct_index": "instinct",
+        # (2026-07-09) SignLSHBandIndex -- LSH sign-bit banding pre-filter.
+        # See docs/implementation_log.md, "SignLSHBandIndex: lsh_sign_dot
+        # backend" and the preceding "sign_alignment_frac / LSH sign-bit
+        # banding" diagnostic entry. Replaces the removed "topk_inverted"
+        # backend (see docs/implementation_log.md's 2026-07-08 correction --
+        # its top-m dominant-coordinate approach degenerated to a near-full
+        # scan on real data; this is a structurally different mechanism).
+        "lsh": "lsh_sign_dot",
+        "sign_lsh": "lsh_sign_dot",
+        "lsh_band": "lsh_sign_dot",
+        "band": "lsh_sign_dot",
+        # (2026-07-10) HammingExactIndex: exact packed-bit Hamming
+        # pre-filter (no bands/buckets at all) -- see
+        # docs/implementation_log.md, "outside-the-box backends" entry.
+        "hamming_exact": "lsh_hamming_exact",
+        "packed_hamming": "lsh_hamming_exact",
+        # (2026-07-15) CircularGroupedExactIndex: full-scan pre-filter using
+        # circular-sector group matching (AND within a group of random 2D
+        # projection planes, OR across groups) -- see
+        # docs/implementation_log.md, 2026-07-15 circular-band-LSH entries.
+        "circular_lsh": "circular_grouped_lsh",
+        "circular_grouped": "circular_grouped_lsh",
+        "grouped_circular_lsh": "circular_grouped_lsh",
+        "circular_band_lsh": "circular_grouped_lsh",
+        # (2026-07-15) MultiDimThetaIndex: the supervisors' idea 1 (a
+        # decoupled, independently-swept theta) combined with idea 2 (one
+        # independent tree/index per sketch dimension, intersected) -- see
+        # docs/implementation_log.md, 2026-07-15 "bptree MIXED supervisor
+        # ideas" entries, and diag_bptree_mixed_ideas.py.
+        "bptree_mixed": "bptree_mixed",
+        "multi_dim_theta": "bptree_mixed",
+        "mixed_bptree": "bptree_mixed",
+        "theta_bptree": "bptree_mixed",
     }
     key = aliases.get(key, key)
     if key in {"hamming", "hamming_multi", "hamming-multi", "hamming_mi", "hamming_multiindex", "simhash", "sign_code", "sign-code"}:
@@ -1431,9 +1544,260 @@ def _resolve_candidate_backend(value, default="auto"):
         raise ValueError("candidate_backend='angular_lsh' has been removed")
     if key in {"dynamic_graph_ann", "graph_ann", "dynamic-graph-ann", "nsw"}:
         raise ValueError("candidate_backend='dynamic_graph_ann' has been removed")
-    if key not in {"flat", "bptree", "sorted_arrays_bs", "auto", "instinct"}:
+    # (2026-07-13) ivf_hamming (IVFHammingIndex) and lsh_ternary_exact
+    # (TernaryExactIndex) removed per explicit instruction -- neither beat
+    # lsh_hamming_exact on both speed and recall (see
+    # docs/implementation_log.md's 2026-07-10 "multi-probe" and
+    # "ternary-scoring variant" entries for the full evidence).
+    if key in {"ivf_hamming", "ivf", "ivf_hamming_exact", "ivf-hamming"}:
+        raise ValueError("candidate_backend='ivf_hamming' has been removed")
+    if key in {"lsh_ternary_exact", "ternary_exact", "packed_ternary", "ternary"}:
+        raise ValueError("candidate_backend='lsh_ternary_exact' has been removed")
+    # (2026-07-27) Release restructuring per explicit instruction: every
+    # candidate_backend other than lsh_sign_dot/lsh_hamming_exact (and the
+    # unconditional flat brute-force reference, kept as the baseline every
+    # speedup claim in this project is measured against) removed from
+    # corrtrack_release_dev. See docs/implementation_log.md's 2026-07-27
+    # release-restructuring entries; corrtrack_release_backup2 preserves
+    # the pre-cleanup tree with all backends intact.
+    if key in {"bptree", "bptree_mixed"}:
+        raise ValueError(f"candidate_backend='{key}' has been removed")
+    if key in {"sorted_arrays_bs"}:
+        raise ValueError("candidate_backend='sorted_arrays_bs' has been removed")
+    if key in {"instinct"}:
+        raise ValueError("candidate_backend='instinct' has been removed")
+    if key in {"circular_grouped_lsh"}:
+        raise ValueError("candidate_backend='circular_grouped_lsh' has been removed")
+    if key in {"lsh_grid_dot"}:
+        raise ValueError("candidate_backend='lsh_grid_dot' has been removed")
+    # (2026-07-31) GlobalOrdinalTransformer/global_ordinal_comparisons
+    # removed: incremental_concordance_multichannel (a per-gap union tier-1
+    # over ConcordanceSketchState) was found, via direct real-data
+    # benchmarking, to strictly dominate global_ordinal_comparisons'
+    # recall at every window_size tested (256/1024/2048/4096: 97.7%/100%/
+    # 100%/100% vs. 83.0%/99.1%/98.2%/93.2%), precision 100% throughout --
+    # see docs/implementation_log.md's 2026-07-31 entry. GlobalOrdinal
+    # Transformer's own recompute-from-scratch-every-step design (unlike
+    # concordance's incremental one) no longer has a real-world edge to
+    # justify keeping it.
+    if key in {"global_ordinal", "ordinal", "ordinal_comparisons", "global_ordinal_comparisons"}:
+        raise ValueError("candidate_backend='global_ordinal_comparisons' has been removed")
+    # (2026-07-31, later) Single-vector ConcordanceSketchState removed:
+    # once ConcordanceMultiGapIndex's own missing Hamming-filter wiring was
+    # fixed (see docs/implementation_log.md's 2026-07-31(g) entry),
+    # touched_candidates became EXACTLY equal between the two
+    # representations at every window_size where multiscale_gaps floors to
+    # one gap (>=1024), removing single-vector concordance's last real
+    # advantage -- multichannel now strictly dominates or ties it
+    # everywhere (97.7% vs 54.8% recall at window_size=256, identical
+    # touched_candidates at window_size>=1024). Aliases fail loudly rather
+    # than silently redirecting to the multichannel backend, matching the
+    # established pattern for every other removed backend this session.
+    if key in {"incremental_concordance", "concordance", "concordance_sketch", "incremental_ordinal"}:
+        raise ValueError("candidate_backend='incremental_concordance' has been removed")
+    # (2026-07-31) Per-gap union tier-1 for concordance -- direct response
+    # to a real, measured recall gap at small window_size (n_gaps>1, before
+    # multiscale_gaps' own n_gaps=1 floor kicks in at window_size>=1024):
+    # concatenating all gaps into one globally-normalized vector dilutes
+    # whichever single gap actually carries the real signal for a pair
+    # near corr_threshold (verified directly: combined-vector cosine mean
+    # only 0.152, 35.7% actually NEGATIVE, at window_size=256). Mirrors
+    # distance_corr_sketch_multichannel's own diagnosis and fix exactly --
+    # see ConcordanceMultiGapIndex's docstring (concordance_sketch.py) and
+    # docs/implementation_log.md's 2026-07-31 entry.
+    concordance_multichannel_aliases = {
+        "incremental_concordance_multichannel", "concordance_multichannel",
+        "concordance_multi_gap", "concordance_multigap",
+    }
+    if key in concordance_multichannel_aliases:
+        return "incremental_concordance_multichannel"
+    # (2026-07-31, Phase 4) Single-vector distance_corr_sketch removed:
+    # confirmed via Phase 0b (docs/implementation_log.md's 2026-07-30(m)/(n)
+    # and 2026-07-31 entries) that distance_corr_sketch_multichannel
+    # strictly dominates it on recall at every K tested (perfect recall at
+    # K>=16, vs. noisy 75-90% for the single-vector representation), with
+    # no offsetting tradeoff (unlike single-vector concordance's own real
+    # large-window speed advantage, which is why THAT one was kept). No
+    # representation-axis name ever pointed here either (see
+    # _REPRESENTATION_ALIASES' own "sketch_proj now means Pearson" comment).
+    if key in {"distance_corr_sketch", "dcor_sketch", "distance_correlation_sketch", "dist_corr_sketch"}:
+        raise ValueError("candidate_backend='distance_corr_sketch' has been removed")
+    # (2026-07-31, Phase 4) "Skip tier-1" variant removed too: it existed
+    # specifically to preserve single-vector distance_corr_sketch's own
+    # tier-2 gate under unconditional enumeration -- with that
+    # representation gone, there is nothing left for this name to be an
+    # alternative TO. (representation=sketch_multichannel + backend=
+    # brute_force still works via the new axis, just as the plain, generic
+    # "brute_force" backend -- representation is a deliberate no-op there,
+    # see _resolve_representation_backend's own comment -- not as a
+    # distinct gate-preserving combination the way this name used to be.)
+    if key in {"distance_corr_sketch_exhaustive", "dcor_sketch_exhaustive", "distance_corr_sketch_brute_force", "dcor_sketch_brute_force"}:
+        raise ValueError("candidate_backend='distance_corr_sketch_exhaustive' has been removed")
+    # (2026-07-30) Multi-channel union tier-1 -- direct response to "I am
+    # still interested in making tier 1 work better... I want smart
+    # filtering with no all pair enumeration" after confirming
+    # distance_corr_sketch's own tier-1 (single concatenated vector, one
+    # global cosine) parameter space was exhausted (docs/implementation_
+    # log.md's 2026-07-30(l) entry). Verified directly (2026-07-30(m)):
+    # the best SINGLE-channel (same frequency, diagonal) cosine alignment
+    # between genuinely dependent series is dramatically stronger and
+    # cleanly separated from independent pairs than the concatenated
+    # vector's own diluted signal. DistanceCorrSketchMultiChannelIndex
+    # (distance_corr_sketch.py) maintains 2K SEPARATE SignLSHBandIndex
+    # instances (one per channel) and proposes a candidate if ANY single
+    # channel's index retrieves it (union across channels) -- see
+    # docs/implementation_log.md's 2026-07-30(n) entry for the real-data
+    # recall/precision/touched_frac results.
+    distance_corr_sketch_multichannel_aliases = {
+        "distance_corr_sketch_multichannel", "dcor_sketch_multichannel",
+        "distance_corr_sketch_multi_channel", "dcor_sketch_multi_channel",
+    }
+    if key in distance_corr_sketch_multichannel_aliases:
+        return "distance_corr_sketch_multichannel"
+    # (2026-07-30) Genuine, unconditional brute-force reference -- added
+    # after finding "flat" is NOT a valid ground-truth/wall-time baseline
+    # for non-Pearson validation_metric values. "flat" always builds and
+    # gates through the project's default Pearson-style sketch for
+    # candidate GENERATION regardless of validation_metric (confirmed
+    # directly: its own recall against a truly exhaustive enumeration was
+    # only 83.6% at one real config, and even its "loose threshold" ground-
+    # truth convention was found NOT to fully saturate at every cell_size
+    # tried) -- a real, disclosed methodology gap for spearman/kendall/
+    # dist_corr, see docs/implementation_log.md's 2026-07-30(i) entry.
+    # "brute_force" enumerates every (recent x alive) pair directly from
+    # the Candidates-level window registry (_win_sid_idx/_win_time/_win_w),
+    # with NO representation, index, or gate of any kind -- correct by
+    # construction for any validation_metric, not just Pearson.
+    brute_force_aliases = {"brute_force", "true_brute_force", "exhaustive", "unconditional"}
+    if key in brute_force_aliases:
+        return "brute_force"
+    # (2026-07-31, Phase 4) "flat" removed -- superseded by "brute_force"
+    # (this session's own finding: "flat" is NOT a valid ground-truth/
+    # wall-time baseline for non-Pearson validation_metric, since it always
+    # gates candidate GENERATION through the default Pearson-style sketch
+    # regardless of validation_metric; see docs/implementation_log.md's
+    # 2026-07-30(i) entry). Following the 2026-07-27(e) precedent: the
+    # user-facing removal is here (raise, don't silently fall through);
+    # the internal Candidates-level "flat" branches (_increment_candidates
+    # et al.) are left in place as harmless, now-unreachable dead code --
+    # the same judgment call already made for bptree/instinct/sorted_
+    # arrays_bs's own dispatch conditionals scattered through that same
+    # method, where hand-editing every site in a 10,000+-line file was
+    # judged riskier than the cost of a little dead code.
+    if key in {"flat"}:
+        raise ValueError("candidate_backend='flat' has been removed")
+    if key not in {"brute_force", "auto", "lsh_sign_dot", "lsh_hamming_exact"}:
         key = default
     return key
+
+
+# Candidate search is controlled by two orthogonal parameters:
+#
+#   data_representation -- which vector representation to build from the
+#     raw window data before searching for candidates.
+#       "auto"               pick per validation_metric (see below).
+#       "raw"                no representation at all: enumerate every
+#                             (recent x alive) pair directly. Only valid
+#                             with candidate_backend="auto"/"brute_force".
+#       "sketch_proj"        Pearson single-vector projection sketch.
+#       "sketch_concordance" per-gap union sketch (spearman/kendall).
+#       "sketch_multichannel" per-channel union sketch (dist_corr).
+#     "auto" resolves by validation_metric: pearson -> sketch_proj,
+#     spearman/kendall -> sketch_concordance, dist_corr -> sketch_multichannel.
+#
+#   candidate_backend -- which search/index mechanism retrieves candidates
+#     from that representation.
+#       "auto"          resolves to "lsh_approx" (the established default).
+#       "lsh_approx"    SignLSHBandIndex (approximate sign-bit banding).
+#       "hamming_exact" HammingExactIndex (exact packed-bit pre-filter).
+#       "brute_force"   no index, exhaustive enumeration -- forces
+#                       data_representation to behave as "raw" regardless
+#                       of what was requested (no representation-preserving
+#                       brute-force retrieval mode exists).
+#
+# Recommended: leave both at "auto" for production use; set
+# data_representation="raw" (or candidate_backend="brute_force") only for a
+# ground-truth/reference run.
+_DATA_REPRESENTATION_ALIASES = {
+    "auto": "auto",
+    "raw": "raw", "none": "raw", "no_representation": "raw",
+    "sketch_proj": "sketch_proj", "pearson_sketch": "sketch_proj", "pearson": "sketch_proj", "sketch": "sketch_proj",
+    "sketch_concordance": "sketch_concordance", "concordance": "sketch_concordance",
+    "sketch_multichannel": "sketch_multichannel",
+    "distance_corr_sketch_multichannel": "sketch_multichannel", "dcor_sketch_multichannel": "sketch_multichannel",
+}
+_VALID_DATA_REPRESENTATIONS = {"auto", "raw", "sketch_proj", "sketch_concordance", "sketch_multichannel"}
+_CANDIDATE_BACKEND_AXIS_ALIASES = {
+    "auto": "auto",
+    "lsh_approx": "lsh_approx", "lsh_sign_dot": "lsh_approx", "lsh": "lsh_approx",
+    "hamming_exact": "hamming_exact", "lsh_hamming_exact": "hamming_exact",
+    "brute_force": "brute_force", "exhaustive": "brute_force", "true_brute_force": "brute_force", "unconditional": "brute_force",
+}
+_VALID_CANDIDATE_BACKEND_AXIS = {"auto", "lsh_approx", "hamming_exact", "brute_force"}
+
+
+def _resolve_data_representation(value, validation_metric):
+    key = str(value if value not in (None, "") else "auto").strip().lower().replace("-", "_")
+    key = _DATA_REPRESENTATION_ALIASES.get(key, key)
+    if key not in _VALID_DATA_REPRESENTATIONS:
+        raise ValueError(
+            f"data_representation={value!r} is not recognized. Valid values: "
+            f"{sorted(_VALID_DATA_REPRESENTATIONS)}."
+        )
+    if key != "auto":
+        return key
+    metric = _resolve_validation_metric(validation_metric)
+    if metric == "pearson":
+        return "sketch_proj"
+    if metric in ("spearman", "kendall"):
+        return "sketch_concordance"
+    return "sketch_multichannel"
+
+
+def _resolve_candidate_backend_axis(value, data_representation="auto"):
+    """Resolves to "lsh_approx"/"hamming_exact"/"brute_force". "auto" means
+    "brute_force" when data_representation is "raw" (nothing to index),
+    else "lsh_approx" (the established default)."""
+    key = str(value if value not in (None, "") else "auto").strip().lower().replace("-", "_")
+    key = _CANDIDATE_BACKEND_AXIS_ALIASES.get(key, key)
+    if key not in _VALID_CANDIDATE_BACKEND_AXIS:
+        raise ValueError(
+            f"candidate_backend={value!r} is not recognized. Valid values: "
+            f"{sorted(_VALID_CANDIDATE_BACKEND_AXIS)}."
+        )
+    if key != "auto":
+        return key
+    return "brute_force" if data_representation == "raw" else "lsh_approx"
+
+
+def _resolve_internal_dispatch(data_representation, candidate_backend, validation_metric):
+    """Maps the resolved (data_representation, candidate_backend) pair to
+    the internal dispatch key the rest of CorrTrack already understands.
+    Returns (effective_candidate_backend, internal_dispatch_key):
+    effective_candidate_backend is one of "lsh_approx"/"hamming_exact"/
+    "brute_force"; internal_dispatch_key is one of "auto"/"lsh_hamming_exact"
+    (sketch_proj), "incremental_concordance_multichannel" (sketch_
+    concordance), "distance_corr_sketch_multichannel" (sketch_multichannel),
+    or "brute_force" (raw, or candidate_backend="brute_force" -- always an
+    unconditional, representation-discarding no-op)."""
+    rep = _resolve_data_representation(data_representation, validation_metric)
+    be = _resolve_candidate_backend_axis(candidate_backend, rep)
+
+    if rep == "raw" and be != "brute_force":
+        raise ValueError(
+            "data_representation='raw' has no vector representation to index -- "
+            f"candidate_backend must be 'auto' or 'brute_force', not {candidate_backend!r}."
+        )
+    if be == "brute_force":
+        return be, "brute_force"
+
+    if rep == "sketch_proj":
+        return be, ("lsh_hamming_exact" if be == "hamming_exact" else "auto")
+    if rep == "sketch_concordance":
+        return be, "incremental_concordance_multichannel"
+    if rep == "sketch_multichannel":
+        return be, "distance_corr_sketch_multichannel"
+    raise AssertionError(f"unreachable data_representation {rep!r}")  # pragma: no cover
 
 
 _BLOCKED_INDEX_BACKENDS = {"sorted_arrays_bs"}
@@ -1443,6 +1807,26 @@ _BLOCKED_INDEX_BACKENDS = {"sorted_arrays_bs"}
 # backend". Deliberately kept out of _BLOCKED_INDEX_BACKENDS (a distinct
 # dispatch marker, its own `_instinct_index` attribute, not `_blocked_index`).
 _INSTINCT_INDEX_BACKENDS = {"instinct"}
+# (2026-07-08) SignLSHBandIndex -- candidate_selector Phase 6 spike, exact
+# (recall verified against brute force, not an approximation like
+# InstinctIndex), a distinct dispatch marker with its own `_lsh_index`
+# attribute. See docs/implementation_log.md.
+# (2026-07-10) "lsh_hamming_exact" (HammingExactIndex) shares this exact
+# same dispatch marker/attribute deliberately -- both classes implement the
+# identical external contract (insert_many/
+# find_pair_rows_full_cosine[_signed]/drop_before_time/clear_recent/
+# last_stats), so reusing `_lsh_index`/`_LSH_SIGN_DOT_BACKENDS` avoids
+# duplicating the ~11 dispatch sites this marker already touches. Only the
+# CONSTRUCTION branch (Candidates.__init__) needs to know which concrete
+# class to instantiate. See docs/implementation_log.md, "outside-the-box
+# backends" entry. (ivf_hamming/lsh_ternary_exact, which also shared this
+# marker, were removed 2026-07-13.)
+# (2026-07-27) circular_grouped_lsh (CircularGroupedExactIndex), bptree_mixed
+# (MultiDimThetaIndex), and lsh_grid_dot (SignLSHBandIndex, band_mode="grid")
+# formerly shared this same marker -- all removed per the release-
+# restructuring cleanup (see docs/implementation_log.md's 2026-07-27
+# entries); corrtrack_release_backup2 preserves the pre-cleanup tree.
+_LSH_SIGN_DOT_BACKENDS = {"lsh_sign_dot", "lsh_hamming_exact"}
 
 
 def _resolve_candidate_similarity(value, default="l2"):
@@ -1683,43 +2067,64 @@ def _compute_speedup_ceil(
     return num / denom
 
 
+# (2026-07-28) A stronger, more idealized ceiling than speedup_ceil -- see
+# docs/implementation_log.md's 2026-07-21 "oracle floor" diagnostic entries,
+# now formalized as a persistent metric rather than a one-off script. Where
+# speedup_ceil keeps CorrTrack's own ACTUAL sketch+candidate-search cost
+# fixed and only lets validation shrink to the oracle rate, speedup_oracle
+# imagines a hypothetical backend that already knows the true positives and
+# scales BOTH candidate-search and validation cost down by that same rate
+# (a hypothetical oracle backend that touches only the true correlated
+# pairs, not every candidate). monit_time_bf stays fixed either way, since
+# monitoring cost doesn't depend on candidate-search backend.
+def _compute_speedup_oracle(
+    cand_time_bf,
+    val_time_bf,
+    monit_time_bf,
+    corr_w_bf,
+    cand_w_bf,
+):
+    cand_time_bf_f = _to_float_safe(cand_time_bf)
+    val_time_bf_f = _to_float_safe(val_time_bf)
+    monit_time_bf_f = _to_float_safe(monit_time_bf)
+    ratio = _safe_div(corr_w_bf, cand_w_bf)
+    if any(
+        value is None
+        for value in (
+            cand_time_bf_f,
+            val_time_bf_f,
+            monit_time_bf_f,
+        )
+    ):
+        return float("nan")
+    if any(
+        math.isnan(value)
+        for value in (
+            cand_time_bf_f,
+            val_time_bf_f,
+            monit_time_bf_f,
+            ratio,
+        )
+    ):
+        return float("nan")
+    denom = cand_time_bf_f * ratio + val_time_bf_f * ratio + monit_time_bf_f
+    if denom == 0.0 or math.isnan(denom):
+        return float("nan")
+    num = cand_time_bf_f + val_time_bf_f + monit_time_bf_f
+    return num / denom
+
+
 def _extract_feature_overrides(params):
     overrides = {}
-    norm = params.get("sketch_norm")
-    if norm is not None:
-        overrides["sketch_norm"] = norm
+    # data_representation/candidate_backend: passed through raw (not
+    # resolved here) -- resolution happens inside CorrTrack.__init__, the
+    # only place validation_metric is reliably known at the same time.
+    data_representation = params.get("data_representation")
+    if data_representation is not None:
+        overrides["data_representation"] = str(data_representation)
     backend = params.get("candidate_backend")
     if backend is not None:
-        overrides["candidate_backend"] = _resolve_candidate_backend(backend, default="auto")
-    bucket_width = params.get("candidate_bucket_width")
-    if bucket_width is not None:
-        try:
-            overrides["candidate_bucket_width"] = float(bucket_width)
-        except (TypeError, ValueError):
-            if bucket_width in ("", "none", "None"):
-                overrides["candidate_bucket_width"] = None
-    block_steps = params.get("candidate_block_size_steps")
-    if block_steps is not None:
-        try:
-            overrides["candidate_block_size_steps"] = int(block_steps)
-        except (TypeError, ValueError):
-            pass
-    block_dims = params.get("candidate_block_index_dims")
-    if block_dims is not None:
-        try:
-            overrides["candidate_block_index_dims"] = int(block_dims)
-        except (TypeError, ValueError):
-            pass
-    similarity = params.get("candidate_similarity")
-    if similarity is not None:
-        overrides["candidate_similarity"] = _resolve_candidate_similarity(similarity, default="l2")
-    key_mode = params.get("candidate_key_mode")
-    if key_mode is not None:
-        overrides["candidate_key_mode"] = _resolve_candidate_key_mode(key_mode, default="first")
-    key_seed = params.get("candidate_key_seed")
-    if key_seed is not None:
-        seed_val = _to_int_safe(key_seed)
-        overrides["candidate_key_seed"] = seed_val
+        overrides["candidate_backend"] = str(backend)
     lsh_radius = params.get("candidate_lsh_radius")
     if lsh_radius is not None:
         radius_val = _to_int_safe(lsh_radius)
@@ -1745,54 +2150,195 @@ def _extract_feature_overrides(params):
         gamma_val = _to_float_safe(gamma)
         if gamma_val is not None:
             overrides["candidate_cosine_threshold"] = float(gamma_val)
-    # (2026-07-06) Part 1: see docs/implementation_log.md. Both pruning
-    # flags default off (opt-in) -- only pass through when explicitly set.
-    bound_dims = params.get("candidate_bound_dims")
-    if bound_dims is not None:
-        bound_dims_val = _to_int_safe(bound_dims)
-        if bound_dims_val is not None:
-            overrides["candidate_bound_dims"] = max(0, int(bound_dims_val))
-    bound_dim_selection = params.get("candidate_bound_dim_selection")
-    if bound_dim_selection is not None:
-        overrides["candidate_bound_dim_selection"] = str(bound_dim_selection)
-    enable_block_ub = params.get("enable_block_ub_pruning")
-    if enable_block_ub is not None:
-        overrides["enable_block_ub_pruning"] = _coerce_to_bool(enable_block_ub, default=False)
-    enable_row_ub = params.get("enable_row_ub_pruning")
-    if enable_row_ub is not None:
-        overrides["enable_row_ub_pruning"] = _coerce_to_bool(enable_row_ub, default=False)
-    # (2026-07-06) Part 1 follow-up: block_similarity_assignment/max_open_blocks
-    # -- see docs/implementation_log.md, "block-level cone pruning:
-    # similarity-aware block assignment". Also opt-in/pass-through-only.
-    block_sim_assign = params.get("block_similarity_assignment")
-    if block_sim_assign is not None:
-        overrides["block_similarity_assignment"] = _coerce_to_bool(block_sim_assign, default=False)
-    max_open = params.get("max_open_blocks")
-    if max_open is not None:
-        max_open_val = _to_int_safe(max_open)
-        if max_open_val is not None:
-            overrides["max_open_blocks"] = max(1, int(max_open_val))
-    # (2026-07-06) InstinctIndex -- experimental approximate graph backend,
-    # candidate_backend="instinct" only. See docs/implementation_log.md,
-    # "InstinctIndex: experimental approximate graph backend".
-    instinct_query_mode = params.get("candidate_instinct_query_mode")
-    if instinct_query_mode is not None:
-        overrides["candidate_instinct_query_mode"] = str(instinct_query_mode)
-    instinct_top_k = params.get("candidate_instinct_top_k")
-    if instinct_top_k is not None:
-        top_k_val = _to_int_safe(instinct_top_k)
-        if top_k_val is not None:
-            overrides["candidate_instinct_top_k"] = max(1, int(top_k_val))
-    instinct_min_candidates = params.get("candidate_instinct_min_candidates")
-    if instinct_min_candidates is not None:
-        min_cand_val = _to_int_safe(instinct_min_candidates)
-        if min_cand_val is not None:
-            overrides["candidate_instinct_min_candidates"] = max(1, int(min_cand_val))
-    instinct_entry_points = params.get("candidate_instinct_entry_points")
-    if instinct_entry_points is not None:
-        entry_points_val = _to_int_safe(instinct_entry_points)
-        if entry_points_val is not None:
-            overrides["candidate_instinct_entry_points"] = max(1, int(entry_points_val))
+    # (2026-09-10) Passed through raw, like data_representation/candidate_backend above --
+    # resolution to an absolute gamma (corr_threshold - offset) happens inside CorrTrack.__init__,
+    # the only place corr_threshold is reliably known alongside it. An explicit
+    # candidate_cosine_threshold still wins there if both are set.
+    gamma_offset = params.get("candidate_cosine_threshold_offset")
+    if gamma_offset is not None:
+        gamma_offset_val = _to_float_safe(gamma_offset)
+        if gamma_offset_val is not None:
+            overrides["candidate_cosine_threshold_offset"] = float(gamma_offset_val)
+    lsh_n_bands = params.get("candidate_lsh_n_bands")
+    if lsh_n_bands is not None:
+        lsh_n_bands_val = _to_int_safe(lsh_n_bands)
+        if lsh_n_bands_val is not None:
+            overrides["candidate_lsh_n_bands"] = max(1, int(lsh_n_bands_val))
+    # (2026-08-30) Theory-driven n_bands cap -- see candidate_kernels.pyx's
+    # SignLSHBandIndex._n_bands_tolerance for the full derivation. When
+    # set, overrides candidate_lsh_n_bands above with ceil(tolerance *
+    # b_min), computed once observed_m is known. Absent/None (the default
+    # for any param grid not setting it) leaves candidate_lsh_n_bands's
+    # own absolute-value behavior fully unaffected.
+    lsh_n_bands_tolerance = params.get("candidate_lsh_n_bands_tolerance")
+    if lsh_n_bands_tolerance is not None:
+        lsh_n_bands_tolerance_val = _to_float_safe(lsh_n_bands_tolerance)
+        if lsh_n_bands_tolerance_val is not None and lsh_n_bands_tolerance_val > 0.0:
+            overrides["candidate_lsh_n_bands_tolerance"] = float(lsh_n_bands_tolerance_val)
+    target_recall_override = params.get("target_recall")
+    if target_recall_override is not None:
+        target_recall_val = _to_float_safe(target_recall_override)
+        if target_recall_val is not None and 0.0 < target_recall_val < 1.0:
+            overrides["target_recall"] = float(target_recall_val)
+    # (2026-07-13) HammingExactIndex ("lsh_hamming_exact") -- None means
+    # auto-derive via the SimHash relation (see
+    # HammingExactIndex._finalize_threshold); inert for other backends.
+    hamming_threshold = params.get("candidate_hamming_threshold")
+    if hamming_threshold is not None:
+        hamming_threshold_val = _to_int_safe(hamming_threshold)
+        if hamming_threshold_val is not None:
+            overrides["candidate_hamming_threshold"] = int(hamming_threshold_val)
+    # (2026-07-09) Shared toggle for the separable final dot+gamma gate --
+    # only meaningful for candidate_backend in {"lsh_sign_dot", "instinct"}
+    # (query_mode="threshold" only for instinct); see
+    # docs/implementation_log.md's 2026-07-09 "SignLSHBandIndex: lsh_sign_dot
+    # backend" entry for why sorted_arrays_bs/bptree don't support this
+    # (gamma is interleaved into their search itself, not a separable step).
+    apply_dot_gamma_filter = params.get("candidate_apply_dot_gamma_filter")
+    if apply_dot_gamma_filter is not None:
+        overrides["candidate_apply_dot_gamma_filter"] = _coerce_to_bool(apply_dot_gamma_filter, default=True)
+    # (2026-07-21) SignLSHBandIndex ("lsh_sign_dot") -- cheap full-vector
+    # sign-Hamming pre-filter between prefiltered_pairs and the real dot
+    # product, opt-in (default off). See docs/implementation_log.md's
+    # 2026-07-21(a) entry.
+    apply_hamming_filter = params.get("candidate_apply_hamming_filter")
+    if apply_hamming_filter is not None:
+        overrides["candidate_apply_hamming_filter"] = _coerce_to_bool(apply_hamming_filter, default=False)
+    hamming_filter_max_frac = params.get("candidate_hamming_filter_max_frac")
+    if hamming_filter_max_frac is not None:
+        hamming_filter_max_frac_val = _to_float_safe(hamming_filter_max_frac)
+        if hamming_filter_max_frac_val is not None:
+            overrides["candidate_hamming_filter_max_frac"] = max(0.0, min(1.0, float(hamming_filter_max_frac_val)))
+    lsh_max_candidates = params.get("candidate_lsh_max_candidates_per_query")
+    if lsh_max_candidates is not None:
+        lsh_max_candidates_val = _to_int_safe(lsh_max_candidates)
+        if lsh_max_candidates_val is not None:
+            overrides["candidate_lsh_max_candidates_per_query"] = max(0, int(lsh_max_candidates_val))
+    # (2026-07-29g) SignLSHBandIndex's band_width auto-sizing target -- the
+    # actual scale-governing knob (band_width = ceil(log2(m*L/target_
+    # occupancy))), now overridable instead of hardcoded. See
+    # candidate_kernels.pyx's _finalize_sizing.
+    lsh_target_occupancy = params.get("candidate_lsh_target_occupancy")
+    if lsh_target_occupancy is not None:
+        val = _to_float_safe(lsh_target_occupancy)
+        if val is not None and val > 0:
+            overrides["candidate_lsh_target_occupancy"] = float(val)
+    # (2026-09-04) 0.0 is a legitimate, meaningful override here (no safety margin at all) --
+    # unlike occupancy above, it must NOT be filtered out by a `val > 0` check.
+    lsh_recall_safety_margin = params.get("candidate_lsh_recall_safety_margin")
+    if lsh_recall_safety_margin is not None:
+        val = _to_float_safe(lsh_recall_safety_margin)
+        if val is not None and val >= 0:
+            overrides["candidate_lsh_recall_safety_margin"] = float(val)
+
+    # (2026-07-29) Part 3/4 validation-metric and representation params --
+    # see docs/implementation_log.md's 2026-07-28/2026-07-29 entries.
+    validation_metric = params.get("validation_metric")
+    if validation_metric is not None:
+        overrides["validation_metric"] = _resolve_validation_metric(validation_metric)
+    dist_corr_algorithm = params.get("dist_corr_algorithm")
+    if dist_corr_algorithm is not None:
+        overrides["dist_corr_algorithm"] = str(dist_corr_algorithm).strip().lower()
+
+    # ConcordanceSketchState (candidate_backend="incremental_concordance_multichannel").
+    concordance_n_gaps = params.get("concordance_n_gaps")
+    if concordance_n_gaps is not None:
+        val = _to_int_safe(concordance_n_gaps)
+        if val is not None:
+            overrides["concordance_n_gaps"] = max(1, int(val))
+    concordance_min_gap = params.get("concordance_min_gap")
+    if concordance_min_gap is not None:
+        val = _to_int_safe(concordance_min_gap)
+        if val is not None:
+            overrides["concordance_min_gap"] = max(1, int(val))
+    concordance_min_capacity = params.get("concordance_min_capacity")
+    if concordance_min_capacity is not None:
+        val = _to_int_safe(concordance_min_capacity)
+        if val is not None:
+            overrides["concordance_min_capacity"] = max(1, int(val))
+    concordance_target_dim = params.get("concordance_target_dim")
+    if concordance_target_dim is not None:
+        val = _to_int_safe(concordance_target_dim)
+        if val is not None:
+            overrides["concordance_target_dim"] = max(1, int(val))
+
+    # (2026-07-30) DistanceCorrSketchState -- only meaningful when
+    # candidate_backend="distance_corr_sketch_multichannel" (single-vector
+    # "distance_corr_sketch" was removed 2026-07-31, Phase 4). See
+    # distance_corr_sketch.py.
+    dcs_k = params.get("distance_corr_sketch_k")
+    if dcs_k is not None:
+        val = _to_int_safe(dcs_k)
+        if val is not None:
+            overrides["distance_corr_sketch_k"] = max(1, int(val))
+    dcs_freq_low = params.get("distance_corr_sketch_freq_low")
+    if dcs_freq_low is not None:
+        val = _to_float_safe(dcs_freq_low)
+        if val is not None:
+            overrides["distance_corr_sketch_freq_low"] = float(val)
+    dcs_freq_high = params.get("distance_corr_sketch_freq_high")
+    if dcs_freq_high is not None:
+        val = _to_float_safe(dcs_freq_high)
+        if val is not None:
+            overrides["distance_corr_sketch_freq_high"] = float(val)
+    dcs_freq_seed = params.get("distance_corr_sketch_freq_seed")
+    if dcs_freq_seed is not None:
+        val = _to_int_safe(dcs_freq_seed)
+        if val is not None:
+            overrides["distance_corr_sketch_freq_seed"] = int(val)
+    dcs_gate_tau = params.get("distance_corr_sketch_gate_tau")
+    if dcs_gate_tau is not None:
+        val = _to_float_safe(dcs_gate_tau)
+        if val is not None:
+            overrides["distance_corr_sketch_gate_tau"] = float(val)
+    # (2026-07-31) ConcordanceMultiGapIndex -- only meaningful when
+    # candidate_backend="incremental_concordance_multichannel".
+    concordance_multichannel_gamma = params.get("concordance_multichannel_gamma")
+    if concordance_multichannel_gamma is not None:
+        val = _to_float_safe(concordance_multichannel_gamma)
+        if val is not None:
+            overrides["concordance_multichannel_gamma"] = float(val)
+    # (2026-07-30) DistanceCorrSketchMultiChannelIndex -- only meaningful
+    # when candidate_backend="distance_corr_sketch_multichannel".
+    dcs_multichannel_gamma = params.get("distance_corr_sketch_multichannel_gamma")
+    if dcs_multichannel_gamma is not None:
+        val = _to_float_safe(dcs_multichannel_gamma)
+        if val is not None:
+            overrides["distance_corr_sketch_multichannel_gamma"] = float(val)
+    # (2026-07-31, Phase 3/5) Independent tier-2 K^2 gate toggle. Default
+    # True (unchanged behavior); inert for every representation except
+    # dist_corr's multichannel one.
+    dcs_apply_tier2_gate = params.get("distance_corr_sketch_apply_tier2_gate")
+    if dcs_apply_tier2_gate is not None:
+        overrides["distance_corr_sketch_apply_tier2_gate"] = _coerce_to_bool(dcs_apply_tier2_gate, default=True)
+
+    # Xiao (2017) online Spearman/Kendall validator (opt-in, default off).
+    validation_incremental_approx = params.get("validation_incremental_approx")
+    if validation_incremental_approx is not None:
+        overrides["validation_incremental_approx"] = _coerce_to_bool(validation_incremental_approx, default=False)
+    validation_incremental_m1 = params.get("validation_incremental_m1")
+    if validation_incremental_m1 is not None:
+        val = _to_int_safe(validation_incremental_m1)
+        if val is not None:
+            overrides["validation_incremental_m1"] = max(2, int(val))
+    validation_incremental_m2 = params.get("validation_incremental_m2")
+    if validation_incremental_m2 is not None:
+        val = _to_int_safe(validation_incremental_m2)
+        if val is not None:
+            overrides["validation_incremental_m2"] = max(2, int(val))
+    validation_incremental_max_age_steps = params.get("validation_incremental_max_age_steps")
+    if validation_incremental_max_age_steps is not None:
+        val = _to_int_safe(validation_incremental_max_age_steps)
+        if val is not None:
+            overrides["validation_incremental_max_age_steps"] = max(1, int(val))
+    validation_incremental_cutpoint_refresh_threshold = params.get(
+        "validation_incremental_cutpoint_refresh_threshold"
+    )
+    if validation_incremental_cutpoint_refresh_threshold is not None:
+        val = _to_float_safe(validation_incremental_cutpoint_refresh_threshold)
+        if val is not None:
+            overrides["validation_incremental_cutpoint_refresh_threshold"] = float(val)
+
     hybrid_kwargs = _resolve_hybrid_validation_kwargs(overrides=params)
     for key, value in hybrid_kwargs.items():
         overrides[key] = value
@@ -1899,6 +2445,13 @@ def _candidate_search_record_fields(source):
         "candidate_search_instinct_best_score_seen": getattr(source, "candidate_search_instinct_best_score_seen", None),
         "candidate_search_instinct_mean_score_returned": getattr(source, "candidate_search_instinct_mean_score_returned", None),
         "candidate_search_instinct_dead_node_ratio": getattr(source, "candidate_search_instinct_dead_node_ratio", None),
+        "candidate_search_lsh_candidates_touched": getattr(source, "candidate_search_lsh_candidates_touched", None),
+        "candidate_search_lsh_dot_checks": getattr(source, "candidate_search_lsh_dot_checks", None),
+        "candidate_search_lsh_candidates_returned": getattr(source, "candidate_search_lsh_candidates_returned", None),
+        "candidate_search_lsh_query_time": getattr(source, "candidate_search_lsh_query_time", None),
+        "candidate_search_lsh_num_nodes_total": getattr(source, "candidate_search_lsh_num_nodes_total", None),
+        "candidate_search_lsh_num_nodes_alive": getattr(source, "candidate_search_lsh_num_nodes_alive", None),
+        "candidate_search_lsh_dead_node_ratio": getattr(source, "candidate_search_lsh_dead_node_ratio", None),
     }
 
 
@@ -2103,6 +2656,199 @@ def _is_structurally_spiked_stats(x, mean, var_sum, n, kurt_thresh=5.0, mu4_sum=
     return kurt > kurt_thresh
 
 
+# (2026-07-28) Non-Pearson validation metrics, ported from
+# corrtrack_release_nonlinear for part 3 of the 2026-07-27(a) roadmap -- see
+# docs/implementation_log.md's 2026-07-28 entries. Unlike that variant
+# (whose own metric resolver has no "pearson" case at all, and validates
+# EVERY metric including the linear one via pure-Python/scipy per pair),
+# "pearson" is added here as a first-class option that stays on the
+# existing fast Cython bulk-validation path unchanged -- only spearman/
+# kendall/dist_corr route through the new per-row Python path below.
+def _resolve_validation_metric(value=None):
+    if value is None or value == "":
+        return "pearson"
+    metric = str(value).strip().lower().replace("-", "_")
+    aliases = {
+        "spearmanr": "spearman",
+        "kendalltau": "kendall",
+        "kendall_tau": "kendall",
+        "distance_correlation": "dist_corr",
+        "distance_corr": "dist_corr",
+        "distcorr": "dist_corr",
+        "dcor": "dist_corr",
+        "linear": "pearson",
+    }
+    metric = aliases.get(metric, metric)
+    if metric not in {"pearson", "spearman", "kendall", "dist_corr"}:
+        raise ValueError("validation_metric must be 'pearson', 'spearman', 'kendall', or 'dist_corr'.")
+    return metric
+
+
+def _derive_candidate_tau(corr_threshold, validation_metric):
+    # Maps corr_threshold (always expressed on the Pearson-like scale the
+    # rest of CorrTrack's config uses) to the ordinal candidate-search gamma
+    # (a cosine/sign-agreement threshold on the SAME scale ordinal_distance_
+    # threshold expects) -- ported from corrtrack_release_nonlinear. Kendall
+    # tau is already on a comparable [-1, 1] concordance scale so it passes
+    # through unchanged; Spearman uses the standard bivariate-normal
+    # Pearson<->Spearman relation rho_s = (2/pi) * arcsin(rho).
+    metric = _resolve_validation_metric(validation_metric)
+    threshold = _to_float_safe(corr_threshold)
+    if threshold is None or not math.isfinite(threshold):
+        threshold = 0.0
+    threshold = max(-1.0, min(1.0, float(threshold)))
+    if metric == "kendall":
+        return threshold
+    return (2.0 / math.pi) * math.asin(threshold)
+
+
+def _distance_correlation_1d(x, y):
+    # Naive O(w^2) distance correlation (Szekely/Rizzo/Bakirov) -- ported
+    # as-is from corrtrack_release_nonlinear's global_ordinal_backend.py.
+    # A known exact O(w log w) algorithm exists (Huo & Szekely 2016) but was
+    # not part of this port; flagged as a real, not-yet-taken optimization
+    # for whoever picks up the distance-correlation thread next.
+    x_arr = np.asarray(x, dtype=np.float64).ravel()
+    y_arr = np.asarray(y, dtype=np.float64).ravel()
+    n = min(int(x_arr.size), int(y_arr.size))
+    if n < 2:
+        return np.nan
+    x_arr = x_arr[:n]
+    y_arr = y_arr[:n]
+    mask = np.isfinite(x_arr) & np.isfinite(y_arr)
+    x_arr = x_arr[mask]
+    y_arr = y_arr[mask]
+    n = int(x_arr.size)
+    if n < 2:
+        return np.nan
+
+    a = np.abs(x_arr[:, None] - x_arr[None, :])
+    b = np.abs(y_arr[:, None] - y_arr[None, :])
+    a_centered = a - a.mean(axis=0, keepdims=True) - a.mean(axis=1, keepdims=True) + a.mean()
+    b_centered = b - b.mean(axis=0, keepdims=True) - b.mean(axis=1, keepdims=True) + b.mean()
+
+    dcov2 = float(np.mean(a_centered * b_centered))
+    dvar_x = float(np.mean(a_centered * a_centered))
+    dvar_y = float(np.mean(b_centered * b_centered))
+    denom = math.sqrt(max(dvar_x, 0.0) * max(dvar_y, 0.0))
+    if denom <= 0.0 or not math.isfinite(denom):
+        return np.nan
+    dcorr2 = max(dcov2, 0.0) / denom
+    return math.sqrt(max(0.0, min(1.0, dcorr2)))
+
+
+def _kendall_tau(x, y):
+    """Exact Kendall's tau-b, matching scipy.stats.kendalltau's default
+    variant. (2026-07-31) Cython-only, by explicit instruction ("I want no
+    hotpaths in python whatsoever"): validation_metric="kendall" used to
+    call scipy.stats.kendalltau directly from within the per-row Python
+    validation loop -- full Python-level function-call overhead on every
+    candidate, every step. Ported to candidate_kernels.kendall_tau_cy (the
+    same Knight 1966 merge-sort inversion-counting algorithm scipy itself
+    uses, in a tight nogil loop), verified bit-identical (~1e-13) against
+    scipy.stats.kendalltau across 2000 random trials spanning heavy ties,
+    monotonic-nonlinear, and independent data (see docs/implementation_
+    log.md's 2026-07-31 entry). No Python fallback -- raises if the
+    compiled extension is unavailable, matching this project's existing
+    strict pattern for distance_corr_sketch_proxy/candidate_backend=
+    "flat"/"lsh_sign_dot"."""
+    if _cy_kendall_tau is None:
+        raise RuntimeError(
+            "validation_metric='kendall' requires the compiled candidate_kernels "
+            "Cython extension (kendall_tau_cy); the Python/scipy fallback was "
+            "removed by explicit instruction. Rebuild with "
+            "`python3 setup_cython.py build_ext --inplace`."
+        )
+    return _cy_kendall_tau(
+        np.ascontiguousarray(x, dtype=np.float64),
+        np.ascontiguousarray(y, dtype=np.float64),
+    )
+
+
+def _spearman_rho(x, y):
+    """Exact Spearman's rho (average-rank tie handling, then Pearson on
+    ranks), matching scipy.stats.spearmanr. Same rationale/precedent as
+    _kendall_tau above -- see candidate_kernels.spearman_rho_cy. No Python
+    fallback -- raises if the compiled extension is unavailable."""
+    if _cy_spearman_rho is None:
+        raise RuntimeError(
+            "validation_metric='spearman' requires the compiled candidate_kernels "
+            "Cython extension (spearman_rho_cy); the Python/scipy fallback was "
+            "removed by explicit instruction. Rebuild with "
+            "`python3 setup_cython.py build_ext --inplace`."
+        )
+    return _cy_spearman_rho(
+        np.ascontiguousarray(x, dtype=np.float64),
+        np.ascontiguousarray(y, dtype=np.float64),
+    )
+
+
+def _dist_corr_fast(x, y):
+    """Exact O(n log n) univariate distance correlation (dist_corr_algorithm
+    ="fast"), matching huo_szekely_distance_correlation.distance_
+    correlation_1d_fast's own double-centering identity. (2026-07-31)
+    Cython-only, by the same explicit instruction as _kendall_tau/
+    _spearman_rho above: the pure-Python version's cross-term sweep drove 4
+    pure-Python _FenwickTree objects through an interpreted per-element
+    loop -- ported to candidate_kernels.distance_correlation_1d_fast_cy
+    (flat C Fenwick buffers in a nogil loop), verified bit-identical
+    (~1e-14) against both the pure-Python "fast" reference and the naive
+    O(w^2) estimator across 2000 trials (ties, linear, nonlinear -- see
+    docs/implementation_log.md's 2026-07-31 entry). No Python fallback --
+    raises if the compiled extension is unavailable."""
+    if _cy_distance_correlation_1d_fast is None:
+        raise RuntimeError(
+            "dist_corr_algorithm='fast' requires the compiled candidate_kernels "
+            "Cython extension (distance_correlation_1d_fast_cy); the Python "
+            "fallback was removed by explicit instruction. Rebuild with "
+            "`python3 setup_cython.py build_ext --inplace`."
+        )
+    return _cy_distance_correlation_1d_fast(
+        np.ascontiguousarray(x, dtype=np.float64),
+        np.ascontiguousarray(y, dtype=np.float64),
+    )
+
+
+def _metric_corr_and_dist(x, y, metric="pearson", return_stats=False, dist_corr_algorithm="naive"):
+    metric = _resolve_validation_metric(metric)
+    linear_corr, _raw_dist, stats = _fast_corr_and_dist(x, y, return_stats=True)
+
+    if metric == "pearson":
+        corr = linear_corr
+    else:
+        x_arr = np.asarray(x, dtype=np.float64)
+        y_arr = np.asarray(y, dtype=np.float64)
+        if metric == "dist_corr":
+            # (2026-07-29) "fast" is Huo & Szekely-style O(w log w) --
+            # EXACT (not approximate, unlike Xiao's online Spearman/Kendall),
+            # verified against this naive O(w^2) estimator on 500 random
+            # trials (max diff ~1e-14, see huo_szekely_distance_correlation.py's
+            # module docstring). Kept opt-in rather than the new default:
+            # measured directly, the naive numpy-vectorized version is
+            # actually FASTER below ~w=200 (a pure-Python Fenwick-tree loop
+            # loses to numpy's O(w^2) vectorization at small w); "fast" only
+            # wins asymptotically at larger window sizes. Default stays
+            # "naive" so no behavior/performance regression at this
+            # project's typical window sizes without an explicit opt-in.
+            if dist_corr_algorithm == "fast":
+                corr = _dist_corr_fast(x_arr, y_arr)
+            else:
+                corr = _distance_correlation_1d(x_arr, y_arr)
+        else:
+            if metric == "spearman":
+                corr = _spearman_rho(x_arr, y_arr)
+            else:
+                corr = _kendall_tau(x_arr, y_arr)
+            try:
+                corr = float(corr)
+            except (TypeError, ValueError):
+                corr = np.nan
+    dist = _metric_distance_from_corr(corr)
+    if return_stats:
+        return corr, dist, stats
+    return corr, dist
+
+
 def _sketch_worker(payload):
     """Execute a sketch node update."""
     corrtrack, node_index, node_new, ids_subset, verbose, testing = payload
@@ -2115,6 +2861,27 @@ def _sketch_worker(payload):
         verbose=verbose,
         testing=testing,
         distribute=False,
+    )
+    return node_index, sketch_node, sketches, partitions
+
+
+def _sketch_multi_worker(payload):
+    """Execute one sketch node update and derive sketches for several sizes.
+
+    (2026-07-28) Ported from corrtrack_release_multiwinsizes for
+    CorrTrackMultiWindow -- see docs/implementation_log.md's 2026-07-28
+    entries.
+    """
+    corrtrack, node_index, node_new, ids_subset, window_sizes, verbose, testing = payload
+    sketch_node = corrtrack.sketch_nodes[node_index]
+    sketch_node._sid_lookup = corrtrack.series_ids
+    sketch_node._profile_callback = corrtrack._profile_add if getattr(corrtrack, "profile_enabled", False) else None
+    sketches, partitions = sketch_node.run_multi(
+        node_new,
+        ids_subset,
+        window_sizes,
+        verbose=verbose,
+        testing=testing,
     )
     return node_index, sketch_node, sketches, partitions
 
@@ -2279,6 +3046,67 @@ def _normalize_bf_key(pair):
     return (id1, id2, t1, t2, w)
 
 
+def _canonicalize_rows(rows):
+    """Vectorized replica of _normalize_bf_key for a batch of numeric candidate rows.
+
+    `rows` is an int array shaped (N, 5) with columns [s1, s2, t1, t2, w] (s1/s2 are
+    the integer series indices, t1/t2 absolute window start times). Returns a NEW (N, 5)
+    array where each row is put in the same canonical orientation _normalize_bf_key
+    produces for the scalar tuple: the later-start side first, id-sorted on ties.
+
+    The four scalar branches collapse to a single predicate: swap (s1,s2) and (t1,t2)
+    together iff  t1 < t2  OR  (t1 == t2 AND s1 > s2).  Verified case-by-case against
+    _normalize_bf_key including the s1==s2 (autocorrelation) and t1==t2 (synchronous)
+    cases -- see test_canonicalize_rows_matches_scalar_normalize_bf_key.
+    """
+    rows = np.ascontiguousarray(np.asarray(rows, dtype=np.int64).reshape((-1, 5)))
+    if rows.shape[0] == 0:
+        return rows
+    s1 = rows[:, 0]
+    s2 = rows[:, 1]
+    t1 = rows[:, 2]
+    t2 = rows[:, 3]
+    swap = (t1 < t2) | ((t1 == t2) & (s1 > s2))
+    out = rows.copy()
+    if swap.any():
+        out[swap] = rows[swap][:, [1, 0, 3, 2, 4]]
+    return out
+
+
+def _rows_as_void_keys(rows):
+    """View an (N, 5) int64 rows array as a 1-D array of opaque per-row keys, so numpy
+    set operations (np.isin / np.unique) treat each whole row as one hashable element."""
+    rows = np.ascontiguousarray(np.asarray(rows, dtype=np.int64).reshape((-1, 5)))
+    return rows.view(np.dtype((np.void, rows.dtype.itemsize * rows.shape[1]))).ravel()
+
+
+class NumericCorrelatedFlags:
+    """(2026-09-10) The `corr_flags` return of a recall_by_window pass, in numeric form:
+    the correlated set as (rows (N,5) int64, corrs (N,) float64). `len()` is the number of
+    correlated windows (same as the old string dict's len); `.correlated_rows()` and tuple
+    unpacking give (rows, corrs), so `CorrTrack.compute_metrics_bf` consumes it directly
+    with no per-key Python normalization."""
+
+    __slots__ = ("rows", "corrs")
+
+    def __init__(self, rows, corrs):
+        self.rows = np.ascontiguousarray(np.asarray(rows, dtype=np.int64).reshape((-1, 5)))
+        c = np.ascontiguousarray(np.asarray(corrs, dtype=np.float64).reshape((-1,)))
+        if c.shape[0] != self.rows.shape[0]:
+            c = np.ones(self.rows.shape[0], dtype=np.float64)
+        self.corrs = c
+
+    def __len__(self):
+        return int(self.rows.shape[0])
+
+    def __bool__(self):
+        return self.rows.shape[0] > 0
+
+    def correlated_rows(self):
+        return self.rows, self.corrs
+
+    def __iter__(self):
+        return iter((self.rows, self.corrs))
 
 
 def _normalize_window_metric_key(id1, id2, t1, t2, window_size):
@@ -2793,9 +3621,23 @@ _os_parallel_guard.environ.setdefault("MKL_CBWR", "COMPATIBLE")
 _os_parallel_guard.environ.setdefault("MKL_DEBUG_CPU_TYPE", "5")
 # ================================================================
 
+# (2026-07-31) candidate_lsh_target_occupancy's default for the concordance/
+# multichannel index wrappers (ConcordanceMultiGapIndex/DistanceCorrSketch
+# MultiChannelIndex) -- distinct from the general sketch_proj/Candidates
+# path's own 3.0 default. Originally tuned for the now-removed single-
+# vector distance_corr_sketch backend (2026-07-30(f), swept {3,10,20,40,80}
+# on real+synthetic data); the multichannel wrapper inherited it from day
+# one, and it is implicitly re-validated by that backend's own real-data
+# recall/precision/touched_frac numbers (2026-07-30(m)/(n)). For sketch_
+# concordance specifically it was independently swept 3.0-50.0 and found
+# to have zero effect. A single named constant so the wrapper construction
+# and CorrTrack's own introspectable attribute can never silently diverge.
+_MULTICHANNEL_DEFAULT_TARGET_OCCUPANCY = 10.0
+
+
 class CorrTrack:
-    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,grid_dimension,cell_size,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,exec="parallel",max_workers=0,sketch_norm="z",candidate_backend="auto",candidate_bucket_width=None,candidate_block_size_steps=None,candidate_block_index_dims=None,candidate_similarity="l2",candidate_cosine_threshold=None,candidate_parallel_mode="recent_shards",candidate_key_mode="first",candidate_key_seed=None,candidate_lsh_radius=None,candidate_ann_m=None,candidate_ann_z=None,candidate_ann_ef=None,parallel_sketch=None,parallel_candidates=None,parallel_validation=None,track_min_dist=True,hybrid_validation=False,hybrid_validation_min_repeat_rate=0.25,hybrid_validation_disable_rate=None,hybrid_validation_ema_alpha=0.25,hybrid_validation_min_candidates=256,numeric_rows=True,validation_current_window_cache=False,candidate_bound_dims=None,candidate_bound_dim_selection="variance",enable_block_ub_pruning=False,enable_row_ub_pruning=False,block_similarity_assignment=False,max_open_blocks=4,candidate_instinct_query_mode="hybrid",candidate_instinct_top_k=256,candidate_instinct_min_candidates=64,candidate_instinct_entry_points=8):
-        
+    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,exec="parallel",max_workers=0,data_representation="auto",candidate_backend="auto",candidate_cosine_threshold=None,candidate_cosine_threshold_offset=None,candidate_parallel_mode="recent_shards",candidate_lsh_radius=None,candidate_ann_m=None,candidate_ann_z=None,candidate_ann_ef=None,parallel_sketch=None,parallel_candidates=None,parallel_validation=None,track_min_dist=True,hybrid_validation=False,hybrid_validation_min_repeat_rate=0.25,hybrid_validation_disable_rate=None,hybrid_validation_ema_alpha=0.25,hybrid_validation_min_candidates=256,numeric_rows=True,validation_current_window_cache=False,candidate_lsh_n_bands=64,candidate_lsh_n_bands_tolerance=None,target_recall=0.95,candidate_lsh_target_occupancy=None,candidate_lsh_recall_safety_margin=None,candidate_apply_dot_gamma_filter=True,candidate_hamming_threshold=None,candidate_apply_hamming_filter=True,candidate_hamming_filter_max_frac=0.40,candidate_lsh_max_candidates_per_query=0,validation_metric="pearson",validation_incremental_approx=False,validation_incremental_m1=None,validation_incremental_m2=None,validation_incremental_max_age_steps=64,validation_incremental_cutpoint_refresh_threshold=0.5,dist_corr_algorithm="naive",concordance_n_gaps=None,concordance_min_gap=8,concordance_min_capacity=16,concordance_target_dim=738,concordance_multichannel_gamma=None,concordance_multichannel_min_channel_capacity=None,distance_corr_sketch_k=8,distance_corr_sketch_freq_low=0.1,distance_corr_sketch_freq_high=10.0,distance_corr_sketch_freq_seed=42,distance_corr_sketch_gate_tau=None,distance_corr_sketch_multichannel_gamma=None,distance_corr_sketch_apply_tier2_gate=True):
+
         if basic_window is not None and window_size % basic_window != 0:
             raise TypeError("Window size (",window_size,") is not divisable by basic window size (",basic_window,")")
         if basic_window is not None and basic_window % window_step != 0:
@@ -2809,15 +3651,343 @@ class CorrTrack:
         parallel_validation_flag = _resolve_parallel_flag(parallel_validation, parallel_default)
         candidate_parallel_mode = "recent_shards"
 
-        grid_dimension = 1 if grid_dimension is None or grid_dimension <= 0 else int(grid_dimension)
+        # data_representation/candidate_backend are the two orthogonal,
+        # user-facing candidate-search parameters (see _resolve_internal_
+        # dispatch's own docstring above). Resolving them here produces the
+        # internal dispatch key the rest of __init__/run() already expects.
+        self.data_representation = _resolve_data_representation(data_representation, validation_metric)
+        self.candidate_backend, resolved_candidate_backend = _resolve_internal_dispatch(
+            data_representation, candidate_backend, validation_metric
+        )
+
+        # (2026-07-29) ConcordanceSketchState -- see concordance_sketch.py's
+        # module docstring. This representation is incrementally
+        # maintained: only the newly-arrived window_step comparisons are
+        # computed each step, mirroring the incremental basic-window
+        # sketch's own append/drop pattern (built as an independent class
+        # rather than folded into Sketches' own already-intricate
+        # window/step-resize machinery, to avoid risking that delicate,
+        # heavily-tested code).
+        #
+        # (2026-07-31, later) The single-vector representation itself
+        # (candidate_backend="incremental_concordance") was REMOVED --
+        # once ConcordanceMultiGapIndex's own missing Hamming-filter wiring
+        # was fixed (docs/implementation_log.md's 2026-07-31(g) entry),
+        # touched_candidates became EXACTLY equal between the two
+        # representations at every window_size where multiscale_gaps
+        # floors to one gap (>=1024), removing its last real advantage --
+        # multichannel now strictly dominates or ties it everywhere.
+        # ConcordanceSketchState itself stays: it's still the shared
+        # sketch-construction machinery multichannel builds on.
+        self.concordance_multichannel_backend = (
+            resolved_candidate_backend == "incremental_concordance_multichannel"
+        )
+        self.concordance_state = None
+        self.concordance_multichannel_index = None
+        self.concordance_multichannel_gamma = None
+        if self.concordance_multichannel_backend:
+            resolved_validation_metric = _resolve_validation_metric(validation_metric)
+            if resolved_validation_metric == "dist_corr":
+                raise NotImplementedError(
+                    "data_representation='sketch_concordance' does not support "
+                    "validation_metric='dist_corr' -- this representation targets "
+                    "Kendall's-tau-style concordance (sign of pairwise differences), "
+                    "not distance correlation's own geometry. Use "
+                    "validation_metric='spearman' or 'kendall' with this representation."
+                )
+            self.concordance_min_gap = max(1, int(concordance_min_gap or 8))
+            self.concordance_min_capacity = max(1, int(concordance_min_capacity or 16))
+            n_gaps_value = _to_int_safe(concordance_n_gaps)
+            if n_gaps_value is None:
+                # (2026-07-29) Bounds output_dim independently of window_size
+                # by reducing n_gaps as window_size grows (output_dim ~=
+                # n_gaps * window_size) -- verified directly: at window_size
+                # =256 (this project's real production size) this closes a
+                # real 2.6x-slower-than-GlobalOrdinalTransformer gap into a
+                # 5.5x FASTER one, without changing the already bit-exact-
+                # verified incremental update logic at all. See
+                # concordance_sketch.py's module docstring and
+                # docs/implementation_log.md's 2026-07-29 entries. Only
+                # a floor at n_gaps=1 for very large windows (output_dim
+                # reverts to O(window_size) there -- a disclosed, remaining
+                # limit, not silently hidden).
+                self.concordance_target_dim = max(1, int(concordance_target_dim or 738))
+                self.concordance_n_gaps = None
+                self.concordance_state = ConcordanceSketchState(
+                    window_size=window_size,
+                    min_gap=self.concordance_min_gap,
+                    min_capacity=self.concordance_min_capacity,
+                    target_dim=self.concordance_target_dim,
+                )
+            else:
+                self.concordance_target_dim = None
+                self.concordance_n_gaps = max(1, int(n_gaps_value))
+                self.concordance_state = ConcordanceSketchState(
+                    window_size=window_size,
+                    n_gaps=self.concordance_n_gaps,
+                    min_gap=self.concordance_min_gap,
+                    min_capacity=self.concordance_min_capacity,
+                )
+            n_vectors = int(self.concordance_state.output_dim)
+        if self.concordance_multichannel_backend:
+            _cmc_occ_val = _to_float_safe(candidate_lsh_target_occupancy)
+            cmc_target_occupancy = (
+                float(_cmc_occ_val) if _cmc_occ_val and _cmc_occ_val > 0
+                else _MULTICHANNEL_DEFAULT_TARGET_OCCUPANCY
+            )
+            self.concordance_multichannel_index = ConcordanceMultiGapIndex(
+                gaps=self.concordance_state.gaps,
+                window_size=window_size,
+                min_channel_capacity=(
+                    int(concordance_multichannel_min_channel_capacity)
+                    if concordance_multichannel_min_channel_capacity is not None
+                    else None
+                ),
+                # (2026-07-31) self.n_lagged_windows itself isn't computed
+                # until later in __init__ -- same formula, computed locally
+                # here, mirroring DistanceCorrSketchMultiChannelIndex's own
+                # precedent exactly.
+                n_lagged_windows=(int(n_lags) // int(window_step) + 1),
+                n_bands=max(1, _to_int_safe(candidate_lsh_n_bands) or 64),
+                target_occupancy=cmc_target_occupancy,
+                band_seed=(seed if seed is not None else 8161),
+                # self.candidate_backend drives which concrete index class
+                # this wrapper builds per usable gap.
+                index_cls=_cy_hamming_exact_index_cls if self.candidate_backend == "hamming_exact" else _cy_lsh_sign_dot_index_cls,
+                # (2026-07-31, touched_frac investigation) Read directly
+                # from the raw constructor params -- self.candidate_apply_
+                # hamming_filter/self.candidate_hamming_filter_max_frac
+                # aren't resolved until later in __init__. Matches what
+                # Candidates already does for single-vector concordance's
+                # own shared index, closing a real touched_frac gap (see
+                # docs/implementation_log.md's 2026-07-31 entry).
+                apply_hamming_filter=_coerce_to_bool(candidate_apply_hamming_filter, default=True),
+                hamming_max_frac=(
+                    None if candidate_hamming_filter_max_frac is None else float(candidate_hamming_filter_max_frac)
+                ),
+            )
+            # (2026-07-31) gamma's default DEPENDS on how many gaps actually
+            # ended up in the union (only known after the index above picks
+            # its own usable subset) -- see
+            # derive_concordance_multichannel_gamma_from_corr_threshold's
+            # docstring for the real regression this avoids: at
+            # window_size>=1024, multiscale_gaps' own n_gaps floor leaves
+            # exactly ONE usable gap, and a "max over 1 term" is just that
+            # term -- mathematically the SAME statistic the single-vector
+            # concordance backend already uses, so it must share that
+            # backend's own already-tuned tau, not the different constant
+            # calibrated for a genuine multi-gap union.
+            gamma_value = _to_float_safe(concordance_multichannel_gamma)
+            if gamma_value is None or not math.isfinite(gamma_value):
+                gamma_value = derive_concordance_multichannel_gamma_from_corr_threshold(
+                    corr_threshold, n_channels=len(self.concordance_multichannel_index.gaps)
+                )
+            self.concordance_multichannel_gamma = float(gamma_value)
+            n_vectors = int(self.concordance_state.output_dim)
+
+        # (2026-07-30) DistanceCorrSketchState -- see distance_corr_sketch.py's
+        # module docstring. Unlike concordance_multichannel_backend above
+        # (which REJECTS validation_metric="dist_corr"), this backend
+        # REQUIRES it -- it
+        # exists specifically to close the disclosed gap left by
+        # GlobalDistanceSignatureTransformer never being ported. Two-tier
+        # design: tier 1 (this state's .vectors(), a cheap concatenated
+        # representation) feeds the existing candidate_index_backend="auto"
+        # (lsh_sign_dot) retrieval, same as concordance; tier 2 (the
+        # more reliable but pricier distance_corr_sketch_proxy) runs as a
+        # validation-time refinement gate on tier 1's survivors (see
+        # _validate_numeric_rows_nonlinear), before the real exact dist_corr
+        # computation. Verified real-data recall/precision at a working
+        # threshold: 91.2%/85.1% while touching only 22.6% of all pairs.
+        #
+        # (2026-07-31, Phase 4) Both the single-vector representation above
+        # and its "skip tier-1" exhaustive variant were REMOVED --
+        # distance_corr_sketch_multichannel (below) strictly dominates the
+        # single-vector representation's recall at every K tested, with no
+        # offsetting tradeoff (see docs/implementation_log.md's 2026-07-31
+        # entry) -- multichannel is now the only dist_corr representation.
+        # (2026-07-30) Multi-channel union tier-1 -- direct response to "I
+        # want smart filtering with no all pair enumeration" after
+        # confirming distance_corr_sketch's own single-vector tier-1
+        # parameter space was exhausted (docs/implementation_log.md's
+        # 2026-07-30(l) entry). Bypasses Candidates/grid_nodes entirely --
+        # this backend's retrieval is 2K SEPARATE small indices, not one
+        # big one Candidates' existing single-_lsh_index architecture has
+        # any way to hold. See DistanceCorrSketchMultiChannelIndex's own
+        # docstring and docs/implementation_log.md's 2026-07-30(m)/(n)
+        # entries.
+        self.distance_corr_sketch_multichannel_backend = (
+            resolved_candidate_backend == "distance_corr_sketch_multichannel"
+        )
+        self.distance_corr_sketch_state = None
+        self.distance_corr_sketch_gate_tau = None
+        self.distance_corr_sketch_multichannel_index = None
+        self.distance_corr_sketch_multichannel_gamma = None
+        self._distance_corr_sketch_multichannel_next_expire_time = None
+        # (2026-07-31, Phase 3) Independent tier-2 K^2 gate toggle -- see
+        # the gate-check condition in _validate_numeric_rows_nonlinear.
+        # Default True (unchanged behavior); set False to let tier-1
+        # retrieval feed validation directly, isolating whether tier-1
+        # alone, or the gate alone, is doing the real filtering work.
+        self.distance_corr_sketch_apply_tier2_gate = _coerce_to_bool(
+            distance_corr_sketch_apply_tier2_gate, default=True
+        )
+        if self.distance_corr_sketch_multichannel_backend:
+            resolved_validation_metric = _resolve_validation_metric(validation_metric)
+            if resolved_validation_metric != "dist_corr":
+                raise NotImplementedError(
+                    "data_representation='sketch_multichannel' only supports "
+                    "validation_metric='dist_corr' -- this representation targets "
+                    "distance-correlation-style general dependence (via a random-"
+                    "Fourier-features/HSIC construction), not Pearson/Spearman/"
+                    "Kendall's own geometry. Use validation_metric='dist_corr'."
+                )
+            self.distance_corr_sketch_k = max(1, int(distance_corr_sketch_k or 8))
+            self.distance_corr_sketch_freq_low = float(distance_corr_sketch_freq_low or 0.1)
+            self.distance_corr_sketch_freq_high = float(distance_corr_sketch_freq_high or 10.0)
+            self.distance_corr_sketch_freq_seed = int(
+                distance_corr_sketch_freq_seed if distance_corr_sketch_freq_seed is not None else 42
+            )
+            self.distance_corr_sketch_state = DistanceCorrSketchState(
+                window_size=window_size,
+                K=self.distance_corr_sketch_k,
+                freq_low=self.distance_corr_sketch_freq_low,
+                freq_high=self.distance_corr_sketch_freq_high,
+                freq_seed=self.distance_corr_sketch_freq_seed,
+            )
+            gate_tau_value = _to_float_safe(distance_corr_sketch_gate_tau)
+            if gate_tau_value is None or not math.isfinite(gate_tau_value):
+                gate_tau_value = derive_gate_tau_from_corr_threshold(corr_threshold, window_size=window_size)
+            self.distance_corr_sketch_gate_tau = float(gate_tau_value)
+        if self.distance_corr_sketch_multichannel_backend:
+            gamma_value = _to_float_safe(distance_corr_sketch_multichannel_gamma)
+            if gamma_value is None or not math.isfinite(gamma_value):
+                gamma_value = derive_multichannel_gamma_from_corr_threshold(corr_threshold)
+            self.distance_corr_sketch_multichannel_gamma = float(gamma_value)
+            _mc_occ_val = _to_float_safe(candidate_lsh_target_occupancy)
+            mc_target_occupancy = (
+                float(_mc_occ_val) if _mc_occ_val and _mc_occ_val > 0
+                else _MULTICHANNEL_DEFAULT_TARGET_OCCUPANCY
+            )
+            self.distance_corr_sketch_multichannel_index = DistanceCorrSketchMultiChannelIndex(
+                n_channels=2 * self.distance_corr_sketch_k,
+                window_size=window_size,
+                # (2026-07-30) self.n_lagged_windows itself isn't computed
+                # until later in __init__ (from n_lags/window_step) -- same
+                # formula, computed locally here since this block runs
+                # first.
+                n_lagged_windows=(int(n_lags) // int(window_step) + 1),
+                n_bands=max(1, _to_int_safe(candidate_lsh_n_bands) or 64),
+                target_occupancy=mc_target_occupancy,
+                band_seed=(seed if seed is not None else 4242),
+                # self.candidate_backend drives which concrete index class
+                # this wrapper builds per channel.
+                index_cls=_cy_hamming_exact_index_cls if self.candidate_backend == "hamming_exact" else _cy_lsh_sign_dot_index_cls,
+            )
+            n_vectors = int(self.distance_corr_sketch_state.output_dim)
+        self.distance_corr_sketch_gate_rejected = 0
+
         if n_vectors is None or n_vectors <= 0:
             raise ValueError("n_vectors must be a positive integer.")
         # Parameters features
         self.neg_corr = neg_corr
+        if self.distance_corr_sketch_multichannel_backend:
+            # (2026-07-30) Distance correlation is unsigned (dCor >= 0
+            # always), so at VALIDATION time neg_corr's fabs(corr) vs corr
+            # distinction is a pure no-op here -- forcing it True never
+            # changes which pairs pass validation for this metric. But
+            # neg_corr ALSO selects, at the CANDIDATE-SEARCH level, whether
+            # find_pair_rows_full_cosine_signed (querying both a band's own
+            # bucket and its bitwise complement) is used instead of the
+            # unsigned find_pair_rows_full_cosine (direct bucket only) --
+            # and that distinction is NOT a no-op for this backend. Tier 1's
+            # RFF-projected cosine similarity can legitimately land negative
+            # for genuine true positives (a projection-sign artifact, not
+            # "anti-correlation" -- dCor has no such concept), and only
+            # querying the direct bucket misses roughly half of those.
+            # (2026-07-30) Originally verified for the now-removed single-
+            # vector distance_corr_sketch backend, where leaving neg_corr at
+            # its default (False) reproduced the same class of severe
+            # recall loss found and fixed for the Hamming pre-filter, just
+            # via a different mechanism. (2026-07-31) Carried forward to
+            # multichannel preventively, since the exact same per-channel
+            # RFF-projection-sign reasoning applies -- disclosed as NOT
+            # independently re-verified via its own dedicated multichannel
+            # benchmark this pass (the single-vector one it was verified on
+            # is gone). Forced here rather than left to the caller.
+            self.neg_corr = True
+        # (2026-07-28) Non-Pearson validation metrics, ported from
+        # corrtrack_release_nonlinear -- see docs/implementation_log.md's
+        # 2026-07-28 entries. Default "pearson" preserves all existing
+        # behavior exactly (stays on the fast Cython bulk-validation path);
+        # spearman/kendall/dist_corr route to a dedicated per-row Python
+        # path with no compiled kernel. dist_corr has no sign (it's always
+        # non-negative), so it forces validation_neg_corr=False regardless
+        # of the neg_corr argument, matching corrtrack_release_nonlinear's
+        # own convention.
+        self.validation_metric = _resolve_validation_metric(validation_metric)
+        self.validation_neg_corr = False if self.validation_metric == "dist_corr" else bool(neg_corr)
+        # (2026-07-29) Xiao (2017) online Spearman/Kendall -- part 4 of the
+        # 2026-07-27 roadmap. An APPROXIMATE, opt-in (default off) alternative
+        # to the exact-but-non-incremental scipy path in
+        # _validate_numeric_rows_nonlinear: maintains a small per-(pair,lag)
+        # count matrix, updated incrementally as the window slides instead
+        # of recomputing from the full window every step. Inert unless
+        # validation_metric is "spearman" or "kendall". See
+        # xiao_online_correlation.py's module docstring and
+        # docs/implementation_log.md's 2026-07-29 entry for the accuracy
+        # characterization (including a real degenerate-cutpoint failure
+        # mode on nonstationary series, and the rebuild-on-degeneracy
+        # mitigation for it) -- never claimed to reproduce the exact scipy
+        # value bit-for-bit.
+        self.validation_incremental_approx = _coerce_to_bool(validation_incremental_approx, default=False)
+        self.validation_incremental_m1 = _to_int_safe(validation_incremental_m1)
+        self.validation_incremental_m2 = _to_int_safe(validation_incremental_m2)
+        max_age = _to_int_safe(validation_incremental_max_age_steps)
+        self.validation_incremental_max_age_steps = max(1, int(max_age)) if max_age else 64
+        # (2026-07-29) HBR (Zhang et al. 2009)-style adaptive-update pattern:
+        # proactively refresh the Xiao validator's cutpoints once a pair's
+        # window mean has drifted this many standard deviations from where
+        # they were last derived, rather than waiting for outright
+        # degeneracy (the reactive NaN fallback in XiaoOnlineCorrState,
+        # which stays in place regardless as a backstop). None disables the
+        # proactive check (reactive-only).
+        refresh_threshold = _to_float_safe(validation_incremental_cutpoint_refresh_threshold)
+        self.validation_incremental_cutpoint_refresh_threshold = refresh_threshold
+        self._xiao_state = (
+            XiaoOnlineCorrState(max_age_steps=self.validation_incremental_max_age_steps)
+            if self.validation_incremental_approx
+            else None
+        )
+        # (2026-07-29) Huo & Szekely-style exact O(w log w) distance
+        # correlation -- opt-in alternative to the naive O(w^2) estimator
+        # for validation_metric="dist_corr". See huo_szekely_distance_
+        # correlation.py's module docstring: "fast" only wins wall-clock
+        # above roughly w=200-256 in direct measurement (numpy's vectorized
+        # O(w^2) has a better constant factor at small w than a pure-Python
+        # Fenwick-tree loop) -- both are EXACT, this is a performance choice
+        # only, never a correctness one.
+        dist_corr_algorithm = str(dist_corr_algorithm or "naive").strip().lower()
+        if dist_corr_algorithm not in ("naive", "fast"):
+            dist_corr_algorithm = "naive"
+        self.dist_corr_algorithm = dist_corr_algorithm
         # Parameters data
         self.window_data = None
         self.window_index = None
         self.window_startTimes = None
+        # (2026-08-24) preprocess=True previously only reached Sketches'
+        # own internal candidate-search buffer (via a *separate*
+        # differencing pass there) -- CorrTrack's own exact-validation
+        # functions always read raw self.window_data regardless of
+        # preprocess, so the final accepted/rejected correlation values
+        # (and brute force's, which validates through this same instance)
+        # never reflected the differenced series. window_data_diff mirrors
+        # window_data column-for-column (same incremental carry-over trick
+        # Sketches._preprocess_data uses, so no double-differencing and no
+        # shape mismatch), maintained only when preprocess is True -- see
+        # docs/implementation_log.md.
+        self.window_data_diff = None
+        self._preprocess_diff_last_origin = None
         self._cw_raw_sums = None
         self._cw_raw_sums_sq = None
         self._cw_raw_sums_cu = None
@@ -2829,17 +3999,39 @@ class CorrTrack:
         self.datetime_index = None
         self.datetime_lookup = {} #TODO: save correlation logs to file
         self.preprocess = preprocess
-        self.sketch_norm = str(sketch_norm) if sketch_norm is not None else "z"
-        self.candidate_backend = _resolve_candidate_backend(candidate_backend, default="auto")
-        self.candidate_bucket_width = _to_float_safe(candidate_bucket_width)
-        block_steps = _to_int_safe(candidate_block_size_steps)
-        if block_steps is None or block_steps <= 0:
-            block_steps = 32
-        self.candidate_block_size_steps = int(block_steps)
-        block_dims = _to_int_safe(candidate_block_index_dims)
-        if block_dims is None or block_dims <= 0:
-            block_dims = 1
-        self.candidate_block_index_dims = int(block_dims)
+        # (2026-07-31) sketch_norm is no longer a public parameter -- "mean_l2"
+        # is the only mode with a live consumer (see docs/implementation_
+        # log.md's 2026-07-10 entries: "z" was replaced project-wide, and
+        # "mean" was built for lsh_mag_dot, which was never adopted).
+        self.sketch_norm = "mean_l2"
+        self._internal_dispatch = resolved_candidate_backend
+        # (2026-07-28) The ordinal representation is a CorrTrack-level
+        # dispatch concept, not a Candidates-level index backend --
+        # Candidates itself is always constructed with a real index backend
+        # ("auto" -> lsh_sign_dot, this project's own established default)
+        # and never sees the string "global_ordinal_comparisons".
+        self.candidate_index_backend = (
+            # (2026-07-30) Multichannel/multi-gap bypass Candidates/
+            # grid_nodes entirely at run() time (see run()'s dispatch
+            # below) -- "brute_force" here is only a safe, zero-extra-
+            # index-construction placeholder so Candidates.__init__ doesn't
+            # build an unused, dimension-mismatched SignLSHBandIndex that
+            # will never be queried.
+            #
+            # (2026-07-31, later) This used to also special-case single-
+            # vector concordance/distance_corr_sketch (translating their
+            # own candidate_backend strings to "auto"/"lsh_hamming_exact"
+            # for Candidates' benefit) -- both representations are now
+            # removed, so every remaining candidate_backend value
+            # (including plain "auto"/"lsh_sign_dot"/"lsh_hamming_exact")
+            # already means what Candidates itself expects, with no
+            # translation needed.
+            "brute_force" if (
+                self.distance_corr_sketch_multichannel_backend
+                or self.concordance_multichannel_backend
+            )
+            else self._internal_dispatch
+        )
         # (2026-07-06) Part 1: see Candidates.__init__ for the full
         # rationale and docs/implementation_log.md. Both pruning flags
         # default False (opt-in) -- row-level pruning showed ~0 wall-clock
@@ -2847,25 +4039,106 @@ class CorrTrack:
         # computation cost offsets it); block-level (cone/angular) pruning
         # showed a real 4-5x speedup on data with genuine angular
         # clustering tighter than gamma, and safely no-ops otherwise.
-        bound_dims_val = _to_int_safe(candidate_bound_dims)
-        self.candidate_bound_dims = max(0, bound_dims_val) if bound_dims_val is not None else 0
-        self.candidate_bound_dim_selection = str(candidate_bound_dim_selection or "variance").lower()
-        self.enable_block_ub_pruning = bool(enable_block_ub_pruning)
-        self.enable_row_ub_pruning = bool(enable_row_ub_pruning)
-        self.block_similarity_assignment = bool(block_similarity_assignment)
-        self.max_open_blocks = max(1, _to_int_safe(max_open_blocks) or 4)
-        # (2026-07-06) InstinctIndex candidate_backend params -- see
-        # docs/implementation_log.md. Approximate, opt-in backend only;
-        # inert for every other candidate_backend value.
-        self.candidate_instinct_query_mode = str(candidate_instinct_query_mode or "hybrid").lower()
-        self.candidate_instinct_top_k = max(1, _to_int_safe(candidate_instinct_top_k) or 256)
-        self.candidate_instinct_min_candidates = max(1, _to_int_safe(candidate_instinct_min_candidates) or 64)
-        self.candidate_instinct_entry_points = max(1, _to_int_safe(candidate_instinct_entry_points) or 8)
-        self.candidate_similarity = _resolve_candidate_similarity(candidate_similarity, default="l2")
+        # (2026-07-08) SignLSHBandIndex candidate_backend params -- see
+        # docs/implementation_log.md, "candidate_selector Phase 6
+        # diagnostic". Exact backend (recall verified against brute force),
+        # opt-in only; inert for every other candidate_backend value.
+        self.candidate_lsh_n_bands = max(1, _to_int_safe(candidate_lsh_n_bands) or 64)
+        # (2026-08-30) Theory-driven n_bands cap -- see candidate_kernels.pyx's
+        # SignLSHBandIndex._n_bands_tolerance field comment for the full
+        # derivation. Overrides candidate_lsh_n_bands above with
+        # ceil(tolerance * b_min), computed once observed_m is known.
+        #
+        # (2026-09-03) _corrected_b_min (see candidate_kernels.pyx) fixed a
+        # real, verified overlap bias in the old formula (+7.0 points too
+        # optimistic on average against the Sobol sweep's own calibration
+        # data), so this no longer needs per-run tuning to reach
+        # target_recall -- None (the default, nothing set) now means AUTO:
+        # tolerance=1.0 against the corrected formula, on by default,
+        # nothing to sweep. Pass 0 or a negative value explicitly to opt
+        # OUT and fall back to candidate_lsh_n_bands's literal value as-is
+        # (the pre-2026-09-03 default), kept available, not removed.
+        if candidate_lsh_n_bands_tolerance is None:
+            self.candidate_lsh_n_bands_tolerance = 1.0
+        else:
+            _tol_val = _to_float_safe(candidate_lsh_n_bands_tolerance)
+            self.candidate_lsh_n_bands_tolerance = _tol_val if _tol_val and _tol_val > 0.0 else None
+        _tr_val = _to_float_safe(target_recall)
+        self.target_recall = _tr_val if _tr_val and 0.0 < _tr_val < 1.0 else 0.95
+        _lsh_occ_val = _to_float_safe(candidate_lsh_target_occupancy)
+        # (2026-07-31) Representation-aware: sketch_concordance/sketch_
+        # multichannel already built their own SignLSHBandIndex wrappers
+        # above using cmc_target_occupancy/mc_target_occupancy (default
+        # _MULTICHANNEL_DEFAULT_TARGET_OCCUPANCY, not this path's own 3.0)
+        # -- reuse those exact values here so this introspectable/loggable
+        # attribute always reflects what was actually used, instead of
+        # silently reporting the unrelated sketch_proj default.
+        if self.concordance_multichannel_backend:
+            self.candidate_lsh_target_occupancy = cmc_target_occupancy
+        elif self.distance_corr_sketch_multichannel_backend:
+            self.candidate_lsh_target_occupancy = mc_target_occupancy
+        elif _lsh_occ_val and _lsh_occ_val > 0:
+            self.candidate_lsh_target_occupancy = float(_lsh_occ_val)
+        else:
+            self.candidate_lsh_target_occupancy = 3.0
+        # (2026-09-04) See Candidates.__init__'s identical block for the full derivation/cost --
+        # None (default) means "use the calibrated value", 0.0 is a legitimate explicit choice
+        # (no margin) and must not collapse to the same thing via a truthy `or` check.
+        _default_recall_safety_margin = 0.028
+        if candidate_lsh_recall_safety_margin is None:
+            self.candidate_lsh_recall_safety_margin = _default_recall_safety_margin
+        else:
+            _margin_val = _to_float_safe(candidate_lsh_recall_safety_margin)
+            self.candidate_lsh_recall_safety_margin = (
+                float(_margin_val) if _margin_val is not None and _margin_val >= 0.0
+                else _default_recall_safety_margin
+            )
+        self.candidate_apply_dot_gamma_filter = _coerce_to_bool(candidate_apply_dot_gamma_filter, default=True)
+        self.candidate_apply_hamming_filter = _coerce_to_bool(candidate_apply_hamming_filter, default=False)
+        # (2026-07-21j) None is a real, meaningful value here (not "use the
+        # 0.40 default") -- it means auto-derive the Hamming threshold from
+        # gamma via the SimHash relation, mirroring candidate_hamming_
+        # threshold's own None-means-auto-derive convention for
+        # lsh_hamming_exact. Preserved through, not coerced away.
+        self.candidate_hamming_filter_max_frac = (
+            None if candidate_hamming_filter_max_frac is None else float(candidate_hamming_filter_max_frac)
+        )
+        self.candidate_lsh_max_candidates_per_query = max(
+            0, _to_int_safe(candidate_lsh_max_candidates_per_query) or 0
+        )
+        # (2026-07-10) HammingExactIndex ("lsh_hamming_exact") -- see
+        # docs/implementation_log.md, "outside-the-box backends" entry.
+        # candidate_hamming_threshold=None means auto-derive
+        # (see HammingExactIndex._finalize_threshold); inert for every other
+        # candidate_backend value.
+        self.candidate_hamming_threshold = _to_int_safe(candidate_hamming_threshold)
+        # (2026-07-31) candidate_similarity is no longer a public parameter --
+        # "cosine" is the only mode with a working search radius for any
+        # current backend. "l2" mode's search radius was found to be
+        # silently desynced from candidate_cosine_threshold/gamma (see
+        # docs/implementation_log.md's "l2 mode" 2026-07-10 entry), and every
+        # LSH-based backend's own numeric-rows dispatch REQUIRES cosine mode
+        # to return any candidates at all (verified directly: with "l2", the
+        # lsh_ready/tree_ready gates never fire and candidate search returns
+        # empty for lsh_approx/hamming_exact).
+        self.candidate_similarity = "cosine"
         self._candidate_cosine_threshold_input = _to_float_safe(candidate_cosine_threshold)
+        # (2026-09-10) candidate_cosine_threshold_offset: an alternative way to set the retrieval
+        # gate as a margin BELOW corr_threshold rather than an absolute cosine value, so a param
+        # grid or calibrator that sweeps offsets stays correct across corr_threshold values
+        # instead of silently pinning one absolute gamma. An explicit candidate_cosine_threshold
+        # still wins if both are given; the offset only fills in when the absolute value is None.
+        self._candidate_cosine_threshold_offset_input = _to_float_safe(candidate_cosine_threshold_offset)
         self.candidate_parallel_mode = candidate_parallel_mode
-        self.candidate_key_mode = _resolve_candidate_key_mode(candidate_key_mode, default="first")
-        self.candidate_key_seed = _to_int_safe(candidate_key_seed)
+        # (2026-07-31) candidate_key_mode/candidate_key_seed are no longer
+        # public parameters -- confirmed via direct empirical A/B testing
+        # (identical tested_candidates/correlated pairs across "first"/
+        # "random_sign"/"sampled_sketch" for the current lsh_approx backend)
+        # that this key has zero effect on real candidate-search output; it
+        # only ever fed internal partition/insertion bookkeeping, not
+        # retrieval. "first" is the simplest, original mode.
+        self.candidate_key_mode = "first"
+        self.candidate_key_seed = None
         lsh_radius = _to_int_safe(candidate_lsh_radius)
         if lsh_radius is None:
             lsh_radius = 0
@@ -2970,7 +4243,17 @@ class CorrTrack:
         self._candidate_numeric_rows = None
         self._last_candidate_numeric_rows = None
         self.validated = {}
-        self.correlated = {}
+        # (2026-09-10) `correlated` is a lazy compatibility view over a persistent numeric
+        # accumulator -- see the `correlated` property below and _append_correlated_numeric.
+        # The hot validation/monitor recording path appends canonical int rows here and never
+        # builds a Python string-tuple key per pair.
+        self._correlated_rows = None            # (cap, 5) int64, canonical orientation
+        self._correlated_corrs = None           # (cap,) float64
+        self._correlated_count = 0
+        self._correlated_cap = 0
+        self._correlated_legacy_dict = {}       # writes from the opt-in string paths only
+        self._correlated_view_cache = None
+        self._correlated_view_cache_key = None
         self.corr_attention_in = {}
         self.corr_attention_out = {}
         self.sketch_mean = 0
@@ -2980,32 +4263,25 @@ class CorrTrack:
         base = _compute_base_cell_size(corr_threshold, self.n_vectors)
         if base is None:
             base = np.sqrt((1.0 - corr_threshold) * 2.0) / np.sqrt(self.n_vectors)
-        grid_dim = _to_float_safe(self.grid_dimension)
-        if grid_dim is None or grid_dim <= 0.0:
-            grid_dim = 1.0
-        try:
-            grid_adjust = math.sqrt(grid_dim)
-        except ValueError:
-            grid_adjust = 1.0
-        stretch = cell_size if cell_size is not None else 1.0
-        try:
-            stretch = float(stretch)
-        except (TypeError, ValueError):
-            stretch = 1.0
-        if stretch <= 0.0:
-            stretch = 1.0
-
-        self.cell_stretch = stretch
-        local_cell_size = base * stretch * grid_adjust
-        full_cell_size = base * stretch * math.sqrt(float(self.n_vectors))
+        # (2026-07-31) cell_size/stretch is no longer a public parameter --
+        # every caller in this codebase already used the implicit stretch=1.0
+        # (cell_size=1/1.0); candidate_cosine_threshold is the real,
+        # explicitly-set tuning knob for the cosine-only search radius.
+        self.cell_stretch = 1.0
+        full_cell_size = base * math.sqrt(float(self.n_vectors))
         self.cell_size = full_cell_size
-        if self._candidate_cosine_threshold_input is None:
-            self.candidate_cosine_threshold = _candidate_gamma_from_tau(self.cell_size)
-        else:
+        if self._candidate_cosine_threshold_input is not None:
             self.candidate_cosine_threshold = max(
                 -1.0,
                 min(1.0, float(self._candidate_cosine_threshold_input)),
             )
+        elif self._candidate_cosine_threshold_offset_input is not None:
+            self.candidate_cosine_threshold = max(
+                -1.0,
+                min(1.0, float(corr_threshold) - float(self._candidate_cosine_threshold_offset_input)),
+            )
+        else:
+            self.candidate_cosine_threshold = _candidate_gamma_from_tau(self.cell_size)
         self.grid_max = min(1.0, 3.0/np.sqrt(self.n_vectors))
 
         # Retain the constructor argument for old callers, but disable frequency gating.
@@ -3058,6 +4334,7 @@ class CorrTrack:
         self.tested_candidates = 0
         self.validated_candidates = 0
         self.candidate_search_index_candidates = 0
+        self.candidate_search_enumerated_candidates = 0
         self.candidate_search_valid_index_candidates = 0
         self.candidate_search_unique_index_candidates = 0
         self.candidate_search_duplicate_index_candidates = 0
@@ -3091,6 +4368,34 @@ class CorrTrack:
         self.candidate_search_instinct_best_score_seen = 0.0
         self.candidate_search_instinct_mean_score_returned = 0.0
         self.candidate_search_instinct_dead_node_ratio = 0.0
+        # (2026-07-21) True per-query real-dot-product cost counters, built
+        # for the 2026-07-17 root-cause investigation (enumerated_pairs
+        # undercounts true dot cost by 6.7-9.8x when candidate_instinct_
+        # use_nav_proxy is off) but never wired into CorrTrack's aggregated
+        # stats until now -- no benchmark could see the nav-proxy's real
+        # effect without this. See docs/implementation_log.md's 2026-07-21
+        # "true dot-product-computation metric" entry.
+        self.candidate_search_instinct_nodes_scored = 0
+        self.candidate_search_instinct_nodes_scored_dead_expand = 0
+        # (2026-07-08) SignLSHBandIndex metrics -- see
+        # docs/implementation_log.md, "candidate_selector Phase 6 diagnostic".
+        self.candidate_search_lsh_candidates_touched = 0
+        self.candidate_search_lsh_dot_checks = 0
+        self.candidate_search_lsh_candidates_returned = 0
+        self.candidate_search_lsh_query_time = 0.0
+        self.candidate_search_lsh_num_nodes_total = 0
+        self.candidate_search_lsh_num_nodes_alive = 0
+        self.candidate_search_lsh_dead_node_ratio = 0.0
+        # (2026-07-21) HammingExactIndex/CircularGroupedExactIndex/
+        # MultiDimThetaIndex's own real dot-computation counters -- were
+        # already returned by Candidates.candidate_search_stats() but never
+        # aggregated onto CorrTrack, the same gap instinct_nodes_scored had
+        # until 2026-07-21(f). See docs/implementation_log.md's 2026-07-21(j)
+        # entry (closes the true_dot_computations fallback for these 3
+        # backends -- they previously silently equaled dot_valid_pairs).
+        self.candidate_search_hexact_dot_checks = 0
+        self.candidate_search_cgrp_dot_checks = 0
+        self.candidate_search_mdt_dot_checks = 0
         self._hybrid_validation_rate_ema = 0.0
         self._hybrid_validation_active = False
         self._hybrid_validation_cache = _cy_hybrid_cache_cls() if _cy_hybrid_cache_cls is not None else None
@@ -3140,10 +4445,7 @@ class CorrTrack:
                 sign_prefilter_scale=self.sign_prefilter_scale,
                 sign_prefilter_extra=self.sign_prefilter_extra,
                 seed=(self.seed + g) if self.seed is not None else g,
-                candidate_backend=self.candidate_backend,
-                candidate_bucket_width=self.candidate_bucket_width,
-                candidate_block_size_steps=self.candidate_block_size_steps,
-                candidate_block_index_dims=self.candidate_block_index_dims,
+                candidate_backend=self.candidate_index_backend,
                 candidate_similarity=self.candidate_similarity,
                 candidate_cosine_threshold=self.candidate_cosine_threshold,
                 candidate_key_mode=self.candidate_key_mode,
@@ -3153,26 +4455,41 @@ class CorrTrack:
                 candidate_ann_z=self.candidate_ann_z,
                 candidate_ann_ef=self.candidate_ann_ef,
                 return_distances=False,
-                candidate_bound_dims=self.candidate_bound_dims,
-                candidate_bound_dim_selection=self.candidate_bound_dim_selection,
-                enable_block_ub_pruning=self.enable_block_ub_pruning,
-                enable_row_ub_pruning=self.enable_row_ub_pruning,
-                block_similarity_assignment=self.block_similarity_assignment,
-                max_open_blocks=self.max_open_blocks,
-                candidate_instinct_query_mode=self.candidate_instinct_query_mode,
-                candidate_instinct_top_k=self.candidate_instinct_top_k,
-                candidate_instinct_min_candidates=self.candidate_instinct_min_candidates,
-                candidate_instinct_entry_points=self.candidate_instinct_entry_points,
+                candidate_lsh_n_bands=self.candidate_lsh_n_bands,
+                candidate_lsh_n_bands_tolerance=self.candidate_lsh_n_bands_tolerance,
+                target_recall=self.target_recall,
+                candidate_lsh_target_occupancy=self.candidate_lsh_target_occupancy,
+                candidate_lsh_recall_safety_margin=self.candidate_lsh_recall_safety_margin,
+                candidate_apply_dot_gamma_filter=self.candidate_apply_dot_gamma_filter,
+                candidate_apply_hamming_filter=self.candidate_apply_hamming_filter,
+                candidate_hamming_filter_max_frac=self.candidate_hamming_filter_max_frac,
+                candidate_lsh_max_candidates_per_query=self.candidate_lsh_max_candidates_per_query,
+                candidate_hamming_threshold=self.candidate_hamming_threshold,
             )
             self.grid_nodes.append(node)
-        if self.grid_nodes:
+        if self.concordance_multichannel_backend or self.distance_corr_sketch_multichannel_backend:
+            # (2026-08-23) grid_nodes is a dead placeholder for these two
+            # representations (built with candidate_index_backend=
+            # "brute_force" so Candidates.__init__ doesn't construct an
+            # unused, dimension-mismatched index -- see _run_concordance_
+            # multichannel/_run_distance_corr_sketch_multichannel's own
+            # docstrings; the REAL retrieval goes through their own per-
+            # gap/per-channel SignLSHBandIndex/HammingExactIndex indices
+            # instead). Reading grid_nodes[0]._candidate_backend here
+            # would always report "brute_force" regardless of the real,
+            # already-correctly-resolved self.candidate_backend -- a pure
+            # introspection bug, same class of issue as the candidate_lsh_
+            # target_occupancy self-reporting gap fixed in docs/
+            # implementation_log.md's 2026-07-31(j)/(k) entries.
+            self.candidate_backend_effective = self.candidate_backend
+        elif self.grid_nodes:
             self.candidate_backend_effective = getattr(
                 self.grid_nodes[0],
                 "_candidate_backend",
-                self.candidate_backend,
+                self._internal_dispatch,
             )
         else:
-            self.candidate_backend_effective = self.candidate_backend
+            self.candidate_backend_effective = self._internal_dispatch
 
     def configure_filters(self, sign_scale=None, sign_extra=None):
         if sign_scale is not None:
@@ -3557,7 +4874,24 @@ class CorrTrack:
         prev_window_data = self.window_data
         prev_curr_window_size = self.curr_window_size
         new_data_step_index = new_data_step[0,:]
-        new_data_step_values = new_data_step[1:,:]
+        # (2026-07-24) The raw loader hstacks a datetime column with the
+        # numeric rows into one object-dtype array so they travel together;
+        # slicing off the numeric rows here still leaves them dtype=object
+        # unless cast now. Left uncast, every downstream consumer (sketches,
+        # candidates, validation) pays a full per-element object->float64
+        # conversion on the *entire* window on every call, a fixed cost
+        # independent of how many rows/candidates that call actually
+        # touches -- see docs/implementation_log.md for the investigation.
+        new_data_step_values = new_data_step[1:,:].astype(np.float64)
+        if prev_window_data is None:
+            # (2026-07-10) First step ever: len(ids) is the true series
+            # count m, straight from the caller's own raw input -- push it
+            # into every grid node's index once, automatically, so nothing
+            # downstream (e.g. SignLSHBandIndex's band_width auto-sizing)
+            # has to guess it from a possibly-filtered later batch, and the
+            # human never has to supply it.
+            for node in self.grid_nodes:
+                node.notify_expected_n_series(len(ids))
         if self.datetime_index is None:
             self.datetime_index = CorrTrack._is_datetime(new_data_step_index)        
         if self.datetime_index:
@@ -3573,6 +4907,9 @@ class CorrTrack:
                 self._cleanup_datetime_lookups()
             self.window_index = np.append(self.window_index,new_data_step_index)
             self.window_data = np.append(self.window_data,new_data_step_values,axis=1)
+
+        if self.preprocess:
+            self._update_window_data_diff(new_data_step_values)
 
         self.ids = ids
         if len(self.series_ids) == 0 or len(self.series_ids) != len(ids):
@@ -3645,7 +4982,7 @@ class CorrTrack:
                 end = start + n_series_node
                 self.map_ids.append(ids[start:end])
     
-    def _preprocess_data(self, data, series_index):       
+    def _preprocess_data(self, data, series_index):
         t = np.asarray(data)
         if self.preprocess:
             diff_t = t[:, 1:] - t[:, :-1]                         # 1. Differencing
@@ -3653,6 +4990,54 @@ class CorrTrack:
             t = diff_t
 
         return t
+
+    def _update_window_data_diff(self, new_data_step_values):
+        # (2026-08-24) Mirrors Sketches._preprocess_data's own incremental
+        # carry-over trick exactly: prepend the last raw value seen (or
+        # mirror the first sample, on the very first-ever step) so this
+        # step's diffed chunk has the same column count as
+        # new_data_step_values -- window_data_diff then stays column-
+        # aligned with window_data/window_index at all times, so every
+        # timestamp-indexed slice validation does against window_data
+        # today works identically against window_data_diff. Trimmed with
+        # the exact same self-referential pre-append shape check
+        # window_data's own trim uses, so both buffers grow/trim in
+        # lockstep and never diverge in column count.
+        if self._preprocess_diff_last_origin is not None:
+            joined = np.append(
+                np.transpose([self._preprocess_diff_last_origin]), new_data_step_values, axis=1
+            )
+        elif new_data_step_values.shape[1] > 0:
+            joined = np.append(new_data_step_values[:, :1], new_data_step_values, axis=1)
+        else:
+            joined = new_data_step_values
+        if joined.shape[1] <= 1:
+            diff_step_values = np.zeros((joined.shape[0], joined.shape[1]), dtype=np.float64)
+        else:
+            diff_step_values = joined[:, 1:] - joined[:, :-1]
+        if new_data_step_values.shape[1] > 0:
+            self._preprocess_diff_last_origin = new_data_step_values[:, -1]
+
+        if self.window_data_diff is None:
+            self.window_data_diff = diff_step_values
+        else:
+            if self.window_data_diff.shape[1] >= (self.n_lags + self.window_size):
+                self.window_data_diff = self.window_data_diff[:, self.window_step:]
+            self.window_data_diff = np.append(self.window_data_diff, diff_step_values, axis=1)
+
+    def _get_validation_window_data(self):
+        # (2026-08-24) Single point of truth for which buffer exact
+        # validation reads: raw window_data by default, or the
+        # incrementally-differenced window_data_diff when preprocess=True.
+        # run_bf's brute-force validation shares this same instance/method
+        # (see docs/implementation_log.md), so brute force ground truth
+        # automatically becomes consistent with the online algorithm's own
+        # validated correlations -- no separate change needed in
+        # Candidates_BF, which only enumerates candidate rows and never
+        # computes correlation values itself.
+        if self.preprocess and self.window_data_diff is not None:
+            return self.window_data_diff
+        return self.window_data
 
     def is_structurally_spiked(
         x=None,
@@ -3708,15 +5093,16 @@ class CorrTrack:
         if not corr_val:
             return (pair, True, 1, 0.0)
 
+        validation_data = self._get_validation_window_data()
         ids = (pair[0],pair[1])
         startTimes = (pair[2],pair[3])
         window_size = pair[4]
-        series_index = self.series_ids[ids[0]]        
+        series_index = self.series_ids[ids[0]]
         startTime_index = int(startTimes[0] - self.window_index[0])
-        x = self.window_data[series_index,startTime_index:startTime_index+window_size].astype(np.float64, copy=False)
+        x = validation_data[series_index,startTime_index:startTime_index+window_size].astype(np.float64, copy=False)
         series_index = self.series_ids[ids[1]]
         startTime_index = int(startTimes[1] - self.window_index[0])
-        y = self.window_data[series_index,startTime_index:startTime_index+window_size].astype(np.float64, copy=False)
+        y = validation_data[series_index,startTime_index:startTime_index+window_size].astype(np.float64, copy=False)
 
         pair_corr, pair_dist, stats = _fast_corr_and_dist(x, y, return_stats=True)
         n, mean_x, mean_y, var_x, var_y = stats
@@ -3733,7 +5119,70 @@ class CorrTrack:
         is_correlated = _passes_corr_threshold(pair_corr, self.corr_threshold, self.neg_corr)
 
         return (pair, is_correlated, pair_corr, pair_dist)
-    
+
+    def _validate_pairs_nonlinear(self, pairs, retain_validated=True):
+        """(2026-07-30) String-keyed-candidates counterpart to
+        _validate_numeric_rows_nonlinear -- required because every path in
+        _get_validated_corr's legacy self.candidates (string pair-key)
+        branch (_cy_validate_corr_rows, _validate_corr, and the parallel
+        worker) is Pearson-only with no validation_metric check at all.
+        Any candidate_backend that never populates
+        self._candidate_numeric_rows (e.g. "flat") silently computed and
+        stored Pearson correlation under a non-Pearson validation_metric
+        until this was found and fixed -- see docs/implementation_log.md's
+        2026-07-30(g) entry. Deliberately does not support hybrid_validation
+        (Pearson-kernel-specific), matching _validate_numeric_rows_nonlinear's
+        own established scope choice."""
+        metric = self.validation_metric
+        threshold = float(self.corr_threshold)
+        neg_corr = bool(self.neg_corr)
+        track_min_dist = bool(getattr(self, "track_min_dist", True))
+        if not track_min_dist:
+            self.min_dist = np.inf
+            self.pair_min_dist = None
+        min_dist, min_pair = self.min_dist, self.pair_min_dist
+        window_start = int(self.window_index[0])
+        validation_data = self._get_validation_window_data()
+        tested = 0
+        accepted_now = {}
+        for pair in pairs:
+            ids = (pair[0], pair[1])
+            start_times = (pair[2], pair[3])
+            window_size = pair[4]
+            series_index = self.series_ids[ids[0]]
+            start_idx = int(start_times[0] - window_start)
+            if start_idx < 0:
+                continue
+            x = validation_data[series_index, start_idx:start_idx + window_size].astype(np.float64, copy=False)
+            series_index = self.series_ids[ids[1]]
+            start_idx = int(start_times[1] - window_start)
+            if start_idx < 0:
+                continue
+            y = validation_data[series_index, start_idx:start_idx + window_size].astype(np.float64, copy=False)
+            if x.shape[0] != window_size or y.shape[0] != window_size:
+                continue
+            tested += 1
+            corr, dist, stats = _metric_corr_and_dist(
+                x, y, metric=metric, return_stats=True, dist_corr_algorithm=self.dist_corr_algorithm
+            )
+            n, mean_x, mean_y, var_x, var_y = stats
+            if _is_near_constant_stats(var_x, n, std_thresh=1e-3) or _is_near_constant_stats(var_y, n, std_thresh=1e-3):
+                continue
+            if (
+                _is_structurally_spiked_stats(x, mean_x, var_x, n, kurt_thresh=5.0)
+                or _is_structurally_spiked_stats(y, mean_y, var_y, n, kurt_thresh=5.0)
+            ):
+                continue
+            if track_min_dist and np.isfinite(dist) and dist < min_dist:
+                min_dist, min_pair = dist, pair
+            if _passes_corr_threshold(corr, threshold, neg_corr):
+                accepted_now[pair] = corr
+        if track_min_dist:
+            self.min_dist, self.pair_min_dist = min_dist, min_pair
+        self._record_correlated_batch(accepted_now, retain_validated=retain_validated)
+        self.tested_candidates += tested
+        self.validated_candidates += len(accepted_now)
+
     def _in_corr(self,pair, corr_value=None):
         raise RuntimeError(
             "Monitoring uses monitor_kernels.NumericMonitorState; "
@@ -3844,7 +5293,7 @@ class CorrTrack:
             self.artifact_bookkeeping_time += time.perf_counter() - t0
         elif record_artifact:
             if getattr(self, "_artifact_save_correlated", True):
-                self.correlated.update(accepted_map)
+                self._correlated_legacy_writethrough(accepted_map)
             if getattr(self, "_artifact_save_maxlag", True):
                 for pair, corr in accepted_map.items():
                     self._update_maxlag_state(pair, corr)
@@ -3905,7 +5354,7 @@ class CorrTrack:
         # saving. See docs/implementation_log.md.
         base_index = int(self.window_index[0])
         ids_lookup = self.series_ids
-        data = self.window_data
+        data = self._get_validation_window_data()
         n_cols = data.shape[1]
         cw_cache_kwargs = self._current_window_cache_kwargs()
 
@@ -4538,7 +5987,7 @@ class CorrTrack:
             }
         try:
             result = cache.validate_pairs(
-                np.asarray(self.window_data, dtype=np.float64),
+                np.asarray(self._get_validation_window_data(), dtype=np.float64),
                 series1[:n_valid],
                 series2[:n_valid],
                 curr_t1[:n_valid],
@@ -4797,6 +6246,9 @@ class CorrTrack:
 
         buffered = bool(getattr(self, "_artifact_buffered", False))
         direct_correlated_artifact = buffered and bool(getattr(self, "_artifact_save_correlated", True))
+        save_correlated = bool(getattr(self, "_artifact_save_correlated", True))
+        save_maxlag = bool(getattr(self, "_artifact_save_maxlag", True))
+        step_observer = bool(getattr(self, "_step_observer_enabled", False))
 
         if direct_correlated_artifact:
             self._spill_correlated_numeric(rows, corr_values)
@@ -4804,36 +6256,34 @@ class CorrTrack:
         if retain_validated:
             self._append_validated_numeric_step(rows, corr_values)
 
-        needs_pair_map = (
-            (bool(retain_validated) and not buffered)
-            or bool(getattr(self, "_step_observer_enabled", False))
-            or (not buffered and bool(getattr(self, "_artifact_save_correlated", True)))
-        )
+        # (2026-09-10) HOT PATH: persist accepted rows into the numeric accumulator,
+        # canonicalized vectorized -- no per-pair Python string tuple, no per-pair maxlag
+        # loop (maxlag is rebuilt lazily from the accumulator at save/access time).
+        # Verified byte-identical (key-set + all metrics) to the old string path on real
+        # dense data -- see docs/implementation_log.md 2026-09-10 (bb).
+        if not buffered and (save_correlated or save_maxlag):
+            self._append_correlated_numeric(rows, corr_values)
+        elif direct_correlated_artifact and save_maxlag:
+            # buffered spill discards rows, so it still needs eager maxlag
+            self._update_maxlag_state_numeric(rows, corr_values)
 
-        accepted_map = None
-        if needs_pair_map:
+        # Opt-in step observer still consumes a per-step {pair_key: corr} dict.
+        if step_observer:
             accepted_map = self._numeric_rows_to_pair_map(rows, corr_values)
             if accepted_map:
-                self._record_correlated_batch(
-                    accepted_map,
-                    retain_validated=retain_validated,
-                    record_artifact=not direct_correlated_artifact,
-                )
+                self._validated_step.update(accepted_map)
 
-        if direct_correlated_artifact:
-            self._update_maxlag_state_numeric(rows, corr_values)
-        elif accepted_map is None and getattr(self, "_artifact_save_maxlag", True):
-            self._update_maxlag_state_numeric(rows, corr_values)
-
-        return len(accepted_map) if accepted_map is not None else n_rows
+        return n_rows
 
     def _reset_validated_numeric_step(self):
         self._validated_numeric_count_step = 0
 
     def _append_validated_numeric_step(self, rows, corr_values):
+        t0 = time.perf_counter()
         rows = np.ascontiguousarray(np.asarray(rows, dtype=np.int64).reshape((-1, 5)))
         n_rows = int(rows.shape[0])
         if n_rows == 0:
+            self.artifact_bookkeeping_time += time.perf_counter() - t0
             return
         corr_values = np.ascontiguousarray(np.asarray(corr_values, dtype=np.float64).reshape((-1,)))
         if corr_values.shape[0] != n_rows:
@@ -4860,6 +6310,7 @@ class CorrTrack:
         self._validated_numeric_rows_step[count:need, :] = rows
         self._validated_numeric_corrs_step[count:need] = corr_values
         self._validated_numeric_count_step = need
+        self.artifact_bookkeeping_time += time.perf_counter() - t0
 
     def _iter_validated_numeric_step(self):
         rows = getattr(self, "_validated_numeric_rows_step", None)
@@ -4871,6 +6322,300 @@ class CorrTrack:
             np.ascontiguousarray(rows[:count, :], dtype=np.int64).reshape((-1, 5)),
             np.ascontiguousarray(corrs[:count], dtype=np.float64).reshape((-1,)),
         )
+
+    # ------------------------------------------------------------------
+    # Persistent numeric correlated accumulator + lazy `correlated` view
+    # ------------------------------------------------------------------
+    def _append_correlated_numeric(self, rows, corr_values):
+        """Append accepted candidate rows (int (N,5) [s1,s2,t1,t2,w]) to the persistent
+        correlated set in canonical orientation, vectorized -- no per-pair Python, no
+        string tuple. Mirrors _append_validated_numeric_step's amortized-doubling buffer.
+        Timed as artifact bookkeeping (subtracted from validation_time), same as the
+        string path it replaces."""
+        t0 = time.perf_counter()
+        rows = _canonicalize_rows(rows)
+        n_rows = int(rows.shape[0])
+        if n_rows == 0:
+            self.artifact_bookkeeping_time += time.perf_counter() - t0
+            return
+        corr_values = np.ascontiguousarray(np.asarray(corr_values, dtype=np.float64).reshape((-1,)))
+        if corr_values.shape[0] != n_rows:
+            fixed = np.ones((n_rows,), dtype=np.float64)
+            copy_n = min(int(corr_values.shape[0]), n_rows)
+            if copy_n > 0:
+                fixed[:copy_n] = corr_values[:copy_n]
+            corr_values = fixed
+        count = int(self._correlated_count)
+        capacity = int(self._correlated_cap)
+        need = count + n_rows
+        if capacity < need or self._correlated_rows is None:
+            new_capacity = max(1024, capacity if capacity > 0 else 0)
+            while new_capacity < need:
+                new_capacity *= 2
+            new_rows = np.empty((new_capacity, 5), dtype=np.int64)
+            new_corrs = np.empty((new_capacity,), dtype=np.float64)
+            if count > 0 and self._correlated_rows is not None:
+                new_rows[:count, :] = self._correlated_rows[:count, :]
+                new_corrs[:count] = self._correlated_corrs[:count]
+            self._correlated_rows = new_rows
+            self._correlated_corrs = new_corrs
+            self._correlated_cap = new_capacity
+        self._correlated_rows[count:need, :] = rows
+        self._correlated_corrs[count:need] = corr_values
+        self._correlated_count = need
+        self._correlated_view_cache = None
+        self.artifact_bookkeeping_time += time.perf_counter() - t0
+
+    def correlated_rows(self):
+        """The persistent correlated set as (rows (N,5) int64 canonical, corrs (N,) float64).
+        Includes any rows written through the legacy string path. Zero-copy for the common
+        (accumulator-only) case."""
+        n = int(self._correlated_count)
+        legacy = self._correlated_legacy_dict
+        acc_rows = (self._correlated_rows[:n] if n > 0 and self._correlated_rows is not None
+                    else np.empty((0, 5), dtype=np.int64))
+        acc_corrs = (self._correlated_corrs[:n] if n > 0 and self._correlated_corrs is not None
+                     else np.empty((0,), dtype=np.float64))
+        if not legacy:
+            return np.ascontiguousarray(acc_rows), np.ascontiguousarray(acc_corrs)
+        ids_lookup = self.series_ids
+        extra_rows = []
+        extra_corrs = []
+        for (id1, id2, t1, t2, w), corr in legacy.items():
+            s1 = ids_lookup.get(id1, id1)
+            s2 = ids_lookup.get(id2, id2)
+            try:
+                extra_rows.append((int(s1), int(s2), int(t1), int(t2), int(w)))
+                extra_corrs.append(float(corr))
+            except (TypeError, ValueError):
+                continue
+        merged_rows = np.vstack([acc_rows, np.asarray(extra_rows, dtype=np.int64).reshape((-1, 5))])
+        merged_corrs = np.concatenate([acc_corrs, np.asarray(extra_corrs, dtype=np.float64).reshape((-1,))])
+        return _canonicalize_rows(merged_rows), merged_corrs
+
+    def _correlated_legacy_writethrough(self, accepted_map):
+        """The 2 cold string-path call sites (opt-in step observer / buffered artifact spill,
+        and the corr_val=False branch) write here instead of onto the property result."""
+        if not accepted_map:
+            return
+        self._correlated_legacy_dict.update(accepted_map)
+        self._correlated_view_cache = None
+
+    @property
+    def correlated(self):
+        rows, corrs = self.correlated_rows()
+        key = (int(rows.shape[0]), id(self._correlated_legacy_dict), len(self._correlated_legacy_dict))
+        if self._correlated_view_cache is not None and self._correlated_view_cache_key == key:
+            return self._correlated_view_cache
+        ids_by_idx = self._ids_by_numeric_index()
+        n_ids = len(ids_by_idx)
+        out = {}
+        rl = rows.tolist()
+        cl = corrs.tolist()
+        for i in range(len(rl)):
+            s1, s2, t1, t2, w = rl[i]
+            id1 = ids_by_idx[s1] if 0 <= s1 < n_ids else s1
+            id2 = ids_by_idx[s2] if 0 <= s2 < n_ids else s2
+            # Re-canonicalize on the STRING labels so this view is byte-identical to the
+            # old _numeric_rows_to_pair_map output. The numeric accumulator stays canonical
+            # on integer indices (see _canonicalize_rows); the two tiebreak the t1==t2 case
+            # differently only when label order != index order, and the numeric metrics
+            # fast path compares index-canonical to index-canonical, never mixing.
+            out[_normalize_bf_key((id1, id2, int(t1), int(t2), int(w)))] = cl[i]
+        self._correlated_view_cache = out
+        self._correlated_view_cache_key = key
+        return out
+
+    @correlated.setter
+    def correlated(self, value):
+        # `self.correlated = {}` (reset) and, defensively, assignment of a full dict
+        # (e.g. an external merge). Anything falsy clears; a dict is absorbed as legacy.
+        self._correlated_rows = None
+        self._correlated_corrs = None
+        self._correlated_count = 0
+        self._correlated_cap = 0
+        self._correlated_view_cache = None
+        if value:
+            self._correlated_legacy_dict = dict(value)
+        else:
+            self._correlated_legacy_dict = {}
+
+    def _validate_numeric_rows_nonlinear(self, rows, retain_validated=True):
+        """(2026-07-31) Non-Pearson validation (spearman/kendall/dist_corr).
+        The EXACT path (the common case) is fully bulk-Cythonized -- ONE
+        call to candidate_kernels.validate_corr_rows_nonlinear handles
+        every surviving candidate row in a single nogil loop, matching
+        Pearson's own single-call design (_cy_validate_corr_rows) instead
+        of a per-row Python loop with a Cython call inside each iteration
+        (the previous state of this function, see docs/implementation_
+        log.md's 2026-07-28 entry). The opt-in APPROXIMATE incremental path
+        (validation_incremental_approx, Xiao 2017 online validator) is
+        deliberately NOT bulk-Cythonized -- a distinct, disclosed-as-
+        approximate mode, out of scope here; see docs/implementation_
+        log.md's 2026-07-31 entry for the verification this bulk kernel
+        was checked against (bit-exact accepted/valid masks, corr/dist
+        agreement to floating-point noise, across all 4 metric/algorithm
+        combinations) before being wired in."""
+        n_pairs = int(rows.shape[0])
+        metric = self.validation_metric
+        threshold = float(self.corr_threshold)
+        neg_corr = bool(self.validation_neg_corr)
+        track_min_dist = bool(getattr(self, "track_min_dist", True))
+        if not track_min_dist:
+            self.min_dist = np.inf
+            self.pair_min_dist = None
+
+        window_data = self._get_validation_window_data()
+        window_start = int(self.window_index[0])
+        use_incremental = bool(self.validation_incremental_approx) and metric in ("spearman", "kendall")
+        if use_incremental:
+            self._xiao_state.touch_step()
+            if self._xiao_state._step % self.validation_incremental_max_age_steps == 0:
+                self._xiao_state.prune()
+            accepted_rows = []
+            accepted_corrs = []
+            tested = 0
+            for i in range(n_pairs):
+                s1 = int(rows[i, 0])
+                s2 = int(rows[i, 1])
+                t1 = int(rows[i, 2])
+                t2 = int(rows[i, 3])
+                w = int(rows[i, 4])
+                t1_idx = t1 - window_start
+                t2_idx = t2 - window_start
+                if t1_idx < 0 or t2_idx < 0:
+                    continue
+                x = np.asarray(window_data[s1, t1_idx:t1_idx + w], dtype=np.float64)
+                y = np.asarray(window_data[s2, t2_idx:t2_idx + w], dtype=np.float64)
+                if x.shape[0] != w or y.shape[0] != w:
+                    continue
+                tested += 1
+                _linear_corr, _raw_dist, stats = _fast_corr_and_dist(x, y, return_stats=True)
+                key = self._normalize_pair_key(s1, s2, t1, t2)
+                corr = self._xiao_state.get_corr(
+                    key, x, y, t1=t1, window_step=self.window_step, metric=metric,
+                    m1=self.validation_incremental_m1, m2=self.validation_incremental_m2,
+                    cutpoint_refresh_threshold=self.validation_incremental_cutpoint_refresh_threshold,
+                )
+                dist = _metric_distance_from_corr(corr)
+                n, mean_x, mean_y, var_x, var_y = stats
+                if _is_near_constant_stats(var_x, n, std_thresh=1e-3) or _is_near_constant_stats(var_y, n, std_thresh=1e-3):
+                    continue
+                if (
+                    _is_structurally_spiked_stats(x, mean_x, var_x, n, kurt_thresh=5.0)
+                    or _is_structurally_spiked_stats(y, mean_y, var_y, n, kurt_thresh=5.0)
+                ):
+                    continue
+                if track_min_dist and np.isfinite(dist) and dist < self.min_dist:
+                    self.min_dist = float(dist)
+                    self.pair_min_dist = self._numeric_row_to_pair(rows[i])
+                if _passes_corr_threshold(corr, threshold, neg_corr):
+                    accepted_rows.append(rows[i])
+                    accepted_corrs.append(corr)
+
+            self.tested_candidates += tested
+            self.validated_candidates += len(accepted_rows)
+            if accepted_rows:
+                self._record_correlated_numeric(
+                    np.ascontiguousarray(np.vstack(accepted_rows), dtype=np.int64),
+                    np.asarray(accepted_corrs, dtype=np.float64),
+                    retain_validated=retain_validated,
+                )
+            return
+
+        apply_gate = (
+            self.distance_corr_sketch_multichannel_backend
+        ) and metric == "dist_corr" and self.distance_corr_sketch_apply_tier2_gate
+        gate_tested = 0
+        if apply_gate:
+            # (2026-07-30) Tier-2 refinement gate -- see distance_corr_
+            # sketch.py's module docstring. Runs on tier-1's (already
+            # sub-linear) survivors only, computed fresh from the raw
+            # window slices, rejecting WITHOUT calling the real exact
+            # dist_corr computation -- this is the whole point of the
+            # gate (verified real-data recall/precision: 91.2%/85.1% at a
+            # dCor>=0.5 working threshold, touching only 22.6% of all
+            # pairs through to this point). Kept as a small per-row Python
+            # PRE-FILTER (not folded into the bulk Cython kernel below) --
+            # it's a representation-specific concern operating on a
+            # DIFFERENT projected space (self.distance_corr_sketch_state.
+            # freqs), not the general metric-agnostic validation the bulk
+            # kernel handles; only the rows that SURVIVE this gate reach
+            # the bulk kernel at all. gate_tested counts every row that
+            # passed the BOUNDS check here, gate-rejected or not -- the
+            # old per-row loop incremented "tested" right after its own
+            # bounds check, BEFORE the gate rejection, so a gate-rejected
+            # row still counted as tested; the bulk kernel's own valid_mask
+            # (used for "tested" in the ungated branch below) must NOT be
+            # double-counted on top of this for gated rows.
+            keep = []
+            for i in range(n_pairs):
+                s1 = int(rows[i, 0])
+                s2 = int(rows[i, 1])
+                t1 = int(rows[i, 2])
+                t2 = int(rows[i, 3])
+                w = int(rows[i, 4])
+                t1_idx = t1 - window_start
+                t2_idx = t2 - window_start
+                if t1_idx < 0 or t2_idx < 0:
+                    continue
+                x = np.asarray(window_data[s1, t1_idx:t1_idx + w], dtype=np.float64)
+                y = np.asarray(window_data[s2, t2_idx:t2_idx + w], dtype=np.float64)
+                if x.shape[0] != w or y.shape[0] != w:
+                    continue
+                gate_tested += 1
+                gate_val = distance_corr_sketch_proxy(x, y, self.distance_corr_sketch_state.freqs)
+                if gate_val < self.distance_corr_sketch_gate_tau:
+                    self.distance_corr_sketch_gate_rejected += 1
+                    continue
+                keep.append(i)
+            if not keep:
+                self.tested_candidates += gate_tested
+                return
+            rows = rows[np.asarray(keep, dtype=np.int64)]
+            n_pairs = rows.shape[0]
+
+        if _cy_validate_corr_rows_nonlinear is None:
+            raise RuntimeError(
+                "validation_metric='spearman'/'kendall'/'dist_corr' requires the "
+                "compiled candidate_kernels Cython extension (validate_corr_rows_"
+                "nonlinear); the per-row Python fallback was removed by explicit "
+                "instruction. Rebuild with `python3 setup_cython.py build_ext "
+                "--inplace`."
+            )
+
+        metric_id = {"spearman": 0, "kendall": 1, "dist_corr": 3 if self.dist_corr_algorithm == "fast" else 2}[metric]
+
+        accepted_mask, corrs, dists, valid_mask, _constants, _spiked = _cy_validate_corr_rows_nonlinear(
+            np.ascontiguousarray(window_data, dtype=np.float64),
+            np.ascontiguousarray(rows, dtype=np.int64),
+            window_start,
+            metric_id,
+            threshold,
+            neg_corr,
+        )
+        accepted_mask = np.asarray(accepted_mask, dtype=np.uint8)
+        corrs = np.asarray(corrs, dtype=np.float64)
+        dists = np.asarray(dists, dtype=np.float64)
+        valid_mask = np.asarray(valid_mask, dtype=np.uint8)
+
+        if track_min_dist and dists.size:
+            finite = np.isfinite(dists)
+            if finite.any():
+                finite_idx = np.flatnonzero(finite)
+                local_idx = int(finite_idx[int(np.argmin(dists[finite_idx]))])
+                local_dist = float(dists[local_idx])
+                if local_dist < self.min_dist:
+                    self.min_dist = local_dist
+                    self.pair_min_dist = self._numeric_row_to_pair(rows[local_idx])
+
+        accepted_idx = np.flatnonzero(accepted_mask != 0)
+        self.tested_candidates += gate_tested if apply_gate else int(np.sum(valid_mask))
+        self.validated_candidates += int(accepted_idx.size)
+        if accepted_idx.size:
+            self._record_correlated_numeric(
+                rows[accepted_idx], corrs[accepted_idx], retain_validated=retain_validated,
+            )
 
     def _get_validated_corr_numeric(self, rows, corr_val=True, retain_validated=True):
         rows = np.ascontiguousarray(np.asarray(rows, dtype=np.int64).reshape((-1, 5)))
@@ -4892,6 +6637,14 @@ class CorrTrack:
             self.validated_candidates += n_pairs
             return
 
+        # (2026-07-28) Non-Pearson validation metrics -- see the constructor
+        # comment and docs/implementation_log.md's 2026-07-28 entries.
+        # Pearson (the default) falls through to the existing fast Cython
+        # path below, completely unchanged.
+        if getattr(self, "validation_metric", "pearson") != "pearson":
+            self._validate_numeric_rows_nonlinear(rows, retain_validated=retain_validated)
+            return
+
         track_min_dist = bool(getattr(self, "track_min_dist", True))
         if not track_min_dist:
             self.min_dist = np.inf
@@ -4907,7 +6660,7 @@ class CorrTrack:
             ):
                 try:
                     result = cache.validate_pairs(
-                        np.ascontiguousarray(self.window_data, dtype=np.float64),
+                        np.ascontiguousarray(self._get_validation_window_data(), dtype=np.float64),
                         rows[:, 0],
                         rows[:, 1],
                         rows[:, 2],
@@ -4990,19 +6743,27 @@ class CorrTrack:
             self.validated_candidates += validated
             return
 
-        t0 = time.perf_counter() if getattr(self, "profile_enabled", False) else None
+        _prof = getattr(self, "profile_enabled", False)
+        t_pre = time.perf_counter() if _prof else None
+        _data_arg = np.ascontiguousarray(self._get_validation_window_data(), dtype=np.float64)
+        _cache_kwargs = self._current_window_cache_kwargs()
+        if t_pre is not None:
+            self._profile_add("val.numeric_rows_prep", time.perf_counter() - t_pre)
+        t0 = time.perf_counter() if _prof else None
         accepted_mask, corrs, dists, _constants, _spiked = _cy_validate_corr_rows(
-            np.ascontiguousarray(self.window_data, dtype=np.float64),
+            _data_arg,
             rows,
             int(self.window_index[0]),
             float(self.corr_threshold),
             bool(self.neg_corr),
             1e-3,
             5.0,
-            **self._current_window_cache_kwargs(),
+            **_cache_kwargs,
         )
         if t0 is not None:
             self._profile_add("val.numeric_rows_kernel", time.perf_counter() - t0)
+
+        t0b = time.perf_counter() if getattr(self, "profile_enabled", False) else None
 
         accepted_mask = np.asarray(accepted_mask, dtype=np.uint8)
         corrs = np.asarray(corrs, dtype=np.float64)
@@ -5024,7 +6785,28 @@ class CorrTrack:
 
         self.tested_candidates += n_pairs
         self.validated_candidates += int(accepted_idx.size)
-    
+
+        if t0b is not None:
+            self._profile_add("val.numeric_rows_postprocess", time.perf_counter() - t0b)
+            self._profile_add_metric("val.numeric_rows_call_count", 1)
+            self._profile_add_metric("val.numeric_rows_n_pairs", n_pairs)
+
+    @staticmethod
+    def _normalize_pair_key(s1, s2, t1, t2):
+        # (2026-07-27) Keyed by RELATIVE lag (t1-t2), not the absolute
+        # timestamps -- t1/t2 shift by window_step every single step, so a
+        # key built from absolute time never recurs across steps and both
+        # cross-step caches silently never hit. Lag is the stable identity
+        # of "the same logical pair-lag relationship" as the window slides.
+        s1 = int(s1)
+        s2 = int(s2)
+        lag = int(t1) - int(t2)
+        if s1 == s2:
+            return (s1, s2, abs(lag))
+        if s1 < s2:
+            return (s1, s2, lag)
+        return (s2, s1, -lag)
+
     def _get_validated_corr(self, corr_val=True, force_mode=None, retain_validated=True):
         self.validated = {}
         self._reset_validated_numeric_step()
@@ -5079,7 +6861,7 @@ class CorrTrack:
                 if retain_validated:
                     self.validated = validated_now
                 if getattr(self, "_artifact_save_correlated", True):
-                    self.correlated.update(validated_now)
+                    self._correlated_legacy_writethrough(validated_now)
                 if getattr(self, "_artifact_save_maxlag", True):
                     for pair in candidates:
                         self._update_maxlag_state(pair, 1.0)
@@ -5092,8 +6874,24 @@ class CorrTrack:
             self.min_dist = np.inf
             self.pair_min_dist = None
 
-        worker_mode = force_mode if force_mode else self.exec
         pairs = list(candidates.keys())
+        # (2026-07-30) Real bug found and fixed: every path below this point
+        # (_cy_validate_corr_rows, _validate_corr, and the parallel worker)
+        # is Pearson-only, with no validation_metric check anywhere --
+        # candidate_backend values that never populate
+        # self._candidate_numeric_rows (e.g. "flat", this project's own
+        # brute-force ground truth) silently computed and stored PEARSON
+        # correlation under a non-Pearson validation_metric, discovered via
+        # a direct recompute showing a stored "dist_corr" value of -0.90
+        # for a pair whose actual naive dCor was +0.91 (dCor is mathematically
+        # never negative). See docs/implementation_log.md's 2026-07-30(g)
+        # entry for the full investigation and its implications for prior
+        # recall/precision claims that used flat+non-pearson as ground truth.
+        if getattr(self, "validation_metric", "pearson") != "pearson":
+            self._validate_pairs_nonlinear(pairs, retain_validated=retain_validated)
+            return
+
+        worker_mode = force_mode if force_mode else self.exec
         if getattr(self, "hybrid_validation", False):
             min_candidates = int(getattr(self, "hybrid_validation_min_candidates", 256) or 0)
             if min_candidates <= 0 or n_pairs >= min_candidates:
@@ -5811,6 +7609,121 @@ class CorrTrack:
             print("\nCorrelated:")
             self._print_correlated()
 
+    def _run_distance_corr_sketch_multichannel(self, verbose=False, testing=False):
+        """(2026-07-30) candidate_backend="distance_corr_sketch_multichannel"
+        -- bypasses Candidates/grid_nodes entirely, unlike every other
+        backend's sketch-then-_run_grids split. Reason: this backend's
+        retrieval is 2K SEPARATE small SignLSHBandIndex instances (one per
+        channel), not the single index Candidates' existing architecture
+        has any slot for -- see DistanceCorrSketchMultiChannelIndex's own
+        docstring and docs/implementation_log.md's 2026-07-30(m)/(n)
+        entries. Builds this step's per-channel vectors directly from
+        self.window_data, inserts+queries the multi-channel index, and
+        writes the resulting union-of-channels candidate rows straight
+        into self._candidate_numeric_rows -- from there, the existing
+        numeric-rows validation path (_get_validated_corr_numeric ->
+        _validate_numeric_rows_nonlinear, including the tier-2 K^2 gate)
+        runs completely unchanged."""
+        self._candidate_numeric_rows = np.empty((0, 5), dtype=np.int64)
+        if self.curr_window_size is None or self.curr_window_size < self.window_size:
+            if verbose:
+                print("\nSkip distance-correlation multichannel vectors (window not full)")
+            return
+        if self.distance_corr_sketch_state is None or self.distance_corr_sketch_multichannel_index is None:
+            return
+
+        current_window = np.asarray(self.window_data[:, -self.window_size:], dtype=np.float64)
+        if current_window.shape[1] != self.window_size:
+            return
+        self.distance_corr_sketch_state.update(current_window, self.window_step)
+        channel_vecs = self.distance_corr_sketch_state.channel_vectors()
+
+        n_series = current_window.shape[0]
+        ids = list(self.ids if self.ids is not None else self.series_ids.keys())
+        if len(ids) < n_series:
+            ids = ids + [str(i) for i in range(len(ids), n_series)]
+        sid_idx = np.asarray([self.series_ids[i] for i in ids[:n_series]], dtype=np.int64)
+        start_time = self._curr_startTime()
+        time_idx = np.full(n_series, start_time, dtype=np.int64)
+        window_size_arr = np.full(n_series, self.window_size, dtype=np.int64)
+        # sid_rank is secondary metadata (tie-breaking/reporting only, not
+        # correctness-critical for the retrieval math itself -- see
+        # DistanceCorrSketchMultiChannelIndex's own docstring) -- sid_idx
+        # itself is a fine placeholder.
+        sid_rank = sid_idx
+
+        self.distance_corr_sketch_multichannel_index.notify_expected_n_series(n_series)
+        rows = self.distance_corr_sketch_multichannel_index.insert_and_query(
+            channel_vecs, sid_idx, time_idx, window_size_arr, sid_rank,
+            self.distance_corr_sketch_multichannel_gamma, 0.0, bool(self.neg_corr),
+        )
+        self._candidate_numeric_rows = np.ascontiguousarray(rows, dtype=np.int64).reshape((-1, 5))
+
+        min_valid_time = start_time - self.n_lagged_windows * self.window_step
+        self.distance_corr_sketch_multichannel_index.drop_before_time(min_valid_time)
+
+        if testing:
+            print(f"\nDistance-correlation multichannel candidates: {self._candidate_numeric_rows.shape[0]} rows")
+
+    def _run_concordance_multichannel(self, verbose=False, testing=False):
+        """(2026-07-31) candidate_backend="incremental_concordance_multichannel"
+        -- bypasses Candidates/grid_nodes entirely, same structural reason
+        as _run_distance_corr_sketch_multichannel: this backend's
+        retrieval is one SEPARATE small SignLSHBandIndex per usable gap,
+        not the single index Candidates' existing architecture has any
+        slot for -- see ConcordanceMultiGapIndex's own docstring
+        (concordance_sketch.py) and docs/implementation_log.md's
+        2026-07-31 entry. Builds this step's per-gap vectors directly from
+        self.window_data, inserts+queries the multi-gap index, and writes
+        the resulting union-of-gaps candidate rows straight into
+        self._candidate_numeric_rows -- from there, the existing numeric-
+        rows validation path (_get_validated_corr_numeric ->
+        _validate_numeric_rows_nonlinear) runs completely unchanged."""
+        self._candidate_numeric_rows = np.empty((0, 5), dtype=np.int64)
+        if self.curr_window_size is None or self.curr_window_size < self.window_size:
+            if verbose:
+                print("\nSkip concordance multichannel vectors (window not full)")
+            return
+        if self.concordance_state is None or self.concordance_multichannel_index is None:
+            return
+
+        current_window = np.asarray(self.window_data[:, -self.window_size:], dtype=np.float64)
+        if current_window.shape[1] != self.window_size:
+            return
+        self.concordance_state.update(current_window, self.window_step)
+        gap_vecs = self.concordance_state.gap_vectors()
+        usable_gaps = set(int(g) for g in self.concordance_multichannel_index.gaps)
+        gap_vecs_usable = [
+            gap_vecs[i] for i, g in enumerate(self.concordance_state.gaps) if int(g) in usable_gaps
+        ]
+
+        n_series = current_window.shape[0]
+        ids = list(self.ids if self.ids is not None else self.series_ids.keys())
+        if len(ids) < n_series:
+            ids = ids + [str(i) for i in range(len(ids), n_series)]
+        sid_idx = np.asarray([self.series_ids[i] for i in ids[:n_series]], dtype=np.int64)
+        start_time = self._curr_startTime()
+        time_idx = np.full(n_series, start_time, dtype=np.int64)
+        window_size_arr = np.full(n_series, self.window_size, dtype=np.int64)
+        # sid_rank is secondary metadata (tie-breaking/reporting only, not
+        # correctness-critical for the retrieval math itself -- see
+        # ConcordanceMultiGapIndex's own docstring) -- sid_idx itself is a
+        # fine placeholder, mirroring the multichannel dCor precedent.
+        sid_rank = sid_idx
+
+        self.concordance_multichannel_index.notify_expected_n_series(n_series)
+        rows = self.concordance_multichannel_index.insert_and_query(
+            gap_vecs_usable, sid_idx, time_idx, window_size_arr, sid_rank,
+            self.concordance_multichannel_gamma, 0.0, bool(self.neg_corr),
+        )
+        self._candidate_numeric_rows = np.ascontiguousarray(rows, dtype=np.int64).reshape((-1, 5))
+
+        min_valid_time = start_time - self.n_lagged_windows * self.window_step
+        self.concordance_multichannel_index.drop_before_time(min_valid_time)
+
+        if testing:
+            print(f"\nConcordance multichannel candidates: {self._candidate_numeric_rows.shape[0]} rows")
+
     def _get_sketches(self, new_data_step, verbose, testing, worker_mode=None):
         """
         Run Sketches nodes in parallel, collect their (sketches, partitions),
@@ -5859,7 +7772,10 @@ class CorrTrack:
         dispatch_items = node_inputs_thread
 
         if worker_mode == "sequential":
+            t0 = time.perf_counter() if self.profile_enabled else None
             results = [_sketch_worker(payload) for payload in dispatch_items]
+            if t0 is not None:
+                self._profile_add("sketch.sequential_dispatch", time.perf_counter() - t0)
         else:
             t0 = time.perf_counter() if self.profile_enabled else None
             results = self._parallel_map(
@@ -5922,6 +7838,115 @@ class CorrTrack:
 
         return merged_sketches
 
+    def _get_sketches_multi(self, window_sizes, new_data_step, verbose, testing, worker_mode=None):
+        """Compute current sketches for several window sizes from shared
+        sketch nodes (2026-07-28, ported from corrtrack_release_multiwinsizes
+        -- see docs/implementation_log.md's 2026-07-28 entries)."""
+        window_sizes = sorted({int(size) for size in window_sizes if int(size) > 0})
+        if not window_sizes:
+            return {}
+
+        new_data_step_index = new_data_step[0, :]
+        new_data_step_series = new_data_step[1:, :]
+
+        while len(self.sketch_nodes) < self.n_sketch_nodes:
+            self.sketch_nodes.append(
+                Sketches(
+                    self.window_size,
+                    self.basic_window,
+                    self.window_step,
+                    self.seed,
+                    self.seed_toggle,
+                    self.n_vectors,
+                    self.grid_dimension,
+                    self.grid_nodes,
+                    self.preprocess,
+                    self.neg_corr,
+                    self.sketch_norm,
+                    full_vector_candidates=self.full_vector_candidates,
+                )
+            )
+        if len(self.sketch_nodes) > self.n_sketch_nodes:
+            self.sketch_nodes = self.sketch_nodes[:self.n_sketch_nodes]
+
+        node_inputs_thread = []
+        max_nodes = min(self.n_sketch_nodes, len(self.map_ids))
+        for s in range(max_nodes):
+            shard_ids = self.map_ids[s]
+            ids_subset = [id_ for id_ in shard_ids if id_ in self.series_ids]
+            if not ids_subset:
+                continue
+            series_idx = [self.series_ids[id_] for id_ in ids_subset]
+            node_series = new_data_step_series[series_idx, :]
+            node_new = np.vstack([new_data_step_index, node_series])
+            node_inputs_thread.append((self, s, node_new, ids_subset, window_sizes, verbose, testing))
+
+        if not node_inputs_thread:
+            return {}
+
+        worker_mode = worker_mode if worker_mode else self.exec
+        if worker_mode == "sequential":
+            t0 = time.perf_counter() if self.profile_enabled else None
+            results = [_sketch_multi_worker(payload) for payload in node_inputs_thread]
+            if t0 is not None:
+                self._profile_add("sketch.sequential_dispatch", time.perf_counter() - t0)
+        else:
+            t0 = time.perf_counter() if self.profile_enabled else None
+            results = self._parallel_map(
+                _sketch_multi_worker,
+                node_inputs_thread,
+                mode=worker_mode,
+                max_workers=len(node_inputs_thread),
+                preserve_order=False,
+            )
+            if t0 is not None:
+                self._profile_add("sketch.dispatch", time.perf_counter() - t0)
+
+        merged_sketches = {}
+        per_grid_partition = [[] for _ in range(self.n_grids)]
+
+        t0 = time.perf_counter() if self.profile_enabled else None
+        for entry in results:
+            s, node_obj, sks, parts = entry
+            self.sketch_nodes[s] = node_obj
+            merged_sketches.update(sks)
+            for g, partition in enumerate(parts):
+                if g >= self.n_grids:
+                    break
+                if partition is None:
+                    continue
+                per_grid_partition[g].append(partition)
+        if t0 is not None:
+            self._profile_add("sketch.merge", time.perf_counter() - t0)
+
+        curr_time = self._curr_startTime()
+        sid_list = [sid for sid, idx in sorted(self.series_ids.items(), key=lambda item: item[1])]
+        t0 = time.perf_counter() if self.profile_enabled else None
+        for g in range(self.n_grids):
+            parts = per_grid_partition[g]
+            if not parts:
+                continue
+            if isinstance(parts[0], dict):
+                merged_partition = {}
+                for part in parts:
+                    merged_partition.update(part)
+            else:
+                sid_list_parts = [p[0] for p in parts if p is not None and p[0].size > 0]
+                if not sid_list_parts:
+                    continue
+                sid_idx = np.concatenate(sid_list_parts, axis=0)
+                time_arr = np.concatenate([p[1] for p in parts if p is not None and p[1].size > 0], axis=0)
+                w_arr = np.concatenate([p[2] for p in parts if p is not None and p[2].size > 0], axis=0)
+                value_arr = np.concatenate([p[3] for p in parts if p is not None and p[3].size > 0], axis=0)
+                is_const = np.concatenate([p[4] for p in parts if p is not None and p[4].size > 0], axis=0)
+                merged_partition = (sid_idx, time_arr, w_arr, value_arr, is_const)
+                self.grid_nodes[g].set_sid_list(sid_list)
+            self.grid_nodes[g].append_partition(curr_time, merged_partition)
+        if t0 is not None:
+            self._profile_add("sketch.distribute", time.perf_counter() - t0)
+
+        return merged_sketches
+
     def _accumulate_candidate_search_stats(self, node_obj):
         stats_getter = getattr(node_obj, "candidate_search_stats", None)
         if stats_getter is None:
@@ -5933,6 +7958,7 @@ class CorrTrack:
         if not stats:
             return
         index_candidates = int(stats.get("index_candidates", 0) or 0)
+        enumerated_candidates = int(stats.get("enumerated_candidates", 0) or 0)
         valid_index_candidates = int(stats.get("valid_index_candidates", 0) or 0)
         unique_index_candidates = int(stats.get("unique_index_candidates", 0) or 0)
         duplicate_index_candidates = int(stats.get("duplicate_index_candidates", 0) or 0)
@@ -5949,6 +7975,7 @@ class CorrTrack:
         rows_in_surviving_blocks = int(stats.get("rows_in_surviving_blocks", 0) or 0)
         dot_checks_saved_by_row_ub = int(stats.get("dot_checks_saved_by_row_ub", 0) or 0)
         self.candidate_search_index_candidates += index_candidates
+        self.candidate_search_enumerated_candidates += enumerated_candidates
         self.candidate_search_valid_index_candidates += valid_index_candidates
         self.candidate_search_unique_index_candidates += unique_index_candidates
         self.candidate_search_duplicate_index_candidates += duplicate_index_candidates
@@ -5991,6 +8018,25 @@ class CorrTrack:
         )
         self.candidate_search_instinct_mean_score_returned = float(stats.get("instinct_mean_score_returned", 0.0) or 0.0)
         self.candidate_search_instinct_dead_node_ratio = float(stats.get("instinct_dead_node_ratio", 0.0) or 0.0)
+        self.candidate_search_instinct_nodes_scored += int(stats.get("instinct_nodes_scored", 0) or 0)
+        self.candidate_search_instinct_nodes_scored_dead_expand += int(stats.get("instinct_nodes_scored_dead_expand", 0) or 0)
+        # (2026-07-08) SignLSHBandIndex metrics -- only nonzero for
+        # candidate_backend="lsh_sign_dot". Same aggregation semantics as
+        # InstinctIndex above: per-batch counts summed, dead_node_ratio a
+        # latest-observed snapshot. See docs/implementation_log.md,
+        # "candidate_selector Phase 6 diagnostic".
+        self.candidate_search_lsh_candidates_touched += int(stats.get("lsh_candidates_touched", 0) or 0)
+        self.candidate_search_lsh_dot_checks += int(stats.get("lsh_dot_checks", 0) or 0)
+        self.candidate_search_lsh_candidates_returned += int(stats.get("lsh_candidates_returned", 0) or 0)
+        self.candidate_search_lsh_query_time += float(stats.get("lsh_query_time", 0.0) or 0.0)
+        self.candidate_search_lsh_num_nodes_total += int(stats.get("lsh_num_nodes_total", 0) or 0)
+        self.candidate_search_lsh_num_nodes_alive += int(stats.get("lsh_num_nodes_alive", 0) or 0)
+        self.candidate_search_lsh_dead_node_ratio = float(stats.get("lsh_dead_node_ratio", 0.0) or 0.0)
+        # (2026-07-21) See the __init__ comment above -- closes the
+        # true_dot_computations fallback gap for these 3 backends.
+        self.candidate_search_hexact_dot_checks += int(stats.get("hexact_dot_checks", 0) or 0)
+        self.candidate_search_cgrp_dot_checks += int(stats.get("cgrp_dot_checks", 0) or 0)
+        self.candidate_search_mdt_dot_checks += int(stats.get("mdt_dot_checks", 0) or 0)
 
     def _run_grids(self, verbose, testing, worker_mode=None):
         """
@@ -6271,7 +8317,7 @@ class CorrTrack:
             self._cw_raw_sums_cu = None
             self._cw_raw_sums_qu = None
             return
-        tail = np.asarray(self.window_data[:, -self.curr_window_size:], dtype=np.float64)
+        tail = np.asarray(self._get_validation_window_data()[:, -self.curr_window_size:], dtype=np.float64)
         self._cw_raw_sums = np.sum(tail, axis=1, dtype=np.float64)
         self._cw_raw_sums_sq = np.sum(tail * tail, axis=1, dtype=np.float64)
         self._cw_raw_sums_cu = np.sum(tail * tail * tail, axis=1, dtype=np.float64)
@@ -6337,6 +8383,116 @@ class CorrTrack:
             'pr_auc': pr_auc
         }
     
+    @staticmethod
+    def _as_row_corr_pair(obj):
+        """Coerce a metrics input to (rows (N,5) int64, corrs (N,) float64) if it is already
+        numeric -- a (rows, corrs) tuple, or an object exposing .correlated_rows(). Returns
+        None for a plain dict (the caller keeps the string-key path)."""
+        if obj is None:
+            return (np.empty((0, 5), dtype=np.int64), np.empty((0,), dtype=np.float64))
+        if hasattr(obj, "correlated_rows") and callable(obj.correlated_rows):
+            obj = obj.correlated_rows()
+        if isinstance(obj, tuple) and len(obj) == 2:
+            rows = np.ascontiguousarray(np.asarray(obj[0], dtype=np.int64).reshape((-1, 5)))
+            corrs = np.ascontiguousarray(np.asarray(obj[1], dtype=np.float64).reshape((-1,)))
+            if corrs.shape[0] != rows.shape[0]:
+                corrs = np.ones(rows.shape[0], dtype=np.float64)
+            return rows, corrs
+        return None
+
+    @staticmethod
+    def compute_metrics_bf_numeric(
+        predicted,
+        ground_truth,
+        *,
+        total_pairs_bf=None,
+        pair_min_dist=None,
+        use_ground_truth_sign_for_tp=False,
+    ):
+        """Pure-numpy replica of _compute_metrics_bf_windows for numeric (rows, corrs) inputs.
+        Both sides are canonicalized on integer series indices (consistent -- never mixed with
+        the string-label view) and each row is one opaque void key for set arithmetic."""
+        p = CorrTrack._as_row_corr_pair(predicted)
+        g = CorrTrack._as_row_corr_pair(ground_truth)
+        if p is None or g is None:
+            raise TypeError("compute_metrics_bf_numeric needs numeric (rows, corrs) inputs")
+        pred_rows, pred_corrs = p
+        gt_rows, gt_corrs = g
+        pred_rows = _canonicalize_rows(pred_rows)
+        gt_rows = _canonicalize_rows(gt_rows)
+
+        def _uniq(rows, corrs):
+            if rows.shape[0] == 0:
+                return (np.empty((0,), dtype=np.dtype((np.void, 40))),
+                        np.empty((0,), dtype=np.float64))
+            keys = _rows_as_void_keys(rows)
+            uk, idx = np.unique(keys, return_index=True)
+            return uk, corrs[idx]
+
+        pk, pc = _uniq(pred_rows, pred_corrs)
+        gk, gc = _uniq(gt_rows, gt_corrs)
+        pk_pos, gk_pos = pk[pc > 0], gk[gc > 0]
+        pk_neg, gk_neg = pk[pc <= 0], gk[gc <= 0]
+
+        def _pr(pset, gset, total_pairs=None):
+            np_, ng = int(pset.shape[0]), int(gset.shape[0])
+            fp = int(np.count_nonzero(~np.isin(pset, gset))) if np_ else 0
+            spec = 0.0
+            try:
+                tp_total = int(total_pairs) if total_pairs is not None else None
+            except (TypeError, ValueError):
+                tp_total = None
+            if tp_total is not None:
+                negatives = max(tp_total - ng, 0)
+                if negatives > 0:
+                    spec = max(negatives - fp, 0) / negatives
+            if np_ == 0:
+                return 0.0, (1.0 if ng == 0 else 0.0), spec
+            if ng == 0:
+                return 0.0, 0.0, spec
+            tp = np_ - fp
+            tp_g = int(np.count_nonzero(np.isin(gset, pset)))
+            return tp / np_, tp_g / ng, spec
+
+        precision, recall, specificity = _pr(pk, gk, total_pairs_bf)
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
+        if use_ground_truth_sign_for_tp:
+            tp_pos = int(np.count_nonzero(np.isin(pk, gk_pos)))
+            tp_neg = int(np.count_nonzero(np.isin(pk, gk_neg)))
+            precision_pos = _signed_precision_from_ambiguous_fp(tp_pos, tp_neg, int(pk.shape[0]))
+            recall_pos = tp_pos / gk_pos.shape[0] if gk_pos.shape[0] else 0.0
+            precision_neg = _signed_precision_from_ambiguous_fp(tp_neg, tp_pos, int(pk.shape[0]))
+            recall_neg = tp_neg / gk_neg.shape[0] if gk_neg.shape[0] else 0.0
+        else:
+            precision_pos, recall_pos, _ = _pr(pk_pos, gk_pos)
+            precision_neg, recall_neg, _ = _pr(pk_neg, gk_neg)
+        f1_pos = 2 * precision_pos * recall_pos / (precision_pos + recall_pos) if (precision_pos + recall_pos) > 0 else 0.0
+        f1_neg = 2 * precision_neg * recall_neg / (precision_neg + recall_neg) if (precision_neg + recall_neg) > 0 else 0.0
+
+        recall_min = None
+        if pair_min_dist is not None:
+            try:
+                pmd_rows = _canonicalize_rows(np.asarray(pair_min_dist, dtype=np.int64).reshape((-1, 5)))
+                if pmd_rows.shape[0]:
+                    recall_min = int(np.isin(_rows_as_void_keys(pmd_rows), pk).any())
+            except (TypeError, ValueError):
+                # string-label pair_min_dist can't be matched against index-canonical keys
+                recall_min = None
+
+        # aucroc / pr_auc: the string path computes these over the corr-value vectors on the
+        # key union. Nothing in the sweep/analysis path consumes them; a faithful vectorized
+        # alignment is possible but not worth the risk here -- left as nan on the numeric path.
+        aucroc = float("nan")
+        pr_auc = float("nan")
+
+        return {
+            "precision": precision, "recall": recall, "specificity": specificity, "f1_score": f1,
+            "aucroc": aucroc, "pr_auc": pr_auc, "recall_min": recall_min,
+            "precision_pos": precision_pos, "recall_pos": recall_pos, "f1_score_pos": f1_pos,
+            "precision_neg": precision_neg, "recall_neg": recall_neg, "f1_score_neg": f1_neg,
+        }
+
     def compute_metrics_bf(
         predicted: dict,
         ground_truth: dict,
@@ -6346,6 +8502,18 @@ class CorrTrack:
         use_ground_truth_sign_for_tp=False,
     ):
         if windows:
+            # (2026-09-10) Numeric fast path: (rows, corrs) tuples or objects exposing
+            # .correlated_rows() skip the per-key Python normalization entirely.
+            if (
+                CorrTrack._as_row_corr_pair(predicted) is not None
+                and CorrTrack._as_row_corr_pair(ground_truth) is not None
+                and not (isinstance(predicted, dict) or isinstance(ground_truth, dict))
+            ):
+                return CorrTrack.compute_metrics_bf_numeric(
+                    predicted, ground_truth,
+                    total_pairs_bf=total_pairs_bf, pair_min_dist=pair_min_dist,
+                    use_ground_truth_sign_for_tp=use_ground_truth_sign_for_tp,
+                )
             return CorrTrack._compute_metrics_bf_windows(
                 predicted,
                 ground_truth,
@@ -6871,7 +9039,85 @@ class CorrTrack:
             del self.sketches[min(self.sketches.keys())]
         self.sketches[self._curr_startTime()] = {}
         self.sketches[self._curr_startTime()].update(new_sketches)
-    
+
+    def _update_curr_sketches_multi(self, new_sketches, max_windows=None):
+        """(2026-07-28) Ported from corrtrack_release_multiwinsizes for
+        CorrTrackMultiWindow -- see docs/implementation_log.md's 2026-07-28
+        entries."""
+        if not new_sketches:
+            return
+        if max_windows is None:
+            max_windows = self.n_lagged_windows
+        for key, value in new_sketches.items():
+            try:
+                start_time = key[1]
+            except (TypeError, IndexError):
+                start_time = self._curr_startTime()
+            self.sketches.setdefault(start_time, {})[key] = value
+        while len(self.sketches) > max(1, int(max_windows)):
+            del self.sketches[min(self.sketches.keys())]
+
+    def run_multi_window(self, window_sizes, new_data_step, ids, verbose, testing, corr_val=True, monitor=True):
+        """(2026-07-28) Shared-sketch multi-window-size entry point, ported
+        from corrtrack_release_multiwinsizes -- see
+        README_multi_window_sizes.md there and docs/implementation_log.md's
+        2026-07-28 entries. Computes basic-window dots once for
+        self.window_size (the max size), derives each requested shorter
+        size's sketch from the trailing basic-window blocks, and filters
+        candidate comparisons so windows only match windows of the same
+        size. All requested sizes must share this instance's hyperparameters
+        (sketch + candidate-search) -- see the README for why."""
+        self.verbose = verbose
+        self.testing = testing
+
+        window_sizes = sorted({int(size) for size in window_sizes if int(size) > 0})
+        window_sizes = [size for size in window_sizes if size <= int(self.window_size)]
+        for size in window_sizes:
+            if size % int(self.basic_window) != 0:
+                raise TypeError(
+                    "Window size (",
+                    size,
+                    ") is not divisable by basic window size (",
+                    self.basic_window,
+                    ")",
+                )
+        if not window_sizes:
+            return
+        self._update_curr_data(new_data_step, ids)
+        sketch_mode = "thread" if self.parallel_sketch else "sequential"
+        cand_mode = "thread" if self.parallel_candidates else "sequential"
+        val_mode = "thread" if self.parallel_validation else "sequential"
+
+        start_time = time.time()
+        sketches = self._get_sketches_multi(window_sizes, self._curr_window_step(), verbose, testing, worker_mode=sketch_mode)
+        end_time = time.time()
+        self.sketch_time += end_time - start_time
+        self._update_curr_sketches_multi(sketches, max_windows=self.n_lagged_windows * max(1, len(window_sizes)))
+
+        start_time = time.time()
+        self._run_grids(verbose, testing, worker_mode=cand_mode)
+        end_time = time.time()
+        self.candidate_time += end_time - start_time
+
+        bookkeeping_before = self.artifact_bookkeeping_time
+        start_time = time.perf_counter()
+        self._get_validated_corr(corr_val, force_mode=val_mode, retain_validated=monitor)
+        end_time = time.perf_counter()
+        bookkeeping_delta = max(self.artifact_bookkeeping_time - bookkeeping_before, 0.0)
+        self.validation_time += max((end_time - start_time) - bookkeeping_delta, 0.0)
+
+        if monitor:
+            start_time = time.time()
+            self._monitor_corr(worker_mode=val_mode)
+            end_time = time.time()
+            self.monitor_time += end_time - start_time
+
+        self._compact_instinct_grids()
+
+        if verbose:
+            self._print_state()
+        self._profile_tick()
+
     def run(self, new_data_step, ids, verbose, testing, corr_val=True, monitor=True):
         self.verbose = verbose
         self.testing = testing
@@ -6883,14 +9129,29 @@ class CorrTrack:
 
         # 1) sketches
         start_time = time.time()
-        sketches = self._get_sketches(self._curr_window_step(), verbose, testing, worker_mode=sketch_mode)
+        if self.distance_corr_sketch_multichannel_backend or self.concordance_multichannel_backend:
+            # (2026-07-30/31) Both multichannel backends' "sketch" and
+            # "candidate search" are one combined step
+            # (_run_distance_corr_sketch_multichannel /
+            # _run_concordance_multichannel, called below in step 2) --
+            # bypasses Candidates/grid_nodes entirely, so there is nothing
+            # meaningful to do here.
+            sketches = {}
+        else:
+            sketches = self._get_sketches(self._curr_window_step(), verbose, testing, worker_mode=sketch_mode)
         end_time = time.time()
         self.sketch_time += end_time - start_time
-        self._update_curr_sketches(sketches)
+        if not (self.distance_corr_sketch_multichannel_backend or self.concordance_multichannel_backend):
+            self._update_curr_sketches(sketches)
 
         # 2) candidates via grids
         start_time = time.time()
-        self._run_grids(verbose, testing, worker_mode=cand_mode)
+        if self.distance_corr_sketch_multichannel_backend:
+            self._run_distance_corr_sketch_multichannel(verbose=verbose, testing=testing)
+        elif self.concordance_multichannel_backend:
+            self._run_concordance_multichannel(verbose=verbose, testing=testing)
+        else:
+            self._run_grids(verbose, testing, worker_mode=cand_mode)
         end_time = time.time()
         self.candidate_time += end_time - start_time
 
@@ -6909,14 +9170,384 @@ class CorrTrack:
             end_time = time.time()
             self.monitor_time += end_time - start_time
 
+        # 5) periodic instinct graph compaction (2026-07-17) -- deliberately
+        # LAST, after validation has already consumed this step's
+        # candidates. Compaction reassigns entry_ids for every surviving
+        # node, so it must only run once nothing from this step still
+        # needs the entry_ids _run_grids/_get_validated_corr just used --
+        # see InstinctIndex.maybe_compact's docstring and
+        # docs/implementation_log.md for the hazard this avoids.
+        self._compact_instinct_grids()
+
         if verbose:
             self._print_state()
         self._profile_tick()
 
+    def _compact_instinct_grids(self):
+        for node_obj in self.grid_nodes:
+            idx = getattr(node_obj, "_instinct_index", None)
+            if idx is not None and hasattr(idx, "maybe_compact"):
+                idx.maybe_compact()
 
-    
+
+class CorrTrackMultiWindow:
+    """Incremental CorrTrack runner for several same-step window sizes.
+
+    (2026-07-28) Ported from corrtrack_release_multiwinsizes -- see
+    README_multi_window_sizes.md there and docs/implementation_log.md's
+    2026-07-28 entries. The online CorrTrack path keeps one max-window
+    tracker; its sketch nodes compute basic-window dots once for the max
+    window and derive shorter same-step sketches from the trailing
+    basic-window blocks (run_multi_window/Sketches.run_multi).
+
+    Unlike the original multiwinsizes version (which threaded a hand-picked
+    subset of CorrTrack's constructor params through a small dict), this
+    accepts **kwargs and forwards them to CorrTrack verbatim -- since
+    corrtrack_release_dev's CorrTrack now has ~50 tuning parameters (LSH
+    band count, Hamming threshold/filter, cosine gamma, etc.) that didn't
+    exist when multiwinsizes branched off, a hardcoded allowlist would
+    silently drop them and always lag behind CorrTrack's own signature.
+    All requested window sizes must share the SAME kwargs (see the README):
+    if per-size hyperopt would pick different sketch/candidate-search
+    params, they cannot safely share one sketch stream.
+    """
+
+    def __init__(self, window_sizes, basic_window=None, window_step=0, **corrtrack_kwargs):
+        sizes = self._normalize_window_sizes(window_sizes)
+        if not sizes:
+            raise ValueError("window_sizes must contain at least one positive window size.")
+        self.window_sizes = sizes
+        self.window_size = max(sizes)
+        self.window_step = int(window_step)
+        self.basic_window = self._resolve_basic_window(sizes, basic_window, self.window_step)
+        if self.window_step <= 0:
+            self.window_step = self.basic_window
+        if self.basic_window % self.window_step != 0:
+            raise TypeError(
+                "Basic window size (",
+                self.basic_window,
+                ") is not divisable by window step (",
+                self.window_step,
+                ")",
+            )
+        for size in sizes:
+            if size % self.basic_window != 0:
+                raise TypeError(
+                    "Window size (",
+                    size,
+                    ") is not divisable by basic window size (",
+                    self.basic_window,
+                    ")",
+                )
+
+        self._corrtrack_kwargs = dict(corrtrack_kwargs)
+        self._corrtrack_kwargs["basic_window"] = self.basic_window
+        self._corrtrack_kwargs["window_step"] = self.window_step
+        self.tracker = CorrTrack(self.window_size, **self._corrtrack_kwargs)
+        self._bf_trackers = None
+        self._last_source = "corrtrack"
+
+        first = self.tracker
+        self.n_lags = first.n_lags
+        self.n_lagged_windows = first.n_lagged_windows
+        self.corr_threshold = first.corr_threshold
+        self.neg_corr = first.neg_corr
+        self.preprocess = first.preprocess
+        self.sketch_norm = first.sketch_norm
+        self.data_representation = first.data_representation
+        self.candidate_backend = first.candidate_backend
+        self.candidate_backend_effective = getattr(first, "candidate_backend_effective", None)
+        self.candidate_parallel_mode = first.candidate_parallel_mode
+        self.candidate_key_mode = first.candidate_key_mode
+        self.candidate_key_seed = first.candidate_key_seed
+        self.exec = first.exec
+        self.parallel_sketch = first.parallel_sketch
+        self.parallel_candidates = first.parallel_candidates
+        self.parallel_validation = first.parallel_validation
+        self.n_nodes = first.n_nodes
+        self.n_sketch_nodes = first.n_sketch_nodes
+        self.n_candidate_nodes = first.n_candidate_nodes
+        self.n_vectors = first.n_vectors
+        self.grid_dimension = first.grid_dimension
+        self.n_grids = first.n_grids
+        self.cell_size = first.cell_size
+        self.freq_threshold = first.freq_threshold
+        self.grid_max = first.grid_max
+        self.cell_stretch = getattr(first, "cell_stretch", None)
+        self.track_min_dist = first.track_min_dist
+        self.reset_aggregate_state()
+
+    _PROPAGATED_ATTRS = {
+        "track_min_dist",
+        "_step_observer_enabled",
+        "_validated_step",
+        "_online_window_metrics_only",
+    }
+
+    def __setattr__(self, name, value):
+        object.__setattr__(self, name, value)
+        tracker = self.__dict__.get("tracker")
+        if tracker is not None and name in self._PROPAGATED_ATTRS:
+            setattr(tracker, name, value)
+        if name == "track_min_dist":
+            trackers = self.__dict__.get("_bf_trackers")
+            if trackers:
+                for bf_tracker in trackers.values():
+                    setattr(bf_tracker, name, value)
+
+    def __getattr__(self, name):
+        tracker = self.__dict__.get("tracker")
+        if tracker is not None:
+            return getattr(tracker, name)
+        raise AttributeError(name)
+
+    @staticmethod
+    def _normalize_window_sizes(window_sizes):
+        if window_sizes is None:
+            return []
+        if isinstance(window_sizes, (int, np.integer)):
+            values = [int(window_sizes)]
+        else:
+            values = [int(value) for value in window_sizes]
+        return sorted({value for value in values if value > 0})
+
+    @staticmethod
+    def _resolve_basic_window(window_sizes, basic_window, window_step):
+        if basic_window is not None:
+            return int(basic_window)
+        step = int(window_step) if window_step and int(window_step) > 0 else 1
+        candidate = CorrTrack.get_bst_basic_window(max(window_sizes), step)
+        if candidate and all(size % candidate == 0 for size in window_sizes):
+            return int(candidate)
+        common = int(window_sizes[0])
+        for size in window_sizes[1:]:
+            common = math.gcd(common, int(size))
+        divisors = []
+        for value in range(1, int(math.sqrt(common)) + 1):
+            if common % value == 0:
+                divisors.extend([value, common // value])
+        divisors = sorted({int(value) for value in divisors if value > 0 and value % step == 0})
+        if not divisors:
+            if all(size % step == 0 for size in window_sizes):
+                return step
+            raise TypeError(
+                "Could not infer a basic_window divisible by window_step that divides all window_sizes."
+            )
+        ref = math.sqrt(max(window_sizes))
+        return min(divisors, key=lambda value: abs(value - ref))
+
+    def reset_aggregate_state(self):
+        self.window_data = None
+        self.window_index = None
+        self.ids = None
+        self.series_ids = {}
+        self.candidates = {}
+        self.freq_pairs = {}
+        self.uncorrelated = {}
+        self.correlated = {}
+        self.previous_correlations = {}
+        self.corr_lengths = {}
+        self.corr_anomalies = {}
+        self.candidate_dist_sq = {}
+        self.sketches = {}
+        self._maxlag_state = {}
+        self.validated_candidates = 0
+        self.tested_candidates = 0
+        self.total_candidates = 0
+        self.sketch_time = 0.0
+        self.candidate_time = 0.0
+        self.validation_time = 0.0
+        self.monitor_time = 0.0
+        self.artifact_bookkeeping_time = 0.0
+        self.min_dist = np.inf
+        self.pair_min_dist = None
+
+    def _ensure_bf_trackers(self):
+        if self._bf_trackers is None:
+            self._bf_trackers = {
+                size: CorrTrack(size, **self._corrtrack_kwargs)
+                for size in self.window_sizes
+            }
+            for tracker in self._bf_trackers.values():
+                tracker.track_min_dist = self.track_min_dist
+        return self._bf_trackers
+
+    @staticmethod
+    def _merge_tracker_dict(trackers, attr):
+        merged = {}
+        for tracker in trackers:
+            value = getattr(tracker, attr, None)
+            if isinstance(value, dict):
+                merged.update(value)
+        return merged
+
+    @staticmethod
+    def _merge_correlated_rows(trackers):
+        """(2026-09-10) Numeric merge of per-window-size trackers' correlated accumulators:
+        vstack + canonicalize + drop exact-duplicate rows (a pair may correlate at two window
+        sizes -- keep the stronger |corr|). Pure numpy, no per-child dict materialization."""
+        rp, cp = [], []
+        for t in trackers:
+            cr = getattr(t, "correlated_rows", None)
+            if callable(cr):
+                r, c = cr()
+                if r.shape[0]:
+                    rp.append(r)
+                    cp.append(c)
+        if not rp:
+            return np.empty((0, 5), dtype=np.int64), np.empty((0,), dtype=np.float64)
+        rows = _canonicalize_rows(np.vstack(rp))
+        corrs = np.concatenate(cp)
+        keys = _rows_as_void_keys(rows)
+        order = np.argsort(-np.abs(corrs), kind="stable")
+        _, first = np.unique(keys[order], return_index=True)
+        idx = np.sort(order[first])
+        return np.ascontiguousarray(rows[idx]), np.ascontiguousarray(corrs[idx])
+
+    def correlated_rows(self):
+        src = self._active_trackers()
+        if src is None:
+            return np.empty((0, 5), dtype=np.int64), np.empty((0,), dtype=np.float64)
+        return CorrTrackMultiWindow._merge_correlated_rows(src)
+
+    def _active_trackers(self):
+        if getattr(self, "_last_source", None) == "bf" and self._bf_trackers is not None:
+            return list(self._bf_trackers.values())
+        tr = getattr(self, "tracker", None)
+        return [tr] if tr is not None else None
+
+    def _sync_from_trackers(self, trackers):
+        trackers = list(trackers)
+        if not trackers:
+            self.reset_aggregate_state()
+            return
+        first = trackers[0]
+        self.window_data = getattr(first, "window_data", None)
+        self.window_index = getattr(first, "window_index", None)
+        self.datetime_index = getattr(first, "datetime_index", None)
+        self.datetime_lookup = getattr(first, "datetime_lookup", {})
+        self.ids = getattr(first, "ids", None)
+        self.series_ids = dict(getattr(first, "series_ids", {}) or {})
+        self.candidates = self._merge_tracker_dict(trackers, "candidates")
+        self.freq_pairs = self._merge_tracker_dict(trackers, "freq_pairs")
+        self.uncorrelated = self._merge_tracker_dict(trackers, "uncorrelated")
+        self.correlated = self._merge_tracker_dict(trackers, "correlated")
+        self.previous_correlations = self._merge_tracker_dict(trackers, "previous_correlations")
+        self.corr_lengths = self._merge_tracker_dict(trackers, "corr_lengths")
+        self.corr_anomalies = self._merge_tracker_dict(trackers, "corr_anomalies")
+        self.candidate_dist_sq = self._merge_tracker_dict(trackers, "candidate_dist_sq")
+        self._maxlag_state = {}
+        for tracker in trackers:
+            for key, record in getattr(tracker, "_maxlag_state", {}).items():
+                prev = self._maxlag_state.get(key)
+                if (
+                    prev is None
+                    or float(record.get("score", 0.0) or 0.0) > float(prev.get("score", 0.0) or 0.0)
+                    or (
+                        float(record.get("score", 0.0) or 0.0) == float(prev.get("score", 0.0) or 0.0)
+                        and int(record.get("lag", 0) or 0) < int(prev.get("lag", 0) or 0)
+                    )
+                ):
+                    self._maxlag_state[key] = dict(record)
+        self.sketches = {}
+        for tracker in trackers:
+            for start_time, sketches in getattr(tracker, "sketches", {}).items():
+                self.sketches.setdefault(start_time, {}).update(sketches)
+        self.validated_candidates = sum(int(getattr(t, "validated_candidates", 0) or 0) for t in trackers)
+        self.tested_candidates = sum(int(getattr(t, "tested_candidates", 0) or 0) for t in trackers)
+        self.total_candidates = sum(int(getattr(t, "total_candidates", 0) or 0) for t in trackers)
+        self.sketch_time = sum(float(getattr(t, "sketch_time", 0.0) or 0.0) for t in trackers)
+        self.candidate_time = sum(float(getattr(t, "candidate_time", 0.0) or 0.0) for t in trackers)
+        self.validation_time = sum(float(getattr(t, "validation_time", 0.0) or 0.0) for t in trackers)
+        self.monitor_time = sum(float(getattr(t, "monitor_time", 0.0) or 0.0) for t in trackers)
+        self.artifact_bookkeeping_time = sum(
+            float(getattr(t, "artifact_bookkeeping_time", 0.0) or 0.0)
+            for t in trackers
+        )
+        min_tracker = None
+        min_dist = np.inf
+        for tracker in trackers:
+            dist = getattr(tracker, "min_dist", np.inf)
+            try:
+                dist = float(dist)
+            except (TypeError, ValueError):
+                dist = np.inf
+            if dist < min_dist:
+                min_dist = dist
+                min_tracker = tracker
+        self.min_dist = min_dist
+        self.pair_min_dist = getattr(min_tracker, "pair_min_dist", None) if min_tracker is not None else None
+
+    def _sync_aggregate_state(self):
+        self._sync_from_trackers([self.tracker])
+
+    def run(self, new_data_step, ids, verbose, testing, corr_val=True, monitor=True):
+        self.tracker.run_multi_window(
+            self.window_sizes,
+            new_data_step,
+            ids,
+            verbose=verbose,
+            testing=testing,
+            corr_val=corr_val,
+            monitor=monitor,
+        )
+        self._last_source = "corrtrack"
+        self._sync_aggregate_state()
+
+    def run_bf(self, new_data_step, ids, verbose, testing, corr_val=True, monitor=True):
+        trackers = self._ensure_bf_trackers()
+        for tracker in trackers.values():
+            tracker.run_bf(new_data_step, ids, verbose=verbose, testing=testing, corr_val=corr_val, monitor=monitor)
+        self._last_source = "bf"
+        self._sync_from_trackers(trackers.values())
+
+    def update_window_step(self, window_step):
+        self.tracker.update_window_step(window_step)
+        self._corrtrack_kwargs["window_step"] = int(window_step)
+        if self._bf_trackers is not None:
+            for tracker in self._bf_trackers.values():
+                tracker.update_window_step(window_step)
+        self.window_step = int(window_step)
+        self.n_lagged_windows = self.tracker.n_lagged_windows
+        return True
+
+    def update_n_lags(self, n_lags):
+        self.tracker.update_n_lags(n_lags)
+        self._corrtrack_kwargs["n_lags"] = int(n_lags)
+        if self._bf_trackers is not None:
+            for tracker in self._bf_trackers.values():
+                tracker.update_n_lags(n_lags)
+        self.n_lags = self.tracker.n_lags
+        self.n_lagged_windows = self.tracker.n_lagged_windows
+        return True
+
+    def get_correlation_flags(self, total_time, tolerance=None):
+        if self._last_source == "corrtrack":
+            return self.tracker.get_correlation_flags(total_time, tolerance=tolerance)
+        trackers = self._bf_trackers.values() if self._bf_trackers is not None else []
+        flags = None
+        for tracker in trackers:
+            curr = tracker.get_correlation_flags(total_time, tolerance=tolerance)
+            if curr is None:
+                continue
+            flags = curr if flags is None else np.maximum(flags, curr)
+        return flags
+
+    def _save_correlated(self, output_csv):
+        return CorrTrack._save_correlated(self, output_csv)
+
+    def _save_max_lag_correlated(self, output_csv):
+        return CorrTrack._save_max_lag_correlated(self, output_csv)
+
+    def _save_monitor_status(self, output_csv):
+        return CorrTrack._save_monitor_status(self, output_csv)
+
+    def _save_anomalies(self, output_csv):
+        return CorrTrack._save_anomalies(self, output_csv)
+
+
 class Sketches:
-    def __init__(self,window_size,basic_window,window_step,seed,seed_toggle,n_vectors,grid_dimension,grid_nodes,preprocess,neg_corr=False,sketch_norm="z",full_vector_candidates=False):
+    def __init__(self,window_size,basic_window,window_step,seed,seed_toggle,n_vectors,grid_dimension,grid_nodes,preprocess,neg_corr=False,sketch_norm="mean_l2",full_vector_candidates=False):
         self.verbose = None
         # Parameters windows
         self.window_size = window_size
@@ -6933,19 +9564,21 @@ class Sketches:
         self.previous_startTime = None
         self.curr_window_size = window_size
         self.preprocess = preprocess
-        self.sketch_norm = str(sketch_norm) if sketch_norm is not None else "z"
+        self.sketch_norm = str(sketch_norm) if sketch_norm is not None else "mean_l2"
         self.full_vector_candidates = bool(full_vector_candidates)
         self.neg_corr = bool(neg_corr)
         self._series_window_sums = None
         self._series_window_means = None
         self._raw_window_sums = None
         self._raw_window_sums_sq = None
-        self._raw_window_sums_cu = None
-        self._raw_window_sums_qu = None
         self._sid_lookup = None
         self._const_flags = None
+        # (2026-07-28) Read/written by run_multi's save/restore state tuple
+        # (multi-window-size support) -- see docs/implementation_log.md's
+        # 2026-07-28 entries. Not otherwise wired into a broader "is_spiked"
+        # feature the way corrtrack_release_multiwinsizes has it; kept
+        # minimal/local to what the ported multi-window mechanism needs.
         self._spiked_flags = None
-        self.is_spiked = {}
         # Parameters sketches
         self._debug_raw_sketches = {}
         self.seed = seed
@@ -6976,6 +9609,12 @@ class Sketches:
         self._toggle_weights = None
         self._random_vector_sums = None
         self._profile_callback = None
+        # (2026-07-28) Multi-window-size shared-sketch support, ported from
+        # corrtrack_release_multiwinsizes -- see docs/implementation_log.md's
+        # 2026-07-28 entries. None/{} means "no multi-window request active",
+        # a true no-op for every existing single-window-size caller.
+        self._multi_window_requested_offsets = None
+        self._latest_multi_window_suffix_cache = {}
 
     def dump_state(self):
         state = {k: v for k, v in self.__dict__.items() if k != "grid_nodes"}
@@ -6997,7 +9636,7 @@ class Sketches:
         callback = getattr(self, "_profile_callback", None)
         if callback is not None:
             callback(key, elapsed)
-    
+
     def _newStream(self,new_data_step,ids):
         new_data_step_index = new_data_step[0,:]
         new_data_step_values = np.asarray(new_data_step[1:,:], dtype=np.float64)
@@ -7015,6 +9654,7 @@ class Sketches:
         )
 
         #Update sliding windows
+        t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
         if self.window_data is None:
             self.window_data_original = new_data_step_values
             self.window_data = processed_new_data_step_values
@@ -7082,72 +9722,69 @@ class Sketches:
             self.window_data_original = np.append(self.window_data_original, new_data_step_values, axis=1)
             self.window_data = np.append(self.window_data, processed_new_data_step_values, axis=1)
             self.last_origin = new_data_step_values[:, -1]
-        
+        if t0 is not None:
+            self._profile_add("sketch.newstream_window_update", time.perf_counter() - t0)
+
+        t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
         if isinstance(ids, (list, tuple)):
             series_list = list(ids)
         else:
             series_list = list(ids)
         self.series_ids = series_list
-        self.window_data = self.window_data.astype(float)
+        self.window_data = self.window_data.astype(float, copy=False)
         self._update_curr_window_size()
         self._update_window_mean_stats(force_recompute=reset_sums)
         self._update_window_raw_stats(force_recompute=reset_raw_stats)
+        if t0 is not None:
+            self._profile_add("sketch.newstream_stats_update", time.perf_counter() - t0)
 
+        t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
         if self.curr_window_size >= self.window_size:
             self._const_flags = None
-            self._spiked_flags = None
             if (
                 _cy_compute_constant_flags is not None
                 and self._raw_window_sums is not None
                 and self._raw_window_sums_sq is not None
-                and self._raw_window_sums_cu is not None
-                and self._raw_window_sums_qu is not None
             ):
-                const_flags, spiked_flags = _cy_compute_constant_flags(
+                # _cy_compute_constant_flags also returns a spiked-flags
+                # array (needs sums 3/4 as inputs); nothing reads it here,
+                # so unused zero placeholders are passed instead of
+                # maintaining real cube/quartic running sums (see
+                # _apply_raw_moment_delta).
+                zero_sums = np.zeros_like(self._raw_window_sums)
+                const_flags, _unused_spiked_flags = _cy_compute_constant_flags(
                     np.asarray(self._raw_window_sums, dtype=np.float64),
                     np.asarray(self._raw_window_sums_sq, dtype=np.float64),
-                    np.asarray(self._raw_window_sums_cu, dtype=np.float64),
-                    np.asarray(self._raw_window_sums_qu, dtype=np.float64),
+                    zero_sums,
+                    zero_sums,
                     int(self.curr_window_size),
                 )
                 const_flags = np.asarray(const_flags, dtype=np.uint8)
-                spiked_flags = np.asarray(spiked_flags, dtype=np.uint8)
                 self._const_flags = const_flags
-                self._spiked_flags = spiked_flags
                 self.is_constant = {}
-                self.is_spiked = {}
                 for idx, series_id in enumerate(self.series_ids):
                     if series_id is None:
                         continue
                     self.is_constant[series_id] = bool(self._const_flags[idx])
-                    self.is_spiked[series_id] = bool(self._spiked_flags[idx])
             else:
                 const_flags = []
-                spiked_flags = []
                 for idx, series_id in enumerate(self.series_ids):
                     stats = self._raw_stats_for_series(idx)
                     if stats is None:
                         flag = True
-                        spiked = False
                     else:
                         flag = CorrTrack.is_near_constant(
                             var_sum=stats["var_sum"],
                             n=stats["n"],
                             std_thresh=1e-3,
                         )
-                        spiked = CorrTrack.is_structurally_spiked(
-                            var_sum=stats["var_sum"],
-                            n=stats["n"],
-                            mu4_sum=stats["mu4_sum"],
-                        )
                     if series_id is not None:
                         self.is_constant[series_id] = flag
-                        self.is_spiked[series_id] = spiked
                     const_flags.append(flag)
-                    spiked_flags.append(spiked)
                 self._const_flags = np.asarray(const_flags, dtype=np.uint8)
-                self._spiked_flags = np.asarray(spiked_flags, dtype=np.uint8)
-            
+        if t0 is not None:
+            self._profile_add("sketch.newstream_flags", time.perf_counter() - t0)
+
     def _preprocess_data(self, data):
         t = np.asarray(data, dtype=np.float64)
 
@@ -7249,12 +9886,16 @@ class Sketches:
             self._series_window_means = current_window_sum / float(self.curr_window_size)
 
     def _apply_raw_moment_delta(self, slice_data, sign):
+        # Only sums 1 and 2 (mean/variance) are maintained -- they are all
+        # `is_constant`/`_cy_compute_constant_flags` need. Sums 3/4 (cube,
+        # quartic) used to be tracked here solely to feed `mu4_sum` ->
+        # `is_structurally_spiked` -> `self.is_spiked`, which nothing in the
+        # codebase ever reads (confirmed by exhaustive search 2026-07-23) --
+        # removed rather than computed and discarded.
         if (
             slice_data is None
             or self._raw_window_sums is None
             or self._raw_window_sums_sq is None
-            or self._raw_window_sums_cu is None
-            or self._raw_window_sums_qu is None
         ):
             return
         arr = np.asarray(slice_data, dtype=np.float64)
@@ -7262,16 +9903,12 @@ class Sketches:
             return
         scale = float(sign)
         self._raw_window_sums += scale * arr.sum(axis=1, dtype=np.float64)
-        self._raw_window_sums_sq += scale * np.sum(arr * arr, axis=1, dtype=np.float64)
-        self._raw_window_sums_cu += scale * np.sum(arr ** 3, axis=1, dtype=np.float64)
-        self._raw_window_sums_qu += scale * np.sum(arr ** 4, axis=1, dtype=np.float64)
+        self._raw_window_sums_sq += scale * (arr * arr).sum(axis=1, dtype=np.float64)
 
     def _update_window_raw_stats(self, force_recompute=False):
         if self.window_data_original is None:
             self._raw_window_sums = None
             self._raw_window_sums_sq = None
-            self._raw_window_sums_cu = None
-            self._raw_window_sums_qu = None
             return
 
         n_series = self.window_data_original.shape[0]
@@ -7279,8 +9916,6 @@ class Sketches:
             zeros = np.zeros(n_series, dtype=np.float64)
             self._raw_window_sums = zeros.copy()
             self._raw_window_sums_sq = zeros.copy()
-            self._raw_window_sums_cu = zeros.copy()
-            self._raw_window_sums_qu = zeros.copy()
             return
 
         needs_reset = (
@@ -7294,14 +9929,10 @@ class Sketches:
                 zeros = np.zeros(n_series, dtype=np.float64)
                 self._raw_window_sums = zeros.copy()
                 self._raw_window_sums_sq = zeros.copy()
-                self._raw_window_sums_cu = zeros.copy()
-                self._raw_window_sums_qu = zeros.copy()
                 return
             arr = np.asarray(current_window, dtype=np.float64)
             self._raw_window_sums = np.sum(arr, axis=1, dtype=np.float64)
             self._raw_window_sums_sq = np.sum(arr * arr, axis=1, dtype=np.float64)
-            self._raw_window_sums_cu = np.sum(arr ** 3, axis=1, dtype=np.float64)
-            self._raw_window_sums_qu = np.sum(arr ** 4, axis=1, dtype=np.float64)
         else:
             # no action needed; incremental updates already applied
             return
@@ -7310,8 +9941,6 @@ class Sketches:
         if (
             self._raw_window_sums is None
             or self._raw_window_sums_sq is None
-            or self._raw_window_sums_cu is None
-            or self._raw_window_sums_qu is None
             or self.curr_window_size is None
             or self.curr_window_size <= 0
         ):
@@ -7321,22 +9950,12 @@ class Sketches:
             return None
         sum1 = float(self._raw_window_sums[index])
         sum2 = float(self._raw_window_sums_sq[index])
-        sum3 = float(self._raw_window_sums_cu[index])
-        sum4 = float(self._raw_window_sums_qu[index])
         mean = sum1 / n if n > 0 else 0.0
         var_sum = max(sum2 - (sum1 * sum1) / n, 0.0)
-        mu4_sum = (
-            sum4
-            - 4.0 * mean * sum3
-            + 6.0 * (mean ** 2) * sum2
-            - 4.0 * (mean ** 3) * sum1
-            + n * (mean ** 4)
-        )
         return {
             "n": n,
             "mean": mean,
             "var_sum": var_sum,
-            "mu4_sum": mu4_sum,
         }
 
 
@@ -7397,9 +10016,11 @@ class Sketches:
         return mean_vec, random_sums
 
     def _sketch_norm_mode_code(self):
-        mode = (self.sketch_norm or "z").lower()
+        mode = (self.sketch_norm or "mean_l2").lower()
         if mode == "mean_l2":
             return 1
+        if mode == "mean":
+            return 2
         return 0
     
     def _generate_randomVectors(self):
@@ -7437,6 +10058,401 @@ class Sketches:
             print(self.basicRandomVector)
             print("Toggle vector (one per basic window)")
             print(self.toggleVector)
+
+    # (2026-07-28) Multi-window-size shared-sketch support, ported from
+    # corrtrack_release_multiwinsizes -- see README_multi_window_sizes.md
+    # there and docs/implementation_log.md's 2026-07-28 entries. These four
+    # methods are the entire mechanism: capture which basic-window offsets
+    # are needed (one per requested shorter window size), build the max-
+    # window raw sketch AND each requested suffix raw sketch in one pass
+    # (via build_multi_suffix_raw), then let _derive_window_sketch_state
+    # turn a cached suffix into a standalone sketch/candidate state for that
+    # window size -- avoiding a full from-scratch recompute per size.
+    def _prepare_multi_window_suffix_capture(self, window_sizes):
+        offsets = set()
+        total_basic = int(self.n_basic_windows)
+        for size in window_sizes:
+            size = int(size)
+            if size <= 0 or size > int(self.window_size):
+                continue
+            if size % int(self.basic_window) != 0:
+                continue
+            n_basic = int(size // self.basic_window)
+            if n_basic <= 0 or n_basic > total_basic:
+                continue
+            offsets.add(total_basic - n_basic)
+        self._multi_window_requested_offsets = offsets if offsets else None
+        self._latest_multi_window_suffix_cache = {}
+
+    def _clear_multi_window_suffix_capture(self):
+        self._multi_window_requested_offsets = None
+
+    def _raw_matrix_with_requested_suffixes(self, basic_dots, feature_sums=None):
+        dots = np.asarray(basic_dots, dtype=np.float64)
+        if dots.ndim != 3:
+            self._latest_multi_window_suffix_cache = {}
+            return np.sum(dots, axis=1, dtype=np.float64)
+        requested_offsets = self._multi_window_requested_offsets
+        if not requested_offsets:
+            self._latest_multi_window_suffix_cache = {}
+            return np.sum(dots, axis=1, dtype=np.float64)
+
+        total_basic = int(dots.shape[1])
+        n_series = int(dots.shape[0])
+        offsets_desc = np.asarray(sorted(int(offset) for offset in requested_offsets), dtype=np.int64)[::-1]
+        feature_arr = np.asarray(feature_sums, dtype=np.float64) if feature_sums is not None else None
+        if feature_arr is None or feature_arr.ndim != 2 or feature_arr.shape[0] != n_series or feature_arr.shape[1] < total_basic:
+            feature_arr = np.zeros((n_series, total_basic), dtype=np.float64)
+        else:
+            feature_arr = np.ascontiguousarray(feature_arr[:, :total_basic], dtype=np.float64)
+
+        if _cy_build_multi_suffix_raw is not None:
+            try:
+                raw_matrix, suffix_raw, suffix_features = _cy_build_multi_suffix_raw(
+                    np.ascontiguousarray(dots, dtype=np.float64),
+                    feature_arr,
+                    offsets_desc,
+                )
+                self._latest_multi_window_suffix_cache = {
+                    int(offset): (
+                        np.array(suffix_raw[pos], dtype=np.float64, copy=True),
+                        np.array(suffix_features[pos], dtype=np.float64, copy=True),
+                    )
+                    for pos, offset in enumerate(offsets_desc)
+                }
+                return raw_matrix
+            except Exception:
+                pass
+
+        running_dots = np.zeros((n_series, int(dots.shape[2])), dtype=np.float64)
+        running_features = np.zeros(n_series, dtype=np.float64)
+
+        cache = {}
+        for offset in range(total_basic - 1, -1, -1):
+            running_dots += dots[:, offset, :]
+            running_features += feature_arr[:, offset]
+            if offset in requested_offsets:
+                cache[offset] = (running_dots.copy(), running_features.copy())
+        self._latest_multi_window_suffix_cache = cache
+        return running_dots.copy()
+
+    def _normalize_current_raw_matrix(self, raw_matrix, n_series, norm_mode):
+        if _cy_apply_orth_and_normalize is not None:
+            mean_vec, random_sums = self._kernel_norm_inputs(n_series, norm_mode)
+            if mean_vec is not None and random_sums is not None:
+                return _cy_apply_orth_and_normalize(
+                    np.ascontiguousarray(raw_matrix, dtype=np.float64),
+                    mean_vec,
+                    random_sums,
+                    int(norm_mode),
+                )
+        return raw_matrix, self._normalize_sketch_matrix(raw_matrix)
+
+    # (2026-07-28) Remaining multi-window-size support, ported from
+    # corrtrack_release_multiwinsizes -- see docs/implementation_log.md's
+    # 2026-07-28 entries. _derive_window_sketch_state is the piece that
+    # actually turns a max-window basicDots snapshot (or a cached suffix
+    # from _raw_matrix_with_requested_suffixes) into a standalone sketch/
+    # candidate state for one shorter window size, including that size's
+    # OWN correctly-scaled mean_l2 normalization (not the max window's).
+    def _constant_flags_for_window_size(self, window_size):
+        n_series = len(self.series_ids)
+        if self.window_data_original is None or self.window_data_original.shape[1] < int(window_size):
+            return np.ones(n_series, dtype=np.uint8), np.zeros(n_series, dtype=np.uint8)
+
+        raw = np.asarray(self.window_data_original[:, -int(window_size):], dtype=np.float64)
+        if raw.ndim != 2 or raw.shape[1] == 0:
+            return np.ones(raw.shape[0] if raw.ndim == 2 else n_series, dtype=np.uint8), np.zeros(n_series, dtype=np.uint8)
+
+        n = int(raw.shape[1])
+        sums = np.sum(raw, axis=1, dtype=np.float64)
+        sums_sq = np.sum(raw * raw, axis=1, dtype=np.float64)
+        sums_cu = np.sum(raw ** 3, axis=1, dtype=np.float64)
+        sums_qu = np.sum(raw ** 4, axis=1, dtype=np.float64)
+
+        if _cy_compute_constant_flags is not None:
+            const_flags, spiked_flags = _cy_compute_constant_flags(
+                np.asarray(sums, dtype=np.float64),
+                np.asarray(sums_sq, dtype=np.float64),
+                np.asarray(sums_cu, dtype=np.float64),
+                np.asarray(sums_qu, dtype=np.float64),
+                int(n),
+            )
+            return (
+                np.asarray(const_flags, dtype=np.uint8),
+                np.asarray(spiked_flags, dtype=np.uint8),
+            )
+
+        mean = sums / float(n)
+        var_sum = np.maximum(sums_sq - (sums * sums) / float(n), 0.0)
+        mu4_sum = (
+            sums_qu
+            - 4.0 * mean * sums_cu
+            + 6.0 * (mean ** 2) * sums_sq
+            - 4.0 * (mean ** 3) * sums
+            + n * (mean ** 4)
+        )
+        const_flags = (var_sum <= (1e-3 ** 2) * n).astype(np.uint8)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            kurtosis = (mu4_sum / n) / ((var_sum / n) ** 2)
+        spiked_flags = np.logical_and(
+            np.isfinite(kurtosis),
+            np.logical_and(var_sum > 0.0, kurtosis > 5.0),
+        ).astype(np.uint8)
+        return const_flags, spiked_flags
+
+    def _random_sums_for_basic_slice(self, offset, n_basic):
+        if self.basicRandomVector is None or self.toggleVector is None:
+            return np.empty(0, dtype=np.float64)
+        offset = int(offset)
+        n_basic = int(n_basic)
+        if n_basic <= 0:
+            return np.zeros(int(self.n_vectors), dtype=np.float64)
+        if offset < 0:
+            offset = 0
+        end = min(int(self.toggleVector.shape[0]), offset + n_basic)
+        if end <= offset:
+            return np.zeros(int(self.n_vectors), dtype=np.float64)
+        weights = (
+            np.asarray(self.toggleVector[offset:end], dtype=np.float64)[:, :, None]
+            * np.asarray(self.basicRandomVector, dtype=np.float64)[None, :, :]
+        )
+        return weights.sum(axis=(0, 2), dtype=np.float64)
+
+    def _random_sums_for_n_basic(self, n_basic):
+        return self._random_sums_for_basic_slice(0, n_basic)
+
+    def _normalize_sketch_matrix_for_size(self, raw_matrix, feature_sums, n_basic, basic_offset=0):
+        raw_matrix = np.ascontiguousarray(raw_matrix, dtype=np.float64)
+        norm_mode = self._sketch_norm_mode_code()
+
+        if norm_mode == 1:
+            denom = max(1.0, float(int(n_basic) * int(self._sketch_feature_width())))
+            feature_sums = np.asarray(feature_sums, dtype=np.float64)
+            if feature_sums.ndim == 1:
+                feature_totals = feature_sums
+            elif feature_sums.ndim == 2:
+                feature_totals = feature_sums.sum(axis=1, dtype=np.float64)
+            else:
+                feature_totals = np.zeros(raw_matrix.shape[0], dtype=np.float64)
+            if feature_totals.shape[0] < raw_matrix.shape[0]:
+                padded = np.zeros(raw_matrix.shape[0], dtype=np.float64)
+                padded[: feature_totals.shape[0]] = feature_totals
+                feature_totals = padded
+            mean_vec = feature_totals[: raw_matrix.shape[0]] / denom
+            random_sums = self._random_sums_for_basic_slice(basic_offset, n_basic)
+            if _cy_apply_orth_and_normalize is not None:
+                return _cy_apply_orth_and_normalize(
+                    raw_matrix,
+                    np.asarray(mean_vec, dtype=np.float64),
+                    np.asarray(random_sums, dtype=np.float64),
+                    int(norm_mode),
+                )
+            adjusted = raw_matrix - mean_vec[:, None] * random_sums[None, :]
+            norms = np.linalg.norm(adjusted, axis=1, keepdims=True)
+            norm_matrix = np.zeros_like(adjusted)
+            valid = np.isfinite(norms[:, 0]) & (norms[:, 0] > 0)
+            if np.any(valid):
+                norm_matrix[valid] = adjusted[valid] / norms[valid]
+            return raw_matrix, norm_matrix
+
+        empty = np.empty(0, dtype=np.float64)
+        if _cy_apply_orth_and_normalize is not None:
+            return _cy_apply_orth_and_normalize(raw_matrix, empty, empty, int(norm_mode))
+        return raw_matrix, self._normalize_sketch_matrix(raw_matrix)
+
+    def _multi_window_suffix_cache(self, window_sizes):
+        if not self.basicDots:
+            return {}
+        current_dots = np.asarray(self.basicDots[-1], dtype=np.float64)
+        if current_dots.ndim != 3:
+            return {}
+        total_basic = int(current_dots.shape[1])
+        if total_basic <= 0:
+            return {}
+
+        offsets = {}
+        for size in window_sizes:
+            size = int(size)
+            if size <= 0 or size > int(self.window_size):
+                continue
+            if size % int(self.basic_window) != 0:
+                continue
+            n_basic = int(size // self.basic_window)
+            if n_basic <= 0 or n_basic > total_basic:
+                continue
+            offsets[total_basic - n_basic] = n_basic
+        if not offsets:
+            return {}
+
+        n_series = int(current_dots.shape[0])
+        running_dots = np.zeros((n_series, int(current_dots.shape[2])), dtype=np.float64)
+        running_features = np.zeros(n_series, dtype=np.float64)
+        feature_source = None
+        if self.basicFeatureSums:
+            current_features = np.asarray(self.basicFeatureSums[-1], dtype=np.float64)
+            if current_features.ndim == 2 and current_features.shape[1] >= total_basic:
+                feature_source = current_features
+
+        cache = {}
+        needed_offsets = set(offsets)
+        for offset in range(total_basic - 1, -1, -1):
+            running_dots += current_dots[:, offset, :]
+            if feature_source is not None:
+                running_features += feature_source[:, offset]
+            if offset in needed_offsets:
+                cache[offset] = (running_dots.copy(), running_features.copy())
+        return cache
+
+    def _derive_window_sketch_state(self, window_size, suffix_cache=None):
+        window_size = int(window_size)
+        if window_size <= 0 or window_size > int(self.window_size):
+            return None
+        if window_size % int(self.basic_window) != 0:
+            raise TypeError(
+                "Window size (",
+                window_size,
+                ") is not divisable by basic window size (",
+                self.basic_window,
+                ")",
+            )
+        if self.curr_window_size is None or self.curr_window_size < window_size:
+            return None
+        if not self.basicDots:
+            return None
+
+        n_basic = int(window_size // self.basic_window)
+        current_dots = np.asarray(self.basicDots[-1], dtype=np.float64)
+        if current_dots.ndim != 3 or current_dots.shape[1] < n_basic:
+            return None
+        n_series = int(current_dots.shape[0])
+        offset = int(current_dots.shape[1] - n_basic)
+
+        if suffix_cache is not None and offset in suffix_cache:
+            raw_matrix, feature_sums = suffix_cache[offset]
+        else:
+            # Multi-window sketches intentionally use the max-window tail toggle
+            # convention, so smaller sizes are not retoggled to standalone prefixes.
+            raw_matrix = current_dots[:, offset:offset + n_basic, :].sum(axis=1, dtype=np.float64)
+            if self.basicFeatureSums:
+                current_features = np.asarray(self.basicFeatureSums[-1], dtype=np.float64)
+                if current_features.ndim == 2 and current_features.shape[1] >= offset + n_basic:
+                    feature_sums = current_features[:, offset:offset + n_basic].sum(axis=1, dtype=np.float64)
+                else:
+                    feature_sums = np.zeros(n_series, dtype=np.float64)
+            else:
+                feature_sums = np.zeros(n_series, dtype=np.float64)
+
+        raw_matrix, norm_matrix = self._normalize_sketch_matrix_for_size(
+            raw_matrix,
+            feature_sums,
+            n_basic,
+            basic_offset=offset,
+        )
+
+        curr_start = self.window_index[-window_size]
+        series_ids = list(self.series_ids)
+        if len(series_ids) < n_series:
+            series_ids = series_ids + [None] * (n_series - len(series_ids))
+        keys = [(series_ids[s], curr_start, window_size) for s in range(n_series)]
+
+        if self._debug_sketches or self.testing:
+            for s in range(n_series):
+                try:
+                    self._debug_raw_sketches[keys[s]] = np.array(raw_matrix[s], dtype=np.float64, copy=True)
+                except Exception:
+                    pass
+
+        const_flags, spiked_flags = self._constant_flags_for_window_size(window_size)
+        if const_flags.shape[0] < n_series:
+            padded = np.ones(n_series, dtype=np.uint8)
+            padded[: const_flags.shape[0]] = const_flags
+            const_flags = padded
+        if spiked_flags.shape[0] < n_series:
+            padded = np.zeros(n_series, dtype=np.uint8)
+            padded[: spiked_flags.shape[0]] = spiked_flags
+            spiked_flags = padded
+
+        sketches = dict(zip(keys, norm_matrix))
+        return sketches, norm_matrix, keys, const_flags[:n_series], spiked_flags[:n_series]
+
+    def run_multi(self, new_data_step, ids, window_sizes, verbose=True, testing=False):
+        self.verbose = verbose
+        self.testing = testing
+
+        requested_sizes = sorted({int(size) for size in window_sizes if int(size) > 0})
+        self._newStream(new_data_step, ids)
+
+        self._prepare_multi_window_suffix_capture(requested_sizes)
+        try:
+            ready = self._get_sketches()
+            suffix_cache = dict(getattr(self, "_latest_multi_window_suffix_cache", {}) or {})
+        finally:
+            self._clear_multi_window_suffix_capture()
+        if not ready:
+            self.partitions = [None for _ in range(self.n_grids)]
+            return {}, list(self.partitions)
+
+        merged_sketches = {}
+        per_grid_parts = [[] for _ in range(self.n_grids)]
+        saved_state = (
+            self.sketches,
+            self._sketch_matrix,
+            list(self._sketch_keys),
+            self._const_flags,
+            self._spiked_flags,
+        )
+
+        try:
+            for size in requested_sizes:
+                state = self._derive_window_sketch_state(size, suffix_cache=suffix_cache)
+                if state is None:
+                    continue
+                sketches, matrix, keys, const_flags, spiked_flags = state
+                merged_sketches.update(sketches)
+                self.sketches = sketches
+                self._sketch_matrix = matrix
+                self._sketch_keys = keys
+                self._const_flags = const_flags
+                self._spiked_flags = spiked_flags
+                self.partition_sketches(size)
+                for grid, partition in enumerate(self.partitions):
+                    if grid >= self.n_grids:
+                        break
+                    if partition is not None:
+                        per_grid_parts[grid].append(partition)
+        finally:
+            self.sketches, self._sketch_matrix, self._sketch_keys, self._const_flags, self._spiked_flags = saved_state
+
+        merged_partitions = [None for _ in range(self.n_grids)]
+        for grid, parts in enumerate(per_grid_parts):
+            if not parts:
+                continue
+            if isinstance(parts[0], dict):
+                merged = {}
+                for part in parts:
+                    merged.update(part)
+                merged_partitions[grid] = merged
+            else:
+                usable = [part for part in parts if part is not None and part[0].size > 0]
+                if not usable:
+                    continue
+                sid_idx = np.concatenate([part[0] for part in usable], axis=0)
+                time_arr = np.concatenate([part[1] for part in usable], axis=0)
+                w_arr = np.concatenate([part[2] for part in usable], axis=0)
+                value_arr = np.concatenate([part[3] for part in usable], axis=0)
+                is_const = np.concatenate([part[4] for part in usable], axis=0)
+                merged_partitions[grid] = (sid_idx, time_arr, w_arr, value_arr, is_const)
+
+        self.sketches = merged_sketches
+        self._sketch_matrix = None
+        self._sketch_keys = list(merged_sketches.keys())
+        self.partitions = merged_partitions
+
+        if testing and merged_sketches:
+            self._print_state()
+
+        return dict(self.sketches), list(self.partitions)
 
     def _get_sketches(self):
         if self.curr_window_size >= self.window_size:
@@ -7490,7 +10506,15 @@ class Sketches:
         weights = np.array(self._toggle_weights, dtype=np.float64, copy=False)
 
         norm_mode = self._sketch_norm_mode_code()
-        if _cy_build_sketch_matrix is not None:
+        # (2026-07-28) Multi-window-size support: when a caller has
+        # requested suffix capture (CorrTrackMultiWindow), the Cython fused
+        # build_sketch_matrix path can't produce per-offset suffixes, so it
+        # is skipped in favor of the suffix-aware raw_matrix helper -- a
+        # true no-op (identical to the pre-existing behavior) whenever no
+        # multi-window request is active. See docs/implementation_log.md's
+        # 2026-07-28 entries.
+        capture_suffixes = bool(self._multi_window_requested_offsets)
+        if _cy_build_sketch_matrix is not None and not capture_suffixes:
             mean_vec, random_sums = self._kernel_norm_inputs(n_series, norm_mode)
             if mean_vec is not None and random_sums is not None:
                 series_dots, raw_matrix, norm_matrix = _cy_build_sketch_matrix(
@@ -7506,8 +10530,12 @@ class Sketches:
                 norm_matrix = self._normalize_sketch_matrix(raw_matrix)
         else:
             series_dots = _compute_series_dots(feature_blocks, weights)
-            raw_matrix = np.sum(series_dots, axis=1)
-            norm_matrix = self._normalize_sketch_matrix(raw_matrix)
+            if capture_suffixes:
+                raw_matrix = self._raw_matrix_with_requested_suffixes(series_dots, feature_sums)
+                raw_matrix, norm_matrix = self._normalize_current_raw_matrix(raw_matrix, n_series, norm_mode)
+            else:
+                raw_matrix = np.sum(series_dots, axis=1)
+                norm_matrix = self._normalize_sketch_matrix(raw_matrix)
         curr_start = self._curr_startTime()
         window_size = self.window_size
 
@@ -7591,7 +10619,12 @@ class Sketches:
                     feature_sums = np.zeros((n_series, self.n_basic_windows), dtype=np.float64)
                 self.basicFeatureSums.append(np.array(feature_sums, dtype=np.float64, copy=True))
                 self._set_feature_window_means(feature_sums)
-                raw_matrix = np.sum(series_dots, axis=1)
+                # (2026-07-28) Multi-window-size support -- see the matching
+                # comment in _sketches_from_scratch.
+                if self._multi_window_requested_offsets:
+                    raw_matrix = self._raw_matrix_with_requested_suffixes(series_dots, feature_sums)
+                else:
+                    raw_matrix = np.sum(series_dots, axis=1)
 
                 norm_mode = self._sketch_norm_mode_code()
                 if _cy_apply_orth_and_normalize is not None:
@@ -7653,6 +10686,7 @@ class Sketches:
         if diff_n_basic_windows < 0:
             self._incremental_sketches_intermediary(diff_n_basic_windows)
         
+        t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
         n_new_basic_windows = max(diff_n_basic_windows,1)
         new_basic_data = np.array(
             self.window_data[:,-(n_new_basic_windows*self.basic_window):],
@@ -7677,10 +10711,13 @@ class Sketches:
             new_feature_blocks = np.empty((n_series, 0, self.basic_window), dtype=np.float64)
             new_dots = np.zeros((n_series, 0, self.n_vectors), dtype=np.float64)
             new_feature_sums = np.zeros((n_series, 0), dtype=np.float64)
+        if t0 is not None:
+            self._profile_add("sketch.incremental_new_blocks", time.perf_counter() - t0)
 
         if(self.verbose):
             self._print_curr_window()
         
+        t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
         self._clean_obsolete_basicDots()
         if not self.basicDots:
             self._sketches_from_scratch()
@@ -7719,8 +10756,17 @@ class Sketches:
         else:
             updated_feature_sums = base_feature_sums
         self._set_feature_window_means(updated_feature_sums)
+        if t0 is not None:
+            self._profile_add("sketch.incremental_prep_base", time.perf_counter() - t0)
 
-        if _cy_incremental_combine_and_normalize is not None:
+        # (2026-07-28) Multi-window-size support -- see the matching comment
+        # in _sketches_from_scratch. The fused Cython kernel combines+
+        # normalizes in one call with no per-offset suffix output, so it is
+        # skipped in favor of the manual combine + suffix-aware raw_matrix
+        # path below whenever suffix capture is active; a true no-op
+        # otherwise (identical to the pre-existing behavior).
+        capture_suffixes = bool(self._multi_window_requested_offsets)
+        if _cy_incremental_combine_and_normalize is not None and not capture_suffixes:
             mean_vec, random_sums = self._kernel_norm_inputs(n_series, norm_mode)
             if mean_vec is not None and random_sums is not None:
                 try:
@@ -7754,23 +10800,15 @@ class Sketches:
                 updated = base_work
             else:
                 updated = np.concatenate((base_work, new_dots), axis=1)
-            raw_matrix = np.sum(updated, axis=1)
-            if _cy_apply_orth_and_normalize is not None:
-                mean_vec, random_sums = self._kernel_norm_inputs(n_series, norm_mode)
-                if mean_vec is not None and random_sums is not None:
-                    raw_matrix, norm_matrix = _cy_apply_orth_and_normalize(
-                        np.ascontiguousarray(raw_matrix, dtype=np.float64),
-                        mean_vec,
-                        random_sums,
-                        int(norm_mode),
-                    )
-                else:
-                    norm_matrix = self._normalize_sketch_matrix(raw_matrix)
+            if capture_suffixes:
+                raw_matrix = self._raw_matrix_with_requested_suffixes(updated, updated_feature_sums)
             else:
-                norm_matrix = self._normalize_sketch_matrix(raw_matrix)
+                raw_matrix = np.sum(updated, axis=1)
+            raw_matrix, norm_matrix = self._normalize_current_raw_matrix(raw_matrix, n_series, norm_mode)
             if t0 is not None:
                 self._profile_add("sketch.incremental_numpy_fallback", time.perf_counter() - t0)
 
+        t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
         self.basicDots.append(np.asarray(updated, dtype=np.float64))
         self.basicFeatureSums.append(np.array(updated_feature_sums, dtype=np.float64, copy=True))
 
@@ -7783,6 +10821,8 @@ class Sketches:
                 except Exception:
                     pass
         self._sketch_matrix = norm_matrix
+        if t0 is not None:
+            self._profile_add("sketch.incremental_append_state", time.perf_counter() - t0)
         series_ids = list(self.series_ids)
         if len(series_ids) < n_series:
             series_ids = series_ids + [None] * (n_series - len(series_ids))
@@ -7792,9 +10832,12 @@ class Sketches:
         if t_materialize is not None:
             self._profile_add("sketch.incremental_materialize", time.perf_counter() - t_materialize)
 
+        t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
         del self.basicDots[0]
         if self.basicFeatureSums:
             del self.basicFeatureSums[0]
+        if t0 is not None:
+            self._profile_add("sketch.incremental_cleanup", time.perf_counter() - t0)
         del self.incrementable_index[0]
 
     def update_window_step(self,window_step):
@@ -7868,10 +10911,22 @@ class Sketches:
             return np.zeros_like(arr)
         return centered / norm
 
+    def _mean_only_normalize_sketch(self, v):
+        # (2026-07-22) "mean" sketch_norm: mean-center only, no rescale --
+        # see the identical branch in sketch_kernels.pyx's build_sketch_matrix
+        # for the full rationale (preserves real, verified correlation
+        # signal carried by the raw sketch's own magnitude).
+        arr = np.array(v, dtype=np.float64, copy=False)
+        if arr.size == 0:
+            return arr
+        return arr - float(np.mean(arr))
+
     def _normalize_sketch(self, v):
-        mode = (self.sketch_norm or "z").lower()
+        mode = (self.sketch_norm or "mean_l2").lower()
         if mode == "mean_l2":
             return self._mean_l2_normalize_sketch(v)
+        if mode == "mean":
+            return self._mean_only_normalize_sketch(v)
         # default to z-normalization
         return self._z_normalize_sketch(v)
 
@@ -7881,7 +10936,7 @@ class Sketches:
             return arr
         if arr.ndim == 1:
             arr = arr[None, :]
-        mode = (self.sketch_norm or "z").lower()
+        mode = (self.sketch_norm or "mean_l2").lower()
         if mode == "mean_l2":
             adjusted = self._mean_adjust_matrix(arr)
             norms = np.linalg.norm(adjusted, axis=1, keepdims=True)
@@ -7890,6 +10945,8 @@ class Sketches:
             if np.any(valid):
                 out[valid] = adjusted[valid] / norms[valid]
             return out
+        if mode == "mean":
+            return arr - np.mean(arr, axis=1, keepdims=True)
         mean = np.mean(arr, axis=1, keepdims=True)
         centered = arr - mean
         std = np.std(arr, axis=1, keepdims=True)
@@ -8078,10 +11135,20 @@ class Sketches:
         self.verbose = verbose
         self.testing = testing
 
+        t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
         self._newStream(new_data_step, ids)
+        if t0 is not None:
+            self._profile_add("sketch.new_stream", time.perf_counter() - t0)
 
+        t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
         sketches = self._get_sketches()
+        if t0 is not None:
+            self._profile_add("sketch.get_sketches_total", time.perf_counter() - t0)
+
+        t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
         self.partition_sketches(self.window_size)
+        if t0 is not None:
+            self._profile_add("sketch.partition_sketches", time.perf_counter() - t0)
         if distribute:
             self.distribute_partitions()
 
@@ -8135,7 +11202,7 @@ class Candidates_BF:
             self.window_data = np.append(self.window_data,new_data_step_values,axis=1)
         
         self.series_ids = ids
-        self.window_data = self.window_data.astype(float)
+        self.window_data = self.window_data.astype(float, copy=False)
         
         self._update_curr_window_size()
     
@@ -8547,15 +11614,18 @@ class Candidates_BF_ExactSTOMP:
 class Candidates:
     def __init__(self,n_lagged_windows,grid_dimension,cell_size,grid_max,freq_threshold,corr_threshold,n_vectors,sketch_std,n_grids,neg_corr,
                  sign_prefilter_scale=1.3,sign_prefilter_extra=1, seed=None, full_vector=False, candidate_backend=None,
-                 candidate_bucket_width=None, candidate_block_size_steps=None, candidate_block_index_dims=None,
                  candidate_similarity="l2", candidate_cosine_threshold=None,
                  candidate_key_mode="first", candidate_key_seed=None, candidate_lsh_radius=None,
                  candidate_ann_m=None, candidate_ann_z=None, candidate_ann_ef=None, return_distances=False,
-                 candidate_bound_dims=None, candidate_bound_dim_selection="variance",
-                 enable_block_ub_pruning=False, enable_row_ub_pruning=False,
-                 block_similarity_assignment=False, max_open_blocks=4,
-                 candidate_instinct_query_mode="hybrid", candidate_instinct_top_k=256,
-                 candidate_instinct_min_candidates=64, candidate_instinct_entry_points=8):
+                 candidate_lsh_n_bands=64,
+                 candidate_lsh_n_bands_tolerance=None,
+                 target_recall=0.95,
+                 candidate_lsh_target_occupancy=3.0,
+                 candidate_lsh_recall_safety_margin=None,
+                 candidate_apply_dot_gamma_filter=True,
+                 candidate_hamming_threshold=None,
+                 candidate_apply_hamming_filter=True, candidate_hamming_filter_max_frac=0.40,
+                 candidate_lsh_max_candidates_per_query=0):
         self.verbose = None
         self.neg_corr = neg_corr
         # Parameters grids
@@ -8576,24 +11646,70 @@ class Candidates:
         # gamma, where it showed a real 4-5x speedup, but safely no-ops
         # otherwise). See docs/implementation_log.md, "Part 1" and "Part 1
         # follow-up: cone-based block bound".
-        bound_dims_val = _to_int_safe(candidate_bound_dims)
-        self.candidate_bound_dims = max(0, bound_dims_val) if bound_dims_val is not None else 0
-        self.candidate_bound_dim_selection = str(candidate_bound_dim_selection or "variance").lower()
-        self.enable_block_ub_pruning = bool(enable_block_ub_pruning)
-        self.enable_row_ub_pruning = bool(enable_row_ub_pruning)
-        self.block_similarity_assignment = bool(block_similarity_assignment)
-        self.max_open_blocks = max(1, _to_int_safe(max_open_blocks) or 4)
-        # (2026-07-06) InstinctIndex -- experimental approximate graph
-        # backend, candidate_backend="instinct" only. See
-        # docs/implementation_log.md, "InstinctIndex: experimental
-        # approximate graph backend". Reuses candidate_ann_m/candidate_ann_z/
-        # candidate_ann_ef (dead knobs left over from the removed
-        # dynamic_graph_ann/angular_lsh backends, already threaded end-to-end
-        # through CLI/config/CSV) as max_degree/ef_insert/ef_search.
-        self.candidate_instinct_query_mode = str(candidate_instinct_query_mode or "hybrid").lower()
-        self.candidate_instinct_top_k = max(1, _to_int_safe(candidate_instinct_top_k) or 256)
-        self.candidate_instinct_min_candidates = max(1, _to_int_safe(candidate_instinct_min_candidates) or 64)
-        self.candidate_instinct_entry_points = max(1, _to_int_safe(candidate_instinct_entry_points) or 8)
+        # (2026-07-08) SignLSHBandIndex -- candidate_selector Phase 6 spike,
+        # candidate_backend="lsh_sign_dot" only. Exact (recall verified
+        # against brute force). See docs/implementation_log.md,
+        # "candidate_selector Phase 6 diagnostic".
+        self.candidate_lsh_n_bands = max(1, _to_int_safe(candidate_lsh_n_bands) or 64)
+        # (2026-08-30) See CorrTrack's identical field for the full
+        # derivation -- forwarded here unchanged, consumed by the
+        # SignLSHBandIndex construction below.
+        # (2026-09-03) None (default) means AUTO now -- see CorrTrack's
+        # identical block for the full rationale.
+        if candidate_lsh_n_bands_tolerance is None:
+            self.candidate_lsh_n_bands_tolerance = 1.0
+        else:
+            _tol_val = _to_float_safe(candidate_lsh_n_bands_tolerance)
+            self.candidate_lsh_n_bands_tolerance = _tol_val if _tol_val and _tol_val > 0.0 else None
+        _tr_val = _to_float_safe(target_recall)
+        self.target_recall = _tr_val if _tr_val and 0.0 < _tr_val < 1.0 else 0.95
+        # (2026-07-29g) SignLSHBandIndex's band_width auto-sizing target
+        # (avg alive entries per bucket) -- was a hardcoded Cython constant,
+        # now overridable since it's the actual scale-governing knob (not
+        # n_bands alone). See candidate_kernels.pyx's _finalize_sizing.
+        _lsh_occ_val = _to_float_safe(candidate_lsh_target_occupancy)
+        self.candidate_lsh_target_occupancy = float(_lsh_occ_val) if _lsh_occ_val and _lsh_occ_val > 0 else 3.0
+        # (2026-09-04) Overridable padding on top of target_recall inside the n_bands sizing
+        # search -- see candidate_kernels.pyx's compute_lsh_n_bands docstring for the
+        # derivation and its real, disclosed memory cost at large (m, L) (n_bands needs 8-11x
+        # more bands at m=1000-3000 than the pre-margin formula, vs ~3-4x at m=150 -- the margin
+        # compounds with the overlap correction's own scale-dependent penalty, it isn't flat).
+        # None (the default) means "use the calibrated value" -- 0.0 is a legitimate, explicit
+        # choice (no margin) and must NOT collapse to the same thing via a truthy `or` check.
+        # 0.028 mirrors candidate_kernels.pyx's own RECALL_SAFETY_MARGIN literal exactly (not
+        # imported from there to avoid a NameError if the compiled extension is ever
+        # unavailable -- in that case no LSH backend works anyway, so this default is inert).
+        _default_recall_safety_margin = 0.028
+        if candidate_lsh_recall_safety_margin is None:
+            self.candidate_lsh_recall_safety_margin = _default_recall_safety_margin
+        else:
+            _margin_val = _to_float_safe(candidate_lsh_recall_safety_margin)
+            self.candidate_lsh_recall_safety_margin = (
+                float(_margin_val) if _margin_val is not None and _margin_val >= 0.0
+                else _default_recall_safety_margin
+            )
+        self.candidate_apply_dot_gamma_filter = _coerce_to_bool(candidate_apply_dot_gamma_filter, default=True)
+        # (2026-07-21) lsh_sign_dot cheap full-vector sign-Hamming
+        # pre-filter -- see docs/implementation_log.md, "lsh_sign_dot
+        # Hamming pre-filter diagnosed and landed". Opt-in (default off)
+        # pending validation against this project's own real benchmark
+        # data, not just the synthetic diagnostic that motivated it.
+        self.candidate_apply_hamming_filter = _coerce_to_bool(candidate_apply_hamming_filter, default=False)
+        # (2026-07-21j) None is a real, meaningful value here (not "use the
+        # 0.40 default") -- it means auto-derive the Hamming threshold from
+        # gamma via the SimHash relation, mirroring candidate_hamming_
+        # threshold's own None-means-auto-derive convention for
+        # lsh_hamming_exact. Preserved through, not coerced away.
+        self.candidate_hamming_filter_max_frac = (
+            None if candidate_hamming_filter_max_frac is None else float(candidate_hamming_filter_max_frac)
+        )
+        # Per-query candidate examination budget (0=unlimited/default) --
+        # a raw safety valve, not a prioritized cutoff; diagnosed to cost
+        # real, unpredictable recall once triggered -- keep off by default.
+        self.candidate_lsh_max_candidates_per_query = max(
+            0, _to_int_safe(candidate_lsh_max_candidates_per_query) or 0
+        )
+        self.candidate_hamming_threshold = _to_int_safe(candidate_hamming_threshold)
         # Flat sorted index storage (legacy backend).
         self._entries = []  # (value, window_id_key, window_id[, vector])
         self._values = []   # parallel list of values for bisect
@@ -8613,32 +11729,29 @@ class Candidates:
         self._win_sid_rank = []
         self._win_time = []
         self._win_w = []
+        # (2026-09-07) Free-list of reclaimed window_idx slots -- see
+        # docs/implementation_log.md's memory-leak fix entry. Before this,
+        # _get_or_create_window_idx only ever minted a brand new idx
+        # (len(self._win_sid), monotonically increasing), and nothing ever
+        # popped an expiring window's entry back out of _window_idx/
+        # _win_sid*, so these grew without bound over a long stream --
+        # the exact same "monotonic index, never reclaimed" pattern as the
+        # SignLSHBandIndex/HammingExactIndex slot leak just fixed, one layer
+        # up. _clean_old_sketches now pushes a freed idx here when an
+        # expiring window's key is dropped; _get_or_create_window_idx pops
+        # from here before ever growing _win_sid's length.
+        self._win_free_idx = []
         self._candidate_numeric_rows = None
         self._profile_callback = None
         self._profile_metric_callback = None
         self._tree_index = None
         self._blocked_index = None
+        self._lsh_index = None
         self._bucket_entries = defaultdict(list)
         self._index_version = 0
         self._candidate_arrays_cache = None
         self._candidate_arrays_cache_version = -1
-        self.candidate_bucket_width = _to_float_safe(candidate_bucket_width)
-        block_steps = _to_int_safe(candidate_block_size_steps)
-        if block_steps is None or block_steps <= 0:
-            block_steps = 32
-        self.candidate_block_size_steps = int(block_steps)
-        block_dims = _to_int_safe(candidate_block_index_dims)
-        if block_dims is None or block_dims <= 0:
-            block_dims = 1
-        self.candidate_block_index_dims = int(block_dims)
         # (2026-07-06) Part 1 -- see docs/implementation_log.md.
-        bound_dims_val = _to_int_safe(candidate_bound_dims)
-        self.candidate_bound_dims = max(0, bound_dims_val) if bound_dims_val is not None else 0
-        self.candidate_bound_dim_selection = str(candidate_bound_dim_selection or "variance").lower()
-        self.enable_block_ub_pruning = bool(enable_block_ub_pruning)
-        self.enable_row_ub_pruning = bool(enable_row_ub_pruning)
-        self.block_similarity_assignment = bool(block_similarity_assignment)
-        self.max_open_blocks = max(1, _to_int_safe(max_open_blocks) or 4)
         self.candidate_similarity = _resolve_candidate_similarity(candidate_similarity, default="l2")
         self.candidate_cosine_threshold = _to_float_safe(candidate_cosine_threshold)
         if self.candidate_cosine_threshold is None:
@@ -8714,9 +11827,69 @@ class Candidates:
                 top_k=int(self.candidate_instinct_top_k),
                 min_candidates=int(self.candidate_instinct_min_candidates),
                 seed=instinct_seed,
+                apply_dot_filter=bool(self.candidate_apply_dot_gamma_filter),
+                compact_dead_ratio_threshold=float(self.candidate_instinct_compact_dead_ratio_threshold),
+                compact_min_count=int(self.candidate_instinct_compact_min_count),
+                incremental_delete=bool(self.candidate_instinct_incremental_delete),
+                use_nav_proxy=bool(self.candidate_instinct_use_nav_proxy),
             )
             self._candidate_backend = "instinct"
         elif instinct_requested:
+            raise RuntimeError(
+                f"candidate_backend='{self._requested_candidate_backend}' requires the "
+                "compiled candidate_kernels Cython extension"
+            )
+        # (2026-07-27) "auto" used to fall through to "bptree" (BalancedIndex)
+        # as its default resolution -- that backend is now removed (see
+        # docs/implementation_log.md's release-restructuring entries), so
+        # "auto" now resolves to lsh_sign_dot, this project's own
+        # established default/best-performing backend throughout its
+        # benchmarking history.
+        lsh_requested = self._requested_candidate_backend in ("lsh_sign_dot", "auto")
+        hamming_exact_requested = self._requested_candidate_backend == "lsh_hamming_exact"
+        if lsh_requested and self._vector_match_enabled and not self.return_distances:
+            index_cls = _cy_lsh_sign_dot_index_cls
+            if index_cls is None:
+                raise RuntimeError(
+                    f"candidate_backend='{self._requested_candidate_backend}' requires the compiled "
+                    "candidate_kernels Cython extension"
+                )
+            self._lsh_index = index_cls(
+                n_vectors=int(self._vector_dim),
+                initial_capacity=1024,
+                n_lagged_windows=int(self.n_lagged_windows),
+                n_bands=int(self.candidate_lsh_n_bands),
+                n_bands_tolerance=float(self.candidate_lsh_n_bands_tolerance or 0.0),
+                corr_threshold_for_sizing=float(self.corr_threshold),
+                target_recall=float(self.target_recall),
+                target_occupancy=float(self.candidate_lsh_target_occupancy),
+                recall_safety_margin=float(self.candidate_lsh_recall_safety_margin),
+                apply_dot_filter=bool(self.candidate_apply_dot_gamma_filter),
+                apply_hamming_filter=bool(self.candidate_apply_hamming_filter),
+                hamming_max_frac=(
+                    None if self.candidate_hamming_filter_max_frac is None
+                    else float(self.candidate_hamming_filter_max_frac)
+                ),
+                max_candidates_per_query=int(self.candidate_lsh_max_candidates_per_query),
+            )
+            self._candidate_backend = "lsh_sign_dot"
+        elif hamming_exact_requested and self._vector_match_enabled and not self.return_distances:
+            # (2026-07-10) idea 3 alone -- see HammingExactIndex's docstring
+            # in candidate_kernels.pyx and docs/implementation_log.md.
+            index_cls = _cy_hamming_exact_index_cls
+            if index_cls is None:
+                raise RuntimeError(
+                    f"candidate_backend='{self._requested_candidate_backend}' requires the compiled "
+                    "candidate_kernels Cython extension"
+                )
+            self._lsh_index = index_cls(
+                n_vectors=int(self._vector_dim),
+                initial_capacity=1024,
+                hamming_threshold=int(self.candidate_hamming_threshold) if self.candidate_hamming_threshold is not None else -1,
+                apply_dot_filter=bool(self.candidate_apply_dot_gamma_filter),
+            )
+            self._candidate_backend = "lsh_hamming_exact"
+        elif lsh_requested or hamming_exact_requested:
             raise RuntimeError(
                 f"candidate_backend='{self._requested_candidate_backend}' requires the "
                 "compiled candidate_kernels Cython extension"
@@ -8737,9 +11910,6 @@ class Candidates:
                 initial_capacity=1024,
                 bound_dims=min(int(self.candidate_bound_dims), int(self._vector_dim)),
                 bound_dim_selection_variance=self.candidate_bound_dim_selection != "first",
-                enable_block_ub_pruning=bool(self.enable_block_ub_pruning),
-                enable_row_ub_pruning=bool(self.enable_row_ub_pruning),
-                block_similarity_assignment=bool(self.block_similarity_assignment),
                 max_open_blocks=max(1, int(self.max_open_blocks)),
             )
             self._candidate_backend = self._requested_candidate_backend
@@ -8748,7 +11918,7 @@ class Candidates:
                 f"candidate_backend='{self._requested_candidate_backend}' requires the "
                 "compiled candidate_kernels Cython extension"
             )
-        elif self._requested_candidate_backend in {"bptree", "auto", "sorted_arrays_bs"} and _cy_balanced_index_cls is not None:
+        elif self._requested_candidate_backend in {"bptree", "sorted_arrays_bs"} and _cy_balanced_index_cls is not None:
             tree_seed = seed if seed is not None else 0
             try:
                 tree_seed = int(tree_seed) & ((1 << 63) - 1)
@@ -8761,7 +11931,7 @@ class Candidates:
                 seed=tree_seed,
             )
             self._candidate_backend = "bptree"
-        elif self._requested_candidate_backend in {"bptree", "auto"}:
+        elif self._requested_candidate_backend == "bptree":
             raise RuntimeError(
                 "Cython candidate search is required, but candidate_kernels.BalancedIndex "
                 "is not available"
@@ -8773,6 +11943,13 @@ class Candidates:
                     "range-search functions; Python candidate search fallback is disabled"
                 )
             self._candidate_backend = "flat"
+        elif self._requested_candidate_backend == "brute_force":
+            # (2026-07-30) No index/representation of any kind is built here
+            # -- _increment_candidates_brute_force enumerates directly from
+            # the window registry (_win_sid_idx/_win_time/_win_w), which is
+            # always populated regardless of backend. See that method's
+            # docstring and docs/implementation_log.md's 2026-07-30(i) entry.
+            self._candidate_backend = "brute_force"
 
     def dump_state(self):
         return dict(self.__dict__)
@@ -8918,6 +12095,21 @@ class Candidates:
         if callback is not None:
             callback(key, value)
 
+    def notify_expected_n_series(self, n_series):
+        # (2026-07-10) Pushed down automatically by CorrTrack the moment it
+        # learns the true series count (from the raw `ids` list on its own
+        # first run() step, before any per-step validity filtering) -- the
+        # human never needs to supply this. No-op for every backend except
+        # lsh_sign_dot, and a no-op there too once already sized (see
+        # SignLSHBandIndex.notify_expected_n_series in candidate_kernels.pyx).
+        if self._lsh_index is not None and hasattr(self._lsh_index, "notify_expected_n_series"):
+            try:
+                n = int(n_series)
+            except (TypeError, ValueError):
+                return
+            if n > 0:
+                self._lsh_index.notify_expected_n_series(n)
+
     def candidate_search_stats(self):
         stats = None
         if self._candidate_backend == "bptree":
@@ -8926,9 +12118,12 @@ class Candidates:
             stats = getattr(getattr(self, "_blocked_index", None), "last_stats", None)
         elif self._candidate_backend in _INSTINCT_INDEX_BACKENDS:
             stats = getattr(getattr(self, "_instinct_index", None), "last_stats", None)
+        elif self._candidate_backend in _LSH_SIGN_DOT_BACKENDS:
+            stats = getattr(getattr(self, "_lsh_index", None), "last_stats", None)
         if not stats:
             return {
                 "index_candidates": 0,
+                "enumerated_candidates": 0,
                 "valid_index_candidates": 0,
                 "unique_index_candidates": 0,
                 "duplicate_index_candidates": 0,
@@ -8959,12 +12154,62 @@ class Candidates:
                 "instinct_num_nodes_total": 0,
                 "instinct_num_nodes_alive": 0,
                 "instinct_dead_node_ratio": 0.0,
+                "instinct_nodes_scored": 0,
+                "instinct_nodes_scored_dead_expand": 0,
+                "lsh_candidates_touched": 0,
+                "lsh_dot_checks": 0,
+                "lsh_candidates_returned": 0,
+                "lsh_query_time": 0.0,
+                "lsh_num_nodes_total": 0,
+                "lsh_num_nodes_alive": 0,
+                "lsh_dead_node_ratio": 0.0,
+                "hexact_candidates_touched": 0,
+                "hexact_dot_checks": 0,
+                "hexact_candidates_returned": 0,
+                "hexact_query_time": 0.0,
+                "hexact_hamming_threshold": 0,
+                "hexact_num_nodes_total": 0,
+                "hexact_num_nodes_alive": 0,
+                "hexact_dead_node_ratio": 0.0,
+                "cgrp_candidates_touched": 0,
+                "cgrp_dot_checks": 0,
+                "cgrp_candidates_returned": 0,
+                "cgrp_query_time": 0.0,
+                "cgrp_group_size": 0,
+                "cgrp_n_groups": 0,
+                "cgrp_sectors": 0,
+                "cgrp_probe_radius": 0,
+                "cgrp_num_nodes_total": 0,
+                "cgrp_num_nodes_alive": 0,
+                "cgrp_dead_node_ratio": 0.0,
+                "mdt_candidates_touched": 0,
+                "mdt_dot_checks": 0,
+                "mdt_candidates_returned": 0,
+                "mdt_query_time": 0.0,
+                "mdt_n_dims": 0,
+                "mdt_theta": 0.0,
+                "mdt_num_nodes_total": 0,
+                "mdt_num_nodes_alive": 0,
+                "mdt_dead_node_ratio": 0.0,
             }
         after_similarity = stats.get("num_after_similarity", stats.get("num_after_dot", 0))
         blocks_visited = int(stats.get("num_blocks_visited", 0) or 0)
         blocks_pruned_by_ub = int(stats.get("num_blocks_pruned_by_ub", 0) or 0)
         return {
             "index_candidates": int(stats.get("num_index_candidates", 0) or 0),
+            # (2026-07-15) The TRUE enumeration count -- how many candidates
+            # the search process actually visited/looped over, regardless
+            # of architecture. For full-scan backends (lsh_hamming_exact,
+            # circular_grouped_lsh) this is genuinely alive_count per query
+            # (every candidate visited unconditionally), NOT the same as
+            # "index_candidates" above (which is a post-cheap-filter
+            # survivor count for those backends specifically -- see
+            # docs/implementation_log.md's "three consistent enumeration
+            # metrics" entry for why the two used to be conflated). For
+            # genuinely single-stage indexed backends (bptree,
+            # sorted_arrays_bs, lsh_sign_dot, instinct) there is no separate
+            # pre-filter stage, so this equals "index_candidates" exactly.
+            "enumerated_candidates": int(stats.get("num_enumerated_candidates", 0) or 0),
             "valid_index_candidates": int(stats.get("num_valid_index_candidates", 0) or 0),
             "unique_index_candidates": int(stats.get("num_unique_index_candidates", 0) or 0),
             "duplicate_index_candidates": int(stats.get("num_duplicate_index_candidates", 0) or 0),
@@ -9002,6 +12247,62 @@ class Candidates:
             "instinct_num_nodes_total": int(stats.get("instinct_num_nodes_total", 0) or 0),
             "instinct_num_nodes_alive": int(stats.get("instinct_num_nodes_alive", 0) or 0),
             "instinct_dead_node_ratio": float(stats.get("instinct_dead_node_ratio", 0.0) or 0.0),
+            # (2026-07-21) True per-query real-dot-product cost -- see
+            # docs/implementation_log.md's 2026-07-21 "true dot-product-
+            # computation metric" entry. Was already computed by the raw
+            # InstinctIndex (2026-07-17 root-cause work) but never passed
+            # through this dict, so it never reached CorrTrack.
+            "instinct_nodes_scored": int(stats.get("instinct_nodes_scored", 0) or 0),
+            "instinct_nodes_scored_dead_expand": int(stats.get("instinct_nodes_scored_dead_expand", 0) or 0),
+            # (2026-07-08) SignLSHBandIndex metrics -- only nonzero for
+            # candidate_backend="lsh_sign_dot". See docs/implementation_log.md,
+            # "candidate_selector Phase 6 diagnostic".
+            "lsh_candidates_touched": int(stats.get("lsh_candidates_touched", 0) or 0),
+            "lsh_dot_checks": int(stats.get("lsh_dot_checks", 0) or 0),
+            "lsh_candidates_returned": int(stats.get("lsh_candidates_returned", 0) or 0),
+            "lsh_query_time": float(stats.get("lsh_query_time", 0.0) or 0.0),
+            "lsh_num_nodes_total": int(stats.get("lsh_num_nodes_total", 0) or 0),
+            "lsh_num_nodes_alive": int(stats.get("lsh_num_nodes_alive", 0) or 0),
+            "lsh_dead_node_ratio": float(stats.get("lsh_dead_node_ratio", 0.0) or 0.0),
+            # (2026-07-10) HammingExactIndex metrics -- only nonzero for
+            # candidate_backend="lsh_hamming_exact". See
+            # docs/implementation_log.md, "outside-the-box backends".
+            "hexact_candidates_touched": int(stats.get("hexact_candidates_touched", 0) or 0),
+            "hexact_dot_checks": int(stats.get("hexact_dot_checks", 0) or 0),
+            "hexact_candidates_returned": int(stats.get("hexact_candidates_returned", 0) or 0),
+            "hexact_query_time": float(stats.get("hexact_query_time", 0.0) or 0.0),
+            "hexact_hamming_threshold": int(stats.get("hexact_hamming_threshold", 0) or 0),
+            "hexact_num_nodes_total": int(stats.get("hexact_num_nodes_total", 0) or 0),
+            "hexact_num_nodes_alive": int(stats.get("hexact_num_nodes_alive", 0) or 0),
+            "hexact_dead_node_ratio": float(stats.get("hexact_dead_node_ratio", 0.0) or 0.0),
+            # (2026-07-15) CircularGroupedExactIndex metrics -- only nonzero
+            # for candidate_backend="circular_grouped_lsh". See
+            # docs/implementation_log.md, 2026-07-15 circular-band-LSH
+            # entries.
+            "cgrp_candidates_touched": int(stats.get("cgrp_candidates_touched", 0) or 0),
+            "cgrp_dot_checks": int(stats.get("cgrp_dot_checks", 0) or 0),
+            "cgrp_candidates_returned": int(stats.get("cgrp_candidates_returned", 0) or 0),
+            "cgrp_query_time": float(stats.get("cgrp_query_time", 0.0) or 0.0),
+            "cgrp_group_size": int(stats.get("cgrp_group_size", 0) or 0),
+            "cgrp_n_groups": int(stats.get("cgrp_n_groups", 0) or 0),
+            "cgrp_sectors": int(stats.get("cgrp_sectors", 0) or 0),
+            "cgrp_probe_radius": int(stats.get("cgrp_probe_radius", 0) or 0),
+            "cgrp_num_nodes_total": int(stats.get("cgrp_num_nodes_total", 0) or 0),
+            "cgrp_num_nodes_alive": int(stats.get("cgrp_num_nodes_alive", 0) or 0),
+            "cgrp_dead_node_ratio": float(stats.get("cgrp_dead_node_ratio", 0.0) or 0.0),
+            # (2026-07-15) MultiDimThetaIndex metrics -- only nonzero for
+            # candidate_backend="bptree_mixed". See
+            # docs/implementation_log.md, 2026-07-15 "bptree MIXED supervisor
+            # ideas" entries.
+            "mdt_candidates_touched": int(stats.get("mdt_candidates_touched", 0) or 0),
+            "mdt_dot_checks": int(stats.get("mdt_dot_checks", 0) or 0),
+            "mdt_candidates_returned": int(stats.get("mdt_candidates_returned", 0) or 0),
+            "mdt_query_time": float(stats.get("mdt_query_time", 0.0) or 0.0),
+            "mdt_n_dims": int(stats.get("mdt_n_dims", 0) or 0),
+            "mdt_theta": float(stats.get("mdt_theta", 0.0) or 0.0),
+            "mdt_num_nodes_total": int(stats.get("mdt_num_nodes_total", 0) or 0),
+            "mdt_num_nodes_alive": int(stats.get("mdt_num_nodes_alive", 0) or 0),
+            "mdt_dead_node_ratio": float(stats.get("mdt_dead_node_ratio", 0.0) or 0.0),
         }
 
     def _profile_candidate_search_stats(self):
@@ -9028,6 +12329,7 @@ class Candidates:
         obj._win_sid_rank = list(getattr(obj, "_win_sid_rank", []))
         obj._win_time = list(getattr(obj, "_win_time", []))
         obj._win_w = list(getattr(obj, "_win_w", []))
+        obj._win_free_idx = list(getattr(obj, "_win_free_idx", []))
         obj._candidate_numeric_rows = None
         obj._profile_metric_callback = None
         obj._blocked_index = getattr(obj, "_blocked_index", None)
@@ -9051,9 +12353,6 @@ class Candidates:
                 f"candidate_backend='{obj._candidate_backend}' requires the compiled "
                 "candidate_kernels.BlockedLazyIndex Cython extension"
             )
-        obj.candidate_bucket_width = _to_float_safe(getattr(obj, "candidate_bucket_width", None))
-        obj.candidate_block_size_steps = int(_to_int_safe(getattr(obj, "candidate_block_size_steps", 32)) or 32)
-        obj.candidate_block_index_dims = int(_to_int_safe(getattr(obj, "candidate_block_index_dims", 1)) or 1)
         obj.candidate_similarity = _resolve_candidate_similarity(getattr(obj, "candidate_similarity", "l2"), default="l2")
         gamma = _to_float_safe(getattr(obj, "candidate_cosine_threshold", None))
         if gamma is None:
@@ -9093,6 +12392,7 @@ class Candidates:
         self._win_sid_rank = list(getattr(self, "_win_sid_rank", []))
         self._win_time = list(getattr(self, "_win_time", []))
         self._win_w = list(getattr(self, "_win_w", []))
+        self._win_free_idx = list(getattr(self, "_win_free_idx", []))
         self._candidate_numeric_rows = None
         self._profile_metric_callback = None
         self._blocked_index = getattr(self, "_blocked_index", None)
@@ -9116,9 +12416,6 @@ class Candidates:
                 f"candidate_backend='{self._candidate_backend}' requires the compiled "
                 "candidate_kernels.BlockedLazyIndex Cython extension"
             )
-        self.candidate_bucket_width = _to_float_safe(getattr(self, "candidate_bucket_width", None))
-        self.candidate_block_size_steps = int(_to_int_safe(getattr(self, "candidate_block_size_steps", 32)) or 32)
-        self.candidate_block_index_dims = int(_to_int_safe(getattr(self, "candidate_block_index_dims", 1)) or 1)
         self.candidate_similarity = _resolve_candidate_similarity(getattr(self, "candidate_similarity", "l2"), default="l2")
         gamma = _to_float_safe(getattr(self, "candidate_cosine_threshold", None))
         if gamma is None:
@@ -9184,6 +12481,10 @@ class Candidates:
                 clear_recent()
         if self._candidate_backend in _INSTINCT_INDEX_BACKENDS and self._instinct_index is not None:
             clear_recent = getattr(self._instinct_index, "clear_recent", None)
+            if clear_recent is not None:
+                clear_recent()
+        if self._candidate_backend in _LSH_SIGN_DOT_BACKENDS and self._lsh_index is not None:
+            clear_recent = getattr(self._lsh_index, "clear_recent", None)
             if clear_recent is not None:
                 clear_recent()
         self._candidate_arrays_cache = None
@@ -9262,7 +12563,6 @@ class Candidates:
         if idx is not None:
             return idx
         sid, start_time, window_size = window_id
-        idx = len(self._win_sid)
         sid_idx = self._sid_idx_map.get(sid)
         if sid_idx is None:
             sid_idx = len(self._sid_idx_map)
@@ -9271,13 +12571,44 @@ class Candidates:
         if sid_rank is None:
             sid_rank = len(self._sid_sort_rank_map)
             self._sid_sort_rank_map[sid] = sid_rank
+        # (2026-09-07) Reuse a freed slot (pushed by _clean_old_sketches when
+        # an expiring window's key is dropped) before ever growing
+        # _win_sid's length -- see _win_free_idx's field comment.
+        if self._win_free_idx:
+            idx = self._win_free_idx.pop()
+            self._win_sid[idx] = sid
+            self._win_sid_idx[idx] = int(sid_idx)
+            self._win_sid_rank[idx] = int(sid_rank)
+            self._win_time[idx] = int(start_time)
+            self._win_w[idx] = int(window_size)
+        else:
+            idx = len(self._win_sid)
+            self._win_sid.append(sid)
+            self._win_sid_idx.append(int(sid_idx))
+            self._win_sid_rank.append(int(sid_rank))
+            self._win_time.append(int(start_time))
+            self._win_w.append(int(window_size))
         self._window_idx[window_id] = idx
-        self._win_sid.append(sid)
-        self._win_sid_idx.append(int(sid_idx))
-        self._win_sid_rank.append(int(sid_rank))
-        self._win_time.append(int(start_time))
-        self._win_w.append(int(window_size))
         return idx
+
+    def _release_window_idx(self, window_id):
+        # (2026-09-07) Companion to _get_or_create_window_idx -- called from
+        # _clean_old_sketches for each key an expiring partition drops, so
+        # the window_idx cache stops growing without bound over a long
+        # stream. Safe to reuse immediately: by the time this runs, the
+        # caller is about to call the matching _expire_*_index(), which will
+        # (via drop_before_time) mark this same key's underlying index
+        # entry/entries dead using the SAME time cutoff that made this
+        # partition eligible for eviction in the first place -- so no
+        # still-alive entry can reference this idx once it's freed. See
+        # docs/implementation_log.md's memory-leak fix entry. Not called
+        # from every code path that can create window_idx entries --
+        # _get_or_create_window_idx_numeric's own (currently LSH-unreachable
+        # -- see that entry) tuple-partition callers are out of scope,
+        # disclosed as a known remaining gap there.
+        idx = self._window_idx.pop(window_id, None)
+        if idx is not None:
+            self._win_free_idx.append(idx)
 
     def _get_or_create_window_idx_numeric(self, sid_idx, start_time, window_size):
         sid_idx = int(sid_idx)
@@ -9352,6 +12683,27 @@ class Candidates:
         drop_before(int(min_time))
         if t0 is not None:
             self._profile_add("cand.instinct_expire", time.perf_counter() - t0)
+
+    def _expire_lsh_index(self):
+        # (2026-07-08) SignLSHBandIndex -- candidate_selector Phase 6
+        # spike, same time-based lazy-eviction contract as
+        # _expire_instinct_index (drop_before_time). See
+        # docs/implementation_log.md, "candidate_selector Phase 6
+        # diagnostic".
+        if self._candidate_backend not in _LSH_SIGN_DOT_BACKENDS or self._lsh_index is None:
+            return
+        min_time = None
+        if self.partition:
+            min_time = self._partition_min_time(self.partition[0])
+        if min_time is None:
+            return
+        drop_before = getattr(self._lsh_index, "drop_before_time", None)
+        if drop_before is None:
+            return
+        t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
+        drop_before(int(min_time))
+        if t0 is not None:
+            self._profile_add("cand.lsh_expire", time.perf_counter() - t0)
 
     def _insert_entry(self, value, window_id, vector=None):
         key = self._window_id_key(window_id)
@@ -9858,6 +13210,13 @@ class Candidates:
             if self._input_tree_instinct_batch(last_partition):
                 return
         if (
+            self._candidate_backend in _LSH_SIGN_DOT_BACKENDS
+            and self._lsh_index is not None
+            and hasattr(self._lsh_index, "insert_many")
+        ):
+            if self._input_tree_lsh_batch(last_partition):
+                return
+        if (
             self._candidate_backend == "bptree"
             and self._tree_index is not None
             and hasattr(self._tree_index, "insert_many")
@@ -10238,6 +13597,156 @@ class Candidates:
             self.partition[-1] = tuple(partition[:5]) + (entry_ids,)
         return True
 
+    def _input_tree_lsh_batch(self, last_partition):
+        # (2026-07-08) SignLSHBandIndex -- candidate_selector Phase 6 spike.
+        # Mirrors _input_tree_instinct_batch exactly (same insert_many
+        # contract, ignores the coordinate-key "values" argument -- no
+        # sorted-array indexing needed for a posting-list index either).
+        # See docs/implementation_log.md, "candidate_selector Phase 6
+        # diagnostic".
+        if isinstance(last_partition, tuple) and len(last_partition) in {5, 6}:
+            return self._input_tree_lsh_batch_tuple(last_partition)
+        if not isinstance(last_partition, dict):
+            return False
+
+        self._recent_window_ids = set()
+        self._recent_entry_ids = []
+        win_indices = []
+        sid_indices = []
+        sid_ranks = []
+        times = []
+        window_sizes = []
+        vectors = []
+        keys_for_entries = []
+
+        for key, value_tuple in last_partition.items():
+            if len(value_tuple) >= 3:
+                sketch, is_constant, _norm = value_tuple[:3]
+            else:
+                continue
+            if is_constant:
+                continue
+            vec = np.asarray(sketch, dtype=np.float64).ravel()
+            if vec.size == 0:
+                continue
+            if vec.size != self._vector_dim:
+                fixed = np.zeros((self._vector_dim,), dtype=np.float64)
+                copy_n = min(vec.size, self._vector_dim)
+                if copy_n > 0:
+                    fixed[:copy_n] = vec[:copy_n]
+                vec = fixed
+
+            win_idx = self._get_or_create_window_idx(key)
+            sid_meta = int(self._win_sid_idx[win_idx])
+            rank_meta = int(self._win_sid_rank[win_idx])
+            win_indices.append(win_idx)
+            sid_indices.append(sid_meta)
+            sid_ranks.append(rank_meta)
+            times.append(int(key[1]))
+            window_sizes.append(int(key[2]))
+            vectors.append(vec)
+            keys_for_entries.append(key)
+            self._recent_window_ids.add(key)
+
+        if not vectors:
+            return True
+
+        vector_arr = np.ascontiguousarray(np.vstack(vectors), dtype=np.float64)
+        t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
+        entry_ids = self._lsh_index.insert_many(
+            None,
+            np.ascontiguousarray(win_indices, dtype=np.int64),
+            vector_arr,
+            np.ascontiguousarray(sid_indices, dtype=np.int64),
+            np.ascontiguousarray(times, dtype=np.int64),
+            np.ascontiguousarray(window_sizes, dtype=np.int64),
+            np.ascontiguousarray(sid_ranks, dtype=np.int64),
+        )
+        if t0 is not None:
+            self._profile_add("cand.lsh_insert", time.perf_counter() - t0)
+        for key, entry_id in zip(keys_for_entries, np.asarray(entry_ids, dtype=np.int64)):
+            entry_id = int(entry_id)
+            self._reverse_entry_ids[key].append(entry_id)
+            self._recent_entry_ids.append(entry_id)
+        return True
+
+    def _input_tree_lsh_batch_tuple(self, partition):
+        sid_idx_arr, time_arr, w_arr, chunk_arr, is_const = partition[:5]
+        if len(partition) >= 6:
+            entry_ids = np.asarray(partition[5], dtype=np.int64).ravel()
+            self._recent_entry_ids = [int(x) for x in entry_ids]
+            self._recent_window_ids = set()
+            return True
+        if sid_idx_arr is None or len(sid_idx_arr) == 0:
+            self._recent_window_ids = set()
+            self._recent_entry_ids = []
+            if len(self.partition) > 0 and self.partition[-1] is partition and len(partition) == 5:
+                self.partition[-1] = tuple(partition[:5]) + (np.empty(0, dtype=np.int64),)
+            return True
+
+        sid_idx_arr = np.asarray(sid_idx_arr, dtype=np.int64)
+        time_arr = np.asarray(time_arr, dtype=np.int64)
+        w_arr = np.asarray(w_arr, dtype=np.int64)
+        chunks = np.asarray(chunk_arr, dtype=np.float64)
+        is_const = np.asarray(is_const, dtype=np.uint8)
+        n_rows = int(sid_idx_arr.shape[0])
+        if time_arr.shape[0] != n_rows or w_arr.shape[0] != n_rows or is_const.shape[0] != n_rows:
+            return False
+        chunks_2d = chunks.reshape((n_rows, 1)) if chunks.ndim == 1 else chunks.reshape((n_rows, chunks.shape[1]))
+        if chunks_2d.shape[0] != n_rows:
+            return False
+
+        valid_mask = is_const == 0
+        if not np.any(valid_mask):
+            self._recent_window_ids = set()
+            self._recent_entry_ids = []
+            if len(self.partition) > 0 and self.partition[-1] is partition and len(partition) == 5:
+                self.partition[-1] = tuple(partition[:5]) + (np.empty(0, dtype=np.int64),)
+            return True
+
+        valid_pos = np.flatnonzero(valid_mask)
+        valid_chunks = np.ascontiguousarray(chunks_2d[valid_pos], dtype=np.float64)
+        valid_sid = np.ascontiguousarray(sid_idx_arr[valid_pos], dtype=np.int64)
+        valid_time = np.ascontiguousarray(time_arr[valid_pos], dtype=np.int64)
+        valid_w = np.ascontiguousarray(w_arr[valid_pos], dtype=np.int64)
+
+        if valid_chunks.shape[1] != self._vector_dim:
+            fixed = np.zeros((valid_chunks.shape[0], self._vector_dim), dtype=np.float64)
+            copy_n = min(valid_chunks.shape[1], self._vector_dim)
+            if copy_n > 0:
+                fixed[:, :copy_n] = valid_chunks[:, :copy_n]
+            valid_chunks = fixed
+
+        win_indices = np.empty(valid_pos.shape[0], dtype=np.int64)
+        sid_ranks = np.empty(valid_pos.shape[0], dtype=np.int64)
+        for out_i in range(valid_pos.shape[0]):
+            sid_idx = int(valid_sid[out_i])
+            win_indices[out_i] = self._get_or_create_window_idx_numeric(sid_idx, int(valid_time[out_i]), int(valid_w[out_i]))
+            if sid_idx < len(self._sid_idx_rank):
+                sid_ranks[out_i] = int(self._sid_idx_rank[sid_idx])
+            else:
+                sid = self._sid_list[sid_idx] if 0 <= sid_idx < len(self._sid_list) else str(sid_idx)
+                sid_ranks[out_i] = int(self._sid_sort_rank_map.get(sid, sid_idx))
+
+        t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
+        entry_ids = self._lsh_index.insert_many(
+            None,
+            np.ascontiguousarray(win_indices, dtype=np.int64),
+            valid_chunks,
+            np.ascontiguousarray(valid_sid, dtype=np.int64),
+            np.ascontiguousarray(valid_time, dtype=np.int64),
+            np.ascontiguousarray(valid_w, dtype=np.int64),
+            np.ascontiguousarray(sid_ranks, dtype=np.int64),
+        )
+        if t0 is not None:
+            self._profile_add("cand.lsh_insert", time.perf_counter() - t0)
+        entry_ids = np.ascontiguousarray(entry_ids, dtype=np.int64)
+        self._recent_entry_ids = [int(x) for x in entry_ids]
+        self._recent_window_ids = set(int(x) for x in win_indices)
+        if len(self.partition) > 0 and self.partition[-1] is partition and len(partition) == 5:
+            self.partition[-1] = tuple(partition[:5]) + (entry_ids,)
+        return True
+
     def _input_tree_bptree_batch(self, last_partition):
         if isinstance(last_partition, tuple) and len(last_partition) in {5, 6}:
             return self._input_tree_bptree_batch_tuple(last_partition)
@@ -10416,6 +13925,9 @@ class Candidates:
                 if self._candidate_backend in _INSTINCT_INDEX_BACKENDS and self._instinct_index is not None:
                     self._expire_instinct_index()
                     return
+                if self._candidate_backend in _LSH_SIGN_DOT_BACKENDS and self._lsh_index is not None:
+                    self._expire_lsh_index()
+                    return
                 if (
                     len(old_partition) >= 6
                     and self._candidate_backend == "bptree"
@@ -10452,13 +13964,22 @@ class Candidates:
                 for key in old_partition:
                     self.sketches.pop(key, None)
                     self._reverse_entry_ids.pop(key, None)
+                    self._release_window_idx(key)
                 self._expire_blocked_lazy_index()
                 return
             if self._candidate_backend in _INSTINCT_INDEX_BACKENDS and self._instinct_index is not None:
                 for key in old_partition:
                     self.sketches.pop(key, None)
                     self._reverse_entry_ids.pop(key, None)
+                    self._release_window_idx(key)
                 self._expire_instinct_index()
+                return
+            if self._candidate_backend in _LSH_SIGN_DOT_BACKENDS and self._lsh_index is not None:
+                for key in old_partition:
+                    self.sketches.pop(key, None)
+                    self._reverse_entry_ids.pop(key, None)
+                    self._release_window_idx(key)
+                self._expire_lsh_index()
                 return
             for k, v in old_partition.items():
                 if len(v) >= 3:
@@ -10622,8 +14143,66 @@ class Candidates:
         self._candidate_arrays_cache_version = cache_version
         return result
 
+    def _increment_candidates_brute_force(self, numeric_rows=True):
+        """(2026-07-30) Genuine, unconditional brute-force candidate
+        enumeration -- no representation, index, similarity gate, or
+        threshold of any kind. Every entry inserted this step ("recent")
+        is paired against every currently-alive entry with a matching
+        window size; recent-recent pairs are deduped (kept once, when the
+        larger index is the outer-loop entry) since old-alive entries are
+        never re-paired with each other across steps (matching every other
+        backend's own "new vs alive" convention -- old-old pairs were
+        already covered in whichever earlier step both entries were
+        simultaneously "recent"). Correct by construction for ANY
+        validation_metric, unlike "flat" -- see docs/implementation_log.md's
+        2026-07-30(i) entry for why "flat" cannot be used as a non-Pearson
+        ground truth or wall-time reference."""
+        if not numeric_rows:
+            return
+        # (2026-07-30) Unlike the structured-index backends (lsh_sign_dot/
+        # bptree/instinct/blocked), "flat"'s own insertion path -- shared by
+        # "brute_force" since neither builds a special index -- never
+        # populates self._recent_entry_ids (that list is only appended to
+        # by the bptree branch of _input_tree). The correct "entries
+        # inserted this step" source here is self._recent_window_ids (a set
+        # of (sid, time, w) keys), resolved to array indices via
+        # self._window_idx -- confirmed by reading _input_tree directly
+        # rather than assuming _recent_entry_ids behaves the same way here.
+        recent = [
+            self._window_idx[k] for k in self._recent_window_ids if k in self._window_idx
+        ]
+        if not recent:
+            return
+        n_alive = len(self._win_sid_idx)
+        if n_alive == 0:
+            return
+        recent_set = set(recent)
+        win_sid_idx = self._win_sid_idx
+        win_time = self._win_time
+        win_w = self._win_w
+        rows = []
+        for i in recent:
+            wi = win_w[i]
+            for j in range(n_alive):
+                if j == i:
+                    continue
+                if j in recent_set and j < i:
+                    continue
+                if win_w[j] != wi:
+                    continue
+                rows.append((win_sid_idx[i], win_sid_idx[j], win_time[i], win_time[j], wi))
+        if rows:
+            self._candidate_numeric_rows = np.ascontiguousarray(
+                np.array(rows, dtype=np.int64).reshape((-1, 5))
+            )
+        else:
+            self._candidate_numeric_rows = np.empty((0, 5), dtype=np.int64)
+
     def _increment_candidates(self, freq_pairs, candidates, dist_pairs=None, numeric_rows=True):
         if not self._recent_window_ids:
+            return
+        if self._candidate_backend == "brute_force":
+            self._increment_candidates_brute_force(numeric_rows=numeric_rows)
             return
         tau = self._candidate_search_tau()
         if tau is None:
@@ -10744,6 +14323,52 @@ class Candidates:
             return
 
         if self._candidate_backend in _INSTINCT_INDEX_BACKENDS:
+            return
+
+        # (2026-07-08) SignLSHBandIndex -- candidate_selector Phase 6
+        # spike. Same dispatch shape as instinct_ready above (same
+        # insert_many/find_pair_rows_full_cosine[_signed] interface). See
+        # docs/implementation_log.md, "candidate_selector Phase 6
+        # diagnostic".
+        lsh_ready = (
+            self._candidate_backend in _LSH_SIGN_DOT_BACKENDS
+            and self._lsh_index is not None
+            and self.candidate_similarity == "cosine"
+            and self.candidate_cosine_threshold is not None
+            and self._recent_entry_ids
+            and len(self._win_sid) > 0
+            and len(self._win_time) == len(self._win_sid)
+            and len(self._win_w) == len(self._win_sid)
+            and len(self._win_sid_idx) == len(self._win_sid)
+        )
+
+        if lsh_ready:
+            row_finder = None
+            row_args = (
+                np.ascontiguousarray(self._recent_entry_ids, dtype=np.int64),
+                float(self.candidate_cosine_threshold),
+                float(tau),
+            )
+            if self.neg_corr and hasattr(self._lsh_index, "find_pair_rows_full_cosine_signed"):
+                row_finder = self._lsh_index.find_pair_rows_full_cosine_signed
+            elif hasattr(self._lsh_index, "find_pair_rows_full_cosine"):
+                row_finder = self._lsh_index.find_pair_rows_full_cosine
+            if row_finder is not None:
+                if numeric_rows and dist_pairs is None:
+                    t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
+                    self._candidate_numeric_rows = row_finder(*row_args)
+                    if t0 is not None:
+                        self._profile_add("cand.lsh_numeric_rows", time.perf_counter() - t0)
+                    self._profile_candidate_search_stats()
+                    return
+                if dist_pairs is None:
+                    rows = row_finder(*row_args)
+                    self._profile_candidate_search_stats()
+                    self._rows_to_global_maps(rows, freq_pairs, candidates)
+                    return
+            return
+
+        if self._candidate_backend in _LSH_SIGN_DOT_BACKENDS:
             return
 
         tree_ready = (
@@ -11065,6 +14690,93 @@ class Candidates:
         return freq_pairs, candidates, uncorrelated
 
 
+# (2026-09-04) Purely a defensive backstop against a genuinely infinite expansion loop (e.g. a
+# future bug in the growth-factor arithmetic) -- NOT the real gate on anchor-count expansion,
+# which is now proxy_max_pair_rows (a real resource budget) checked directly in
+# _get_proxy_anchor_optim_params. Set generously high specifically so it never binds in normal
+# operation.
+_MAX_ANCHOR_EXPANSION_SAFETY_ROUNDS = 20
+
+
+def estimate_proxy_pairs_per_anchor(n_series, n_lags, window_step):
+    """Exact size of ONE proxy-anchor's own local candidate-pair universe: every other
+    series at the anchor's own position (n_series*(n_series-1)/2, same-window pairs) plus
+    every series-pair across the (lag_count-1) additional lagged history positions that
+    anchor also compares against. Matches CorrTrack_optimize._prepare_proxy_anchor_reference's
+    own construction exactly (extracted here so a caller can size OPTIM_PROXY_MAX_PAIR_ROWS
+    for a real (m, L) BEFORE building the reference, rather than discovering after the fact
+    that the anchor count got silently truncated)."""
+    n_series = max(0, int(n_series))
+    lag_count = max(1, int(n_lags) // max(1, int(window_step)) + 1)
+    est = int(n_series * (n_series - 1) / 2) + int(n_series * n_series * max(lag_count - 1, 0))
+    return max(1, est)
+
+
+def estimate_proxy_series_subsample_cap(n_series_total, n_lags, window_step, budget):
+    """(2026-09-08) Largest series count whose OWN single-anchor pair universe
+    (estimate_proxy_pairs_per_anchor) still fits `budget` -- binary search over that exact
+    formula. Module-level (not just CorrTrack_optimize._proxy_series_subsample_cap, which
+    delegates here) so a CALLER can also know the EFFECTIVE, post-subsampling series count
+    before it builds a CorrTrack_optimize instance -- needed to size proxy_max_pair_rows/
+    anchor_count off the cost subsampling will ACTUALLY produce, not the true, pre-subsampling
+    n_series (which would needlessly under-budget anchors once subsampling has already made
+    each one far cheaper than that stale estimate assumes). Returns n_series_total unchanged
+    whenever it already fits."""
+    n_series_total = int(n_series_total)
+    budget = float(budget)
+    if n_series_total <= 2 or budget <= 0:
+        return n_series_total
+    if estimate_proxy_pairs_per_anchor(n_series_total, n_lags, window_step) <= budget:
+        return n_series_total
+    lo, hi = 2, n_series_total
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if estimate_proxy_pairs_per_anchor(mid, n_lags, window_step) <= budget:
+            lo = mid
+        else:
+            hi = mid - 1
+    return max(2, lo)
+
+
+def recommend_proxy_pair_row_budget(n_series, n_lags, window_step, max_anchor_count=256,
+                                     hard_ceiling=20_000_000):
+    """(2026-09-03) Replaces a flat, fixed OPTIM_PROXY_MAX_PAIR_ROWS guess with one sized to
+    the REAL (m, L) at hand. The old fixed default (50,000) affords less than one full
+    anchor's own pair universe at m=150, L=32 (~709K pairs/anchor) -- silently truncating the
+    proxy hyperopt's own statistical power down to a single, unreliable anchor with no
+    warning beyond a generic 'anchors were truncated' note.
+
+    Sizes for max_anchor_count (the ADAPTIVE ceiling _prepare_proxy_anchor_reference can grow
+    into when underpowered), not just the initial requested anchor_count -- previously the
+    adaptive-expansion safety net could be entirely inert whenever max_pair_rows was already
+    the binding constraint (observed directly: an expansion log line fired, anchor count
+    stayed unchanged, because the row cap never moved).
+
+    hard_ceiling bounds this explicitly so a large (m, L) degrades GRACEFULLY -- fewer anchors
+    actually used, via the existing capped_anchor_count logic -- instead of scaling
+    unboundedly. This matters for real memory, not just wall-clock time: each pair row is a
+    handful of plain Python objects (a normalized key tuple, an anchor id, a bool, a sign int)
+    during reference construction, before anything is packed into compact numpy arrays.
+    Default 20,000,000 was chosen because 10,000,000 rows (half this budget) built its
+    reference and ran a full 24-combo proxy-anchor hyperopt sweep in ~5 minutes wall-clock in
+    this project's own testing -- a real, checked data point, not a guess -- leaving headroom
+    for the full 256-anchor ceiling at moderate (m, L) while still bounding worst-case cost at
+    large (m, L). Raise or lower it based on your own available memory/time budget; nothing
+    about its value is derived from theory, unlike est_pairs_per_anchor itself.
+
+    Returns (max_pair_rows, est_pairs_per_anchor, anchors_affordable) -- the last value says
+    how many anchors this budget actually buys at this (m, L), which is worth logging: if it's
+    well below max_anchor_count, the hard_ceiling (not the anchor target) is the thing
+    limiting statistical power for this problem size, and that's a real, visible trade-off,
+    not a silent one.
+    """
+    est = estimate_proxy_pairs_per_anchor(n_series, n_lags, window_step)
+    ideal = int(max_anchor_count) * est
+    budget = min(ideal, int(hard_ceiling))
+    anchors_affordable = max(1, budget // est)
+    return budget, est, anchors_affordable
+
+
 class CorrTrack_optimize:
     def __init__(
         self,
@@ -11080,10 +14792,7 @@ class CorrTrack_optimize:
         corr_val,
         exec="parallel",
         max_workers=0,
-        sketch_norm="z",
-        candidate_bucket_width=None,
-        candidate_block_size_steps=None,
-        candidate_block_index_dims=None,
+        sketch_norm="mean_l2",
         candidate_similarity="l2",
         candidate_cosine_threshold=None,
         candidate_parallel_mode="recent_shards",
@@ -11093,16 +14802,13 @@ class CorrTrack_optimize:
         candidate_ann_m=None,
         candidate_ann_z=None,
         candidate_ann_ef=None,
-        candidate_bound_dims=None,
-        candidate_bound_dim_selection="variance",
-        enable_block_ub_pruning=False,
-        enable_row_ub_pruning=False,
-        block_similarity_assignment=False,
-        max_open_blocks=4,
-        candidate_instinct_query_mode="hybrid",
-        candidate_instinct_top_k=256,
-        candidate_instinct_min_candidates=64,
-        candidate_instinct_entry_points=8,
+        candidate_lsh_n_bands=64,
+        candidate_lsh_target_occupancy=3.0,
+        candidate_apply_dot_gamma_filter=True,
+        candidate_hamming_threshold=None,
+        candidate_apply_hamming_filter=True,
+        candidate_hamming_filter_max_frac=0.40,
+        candidate_lsh_max_candidates_per_query=0,
         hybrid_validation=False,
         hybrid_validation_min_repeat_rate=0.25,
         hybrid_validation_disable_rate=None,
@@ -11125,30 +14831,28 @@ class CorrTrack_optimize:
 
         self.neg_corr = neg_corr
         self.corr_val = False
-        self.sketch_norm = sketch_norm or "z"
-        self.candidate_bucket_width = _to_float_safe(candidate_bucket_width)
-        block_steps = _to_int_safe(candidate_block_size_steps)
-        if block_steps is None or block_steps <= 0:
-            block_steps = 32
-        self.candidate_block_size_steps = int(block_steps)
-        block_dims = _to_int_safe(candidate_block_index_dims)
-        if block_dims is None or block_dims <= 0:
-            block_dims = 1
-        self.candidate_block_index_dims = int(block_dims)
+        self.sketch_norm = sketch_norm or "mean_l2"
         # (2026-07-06) Part 1 -- see docs/implementation_log.md.
-        bound_dims_val = _to_int_safe(candidate_bound_dims)
-        self.candidate_bound_dims = max(0, bound_dims_val) if bound_dims_val is not None else 0
-        self.candidate_bound_dim_selection = str(candidate_bound_dim_selection or "variance").lower()
-        self.enable_block_ub_pruning = bool(enable_block_ub_pruning)
-        self.enable_row_ub_pruning = bool(enable_row_ub_pruning)
-        self.block_similarity_assignment = bool(block_similarity_assignment)
-        self.max_open_blocks = max(1, _to_int_safe(max_open_blocks) or 4)
         # (2026-07-06) InstinctIndex candidate_backend params -- see
         # docs/implementation_log.md. Approximate, opt-in backend only.
-        self.candidate_instinct_query_mode = str(candidate_instinct_query_mode or "hybrid").lower()
-        self.candidate_instinct_top_k = max(1, _to_int_safe(candidate_instinct_top_k) or 256)
-        self.candidate_instinct_min_candidates = max(1, _to_int_safe(candidate_instinct_min_candidates) or 64)
-        self.candidate_instinct_entry_points = max(1, _to_int_safe(candidate_instinct_entry_points) or 8)
+        # (2026-07-08) SignLSHBandIndex candidate_backend params -- see
+        # docs/implementation_log.md, "candidate_selector Phase 6
+        # diagnostic". Exact backend, opt-in only.
+        self.candidate_lsh_n_bands = max(1, _to_int_safe(candidate_lsh_n_bands) or 64)
+        _lsh_occ_val = _to_float_safe(candidate_lsh_target_occupancy)
+        self.candidate_lsh_target_occupancy = float(_lsh_occ_val) if _lsh_occ_val and _lsh_occ_val > 0 else 3.0
+        self.candidate_apply_dot_gamma_filter = _coerce_to_bool(candidate_apply_dot_gamma_filter, default=True)
+        # (2026-07-13) HammingExactIndex ("lsh_hamming_exact") -- None means
+        # auto-derive; inert for other backends.
+        self.candidate_hamming_threshold = _to_int_safe(candidate_hamming_threshold)
+        # (2026-07-21) SignLSHBandIndex Hamming pre-filter / budget cap and
+        # InstinctIndex navigation-proxy -- both opt-in, default off. See
+        # docs/implementation_log.md's 2026-07-21(a)/(b) entries.
+        self.candidate_apply_hamming_filter = _coerce_to_bool(candidate_apply_hamming_filter, default=False)
+        frac_val = _to_float_safe(candidate_hamming_filter_max_frac)
+        self.candidate_hamming_filter_max_frac = max(0.0, min(1.0, float(frac_val))) if frac_val is not None else 0.40
+        max_cand_val = _to_int_safe(candidate_lsh_max_candidates_per_query)
+        self.candidate_lsh_max_candidates_per_query = max(0, int(max_cand_val)) if max_cand_val is not None else 0
         self.candidate_similarity = _resolve_candidate_similarity(candidate_similarity, default="l2")
         self.candidate_cosine_threshold = _to_float_safe(candidate_cosine_threshold)
         self.candidate_parallel_mode = "recent_shards"
@@ -11214,13 +14918,9 @@ class CorrTrack_optimize:
             default=True,
         )
         self.corrtrack_bf = CorrTrack(window_size=self.window_size,basic_window=None,window_step=window_step,n_vectors=1,n_lags=self.n_lags,
-                                    grid_dimension=1,cell_size=1,seed=None,seed_toggle=None,corr_threshold=self.corr_threshold,
+                                    seed=None,seed_toggle=None,corr_threshold=self.corr_threshold,
                                     neg_corr=self.neg_corr,preprocess=False,exec=self.exec,max_workers=self.max_workers,
-                                    sketch_norm=self.sketch_norm,candidate_parallel_mode=self.candidate_parallel_mode,
-                                    candidate_bucket_width=self.candidate_bucket_width,
-                                    candidate_block_size_steps=self.candidate_block_size_steps,
-                                    candidate_block_index_dims=self.candidate_block_index_dims,
-                                    candidate_similarity=self.candidate_similarity,
+                                    candidate_parallel_mode=self.candidate_parallel_mode,
                                     candidate_cosine_threshold=self.candidate_cosine_threshold,
                                     candidate_lsh_radius=self.candidate_lsh_radius,
                                     candidate_ann_m=self.candidate_ann_m,
@@ -11249,6 +14949,25 @@ class CorrTrack_optimize:
         self.proxy_max_pair_rows = max(
             1,
             _to_int_safe(self.proxy_config.get("max_pair_rows")) or 250000,
+        )
+        # (2026-09-08) Bounds the SERIES count _prepare_proxy_anchor_reference uses to build
+        # its ground-truth reference, independent of proxy_max_pair_rows (which bounds total
+        # rows across anchors, not the per-anchor series universe itself). Reference
+        # construction cost is quadratic in series count (same reason full brute force is);
+        # a real dataset can have far more series than a single anchor's ground-truth
+        # computation can afford. gamma/occupancy calibration doesn't need every series --
+        # their optimal values depend on corr_threshold/n_vectors/data characteristics, not on
+        # how many series exist -- so when n_series exceeds what this budget affords, a
+        # STRATIFIED (not uniform-random) subsample is used instead, chosen to span the
+        # dataset's own diversity of series behavior (variance/kurtosis/autocorrelation) rather
+        # than risk a random draw missing a rare-but-real behavior type. n_bands itself is
+        # UNAFFECTED by this -- it's sized analytically for the true, full n_series elsewhere
+        # (compute_lsh_sizing), never from this subsample. See
+        # _proxy_series_subsample_cap/_proxy_stratified_series_sample and
+        # docs/implementation_log.md's 2026-09-08 entry.
+        self.proxy_series_subsample_max_pairs = max(
+            1,
+            _to_int_safe(self.proxy_config.get("series_subsample_max_pairs")) or 3_000_000,
         )
         self.proxy_random_seed = _to_int_safe(self.proxy_config.get("random_seed"))
         if self.proxy_random_seed is None:
@@ -11314,11 +15033,12 @@ class CorrTrack_optimize:
             1,
             _to_int_safe(self.proxy_config.get("timing_repeats")) or 3,
         )
-        # Relative tolerance defining "reasonably close" to the best
-        # achievable candidate rate among feasible configs: within this
-        # fraction, real measured execution time breaks the tie instead of
-        # further candidate-count refinements. Candidate-count minimization
-        # remains the dominant objective outside this tolerance.
+        # (2026-09-04) No longer read by _apply_proxy_anchor_selection -- the near/far
+        # candidate-rate-tolerance split this governed was replaced by n_bands-primary ranking
+        # (exact integer, no "how close counts as tied" tolerance needed the way a noisy
+        # candidate-rate measurement did). Kept as a harmless, accepted (but inert) config key
+        # for now, rather than a wider cross-file removal not otherwise in scope this round --
+        # see docs/implementation_log.md's 2026-09-04 entry.
         self.proxy_candidate_rate_close_tolerance = max(
             0.0,
             _to_float_safe(self.proxy_config.get("candidate_rate_close_tolerance")) or 0.05,
@@ -11420,67 +15140,49 @@ class CorrTrack_optimize:
         record["preprocess"] = param_combo.get("preprocess")
         record["sketch_norm"] = param_combo.get("sketch_norm")
         record["candidate_backend"] = param_combo.get("candidate_backend")
-        record["candidate_bucket_width"] = param_combo.get(
-            "candidate_bucket_width",
-            self.candidate_bucket_width,
+        record["validation_metric"] = param_combo.get("validation_metric")
+        record["candidate_lsh_n_bands"] = param_combo.get(
+            "candidate_lsh_n_bands",
+            self.candidate_lsh_n_bands,
         )
-        record["candidate_block_size_steps"] = param_combo.get(
-            "candidate_block_size_steps",
-            self.candidate_block_size_steps,
+        record["candidate_apply_dot_gamma_filter"] = param_combo.get(
+            "candidate_apply_dot_gamma_filter",
+            self.candidate_apply_dot_gamma_filter,
         )
-        record["candidate_block_index_dims"] = param_combo.get(
-            "candidate_block_index_dims",
-            self.candidate_block_index_dims,
+        record["candidate_hamming_threshold"] = param_combo.get(
+            "candidate_hamming_threshold",
+            self.candidate_hamming_threshold,
         )
-        # (2026-07-06) Part 1 -- see docs/implementation_log.md.
-        record["candidate_bound_dims"] = param_combo.get(
-            "candidate_bound_dims",
-            self.candidate_bound_dims,
+        record["candidate_apply_hamming_filter"] = param_combo.get(
+            "candidate_apply_hamming_filter",
+            self.candidate_apply_hamming_filter,
         )
-        record["candidate_bound_dim_selection"] = param_combo.get(
-            "candidate_bound_dim_selection",
-            self.candidate_bound_dim_selection,
+        record["candidate_hamming_filter_max_frac"] = param_combo.get(
+            "candidate_hamming_filter_max_frac",
+            self.candidate_hamming_filter_max_frac,
         )
-        record["enable_block_ub_pruning"] = param_combo.get(
-            "enable_block_ub_pruning",
-            self.enable_block_ub_pruning,
-        )
-        record["enable_row_ub_pruning"] = param_combo.get(
-            "enable_row_ub_pruning",
-            self.enable_row_ub_pruning,
-        )
-        record["block_similarity_assignment"] = param_combo.get(
-            "block_similarity_assignment",
-            self.block_similarity_assignment,
-        )
-        record["max_open_blocks"] = param_combo.get(
-            "max_open_blocks",
-            self.max_open_blocks,
-        )
-        record["candidate_instinct_query_mode"] = param_combo.get(
-            "candidate_instinct_query_mode",
-            self.candidate_instinct_query_mode,
-        )
-        record["candidate_instinct_top_k"] = param_combo.get(
-            "candidate_instinct_top_k",
-            self.candidate_instinct_top_k,
-        )
-        record["candidate_instinct_min_candidates"] = param_combo.get(
-            "candidate_instinct_min_candidates",
-            self.candidate_instinct_min_candidates,
-        )
-        record["candidate_instinct_entry_points"] = param_combo.get(
-            "candidate_instinct_entry_points",
-            self.candidate_instinct_entry_points,
+        record["candidate_lsh_max_candidates_per_query"] = param_combo.get(
+            "candidate_lsh_max_candidates_per_query",
+            self.candidate_lsh_max_candidates_per_query,
         )
         record["candidate_similarity"] = param_combo.get(
             "candidate_similarity",
             getattr(self, "candidate_similarity", "l2"),
         )
-        record["candidate_cosine_threshold"] = param_combo.get(
+        _rec_gamma = param_combo.get(
             "candidate_cosine_threshold",
             getattr(self, "candidate_cosine_threshold", None),
         )
+        # (2026-09-10) When the grid sweeps candidate_cosine_threshold_offset instead of an
+        # absolute gamma, log the resolved gamma (corr_threshold - offset) so the trial CSV
+        # still records what the retrieval gate actually was.
+        _rec_offset = param_combo.get("candidate_cosine_threshold_offset")
+        if _rec_gamma is None and _rec_offset is not None:
+            _rec_off_val = _to_float_safe(_rec_offset)
+            if _rec_off_val is not None:
+                _rec_gamma = max(-1.0, min(1.0, float(self.corr_threshold) - float(_rec_off_val)))
+        record["candidate_cosine_threshold"] = _rec_gamma
+        record["candidate_cosine_threshold_offset"] = _to_float_safe(_rec_offset)
         record["candidate_parallel_mode"] = param_combo.get("candidate_parallel_mode", self.candidate_parallel_mode)
         record["candidate_key_mode"] = param_combo.get("candidate_key_mode", self.candidate_key_mode)
         record["candidate_key_seed"] = param_combo.get("candidate_key_seed", self.candidate_key_seed)
@@ -11633,6 +15335,75 @@ class CorrTrack_optimize:
             return (id2, id1, t2, t1, w)
         return (id1, id2, t1, t2, w)
 
+    def _proxy_series_subsample_cap(self, n_series_total):
+        """Thin instance wrapper over the module-level estimate_proxy_series_subsample_cap
+        (a caller building proxy_config can also call that function directly, before ever
+        constructing this class, to size anchor_count/max_pair_rows off the SAME effective,
+        post-subsampling series count this method will actually use)."""
+        return estimate_proxy_series_subsample_cap(
+            n_series_total, self.n_lags, self.window_step, self.proxy_series_subsample_max_pairs,
+        )
+
+    def _proxy_stratified_series_sample(self, values_full, cap):
+        """Picks `cap` of the available series, spanning their DIVERSITY of behavior instead of
+        drawing uniformly at random -- real datasets can have heterogeneous series (different
+        noise levels, trend structure, spikiness), and a random draw has no guarantee of
+        covering rare-but-real behavior types the way a diversity-aware selection does.
+
+        Method: compute three cheap, O(n_series) summary statistics per series (variance,
+        kurtosis, lag-1 autocorrelation -- the first two using the exact same formulas
+        _proxy_window_is_valid's own is_near_constant/is_structurally_spiked check use, for
+        consistency), rank each series within each statistic (percentile rank), average the
+        three ranks into one composite diversity score, sort series by that score, then take an
+        evenly-SPACED systematic sample across the sorted axis -- so the selected subset spans
+        the full range of observed behavior instead of clustering near whatever a random draw
+        happened to land on. This is a real, disclosed heuristic (collapsing 3 dimensions into
+        1 composite score can still miss some multi-axis diversity a full 3D stratification
+        would catch) chosen for simplicity within a hard deadline, not presented as an exact
+        or exhaustive diversity guarantee -- see docs/implementation_log.md's 2026-09-08 entry
+        for the one-off validation exercise checking whether this actually matters in practice.
+        """
+        n_total = int(values_full.shape[0])
+        if cap >= n_total:
+            return np.arange(n_total, dtype=np.int64)
+
+        mean = values_full.mean(axis=1)
+        centered = values_full - mean[:, None]
+        var = np.mean(centered * centered, axis=1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            mu4 = np.mean(centered ** 4, axis=1)
+            var_safe = np.where(var > 0, var, 1.0)
+            kurt = np.where(var > 0, mu4 / (var_safe * var_safe) - 3.0, 0.0)
+            n_lag_cols = max(1, centered.shape[1] - 1)
+            x0 = centered[:, :-1] if centered.shape[1] > 1 else centered[:, :0]
+            x1 = centered[:, 1:] if centered.shape[1] > 1 else centered[:, :0]
+            denom = var_safe * n_lag_cols
+            lag1 = np.where(var > 0, np.sum(x0 * x1, axis=1) / denom, 0.0)
+
+        def _percentile_rank(x):
+            order = np.argsort(x, kind="mergesort")
+            ranks = np.empty(x.shape[0], dtype=np.float64)
+            ranks[order] = np.arange(x.shape[0], dtype=np.float64)
+            denom_r = max(1, x.shape[0] - 1)
+            return ranks / denom_r
+
+        composite = (_percentile_rank(var) + _percentile_rank(kurt) + _percentile_rank(lag1)) / 3.0
+        order = np.argsort(composite, kind="mergesort")
+
+        rng = np.random.default_rng(int(self.proxy_random_seed))
+        step = n_total / float(cap)
+        start = rng.uniform(0.0, step)
+        positions = np.clip(np.floor(start + step * np.arange(cap)).astype(np.int64), 0, n_total - 1)
+        picks = np.unique(positions)
+        if picks.size < cap:
+            remaining_pool = np.setdiff1d(np.arange(n_total, dtype=np.int64), picks)
+            extra_needed = min(cap - picks.size, remaining_pool.size)
+            if extra_needed > 0:
+                extra = rng.choice(remaining_pool, size=extra_needed, replace=False)
+                picks = np.union1d(picks, extra)
+        picks = picks[:cap]
+        return np.sort(order[picks].astype(np.int64))
+
     def _prepare_proxy_anchor_reference(self):
         """Build the sampled anchor/pair truth table for proxy hyperopt.
 
@@ -11643,9 +15414,9 @@ class CorrTrack_optimize:
         computed once and reused for every sketch hyperparameter setting.
         """
 
-        n_series = max(0, int(self.train_data.shape[0]) - 1)
+        n_series_total = max(0, int(self.train_data.shape[0]) - 1)
         length_data = int(self.train_data.shape[1]) if self.train_data is not None else 0
-        if n_series <= 1:
+        if n_series_total <= 1:
             raise ValueError("Proxy-anchor hyperopt requires at least two series")
         max_start = length_data - int(self.window_size)
         if max_start < 0:
@@ -11657,10 +15428,32 @@ class CorrTrack_optimize:
         full_history_starts = [start for start in all_starts if start >= int(self.n_lags)]
         candidate_anchors = full_history_starts or all_starts
 
-        lag_count = max(1, int(self.n_lags // self.window_step) + 1)
-        est_pairs_per_anchor = int(n_series * (n_series - 1) / 2) + int(n_series * n_series * max(lag_count - 1, 0))
-        if est_pairs_per_anchor <= 0:
-            est_pairs_per_anchor = 1
+        proxy_ids_full = self._proxy_ids()
+        values_full = np.asarray(self.train_data[1 : 1 + n_series_total, :], dtype=np.float64)
+        window_size = int(self.window_size)
+
+        # (2026-09-08) Subsample series for calibration when the full population would make
+        # even ONE anchor's own pair universe impractical -- see proxy_series_subsample_max_
+        # pairs' own field comment and _proxy_stratified_series_sample's docstring for the full
+        # rationale (gamma/occupancy don't depend on series count; a real, heterogeneous
+        # dataset's diversity is preserved via stratified, not uniform-random, selection).
+        # n_bands itself is NOT sized from this subsample -- it's derived analytically for the
+        # TRUE n_series_total elsewhere (compute_lsh_sizing), so recall guarantees at real scale
+        # are unaffected by subsampling calibration.
+        subsample_cap = self._proxy_series_subsample_cap(n_series_total)
+        if subsample_cap < n_series_total:
+            series_idx = self._proxy_stratified_series_sample(values_full, subsample_cap)
+            proxy_ids = [proxy_ids_full[int(i)] for i in series_idx]
+            values = values_full[series_idx]
+        else:
+            proxy_ids = proxy_ids_full
+            values = values_full
+        n_series = int(values.shape[0])
+
+        # (2026-09-03) Extracted to estimate_proxy_pairs_per_anchor (module-level, above this
+        # class) so a caller can size proxy_max_pair_rows for the real (m, L) BEFORE building
+        # this reference -- see recommend_proxy_pair_row_budget's docstring.
+        est_pairs_per_anchor = estimate_proxy_pairs_per_anchor(n_series, self.n_lags, self.window_step)
         capped_anchor_count = max(1, int(self.proxy_max_pair_rows // est_pairs_per_anchor))
         anchor_count = min(
             int(self.proxy_anchor_count_requested),
@@ -11676,24 +15469,49 @@ class CorrTrack_optimize:
         else:
             anchor_starts = sorted(int(x) for x in candidate_anchors)
 
-        proxy_ids = self._proxy_ids()
-        values = np.asarray(self.train_data[1 : 1 + n_series, :], dtype=np.float64)
-        window_cache = {}
-        valid_cache = {}
+        # (2026-09-08) Vectorized replica of _proxy_window_is_valid/get_window -- a real,
+        # measured bottleneck fix, not a cosmetic one: cProfile on a real 438,675-pair
+        # reference showed the per-pair Python loop (calling _fast_corr_and_dist and
+        # is_valid/get_window once per CANDIDATE PAIR, i.e. O(n_series^2 * L) times) spending
+        # only 18% of its time in the correlation math itself -- the rest was Python-level
+        # loop/dict/call overhead. is_valid/get_window only ever depend on (series, start_idx),
+        # not on which pair is being considered, so this computes each one ONCE per unique
+        # start_idx, for every series at once (numpy), instead of once per pair with a
+        # per-pair dict-lookup as before -- same caching CONTRACT the old code already had
+        # (results reused across anchors/s_current), just computed eagerly and in bulk.
+        # Formulas match CorrTrack.is_near_constant/is_structurally_spiked's own
+        # (std_thresh=1e-3, kurt_thresh=5.0 -- the same hardcoded defaults
+        # _proxy_window_is_valid itself calls with) EXACTLY -- verified bit-for-bit against
+        # the original per-window implementation before trusting this at scale.
+        _std_thresh = 1e-3
+        _kurt_thresh = 5.0
+        valid_mask_cache = {}
 
-        def get_window(series_idx, start_idx):
-            key = (int(series_idx), int(start_idx))
-            cached = window_cache.get(key)
-            if cached is None:
-                cached = values[int(series_idx), int(start_idx) : int(start_idx) + int(self.window_size)]
-                window_cache[key] = cached
-            return cached
-
-        def is_valid(series_idx, start_idx):
-            key = (int(series_idx), int(start_idx))
-            if key not in valid_cache:
-                valid_cache[key] = self._proxy_window_is_valid(get_window(series_idx, start_idx))
-            return bool(valid_cache[key])
+        def get_validity_mask(start_idx):
+            start_idx = int(start_idx)
+            cached = valid_mask_cache.get(start_idx)
+            if cached is not None:
+                return cached
+            block = values[:, start_idx : start_idx + window_size]
+            if block.shape[1] == 0:
+                mask = np.zeros(n_series, dtype=bool)
+                valid_mask_cache[start_idx] = mask
+                return mask
+            mean = block.mean(axis=1)
+            centered = block - mean[:, None]
+            var_sum = np.sum(centered * centered, axis=1)
+            near_const = var_sum <= (_std_thresh ** 2) * window_size
+            spiked = np.zeros(n_series, dtype=bool)
+            if window_size >= 4:
+                var = var_sum / window_size
+                can_check = var_sum > 0.0
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    mu4 = np.sum(centered ** 4, axis=1)
+                    kurt = (mu4 / window_size) / (var * var) - 3.0
+                spiked = can_check & (kurt > _kurt_thresh)
+            mask = ~near_const & ~spiked
+            valid_mask_cache[start_idx] = mask
+            return mask
 
         anchors = []
         pair_keys = []
@@ -11703,6 +15521,9 @@ class CorrTrack_optimize:
         key_to_indices = defaultdict(list)
         unique_starts = set()
         max_rows_reached = False
+        neg_corr = bool(self.neg_corr)
+        corr_threshold = float(self.corr_threshold)
+        _batch_corr = _cy_fast_corr_and_dist_batch
 
         for anchor_id, anchor_start in enumerate(anchor_starts):
             min_lag_start = max(0, int(anchor_start) - int(self.n_lags))
@@ -11722,48 +15543,78 @@ class CorrTrack_optimize:
             for start in lag_starts:
                 unique_starts.add(int(start))
 
+            x_block = values[:, anchor_start : anchor_start + window_size]
+            valid_current = get_validity_mask(anchor_start)
+            # Precompute once per anchor, shared across every s_current below -- matches the
+            # old code's own caching contract (is_valid(s_other, lag_start) never depended on
+            # s_current), just computed eagerly instead of lazily.
+            y_blocks = {ls: values[:, ls : ls + window_size] for ls in lag_starts}
+            valid_other_by_lag = {ls: get_validity_mask(ls) for ls in lag_starts}
+            anchor_time = self._proxy_start_time(anchor_start)
+            lag_times = {ls: self._proxy_start_time(ls) for ls in lag_starts}
+
             for s_current in range(n_series):
-                if not is_valid(s_current, anchor_start):
+                if not valid_current[s_current]:
                     continue
-                x = get_window(s_current, anchor_start)
+                y_row_chunks = []
+                so_chunks = []
+                lag_chunks = []
                 for lag_start in lag_starts:
-                    for s_other in range(n_series):
-                        if lag_start == anchor_start and s_other <= s_current:
-                            continue
-                        if not is_valid(s_other, lag_start):
-                            continue
-                        y = get_window(s_other, lag_start)
-                        corr, _dist = _fast_corr_and_dist(x, y)
-                        if not np.isfinite(corr):
-                            gt = False
-                            sign = 0
-                        elif self.neg_corr and corr <= -float(self.corr_threshold):
-                            gt = True
-                            sign = -1
-                        elif corr >= float(self.corr_threshold):
-                            gt = True
-                            sign = 1
-                        else:
-                            gt = False
-                            sign = 0
-                        pair_key = self._normalize_window_pair_key(
-                            (
-                                proxy_ids[s_current],
-                                proxy_ids[s_other],
-                                self._proxy_start_time(anchor_start),
-                                self._proxy_start_time(lag_start),
-                                int(self.window_size),
-                            )
+                    so_idx = np.nonzero(valid_other_by_lag[lag_start])[0]
+                    if lag_start == anchor_start:
+                        so_idx = so_idx[so_idx > s_current]
+                    if so_idx.size == 0:
+                        continue
+                    y_row_chunks.append(y_blocks[lag_start][so_idx])
+                    so_chunks.append(so_idx)
+                    lag_chunks.append(np.full(so_idx.shape[0], lag_start, dtype=np.int64))
+                if not y_row_chunks:
+                    continue
+
+                y_rows = np.ascontiguousarray(np.concatenate(y_row_chunks, axis=0))
+                so_flat = np.concatenate(so_chunks)
+                lag_flat = np.concatenate(lag_chunks)
+                x_rows = np.ascontiguousarray(np.repeat(x_block[s_current][None, :], y_rows.shape[0], axis=0))
+
+                if _batch_corr is not None:
+                    corr_arr, _dist_arr = _batch_corr(x_rows, y_rows)
+                else:  # pragma: no cover -- compiled extension always present in this project
+                    corr_arr = np.array([_fast_corr_and_dist(x_rows[i], y_rows[i])[0] for i in range(y_rows.shape[0])])
+
+                finite = np.isfinite(corr_arr)
+                pos_mask = finite & (corr_arr >= corr_threshold)
+                neg_mask = finite & neg_corr & (corr_arr <= -corr_threshold)
+
+                sid_current = proxy_ids[s_current]
+                for idx in range(y_rows.shape[0]):
+                    s_other = int(so_flat[idx])
+                    lag_start = int(lag_flat[idx])
+                    if pos_mask[idx]:
+                        gt, sign = True, 1
+                    elif neg_mask[idx]:
+                        gt, sign = True, -1
+                    else:
+                        gt, sign = False, 0
+                    pair_key = self._normalize_window_pair_key(
+                        (
+                            sid_current,
+                            proxy_ids[s_other],
+                            anchor_time,
+                            lag_times[lag_start],
+                            window_size,
                         )
-                        row_idx = len(pair_keys)
-                        pair_keys.append(pair_key)
-                        pair_anchor_ids.append(current_anchor_id)
-                        truth.append(bool(gt))
-                        truth_sign.append(int(sign))
-                        key_to_indices[pair_key].append(row_idx)
-                        if len(pair_keys) >= int(self.proxy_max_pair_rows):
-                            max_rows_reached = True
-                            break
+                    )
+                    row_idx = len(pair_keys)
+                    pair_keys.append(pair_key)
+                    pair_anchor_ids.append(current_anchor_id)
+                    truth.append(gt)
+                    truth_sign.append(sign)
+                    key_to_indices[pair_key].append(row_idx)
+                    if len(pair_keys) >= int(self.proxy_max_pair_rows):
+                        max_rows_reached = True
+                        break
+                if max_rows_reached:
+                    break
                     if max_rows_reached:
                         break
                 if max_rows_reached:
@@ -11838,14 +15689,29 @@ class CorrTrack_optimize:
         return partitions_by_start
 
     def _proxy_candidate_keys_for_anchor(self, corrtrack, partitions_by_start, anchor, feature_kwargs, return_stats=False):
+        # (2026-07-31) data_representation in {"sketch_concordance",
+        # "sketch_multichannel"} bypasses Candidates/grid_nodes entirely in
+        # the real run() (_run_concordance_multichannel/_run_distance_corr_
+        # sketch_multichannel) -- the grid_nodes-based path below cannot
+        # proxy for them at all: their grid_nodes are only ever built with
+        # the placeholder candidate_index_backend="brute_force" (never
+        # queried by the real run), so evaluating candidates via _run_grids
+        # here would always report "every pair is a candidate" regardless
+        # of any tuning parameter -- confirmed as the root cause of
+        # proxy-anchor hyperopt reporting ~100% candidate rate for every
+        # candidate_lsh_n_bands sweep value under validation_metric=
+        # "kendall"/"dist_corr". Delegate to a representation-aware sibling
+        # instead.
+        if corrtrack.concordance_multichannel_backend or corrtrack.distance_corr_sketch_multichannel_backend:
+            return self._proxy_multichannel_candidate_keys_for_anchor(
+                corrtrack, anchor, feature_kwargs, return_stats=return_stats,
+            )
         anchor_ct = CorrTrack(
             window_size=self.window_size,
             basic_window=corrtrack.basic_window,
             window_step=self.window_step,
             n_vectors=corrtrack.n_vectors,
             n_lags=self.n_lags,
-            grid_dimension=corrtrack.grid_dimension,
-            cell_size=corrtrack.cell_stretch,
             seed=corrtrack.seed,
             seed_toggle=corrtrack.seed_toggle,
             freq_threshold=(corrtrack.freq_threshold / corrtrack.n_grids if corrtrack.n_grids else 0),
@@ -11900,6 +15766,108 @@ class CorrTrack_optimize:
                 return (candidate_keys, search_stats) if return_stats else candidate_keys
         candidate_keys = set(anchor_ct.candidates.keys())
         return (candidate_keys, search_stats) if return_stats else candidate_keys
+
+    def _proxy_multichannel_candidate_keys_for_anchor(self, corrtrack, anchor, feature_kwargs, return_stats=False):
+        """(2026-07-31) Sibling to _proxy_candidate_keys_for_anchor for
+        data_representation in {"sketch_concordance", "sketch_multichannel"}
+        -- see the dispatch comment above for why the grid_nodes-based path
+        cannot proxy for these representations at all.
+
+        Builds a FRESH anchor_ct per anchor (same precedent as the
+        grid_nodes path), then for each of the anchor's lag_starts (in
+        chronological order) feeds that ONE window position's raw data as
+        a one-shot "first ever" window -- mirroring _proxy_partitions_for_
+        corrtrack's own fresh-Sketches-per-start_idx pattern -- and calls
+        the SAME real _run_concordance_multichannel/_run_distance_corr_
+        sketch_multichannel method the live run() uses. Not a
+        reimplementation of their retrieval math: the identical method, so
+        this can never silently diverge from real behavior. Only the
+        FINAL lag_start's resulting candidate rows are collected -- the
+        earlier calls exist purely to populate the multi-gap/multi-
+        channel index with historical entries to retrieve against,
+        mirroring the grid_nodes path's own "feed historical partitions
+        first, collect only the final step" discipline.
+
+        ConcordanceSketchState/DistanceCorrSketchState's own update()
+        only does a genuine incremental step (assuming true contiguous
+        continuity with whatever was fed last) once their ring buffers
+        already exist -- lag_starts are disjoint historical anchor points,
+        not a contiguous stream, so each one is forced to be treated as
+        that state's own "first ever" window by resetting window_data and
+        the sketch state's ring buffers before every lag_start.
+        """
+        anchor_ct = CorrTrack(
+            window_size=self.window_size,
+            basic_window=corrtrack.basic_window,
+            window_step=self.window_step,
+            n_vectors=corrtrack.n_vectors,
+            n_lags=self.n_lags,
+            seed=corrtrack.seed,
+            seed_toggle=corrtrack.seed_toggle,
+            corr_threshold=self.corr_threshold,
+            neg_corr=self.neg_corr,
+            preprocess=corrtrack.preprocess,
+            exec="sequential",
+            max_workers=self.max_workers,
+            parallel_sketch=False,
+            parallel_candidates=False,
+            parallel_validation=False,
+            track_min_dist=False,
+            **feature_kwargs,
+        )
+        proxy_ids = list(self._proxy_reference["proxy_ids"])
+        anchor_ct.series_ids = {sid: idx for idx, sid in enumerate(proxy_ids)}
+        lag_starts = [int(x) for x in anchor.get("lag_starts", [])]
+        if not lag_starts:
+            return (set(), self._empty_proxy_search_stats()) if return_stats else set()
+        final_start = int(anchor.get("start_idx", lag_starts[-1]))
+
+        is_concordance = bool(anchor_ct.concordance_multichannel_backend)
+        is_dist_corr = bool(anchor_ct.distance_corr_sketch_multichannel_backend)
+
+        final_rows = None
+        for start_idx in lag_starts:
+            start_idx = int(start_idx)
+            data_step = np.array(
+                self.train_data[:, start_idx:start_idx + int(self.window_size)],
+                dtype=object,
+                copy=True,
+            )
+            if data_step.shape[1] != self.window_size:
+                continue
+            data_step[0, :] = np.arange(
+                start_idx, start_idx + int(data_step.shape[1]), dtype=np.int64,
+            )
+            anchor_ct.window_data = None
+            if is_concordance and anchor_ct.concordance_state is not None:
+                anchor_ct.concordance_state._ring_buffers = None
+            if is_dist_corr and anchor_ct.distance_corr_sketch_state is not None:
+                anchor_ct.distance_corr_sketch_state._ring_buffers = None
+            anchor_ct._update_curr_data(data_step, proxy_ids)
+            if is_concordance:
+                anchor_ct._run_concordance_multichannel(verbose=False, testing=False)
+            elif is_dist_corr:
+                anchor_ct._run_distance_corr_sketch_multichannel(verbose=False, testing=False)
+            else:
+                continue
+            if start_idx == final_start:
+                final_rows = getattr(anchor_ct, "_candidate_numeric_rows", None)
+
+        search_stats = self._proxy_candidate_search_stats_for_corrtrack(anchor_ct)
+        if final_rows is not None:
+            rows = np.asarray(final_rows, dtype=np.int64).reshape((-1, 5))
+            if rows.size:
+                candidate_keys = set()
+                for sid1_idx, sid2_idx, t1, t2, w in rows:
+                    sid1_idx = int(sid1_idx)
+                    sid2_idx = int(sid2_idx)
+                    sid1 = proxy_ids[sid1_idx] if 0 <= sid1_idx < len(proxy_ids) else str(sid1_idx)
+                    sid2 = proxy_ids[sid2_idx] if 0 <= sid2_idx < len(proxy_ids) else str(sid2_idx)
+                    candidate_keys.add(
+                        self._normalize_window_pair_key((sid1, sid2, int(t1), int(t2), int(w)))
+                    )
+                return (candidate_keys, search_stats) if return_stats else candidate_keys
+        return (set(), search_stats) if return_stats else set()
 
     def _proxy_counts_by_anchor(self, reference, candidate_mask):
         truth = reference["truth"]
@@ -12201,20 +16169,14 @@ class CorrTrack_optimize:
             "candidate_ann_m": self.candidate_ann_m,
             "candidate_ann_z": self.candidate_ann_z,
             "candidate_ann_ef": self.candidate_ann_ef,
-            "candidate_bucket_width": self.candidate_bucket_width,
             "candidate_parallel_mode": self.candidate_parallel_mode,
-            "candidate_block_size_steps": self.candidate_block_size_steps,
-            "candidate_block_index_dims": self.candidate_block_index_dims,
-            "candidate_bound_dims": self.candidate_bound_dims,
-            "candidate_bound_dim_selection": self.candidate_bound_dim_selection,
-            "enable_block_ub_pruning": self.enable_block_ub_pruning,
-            "enable_row_ub_pruning": self.enable_row_ub_pruning,
-            "block_similarity_assignment": self.block_similarity_assignment,
-            "max_open_blocks": self.max_open_blocks,
-            "candidate_instinct_query_mode": self.candidate_instinct_query_mode,
-            "candidate_instinct_top_k": self.candidate_instinct_top_k,
-            "candidate_instinct_min_candidates": self.candidate_instinct_min_candidates,
-            "candidate_instinct_entry_points": self.candidate_instinct_entry_points,
+            "candidate_lsh_n_bands": self.candidate_lsh_n_bands,
+            "candidate_lsh_target_occupancy": self.candidate_lsh_target_occupancy,
+            "candidate_apply_dot_gamma_filter": self.candidate_apply_dot_gamma_filter,
+            "candidate_hamming_threshold": self.candidate_hamming_threshold,
+            "candidate_apply_hamming_filter": self.candidate_apply_hamming_filter,
+            "candidate_hamming_filter_max_frac": self.candidate_hamming_filter_max_frac,
+            "candidate_lsh_max_candidates_per_query": self.candidate_lsh_max_candidates_per_query,
             "candidate_similarity": self.candidate_similarity,
             "candidate_cosine_threshold": self.candidate_cosine_threshold,
             "hybrid_validation": self.hybrid_validation,
@@ -12232,8 +16194,6 @@ class CorrTrack_optimize:
             window_step=self.window_step,
             n_vectors=n_vectors,
             n_lags=self.n_lags,
-            grid_dimension=grid_dimension,
-            cell_size=cell_stretch,
             seed=seed,
             seed_toggle=seed_toggle,
             freq_threshold=freq_threshold,
@@ -12295,20 +16255,14 @@ class CorrTrack_optimize:
             "candidate_backend_effective",
             getattr(corrtrack, "candidate_backend", None),
         )
-        record["candidate_bucket_width"] = corrtrack.candidate_bucket_width
-        record["candidate_block_size_steps"] = corrtrack.candidate_block_size_steps
-        record["candidate_block_index_dims"] = corrtrack.candidate_block_index_dims
+        record["validation_metric"] = getattr(corrtrack, "validation_metric", None)
         # (2026-07-06) Part 1 -- see docs/implementation_log.md.
-        record["candidate_bound_dims"] = getattr(corrtrack, "candidate_bound_dims", None)
-        record["candidate_bound_dim_selection"] = getattr(corrtrack, "candidate_bound_dim_selection", None)
-        record["enable_block_ub_pruning"] = getattr(corrtrack, "enable_block_ub_pruning", None)
-        record["enable_row_ub_pruning"] = getattr(corrtrack, "enable_row_ub_pruning", None)
-        record["block_similarity_assignment"] = getattr(corrtrack, "block_similarity_assignment", None)
-        record["max_open_blocks"] = getattr(corrtrack, "max_open_blocks", None)
-        record["candidate_instinct_query_mode"] = getattr(corrtrack, "candidate_instinct_query_mode", None)
-        record["candidate_instinct_top_k"] = getattr(corrtrack, "candidate_instinct_top_k", None)
-        record["candidate_instinct_min_candidates"] = getattr(corrtrack, "candidate_instinct_min_candidates", None)
-        record["candidate_instinct_entry_points"] = getattr(corrtrack, "candidate_instinct_entry_points", None)
+        record["candidate_lsh_n_bands"] = getattr(corrtrack, "candidate_lsh_n_bands", None)
+        record["candidate_apply_dot_gamma_filter"] = getattr(corrtrack, "candidate_apply_dot_gamma_filter", None)
+        record["candidate_hamming_threshold"] = getattr(corrtrack, "candidate_hamming_threshold", None)
+        record["candidate_apply_hamming_filter"] = getattr(corrtrack, "candidate_apply_hamming_filter", None)
+        record["candidate_hamming_filter_max_frac"] = getattr(corrtrack, "candidate_hamming_filter_max_frac", None)
+        record["candidate_lsh_max_candidates_per_query"] = getattr(corrtrack, "candidate_lsh_max_candidates_per_query", None)
         record.update(_candidate_runtime_record_fields(corrtrack))
         record["candidate_parallel_mode"] = corrtrack.candidate_parallel_mode
         record["candidate_key_mode"] = corrtrack.candidate_key_mode
@@ -12477,6 +16431,7 @@ class CorrTrack_optimize:
         record["cand_w"] = metrics["cand_total"]
         record["speedup"] = _safe_div(metrics["total"], metrics["cand_total"])
         record["speedup_ceil"] = record["speedup"]
+        record["speedup_oracle"] = record["speedup"]
         record["rel_speedup_eff"] = 1.0
         record["corr_prop"] = _safe_div(metrics["gt_total"], metrics["total"])
         record["waste_val_bf"] = _safe_div(metrics["total"], metrics["gt_total"])
@@ -12687,19 +16642,13 @@ class CorrTrack_optimize:
             "candidate_ann_z": self.candidate_ann_z,
             "candidate_ann_ef": self.candidate_ann_ef,
             "candidate_parallel_mode": self.candidate_parallel_mode,
-            "candidate_bucket_width": self.candidate_bucket_width,
-            "candidate_block_size_steps": self.candidate_block_size_steps,
-            "candidate_block_index_dims": self.candidate_block_index_dims,
-            "candidate_bound_dims": self.candidate_bound_dims,
-            "candidate_bound_dim_selection": self.candidate_bound_dim_selection,
-            "enable_block_ub_pruning": self.enable_block_ub_pruning,
-            "enable_row_ub_pruning": self.enable_row_ub_pruning,
-            "block_similarity_assignment": self.block_similarity_assignment,
-            "max_open_blocks": self.max_open_blocks,
-            "candidate_instinct_query_mode": self.candidate_instinct_query_mode,
-            "candidate_instinct_top_k": self.candidate_instinct_top_k,
-            "candidate_instinct_min_candidates": self.candidate_instinct_min_candidates,
-            "candidate_instinct_entry_points": self.candidate_instinct_entry_points,
+            "candidate_lsh_n_bands": self.candidate_lsh_n_bands,
+            "candidate_lsh_target_occupancy": self.candidate_lsh_target_occupancy,
+            "candidate_apply_dot_gamma_filter": self.candidate_apply_dot_gamma_filter,
+            "candidate_hamming_threshold": self.candidate_hamming_threshold,
+            "candidate_apply_hamming_filter": self.candidate_apply_hamming_filter,
+            "candidate_hamming_filter_max_frac": self.candidate_hamming_filter_max_frac,
+            "candidate_lsh_max_candidates_per_query": self.candidate_lsh_max_candidates_per_query,
             "candidate_similarity": self.candidate_similarity,
             "candidate_cosine_threshold": self.candidate_cosine_threshold,
             "hybrid_validation": self.hybrid_validation,
@@ -12730,8 +16679,6 @@ class CorrTrack_optimize:
                 window_step=self.window_step,
                 n_vectors=n_vectors,
                 n_lags=self.n_lags,
-                grid_dimension=grid_dimension,
-                cell_size=cell_stretch,
                 seed=seed,
                 seed_toggle=seed_toggle,
                 freq_threshold=freq_threshold,
@@ -12761,20 +16708,45 @@ class CorrTrack_optimize:
                 "candidate_backend_effective",
                 getattr(corrtrack, "candidate_backend", None),
             )
-            record["candidate_bucket_width"] = corrtrack.candidate_bucket_width
-            record["candidate_block_size_steps"] = corrtrack.candidate_block_size_steps
-            record["candidate_block_index_dims"] = corrtrack.candidate_block_index_dims
+            record["validation_metric"] = getattr(corrtrack, "validation_metric", None)
             # (2026-07-06) Part 1 -- see docs/implementation_log.md.
-            record["candidate_bound_dims"] = getattr(corrtrack, "candidate_bound_dims", None)
-            record["candidate_bound_dim_selection"] = getattr(corrtrack, "candidate_bound_dim_selection", None)
-            record["enable_block_ub_pruning"] = getattr(corrtrack, "enable_block_ub_pruning", None)
-            record["enable_row_ub_pruning"] = getattr(corrtrack, "enable_row_ub_pruning", None)
-            record["block_similarity_assignment"] = getattr(corrtrack, "block_similarity_assignment", None)
-            record["max_open_blocks"] = getattr(corrtrack, "max_open_blocks", None)
-            record["candidate_instinct_query_mode"] = getattr(corrtrack, "candidate_instinct_query_mode", None)
-            record["candidate_instinct_top_k"] = getattr(corrtrack, "candidate_instinct_top_k", None)
-            record["candidate_instinct_min_candidates"] = getattr(corrtrack, "candidate_instinct_min_candidates", None)
-            record["candidate_instinct_entry_points"] = getattr(corrtrack, "candidate_instinct_entry_points", None)
+            # (2026-09-04) corrtrack.candidate_lsh_n_bands is only the CONSTRUCTOR's literal
+            # default (e.g. 64) -- the real, post-sizing value lives inside the Cython
+            # SignLSHBandIndex, which this proxy path never builds directly (it builds a fresh,
+            # throwaway CorrTrack PER ANCHOR instead -- see _proxy_candidate_keys_for_anchor).
+            # Rather than reach into that ephemeral per-anchor state, compute the real n_bands
+            # directly -- it's a pure function of config (compute_lsh_sizing, the same one
+            # SignLSHBandIndex._finalize_sizing itself calls), so this is exact, not an
+            # estimate, and costs nothing (no index, no data touched). None when tolerance<=0
+            # (sizing disabled) -- candidate_lsh_n_bands's own literal value applies unchanged
+            # in that case, exactly as _finalize_sizing's own inert-when-disabled behavior.
+            candidate_lsh_n_bands_tolerance = getattr(corrtrack, "candidate_lsh_n_bands_tolerance", None) or 0.0
+            candidate_lsh_target_occupancy = getattr(corrtrack, "candidate_lsh_target_occupancy", None) or 3.0
+            real_n_bands = None
+            if candidate_lsh_n_bands_tolerance > 0.0:
+                try:
+                    # corrtrack.target_recall (not the outer hyperopt target_recall argument,
+                    # which this method never receives) is what this SPECIFIC construction
+                    # actually resolved to (its own default, 0.95, unless param_combo overrode
+                    # it) -- the exact value _finalize_sizing itself would use. n_series matches
+                    # _prepare_proxy_anchor_reference's own identical expression.
+                    _n_series_for_sizing = max(0, int(self.train_data.shape[0]) - 1)
+                    _band_width, real_n_bands = _cand_kernels.compute_lsh_sizing(
+                        _n_series_for_sizing, corrtrack.n_lagged_windows, candidate_lsh_target_occupancy,
+                        self.corr_threshold, n_vectors, corrtrack.target_recall, candidate_lsh_n_bands_tolerance,
+                    )
+                except Exception:
+                    real_n_bands = None
+            record["candidate_lsh_n_bands"] = (
+                real_n_bands if real_n_bands is not None else getattr(corrtrack, "candidate_lsh_n_bands", None)
+            )
+            record["candidate_lsh_n_bands_tolerance"] = getattr(corrtrack, "candidate_lsh_n_bands_tolerance", None)
+            record["candidate_lsh_target_occupancy"] = candidate_lsh_target_occupancy
+            record["candidate_apply_dot_gamma_filter"] = getattr(corrtrack, "candidate_apply_dot_gamma_filter", None)
+            record["candidate_hamming_threshold"] = getattr(corrtrack, "candidate_hamming_threshold", None)
+            record["candidate_apply_hamming_filter"] = getattr(corrtrack, "candidate_apply_hamming_filter", None)
+            record["candidate_hamming_filter_max_frac"] = getattr(corrtrack, "candidate_hamming_filter_max_frac", None)
+            record["candidate_lsh_max_candidates_per_query"] = getattr(corrtrack, "candidate_lsh_max_candidates_per_query", None)
             record.update(_candidate_runtime_record_fields(corrtrack))
             record["candidate_parallel_mode"] = corrtrack.candidate_parallel_mode
             record["candidate_key_mode"] = corrtrack.candidate_key_mode
@@ -12855,6 +16827,7 @@ class CorrTrack_optimize:
             record["cand_w"] = metrics["cand_total"]
             record["speedup"] = _safe_div(metrics["total"], metrics["cand_total"])
             record["speedup_ceil"] = record["speedup"]
+            record["speedup_oracle"] = record["speedup"]
             record["rel_speedup_eff"] = 1.0
             record["corr_prop"] = _safe_div(metrics["gt_total"], metrics["total"])
             record["waste_val_bf"] = _safe_div(metrics["total"], metrics["gt_total"])
@@ -13018,6 +16991,15 @@ class CorrTrack_optimize:
             candidate_rate_mean.notna(),
             candidate_rate_med.where(candidate_rate_med.notna(), candidate_rate_point),
         )
+        # (2026-09-04) n_bands is now the PRIMARY cost signal (see docs/implementation_log.md's
+        # 2026-09-04 entry) -- candidate_rate barely varied across a 3.6x real cost swing in
+        # this project's own m=150 comparison (occupancy 2 vs 10, n_bands 211 vs 58), while
+        # n_bands is exact, theoretically grounded, and known for free (candidate_lsh_n_bands is
+        # now the REAL post-sizing value -- see the fix in _run_corrtrack_proxy_anchor -- not the
+        # stale constructor echo it used to be). candidate_rate_rank is kept below only as a
+        # later tie-break, not the primary axis anymore.
+        n_bands_rank = numeric_column("candidate_lsh_n_bands")
+        recall_ci_width = numeric_column("proxy_recall_ub") - numeric_column("proxy_recall_lb")
         search_objective = numeric_column("proxy_search_objective_rate")
         search_similarity_work = numeric_column("proxy_search_similarity_work_rate")
         search_dot_work = numeric_column("proxy_search_dot_work_rate")
@@ -13057,6 +17039,8 @@ class CorrTrack_optimize:
         ranking = candidates.copy()
         ranking["_recall_score"] = recall_score
         ranking["_recall_rank"] = recall_rank
+        ranking["_n_bands_rank"] = n_bands_rank
+        ranking["_ci_width_rank"] = recall_ci_width
         ranking["_candidate_rate_rank"] = candidate_rate_rank
         ranking["_search_similarity_work_rank"] = search_similarity_work_rank
         ranking["_search_objective_rank"] = search_objective_rank
@@ -13078,19 +17062,41 @@ class CorrTrack_optimize:
                 + "; no proxy configuration met target recall; selected among max-recall rows"
             ).str.strip("; ")
 
-        # (2026-07-05) Candidate-count minimization remains the dominant
-        # objective (unchanged "far" branch below for configs outside
-        # tolerance of the best achievable candidate rate). But among
-        # configs already close to that best rate, real measured execution
-        # time (sk_time+cand_time -- genuinely measured, not a candidate-
-        # count proxy) is a more meaningful tie-break than further
-        # candidate-rate refinements, since search cost does not scale
-        # purely with output candidate count (a backend's index-maintenance/
-        # search cost can vary independently of how many candidates it
-        # ultimately surfaces -- see docs/implementation_log.md, "hyperopt
-        # real-time tie-break", and this session's sorted_arrays_bs/blocked_lazy
-        # finding: 6x the search time for byte-identical candidate output).
+        # (2026-09-04) n_bands is now the PRIMARY ranking axis, real measured time the
+        # secondary tie-break -- replaces the old candidate-rate-primary, tolerance-gated
+        # near/far split. Rationale, from this project's own real data (see
+        # docs/implementation_log.md's 2026-09-04 entry): candidate_rate barely moved (5th
+        # significant digit) across a 3.6x swing in real structural cost (occupancy 2 vs 10,
+        # n_bands 211 vs 58) -- too weak a signal to trust as primary. n_bands, by contrast, is
+        # EXACT and known for free (a pure function of config, no measurement noise at all), and
+        # for a fixed occupancy it's provably the right thing to minimize (both the insertion
+        # term and the dot-gate/search term scale with it). Since n_bands is an exact integer,
+        # not a noisy proxy, ties are unambiguous -- no arbitrary "how close counts as close"
+        # tolerance is needed the way candidate_rate required one. Real measured time
+        # (_time_rank) is the tie-break for the remaining cost variation n_bands alone doesn't
+        # capture (occupancy's own effect on bucket/touched-candidate size) -- it's already
+        # computed for every trial regardless, so promoting it here costs nothing extra.
+        #
+        # _ci_width_rank (bootstrap CI width, ub-lb) is a continuous statistical-power signal --
+        # a config just above the gt_support floor can still have a much wider (less
+        # trustworthy) CI than one well past it, and preferring the narrower CI uses information
+        # this project already computes rather than discarding it once the binary underpowered
+        # flag is resolved. It sits LAST, though, not alongside _underpowered_rank near the
+        # front: an EARLIER version of this change placed it right after _underpowered_rank, and
+        # a real rerun caught the bug directly -- a 219-band config beat an available, feasible,
+        # faster 88-band one purely because the loser's CI happened to be perfectly tight
+        # (recall_lb==recall_ub==1.0) while the winner's had ordinary sampling width. Any
+        # CONTINUOUS key placed that early wins on essentially every row (exact ties in a float
+        # are vanishingly rare), silently defeating whatever comes after it -- exactly the
+        # failure mode candidate_rate had before this whole redesign. CI width's real role is a
+        # genuine tie-break of last resort, for the case n_bands AND time both land on an exact
+        # tie, not a primary-tier signal -- the remaining search-work-based ranks (candidate
+        # rate, similarity/dot/index work, precision, specificity, plain recall, output
+        # candidate count) stay even later, for the rarer case all three of those also tie.
+        primary_sort_cols = ["_underpowered_rank", "_n_bands_rank", "_time_rank", "_ci_width_rank"]
+        primary_ascending = [True, True, True, True]
         common_sort_cols = [
+            "_candidate_rate_rank",
             "_search_similarity_work_rank",
             "_search_dot_work_rank",
             "_search_index_work_rank",
@@ -13102,31 +17108,13 @@ class CorrTrack_optimize:
             "_recall_rank",
             "cand_w",
         ]
-        common_ascending = [True, True, True, True, True, False, False, False, False, True]
+        common_ascending = [True, True, True, True, True, True, False, False, False, False, True]
 
-        not_underpowered = feasible[feasible["_underpowered_rank"] == 0]
-        reference_pool = not_underpowered if not not_underpowered.empty else feasible
-        best_candidate_rate = reference_pool["_candidate_rate_rank"].min()
-        tolerance = float(self.proxy_candidate_rate_close_tolerance)
-        if pd.notna(best_candidate_rate):
-            close_mask = feasible["_candidate_rate_rank"] <= best_candidate_rate * (1.0 + tolerance)
-            close_mask = close_mask.fillna(False)
-        else:
-            close_mask = pd.Series(False, index=feasible.index)
-        near_best = feasible[close_mask]
-        far = feasible[~close_mask]
-
-        near_best_sorted = near_best.sort_values(
-            ["_underpowered_rank", "_time_rank"] + common_sort_cols,
-            ascending=[True, True] + common_ascending,
+        best = feasible.sort_values(
+            primary_sort_cols + common_sort_cols,
+            ascending=primary_ascending + common_ascending,
             na_position="last",
-        )
-        far_sorted = far.sort_values(
-            ["_underpowered_rank", "_candidate_rate_rank"] + common_sort_cols,
-            ascending=[True, True] + common_ascending,
-            na_position="last",
-        )
-        best = pd.concat([near_best_sorted, far_sorted]).head(1)
+        ).head(1)
         if best.empty:
             return metrics, None
 
@@ -13223,16 +17211,28 @@ class CorrTrack_optimize:
                 return None
 
             reason = self._proxy_anchor_expansion_reason_for_best(proxy_best, target_recall)
+            # (2026-09-04) Previously bounded by a fixed round count
+            # (proxy_anchor_expand_max_rounds), chosen out of caution against unbounded
+            # memory/time growth. Now bounded by the REAL resource limit that caution was
+            # actually about: proxy_max_pair_rows (itself sized from OPTIM_PROXY_PAIR_ROW_
+            # HARD_CEILING by recommend_proxy_pair_row_budget). Expansion keeps going --
+            # no round limit -- as long as it's still underpowered AND the next anchor count's
+            # own pair-row need still fits the budget; a generous absolute round cap
+            # (_MAX_ANCHOR_EXPANSION_SAFETY_ROUNDS) remains only as a defensive backstop against
+            # a genuinely infinite loop, not as the real gate.
+            n_series_for_expansion = max(0, int(self.train_data.shape[0]) - 1)
+            est_pairs_per_anchor = estimate_proxy_pairs_per_anchor(n_series_for_expansion, self.n_lags, self.window_step)
             if (
                 run
                 and self.proxy_adaptive_anchor_enabled
                 and reason
-                and rounds_done < self.proxy_anchor_expand_max_rounds
+                and rounds_done < _MAX_ANCHOR_EXPANSION_SAFETY_ROUNDS
                 and int(self.proxy_anchor_count_requested) < int(self.proxy_max_anchor_count)
             ):
                 next_count = int(math.ceil(float(self.proxy_anchor_count_requested) * self.proxy_anchor_expand_factor))
                 next_count = min(int(self.proxy_max_anchor_count), max(next_count, int(self.proxy_anchor_count_requested) + 1))
-                if next_count > int(self.proxy_anchor_count_requested):
+                next_count_row_need = next_count * est_pairs_per_anchor
+                if next_count > int(self.proxy_anchor_count_requested) and next_count_row_need <= int(self.proxy_max_pair_rows):
                     print(
                         "[Optim][ProxyAnchor] "
                         f"{reason}; increasing anchors "
@@ -13241,7 +17241,15 @@ class CorrTrack_optimize:
                     self.proxy_anchor_count_requested = next_count
                     rounds_done += 1
                     expansion_reason = reason
-                continue
+                    continue
+                if next_count > int(self.proxy_anchor_count_requested):
+                    print(
+                        "[Optim][ProxyAnchor] "
+                        f"{reason}, but the next expansion ({self.proxy_anchor_count_requested} -> {next_count}) "
+                        f"would need {next_count_row_need:,} pair rows, over proxy_max_pair_rows "
+                        f"({int(self.proxy_max_pair_rows):,}) -- stopping expansion here, selection stands "
+                        "as the best available given the resource budget, not fully powered."
+                    )
             return proxy_best
 
     def get_optim_params(
@@ -13268,7 +17276,7 @@ class CorrTrack_optimize:
         #return self.ground_truth, self.runtime_bf, CorrTrack_HyperOptim._skyline_query(metrics, ref_metrics) 
 
 class CorrTrack_compare:
-    def __init__(self,train_data,test_data,ids,window_size,window_step,basic_window,n_lags,corr_threshold,param_grid,recall_by_window,neg_corr,corr_val,algs=None, exec="parallel", max_workers=0, sketch_norm="z", candidate_bucket_width=None, candidate_block_size_steps=None, candidate_block_index_dims=None, candidate_similarity="l2", candidate_cosine_threshold=None, candidate_parallel_mode="recent_shards", candidate_key_mode="first", candidate_key_seed=None, candidate_lsh_radius=None, candidate_ann_m=None, candidate_ann_z=None, candidate_ann_ef=None, candidate_bound_dims=None, candidate_bound_dim_selection="variance", enable_block_ub_pruning=False, enable_row_ub_pruning=False, block_similarity_assignment=False, max_open_blocks=4, candidate_instinct_query_mode="hybrid", candidate_instinct_top_k=256, candidate_instinct_min_candidates=64, candidate_instinct_entry_points=8, numeric_rows=True, verbose=False, testing=False, parallel_sketch=None, parallel_candidates=None, parallel_validation=None, monitor=True, track_min_dist=True, tuning_mode="sampling"):
+    def __init__(self,train_data,test_data,ids,window_size,window_step,basic_window,n_lags,corr_threshold,param_grid,recall_by_window,neg_corr,corr_val,algs=None, exec="parallel", max_workers=0, sketch_norm="mean_l2", candidate_similarity="l2", candidate_cosine_threshold=None, candidate_parallel_mode="recent_shards", candidate_key_mode="first", candidate_key_seed=None, candidate_lsh_radius=None, candidate_ann_m=None, candidate_ann_z=None, candidate_ann_ef=None, candidate_lsh_n_bands=64, candidate_lsh_target_occupancy=3.0, candidate_apply_dot_gamma_filter=True, candidate_hamming_threshold=None, candidate_apply_hamming_filter=True, candidate_hamming_filter_max_frac=0.40, candidate_lsh_max_candidates_per_query=0, numeric_rows=True, verbose=False, testing=False, parallel_sketch=None, parallel_candidates=None, parallel_validation=None, monitor=True, track_min_dist=True, tuning_mode="sampling"):
         
         self.neg_corr = neg_corr
         self.corr_val = _coerce_to_bool(corr_val, default=True)
@@ -13277,30 +17285,28 @@ class CorrTrack_compare:
         if not self.corr_val:
             self.monitor = False
             self.track_min_dist = False
-        self.sketch_norm = sketch_norm or "z"
-        self.candidate_bucket_width = _to_float_safe(candidate_bucket_width)
-        block_steps = _to_int_safe(candidate_block_size_steps)
-        if block_steps is None or block_steps <= 0:
-            block_steps = 32
-        self.candidate_block_size_steps = int(block_steps)
-        block_dims = _to_int_safe(candidate_block_index_dims)
-        if block_dims is None or block_dims <= 0:
-            block_dims = 1
-        self.candidate_block_index_dims = int(block_dims)
+        self.sketch_norm = sketch_norm or "mean_l2"
         # (2026-07-06) Part 1 -- see docs/implementation_log.md.
-        bound_dims_val = _to_int_safe(candidate_bound_dims)
-        self.candidate_bound_dims = max(0, bound_dims_val) if bound_dims_val is not None else 0
-        self.candidate_bound_dim_selection = str(candidate_bound_dim_selection or "variance").lower()
-        self.enable_block_ub_pruning = bool(enable_block_ub_pruning)
-        self.enable_row_ub_pruning = bool(enable_row_ub_pruning)
-        self.block_similarity_assignment = bool(block_similarity_assignment)
-        self.max_open_blocks = max(1, _to_int_safe(max_open_blocks) or 4)
         # (2026-07-06) InstinctIndex candidate_backend params -- see
         # docs/implementation_log.md. Approximate, opt-in backend only.
-        self.candidate_instinct_query_mode = str(candidate_instinct_query_mode or "hybrid").lower()
-        self.candidate_instinct_top_k = max(1, _to_int_safe(candidate_instinct_top_k) or 256)
-        self.candidate_instinct_min_candidates = max(1, _to_int_safe(candidate_instinct_min_candidates) or 64)
-        self.candidate_instinct_entry_points = max(1, _to_int_safe(candidate_instinct_entry_points) or 8)
+        # (2026-07-08) SignLSHBandIndex candidate_backend params -- see
+        # docs/implementation_log.md, "candidate_selector Phase 6
+        # diagnostic". Exact backend, opt-in only.
+        self.candidate_lsh_n_bands = max(1, _to_int_safe(candidate_lsh_n_bands) or 64)
+        _lsh_occ_val = _to_float_safe(candidate_lsh_target_occupancy)
+        self.candidate_lsh_target_occupancy = float(_lsh_occ_val) if _lsh_occ_val and _lsh_occ_val > 0 else 3.0
+        self.candidate_apply_dot_gamma_filter = _coerce_to_bool(candidate_apply_dot_gamma_filter, default=True)
+        # (2026-07-13) HammingExactIndex ("lsh_hamming_exact") -- None means
+        # auto-derive; inert for other backends.
+        self.candidate_hamming_threshold = _to_int_safe(candidate_hamming_threshold)
+        # (2026-07-21) SignLSHBandIndex Hamming pre-filter / budget cap and
+        # InstinctIndex navigation-proxy -- both opt-in, default off. See
+        # docs/implementation_log.md's 2026-07-21(a)/(b) entries.
+        self.candidate_apply_hamming_filter = _coerce_to_bool(candidate_apply_hamming_filter, default=False)
+        frac_val = _to_float_safe(candidate_hamming_filter_max_frac)
+        self.candidate_hamming_filter_max_frac = max(0.0, min(1.0, float(frac_val))) if frac_val is not None else 0.40
+        max_cand_val = _to_int_safe(candidate_lsh_max_candidates_per_query)
+        self.candidate_lsh_max_candidates_per_query = max(0, int(max_cand_val)) if max_cand_val is not None else 0
         self.candidate_similarity = _resolve_candidate_similarity(candidate_similarity, default="l2")
         self.candidate_cosine_threshold = _to_float_safe(candidate_cosine_threshold)
         self.candidate_parallel_mode = "recent_shards"
@@ -13338,14 +17344,10 @@ class CorrTrack_compare:
         self.parallel_validation = _resolve_parallel_flag(parallel_validation, parallel_default)
 
         self.corrtrack_bf = CorrTrack(window_size=self.window_size,basic_window=basic_window,window_step=window_step,n_vectors=1,n_lags=self.n_lags,
-                                    grid_dimension=1,cell_size=1,seed=None,seed_toggle=None,
+                                    seed=None,seed_toggle=None,
                                     corr_threshold=self.corr_threshold,neg_corr=self.neg_corr,preprocess=False,
                                     exec=self.exec,max_workers=self.max_workers,
-                                    sketch_norm=self.sketch_norm,candidate_parallel_mode=self.candidate_parallel_mode,
-                                    candidate_bucket_width=self.candidate_bucket_width,
-                                    candidate_block_size_steps=self.candidate_block_size_steps,
-                                    candidate_block_index_dims=self.candidate_block_index_dims,
-                                    candidate_similarity=self.candidate_similarity,
+                                    candidate_parallel_mode=self.candidate_parallel_mode,
                                     candidate_cosine_threshold=self.candidate_cosine_threshold,
                                     candidate_lsh_radius=self.candidate_lsh_radius,
                                     candidate_ann_m=self.candidate_ann_m,
@@ -13371,6 +17373,7 @@ class CorrTrack_compare:
         self.tested_w = 0.0
         self.total_w = 0.0
         self.candidate_search_index_candidates = 0
+        self.candidate_search_enumerated_candidates = 0
         self.candidate_search_valid_index_candidates = 0
         self.candidate_search_unique_index_candidates = 0
         self.candidate_search_duplicate_index_candidates = 0
@@ -13404,6 +17407,34 @@ class CorrTrack_compare:
         self.candidate_search_instinct_best_score_seen = 0.0
         self.candidate_search_instinct_mean_score_returned = 0.0
         self.candidate_search_instinct_dead_node_ratio = 0.0
+        # (2026-07-21) True per-query real-dot-product cost counters, built
+        # for the 2026-07-17 root-cause investigation (enumerated_pairs
+        # undercounts true dot cost by 6.7-9.8x when candidate_instinct_
+        # use_nav_proxy is off) but never wired into CorrTrack's aggregated
+        # stats until now -- no benchmark could see the nav-proxy's real
+        # effect without this. See docs/implementation_log.md's 2026-07-21
+        # "true dot-product-computation metric" entry.
+        self.candidate_search_instinct_nodes_scored = 0
+        self.candidate_search_instinct_nodes_scored_dead_expand = 0
+        # (2026-07-08) SignLSHBandIndex metrics -- see
+        # docs/implementation_log.md, "candidate_selector Phase 6 diagnostic".
+        self.candidate_search_lsh_candidates_touched = 0
+        self.candidate_search_lsh_dot_checks = 0
+        self.candidate_search_lsh_candidates_returned = 0
+        self.candidate_search_lsh_query_time = 0.0
+        self.candidate_search_lsh_num_nodes_total = 0
+        self.candidate_search_lsh_num_nodes_alive = 0
+        self.candidate_search_lsh_dead_node_ratio = 0.0
+        # (2026-07-21) HammingExactIndex/CircularGroupedExactIndex/
+        # MultiDimThetaIndex's own real dot-computation counters -- were
+        # already returned by Candidates.candidate_search_stats() but never
+        # aggregated onto CorrTrack, the same gap instinct_nodes_scored had
+        # until 2026-07-21(f). See docs/implementation_log.md's 2026-07-21(j)
+        # entry (closes the true_dot_computations fallback for these 3
+        # backends -- they previously silently equaled dot_valid_pairs).
+        self.candidate_search_hexact_dot_checks = 0
+        self.candidate_search_cgrp_dot_checks = 0
+        self.candidate_search_mdt_dot_checks = 0
 
     def _run_is_parallel(self) -> bool:
         return self.exec != "sequential"
@@ -13444,29 +17475,17 @@ class CorrTrack_compare:
 
         # Instantiating corrtrack objects
         overrides = {
-            "candidate_block_size_steps": self.candidate_block_size_steps,
-            "candidate_block_index_dims": self.candidate_block_index_dims,
-            "candidate_bound_dims": self.candidate_bound_dims,
-            "candidate_bound_dim_selection": self.candidate_bound_dim_selection,
-            "enable_block_ub_pruning": self.enable_block_ub_pruning,
-            "enable_row_ub_pruning": self.enable_row_ub_pruning,
-            "block_similarity_assignment": self.block_similarity_assignment,
-            "max_open_blocks": self.max_open_blocks,
-            "candidate_bucket_width": self.candidate_bucket_width,
             "candidate_parallel_mode": self.candidate_parallel_mode,
-            "candidate_key_mode": self.candidate_key_mode,
-            "candidate_key_seed": self.candidate_key_seed,
             "candidate_lsh_radius": self.candidate_lsh_radius,
             "candidate_ann_m": self.candidate_ann_m,
             "candidate_ann_z": self.candidate_ann_z,
             "candidate_ann_ef": self.candidate_ann_ef,
-            "candidate_similarity": self.candidate_similarity,
             "candidate_cosine_threshold": self.candidate_cosine_threshold,
             "numeric_rows": self.numeric_rows,
         }
         overrides.update(feature_overrides or {})
         corrtrack = CorrTrack(window_size=self.window_size,basic_window=self.basic_window,window_step=self.window_step,n_vectors=n_vectors,n_lags=self.n_lags,
-                            grid_dimension=grid_dimension,cell_size=cell_size,seed=seed,seed_toggle=seed_toggle,
+                            seed=seed,seed_toggle=seed_toggle,
                             freq_threshold=freq_threshold,corr_threshold=self.corr_threshold,neg_corr=self.neg_corr,preprocess=preprocess,
                             exec=self.exec,max_workers=nodes,
                             parallel_sketch=self.parallel_sketch,parallel_candidates=self.parallel_candidates,parallel_validation=self.parallel_validation,
@@ -13522,6 +17541,13 @@ class CorrTrack_compare:
             self.candidate_search_instinct_best_score_seen = getattr(corrtrack, "candidate_search_instinct_best_score_seen", 0.0)
             self.candidate_search_instinct_mean_score_returned = getattr(corrtrack, "candidate_search_instinct_mean_score_returned", 0.0)
             self.candidate_search_instinct_dead_node_ratio = getattr(corrtrack, "candidate_search_instinct_dead_node_ratio", 0.0)
+            self.candidate_search_lsh_candidates_touched = getattr(corrtrack, "candidate_search_lsh_candidates_touched", 0)
+            self.candidate_search_lsh_dot_checks = getattr(corrtrack, "candidate_search_lsh_dot_checks", 0)
+            self.candidate_search_lsh_candidates_returned = getattr(corrtrack, "candidate_search_lsh_candidates_returned", 0)
+            self.candidate_search_lsh_query_time = getattr(corrtrack, "candidate_search_lsh_query_time", 0.0)
+            self.candidate_search_lsh_num_nodes_total = getattr(corrtrack, "candidate_search_lsh_num_nodes_total", 0)
+            self.candidate_search_lsh_num_nodes_alive = getattr(corrtrack, "candidate_search_lsh_num_nodes_alive", 0)
+            self.candidate_search_lsh_dead_node_ratio = getattr(corrtrack, "candidate_search_lsh_dead_node_ratio", 0.0)
         elif mode == "bf":
             start_time = time.time()
             for start in range(0, length_data - self.window_step + 1, self.window_step):
@@ -13574,7 +17600,10 @@ class CorrTrack_compare:
 
         #Get flags based on brute-force
         if self.recall_by_window:
-            corr_flags = corrtrack.correlated
+            if hasattr(corrtrack, "correlated_rows") and callable(corrtrack.correlated_rows):
+                corr_flags = NumericCorrelatedFlags(*corrtrack.correlated_rows())
+            else:
+                corr_flags = corrtrack.correlated
         else:
             corr_flags = corrtrack.get_correlation_flags(length_data,0)
 
@@ -13598,9 +17627,6 @@ class CorrTrack_compare:
             exec=self.exec,
             verbose=self.verbose,
             testing=self.testing,
-            candidate_bucket_width=self.candidate_bucket_width,
-            candidate_block_size_steps=self.candidate_block_size_steps,
-            candidate_block_index_dims=self.candidate_block_index_dims,
             candidate_similarity=self.candidate_similarity,
             candidate_cosine_threshold=self.candidate_cosine_threshold,
             candidate_parallel_mode=self.candidate_parallel_mode,
@@ -14389,6 +18415,13 @@ class CorrTrack_compare:
             corr_w_bf,
             cand_w_bf,
         )
+        speedup_oracle = _compute_speedup_oracle(
+            bf_record.get("cand_time"),
+            bf_record.get("val_time"),
+            bf_record.get("monit_time"),
+            corr_w_bf,
+            cand_w_bf,
+        )
         rel_speedup_eff = _safe_div(speedup, speedup_ceil)
         corr_prop = _safe_div(corr_w_bf, cand_w_bf)
         waste_val_bf = _safe_div(cand_w_bf, corr_w_bf)
@@ -14423,19 +18456,12 @@ class CorrTrack_compare:
             str(record.get("preprocess")),
             str(record.get("sketch_norm")),
             str(record.get("candidate_backend")),
-            fmt(record.get("candidate_bucket_width")),
-            as_optional_int(record.get("candidate_block_size_steps")),
-            as_optional_int(record.get("candidate_block_index_dims")),
-            as_optional_int(record.get("candidate_bound_dims")),
-            str(record.get("candidate_bound_dim_selection", "")),
-            str(record.get("enable_block_ub_pruning", "")),
-            str(record.get("enable_row_ub_pruning", "")),
-            str(record.get("block_similarity_assignment", "")),
-            as_optional_int(record.get("max_open_blocks")),
-            str(record.get("candidate_instinct_query_mode", "")),
-            as_optional_int(record.get("candidate_instinct_top_k")),
-            as_optional_int(record.get("candidate_instinct_min_candidates")),
-            as_optional_int(record.get("candidate_instinct_entry_points")),
+            as_optional_int(record.get("candidate_lsh_n_bands")),
+            str(record.get("candidate_apply_dot_gamma_filter", "")),
+            as_optional_int(record.get("candidate_hamming_threshold")),
+            str(record.get("candidate_apply_hamming_filter", "")),
+            fmt(record.get("candidate_hamming_filter_max_frac")),
+            as_optional_int(record.get("candidate_lsh_max_candidates_per_query")),
             str(record.get("candidate_similarity", "")),
             fmt(record.get("candidate_cosine_threshold")),
             str(record.get("candidate_parallel_mode", "")),
@@ -14474,6 +18500,7 @@ class CorrTrack_compare:
             fmt(artifact_time),
             fmt(speedup),
             fmt(speedup_ceil),
+            fmt(speedup_oracle),
             fmt(rel_speedup_eff),
             as_int_str(corr_w_bf),
             as_int_str(corr_w),
@@ -14512,6 +18539,13 @@ class CorrTrack_compare:
             fmt(record.get("candidate_search_instinct_best_score_seen")),
             fmt(record.get("candidate_search_instinct_mean_score_returned")),
             fmt(record.get("candidate_search_instinct_dead_node_ratio")),
+            as_optional_int(record.get("candidate_search_lsh_candidates_touched")),
+            as_optional_int(record.get("candidate_search_lsh_dot_checks")),
+            as_optional_int(record.get("candidate_search_lsh_candidates_returned")),
+            fmt(record.get("candidate_search_lsh_query_time")),
+            as_optional_int(record.get("candidate_search_lsh_num_nodes_total")),
+            as_optional_int(record.get("candidate_search_lsh_num_nodes_alive")),
+            fmt(record.get("candidate_search_lsh_dead_node_ratio")),
             fmt(corr_prop),
             fmt(waste_val_bf),
             fmt(waste_val),
@@ -14798,6 +18832,13 @@ class CorrTrack_compare:
             self.correlated_bf,
             self.total_bf,
         )
+        speedup_oracle = _compute_speedup_oracle(
+            self.candidate_time_bf,
+            self.validation_time_bf,
+            self.monitor_time_bf,
+            self.correlated_bf,
+            self.total_bf,
+        )
         rel_speedup_eff = _safe_div(speedup, speedup_ceil)
         corr_prop = _safe_div(self.correlated_bf, self.total_bf)
         waste_val_bf = _safe_div(self.total_bf, self.correlated_bf)
@@ -14828,19 +18869,12 @@ class CorrTrack_compare:
             "preprocess",
             "sketch_norm",
             "candidate_backend",
-            "candidate_bucket_width",
-            "candidate_block_size_steps",
-            "candidate_block_index_dims",
-            "candidate_bound_dims",
-            "candidate_bound_dim_selection",
-            "enable_block_ub_pruning",
-            "enable_row_ub_pruning",
-            "block_similarity_assignment",
-            "max_open_blocks",
-            "candidate_instinct_query_mode",
-            "candidate_instinct_top_k",
-            "candidate_instinct_min_candidates",
-            "candidate_instinct_entry_points",
+                    "candidate_lsh_n_bands",
+            "candidate_apply_dot_gamma_filter",
+            "candidate_hamming_threshold",
+            "candidate_apply_hamming_filter",
+            "candidate_hamming_filter_max_frac",
+            "candidate_lsh_max_candidates_per_query",
                                             "candidate_similarity",
             "candidate_cosine_threshold",
             "candidate_parallel_mode",
@@ -14908,32 +18942,18 @@ class CorrTrack_compare:
                 param_values.append(bst.get(key, getattr(self, "candidate_ann_ef", 256)))
             elif key == "candidate_parallel_mode":
                 param_values.append(bst.get(key, self.candidate_parallel_mode))
-            elif key == "candidate_bucket_width":
-                param_values.append(bst.get(key, self.candidate_bucket_width))
-            elif key == "candidate_block_size_steps":
-                param_values.append(bst.get(key, self.candidate_block_size_steps))
-            elif key == "candidate_block_index_dims":
-                param_values.append(bst.get(key, self.candidate_block_index_dims))
-            elif key == "candidate_bound_dims":
-                param_values.append(bst.get(key, getattr(self, "candidate_bound_dims", 0)))
-            elif key == "candidate_bound_dim_selection":
-                param_values.append(bst.get(key, getattr(self, "candidate_bound_dim_selection", "variance")))
-            elif key == "enable_block_ub_pruning":
-                param_values.append(bst.get(key, getattr(self, "enable_block_ub_pruning", False)))
-            elif key == "enable_row_ub_pruning":
-                param_values.append(bst.get(key, getattr(self, "enable_row_ub_pruning", False)))
-            elif key == "block_similarity_assignment":
-                param_values.append(bst.get(key, getattr(self, "block_similarity_assignment", False)))
-            elif key == "max_open_blocks":
-                param_values.append(bst.get(key, getattr(self, "max_open_blocks", 4)))
-            elif key == "candidate_instinct_query_mode":
-                param_values.append(bst.get(key, getattr(self, "candidate_instinct_query_mode", "hybrid")))
-            elif key == "candidate_instinct_top_k":
-                param_values.append(bst.get(key, getattr(self, "candidate_instinct_top_k", 256)))
-            elif key == "candidate_instinct_min_candidates":
-                param_values.append(bst.get(key, getattr(self, "candidate_instinct_min_candidates", 64)))
-            elif key == "candidate_instinct_entry_points":
-                param_values.append(bst.get(key, getattr(self, "candidate_instinct_entry_points", 8)))
+            elif key == "candidate_lsh_n_bands":
+                param_values.append(bst.get(key, getattr(self, "candidate_lsh_n_bands", 64)))
+            elif key == "candidate_apply_dot_gamma_filter":
+                param_values.append(bst.get(key, getattr(self, "candidate_apply_dot_gamma_filter", True)))
+            elif key == "candidate_hamming_threshold":
+                param_values.append(bst.get(key, getattr(self, "candidate_hamming_threshold", None)))
+            elif key == "candidate_apply_hamming_filter":
+                param_values.append(bst.get(key, getattr(self, "candidate_apply_hamming_filter", False)))
+            elif key == "candidate_hamming_filter_max_frac":
+                param_values.append(bst.get(key, getattr(self, "candidate_hamming_filter_max_frac", 0.40)))
+            elif key == "candidate_lsh_max_candidates_per_query":
+                param_values.append(bst.get(key, getattr(self, "candidate_lsh_max_candidates_per_query", 0)))
             elif key == "candidate_similarity":
                 param_values.append(bst.get(key, getattr(self, "candidate_similarity", "l2")))
             elif key == "candidate_cosine_threshold":
@@ -14982,6 +19002,13 @@ class CorrTrack_compare:
     "candidate_search_instinct_best_score_seen",
     "candidate_search_instinct_mean_score_returned",
     "candidate_search_instinct_dead_node_ratio",
+    "candidate_search_lsh_candidates_touched",
+    "candidate_search_lsh_dot_checks",
+    "candidate_search_lsh_candidates_returned",
+    "candidate_search_lsh_query_time",
+    "candidate_search_lsh_num_nodes_total",
+    "candidate_search_lsh_num_nodes_alive",
+    "candidate_search_lsh_dead_node_ratio",
             }:
                 param_values.append(bst.get(key, ""))
             elif key == "hybrid_validation":
@@ -15008,6 +19035,7 @@ class CorrTrack_compare:
             f"{runtime_parts[0]:.4f}",f"{runtime_parts[1]:.4f}",f"{runtime_parts[2]:.4f}",f"{runtime_parts[3]:.4f}",
             f"{runtime:.4f}", f"{artifact_time:.4f}", f"{speedup:.4f}",
             _format_float(speedup_ceil),
+            _format_float(speedup_oracle),
             _format_float(rel_speedup_eff),
             int(self.correlated_bf), int(self.correlated_w),
             int(self.tested_bf), int(self.tested_w),
@@ -15043,6 +19071,13 @@ class CorrTrack_compare:
             _format_float(getattr(self, "candidate_search_instinct_best_score_seen", 0.0) or 0.0),
             _format_float(getattr(self, "candidate_search_instinct_mean_score_returned", 0.0) or 0.0),
             _format_float(getattr(self, "candidate_search_instinct_dead_node_ratio", 0.0) or 0.0),
+            int(getattr(self, "candidate_search_lsh_candidates_touched", 0) or 0),
+            int(getattr(self, "candidate_search_lsh_dot_checks", 0) or 0),
+            int(getattr(self, "candidate_search_lsh_candidates_returned", 0) or 0),
+            _format_float(getattr(self, "candidate_search_lsh_query_time", 0.0) or 0.0),
+            int(getattr(self, "candidate_search_lsh_num_nodes_total", 0) or 0),
+            int(getattr(self, "candidate_search_lsh_num_nodes_alive", 0) or 0),
+            _format_float(getattr(self, "candidate_search_lsh_dead_node_ratio", 0.0) or 0.0),
             _format_float(corr_prop),
             _format_float(waste_val_bf),
             _format_float(waste_val),

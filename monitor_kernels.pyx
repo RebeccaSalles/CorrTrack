@@ -716,3 +716,216 @@ cdef class NumericMonitorState:
         if self._anomaly_count <= 0:
             return np.empty((0, 5), dtype=np.int64)
         return np.ascontiguousarray(self._anomaly_rows_arr[:self._anomaly_count, :], dtype=np.int64)
+
+
+# (2026-07-27) Cython prototype for candidate_skip_ahead_revalidation's
+# per-pair bookkeeping (see docs/implementation_log.md). Profiling found the
+# pure-Python version (Python dict, tuple keys) cost a flat ~39% of wall
+# time with no algorithmic blowup -- unlike the transitive-bound witness
+# search, which had a real capped-search fix instead. This mirrors
+# NumericMonitorState's own open-addressing hash table (same
+# _monitor_hash_key/_monitor_next_power2 helpers, same array-backed slot
+# layout) rather than inventing a new scheme, since that pattern is already
+# established and tested in this file for an (s1, s2, lag)-keyed table.
+cdef class SkipAheadState:
+    cdef object _occupied_arr
+    cdef object _key_s1_arr
+    cdef object _key_s2_arr
+    cdef object _key_lag_arr
+    cdef object _corr_arr
+    cdef object _steps_arr
+    cdef Py_ssize_t _capacity
+    cdef Py_ssize_t _size
+
+    def __cinit__(self, Py_ssize_t initial_capacity=1024):
+        if initial_capacity < 16:
+            initial_capacity = 16
+        self._capacity = _monitor_next_power2(initial_capacity)
+        self._size = 0
+        self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)
+        self._key_s1_arr = np.zeros(self._capacity, dtype=np.int64)
+        self._key_s2_arr = np.zeros(self._capacity, dtype=np.int64)
+        self._key_lag_arr = np.zeros(self._capacity, dtype=np.int64)
+        self._corr_arr = np.zeros(self._capacity, dtype=np.float64)
+        self._steps_arr = np.zeros(self._capacity, dtype=np.int64)
+
+    cdef Py_ssize_t _find_slot(self, int64_t s1, int64_t s2, int64_t lag):
+        cdef uint8_t[:] occupied = self._occupied_arr
+        cdef int64_t[:] key_s1 = self._key_s1_arr
+        cdef int64_t[:] key_s2 = self._key_s2_arr
+        cdef int64_t[:] key_lag = self._key_lag_arr
+        cdef Py_ssize_t mask = self._capacity - 1
+        cdef Py_ssize_t idx = <Py_ssize_t>(_monitor_hash_key(s1, s2, lag) & <uint64_t>mask)
+        while occupied[idx] != 0:
+            if key_s1[idx] == s1 and key_s2[idx] == s2 and key_lag[idx] == lag:
+                return idx
+            idx = (idx + 1) & mask
+        return idx
+
+    cdef void _rehash(self, Py_ssize_t new_capacity):
+        cdef object old_occupied_obj = self._occupied_arr
+        cdef object old_s1_obj = self._key_s1_arr
+        cdef object old_s2_obj = self._key_s2_arr
+        cdef object old_lag_obj = self._key_lag_arr
+        cdef object old_corr_obj = self._corr_arr
+        cdef object old_steps_obj = self._steps_arr
+        cdef uint8_t[:] old_occupied = old_occupied_obj
+        cdef int64_t[:] old_s1 = old_s1_obj
+        cdef int64_t[:] old_s2 = old_s2_obj
+        cdef int64_t[:] old_lag = old_lag_obj
+        cdef double[:] old_corr = old_corr_obj
+        cdef int64_t[:] old_steps = old_steps_obj
+        cdef Py_ssize_t old_capacity = self._capacity
+        cdef Py_ssize_t old_i, idx, mask
+        cdef uint8_t[:] occupied
+        cdef int64_t[:] key_s1
+        cdef int64_t[:] key_s2
+        cdef int64_t[:] key_lag
+        cdef double[:] corr_arr
+        cdef int64_t[:] steps_arr
+
+        new_capacity = _monitor_next_power2(new_capacity)
+        self._capacity = new_capacity
+        self._occupied_arr = np.zeros(new_capacity, dtype=np.uint8)
+        self._key_s1_arr = np.zeros(new_capacity, dtype=np.int64)
+        self._key_s2_arr = np.zeros(new_capacity, dtype=np.int64)
+        self._key_lag_arr = np.zeros(new_capacity, dtype=np.int64)
+        self._corr_arr = np.zeros(new_capacity, dtype=np.float64)
+        self._steps_arr = np.zeros(new_capacity, dtype=np.int64)
+
+        occupied = self._occupied_arr
+        key_s1 = self._key_s1_arr
+        key_s2 = self._key_s2_arr
+        key_lag = self._key_lag_arr
+        corr_arr = self._corr_arr
+        steps_arr = self._steps_arr
+        mask = new_capacity - 1
+        self._size = 0
+        for old_i in range(old_capacity):
+            if old_occupied[old_i] == 0:
+                continue
+            idx = <Py_ssize_t>(_monitor_hash_key(old_s1[old_i], old_s2[old_i], old_lag[old_i]) & <uint64_t>mask)
+            while occupied[idx] != 0:
+                idx = (idx + 1) & mask
+            occupied[idx] = <uint8_t>1
+            key_s1[idx] = old_s1[old_i]
+            key_s2[idx] = old_s2[old_i]
+            key_lag[idx] = old_lag[old_i]
+            corr_arr[idx] = old_corr[old_i]
+            steps_arr[idx] = old_steps[old_i]
+            self._size += 1
+
+    cdef void _ensure_capacity(self, Py_ssize_t need):
+        while need * 2 >= self._capacity:
+            self._rehash(self._capacity * 2)
+
+    cpdef void update_batch(self, np.ndarray rows, np.ndarray corrs):
+        cdef int64_t[:, :] rows_view = rows
+        cdef double[:] corrs_view = corrs
+        cdef Py_ssize_t n = rows_view.shape[0]
+        cdef Py_ssize_t i, idx
+        cdef int64_t s1, s2, t1, t2, lag, ns1, ns2, nlag
+        cdef uint8_t[:] occupied
+        cdef int64_t[:] key_s1
+        cdef int64_t[:] key_s2
+        cdef int64_t[:] key_lag
+        cdef double[:] corr_arr
+        cdef int64_t[:] steps_arr
+
+        if n == 0:
+            return
+        self._ensure_capacity(self._size + n)
+        occupied = self._occupied_arr
+        key_s1 = self._key_s1_arr
+        key_s2 = self._key_s2_arr
+        key_lag = self._key_lag_arr
+        corr_arr = self._corr_arr
+        steps_arr = self._steps_arr
+
+        for i in range(n):
+            s1 = rows_view[i, 0]
+            s2 = rows_view[i, 1]
+            t1 = rows_view[i, 2]
+            t2 = rows_view[i, 3]
+            lag = t1 - t2
+            if s1 == s2:
+                ns1 = s1
+                ns2 = s2
+                nlag = lag if lag >= 0 else -lag
+            elif s1 < s2:
+                ns1 = s1
+                ns2 = s2
+                nlag = lag
+            else:
+                ns1 = s2
+                ns2 = s1
+                nlag = -lag
+            idx = self._find_slot(ns1, ns2, nlag)
+            if occupied[idx] == 0:
+                occupied[idx] = <uint8_t>1
+                key_s1[idx] = ns1
+                key_s2[idx] = ns2
+                key_lag[idx] = nlag
+                self._size += 1
+            corr_arr[idx] = corrs_view[i]
+            steps_arr[idx] = 0
+
+    cpdef object prune_mask(self, np.ndarray rows, double threshold, double margin, int64_t max_steps, bint neg_corr):
+        cdef int64_t[:, :] rows_view = rows
+        cdef Py_ssize_t n = rows_view.shape[0]
+        cdef Py_ssize_t i, idx
+        cdef int64_t s1, s2, t1, t2, lag, ns1, ns2, nlag
+        cdef uint8_t[:] occupied
+        cdef int64_t[:] key_s1
+        cdef int64_t[:] key_s2
+        cdef int64_t[:] key_lag
+        cdef double[:] corr_arr
+        cdef int64_t[:] steps_arr
+        cdef double last_corr, floor
+        cdef bint comfortably_below
+        cdef object keep = np.ones(n, dtype=np.uint8)
+        cdef uint8_t[:] keep_view = keep
+        cdef Py_ssize_t skipped = 0
+
+        occupied = self._occupied_arr
+        key_s1 = self._key_s1_arr
+        key_s2 = self._key_s2_arr
+        key_lag = self._key_lag_arr
+        corr_arr = self._corr_arr
+        steps_arr = self._steps_arr
+        floor = threshold - margin
+
+        for i in range(n):
+            s1 = rows_view[i, 0]
+            s2 = rows_view[i, 1]
+            t1 = rows_view[i, 2]
+            t2 = rows_view[i, 3]
+            lag = t1 - t2
+            if s1 == s2:
+                ns1 = s1
+                ns2 = s2
+                nlag = lag if lag >= 0 else -lag
+            elif s1 < s2:
+                ns1 = s1
+                ns2 = s2
+                nlag = lag
+            else:
+                ns1 = s2
+                ns2 = s1
+                nlag = -lag
+            idx = self._find_slot(ns1, ns2, nlag)
+            if occupied[idx] == 0:
+                continue
+            last_corr = corr_arr[idx]
+            if neg_corr:
+                comfortably_below = (last_corr if last_corr >= 0 else -last_corr) < floor
+            else:
+                comfortably_below = last_corr < floor
+            if comfortably_below and steps_arr[idx] < max_steps:
+                keep_view[i] = <uint8_t>0
+                steps_arr[idx] += 1
+                skipped += 1
+        return keep, skipped
+
+    cpdef Py_ssize_t size(self):
+        return self._size
