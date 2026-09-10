@@ -1,0 +1,70 @@
+{
+  "name": "test_bf_corr_100_1",
+  "dataset": "/storage/simple/projects/iroko-lirmm/CorrTrack/datasets/asos-airports/fr-air_temperature.csv",
+  "baseline": false,
+  "clean": false,
+  "incremental": true,
+  "output": "results",
+  "params": {
+    "n_series": 100,
+    "n_years": 1,
+    "neg_corr": false,
+    "std_threshold": 0.001
+  },
+  "runs": [
+    {
+      "name": "filcorr_full_cython",
+      "mode": "filcorr",
+      "params": {
+        "filcorr_fs": 0.0,
+        "filcorr_ft": 0.5,
+        "filcorr_backend": "cython"
+      }
+    },
+    {
+      "name": "filcorr_band_cython",
+      "mode": "filcorr",
+      "params": {
+        "filcorr_fs": 0.01,
+        "filcorr_ft": 0.1,
+        "filcorr_backend": "cython"
+      }
+    },
+    {
+      "name": "filcorr_full_python",
+      "mode": "filcorr",
+      "params": {
+        "filcorr_fs": 0.0,
+        "filcorr_ft": 0.5,
+        "filcorr_backend": "python"
+      }
+    },
+    {
+      "name": "filcorr_band_python",
+      "mode": "filcorr",
+      "params": {
+        "filcorr_fs": 0.01,
+        "filcorr_ft": 0.1,
+        "filcorr_backend": "python"
+      }
+    },
+    {
+      "name": "filcorr_full_vectorized",
+      "mode": "filcorr",
+      "params": {
+        "filcorr_fs": 0.0,
+        "filcorr_ft": 0.5,
+        "filcorr_backend": "vectorized"
+      }
+    },
+    {
+      "name": "filcorr_band_vectorized",
+      "mode": "filcorr",
+      "params": {
+        "filcorr_fs": 0.01,
+        "filcorr_ft": 0.1,
+        "filcorr_backend": "vectorized"
+      }
+    }
+  ]
+}

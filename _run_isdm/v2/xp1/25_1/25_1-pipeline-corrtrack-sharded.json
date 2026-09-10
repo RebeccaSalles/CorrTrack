@@ -1,0 +1,777 @@
+{
+  "name": "test_bf_corr_25_1",
+  "dataset": "/storage/simple/projects/iroko-lirmm/CorrTrack/datasets/asos-airports/fr-air_temperature.csv",
+  "baseline": false,
+  "clean": false,
+  "incremental": true,
+  "output": "results",
+  "params": {
+    "n_series": 25,
+    "n_years": 1,
+    "neg_corr": false,
+    "std_threshold": 0.001
+  },
+  "optimize": {
+    "grid": {
+      "n_vectors": [
+        32,
+        64
+      ],
+      "grid_cell": [
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "grid_n_tables": [
+        8,
+        16
+      ],
+      "query_radius": [
+        2,
+        4,
+        6,
+        8,
+        10,
+        12
+      ],
+      "n_neighbors": [
+        32,
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    "train_ratio": 0.2,
+    "target_recall": 0.95,
+    "target_precision": 0.9,
+    "auto_derive": true,
+    "smart_grid": true,
+    "successive_halving": 3,
+    "n_series_opt": 5,
+    "n_years_opt": 1
+  },
+  "runs": [
+    {
+      "name": "corrtrack_bptree_shvect_w1",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_vectorized",
+        "key-mode": "truncate",
+        "workers": 1
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shvect_w2",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_vectorized",
+        "key-mode": "truncate",
+        "workers": 2
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shvect_w4",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_vectorized",
+        "key-mode": "truncate",
+        "workers": 4
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shvect_w8",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_vectorized",
+        "key-mode": "truncate",
+        "workers": 8
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shcyth_w1",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_cython",
+        "key-mode": "truncate",
+        "workers": 1
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shcyth_w2",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_cython",
+        "key-mode": "truncate",
+        "workers": 2
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shcyth_w4",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_cython",
+        "key-mode": "truncate",
+        "workers": 4
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shcyth_w8",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_cython",
+        "key-mode": "truncate",
+        "workers": 8
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shpy_w1",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_python",
+        "key-mode": "truncate",
+        "workers": 1
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shpy_w2",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_python",
+        "key-mode": "truncate",
+        "workers": 2
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shpy_w4",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_python",
+        "key-mode": "truncate",
+        "workers": 4
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shpy_w8",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_python",
+        "key-mode": "truncate",
+        "workers": 8
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shvect_w1_fused",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_vectorized",
+        "key-mode": "truncate",
+        "workers": 1,
+        "shard_mode": "fused"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shvect_w2_fused",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_vectorized",
+        "key-mode": "truncate",
+        "workers": 2,
+        "shard_mode": "fused"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shvect_w4_fused",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_vectorized",
+        "key-mode": "truncate",
+        "workers": 4,
+        "shard_mode": "fused"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shvect_w8_fused",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_vectorized",
+        "key-mode": "truncate",
+        "workers": 8,
+        "shard_mode": "fused"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shcyth_w1_fused",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_cython",
+        "key-mode": "truncate",
+        "workers": 1,
+        "shard_mode": "fused"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shcyth_w2_fused",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_cython",
+        "key-mode": "truncate",
+        "workers": 2,
+        "shard_mode": "fused"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shcyth_w4_fused",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_cython",
+        "key-mode": "truncate",
+        "workers": 4,
+        "shard_mode": "fused"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_shcyth_w8_fused",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_cython",
+        "key-mode": "truncate",
+        "workers": 8,
+        "shard_mode": "fused"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_par_w1",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "parallel",
+        "key-mode": "truncate",
+        "workers": 1
+      }
+    },
+    {
+      "name": "corrtrack_bptree_par_w2",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "parallel",
+        "key-mode": "truncate",
+        "workers": 2
+      }
+    },
+    {
+      "name": "corrtrack_bptree_par_w4",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "parallel",
+        "key-mode": "truncate",
+        "workers": 4
+      }
+    },
+    {
+      "name": "corrtrack_bptree_par_w8",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "parallel",
+        "key-mode": "truncate",
+        "workers": 8
+      }
+    },
+    {
+      "name": "corrtrack_bptree_vectpar_w1",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "vectorized_parallel",
+        "key-mode": "truncate",
+        "workers": 1
+      }
+    },
+    {
+      "name": "corrtrack_bptree_vectpar_w2",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "vectorized_parallel",
+        "key-mode": "truncate",
+        "workers": 2
+      }
+    },
+    {
+      "name": "corrtrack_bptree_vectpar_w4",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "vectorized_parallel",
+        "key-mode": "truncate",
+        "workers": 4
+      }
+    },
+    {
+      "name": "corrtrack_bptree_vectpar_w8",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "vectorized_parallel",
+        "key-mode": "truncate",
+        "workers": 8
+      }
+    },
+    {
+      "name": "corrtrack_bptree_cythpar_w1",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "cython_parallel",
+        "key-mode": "truncate",
+        "workers": 1
+      }
+    },
+    {
+      "name": "corrtrack_bptree_cythpar_w2",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "cython_parallel",
+        "key-mode": "truncate",
+        "workers": 2
+      }
+    },
+    {
+      "name": "corrtrack_bptree_cythpar_w4",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "cython_parallel",
+        "key-mode": "truncate",
+        "workers": 4
+      }
+    },
+    {
+      "name": "corrtrack_bptree_cythpar_w8",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "cython_parallel",
+        "key-mode": "truncate",
+        "workers": 8
+      }
+    },
+    {
+      "name": "corrtrack_bst_shvect_w1",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_vectorized",
+        "key-mode": "truncate",
+        "workers": 1
+      }
+    },
+    {
+      "name": "corrtrack_bst_shvect_w2",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_vectorized",
+        "key-mode": "truncate",
+        "workers": 2
+      }
+    },
+    {
+      "name": "corrtrack_bst_shvect_w4",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_vectorized",
+        "key-mode": "truncate",
+        "workers": 4
+      }
+    },
+    {
+      "name": "corrtrack_bst_shvect_w8",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_vectorized",
+        "key-mode": "truncate",
+        "workers": 8
+      }
+    },
+    {
+      "name": "corrtrack_bst_shcyth_w1",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_cython",
+        "key-mode": "truncate",
+        "workers": 1
+      }
+    },
+    {
+      "name": "corrtrack_bst_shcyth_w2",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_cython",
+        "key-mode": "truncate",
+        "workers": 2
+      }
+    },
+    {
+      "name": "corrtrack_bst_shcyth_w4",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_cython",
+        "key-mode": "truncate",
+        "workers": 4
+      }
+    },
+    {
+      "name": "corrtrack_bst_shcyth_w8",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_cython",
+        "key-mode": "truncate",
+        "workers": 8
+      }
+    },
+    {
+      "name": "corrtrack_bst_shpy_w1",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_python",
+        "key-mode": "truncate",
+        "workers": 1
+      }
+    },
+    {
+      "name": "corrtrack_bst_shpy_w2",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_python",
+        "key-mode": "truncate",
+        "workers": 2
+      }
+    },
+    {
+      "name": "corrtrack_bst_shpy_w4",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_python",
+        "key-mode": "truncate",
+        "workers": 4
+      }
+    },
+    {
+      "name": "corrtrack_bst_shpy_w8",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_python",
+        "key-mode": "truncate",
+        "workers": 8
+      }
+    },
+    {
+      "name": "corrtrack_bst_shvect_w1_fused",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_vectorized",
+        "key-mode": "truncate",
+        "workers": 1,
+        "shard_mode": "fused"
+      }
+    },
+    {
+      "name": "corrtrack_bst_shvect_w2_fused",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_vectorized",
+        "key-mode": "truncate",
+        "workers": 2,
+        "shard_mode": "fused"
+      }
+    },
+    {
+      "name": "corrtrack_bst_shvect_w4_fused",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_vectorized",
+        "key-mode": "truncate",
+        "workers": 4,
+        "shard_mode": "fused"
+      }
+    },
+    {
+      "name": "corrtrack_bst_shvect_w8_fused",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_vectorized",
+        "key-mode": "truncate",
+        "workers": 8,
+        "shard_mode": "fused"
+      }
+    },
+    {
+      "name": "corrtrack_bst_shcyth_w1_fused",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_cython",
+        "key-mode": "truncate",
+        "workers": 1,
+        "shard_mode": "fused"
+      }
+    },
+    {
+      "name": "corrtrack_bst_shcyth_w2_fused",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_cython",
+        "key-mode": "truncate",
+        "workers": 2,
+        "shard_mode": "fused"
+      }
+    },
+    {
+      "name": "corrtrack_bst_shcyth_w4_fused",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_cython",
+        "key-mode": "truncate",
+        "workers": 4,
+        "shard_mode": "fused"
+      }
+    },
+    {
+      "name": "corrtrack_bst_shcyth_w8_fused",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_cython",
+        "key-mode": "truncate",
+        "workers": 8,
+        "shard_mode": "fused"
+      }
+    },
+    {
+      "name": "corrtrack_bst_par_w1",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "parallel",
+        "key-mode": "truncate",
+        "workers": 1
+      }
+    },
+    {
+      "name": "corrtrack_bst_par_w2",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "parallel",
+        "key-mode": "truncate",
+        "workers": 2
+      }
+    },
+    {
+      "name": "corrtrack_bst_par_w4",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "parallel",
+        "key-mode": "truncate",
+        "workers": 4
+      }
+    },
+    {
+      "name": "corrtrack_bst_par_w8",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "parallel",
+        "key-mode": "truncate",
+        "workers": 8
+      }
+    },
+    {
+      "name": "corrtrack_bst_vectpar_w1",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "vectorized_parallel",
+        "key-mode": "truncate",
+        "workers": 1
+      }
+    },
+    {
+      "name": "corrtrack_bst_vectpar_w2",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "vectorized_parallel",
+        "key-mode": "truncate",
+        "workers": 2
+      }
+    },
+    {
+      "name": "corrtrack_bst_vectpar_w4",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "vectorized_parallel",
+        "key-mode": "truncate",
+        "workers": 4
+      }
+    },
+    {
+      "name": "corrtrack_bst_vectpar_w8",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "vectorized_parallel",
+        "key-mode": "truncate",
+        "workers": 8
+      }
+    },
+    {
+      "name": "corrtrack_bst_cythpar_w1",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "cython_parallel",
+        "key-mode": "truncate",
+        "workers": 1
+      }
+    },
+    {
+      "name": "corrtrack_bst_cythpar_w2",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "cython_parallel",
+        "key-mode": "truncate",
+        "workers": 2
+      }
+    },
+    {
+      "name": "corrtrack_bst_cythpar_w4",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "cython_parallel",
+        "key-mode": "truncate",
+        "workers": 4
+      }
+    },
+    {
+      "name": "corrtrack_bst_cythpar_w8",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "cython_parallel",
+        "key-mode": "truncate",
+        "workers": 8
+      }
+    }
+  ]
+}

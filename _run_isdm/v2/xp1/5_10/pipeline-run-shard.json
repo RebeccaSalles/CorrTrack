@@ -1,0 +1,314 @@
+{
+  "name": "test_v2_5_10_shard",
+  "dataset": "/storage/simple/projects/iroko-lirmm/CorrTrack/datasets/asos-airports/fr-air_temperature.csv",
+  "baseline": 0,
+  "clean": false,
+  "incremental": true,
+  "output": "results",
+  "params": {
+    "n_series": 5,
+    "n_years": 10,
+    "neg_corr": false,
+    "std_threshold": 0.001,
+    "workers": 4
+  },
+  "optimize": {
+    "grid": {
+      "n_vectors": [
+        32,
+        64
+      ],
+      "grid_cell": [
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "grid_n_tables": [
+        8,
+        16
+      ],
+      "query_radius": [
+        2,
+        4,
+        6,
+        8,
+        10,
+        12
+      ],
+      "n_neighbors": [
+        32,
+        64,
+        128,
+        256,
+        512
+      ],
+      "key_mode": [
+        "truncate",
+        "random"
+      ],
+      "key_proj_dim": [
+        1,
+        3
+      ]
+    },
+    "train_ratio": 0.2,
+    "target_recall": 0.95,
+    "target_precision": 0.9,
+    "auto_derive": true,
+    "smart_grid": true,
+    "successive_halving": 3,
+    "n_series_opt": 5,
+    "n_years_opt": 1
+  },
+  "runs": [
+    {
+      "name": "bf_python",
+      "mode": "bf"
+    },
+    {
+      "name": "bf_vectorized",
+      "mode": "bf",
+      "params": {
+        "backend": "vectorized"
+      }
+    },
+    {
+      "name": "bf_cython",
+      "mode": "bf",
+      "params": {
+        "backend": "cython"
+      }
+    },
+    {
+      "name": "corrtrack_grid_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "grid",
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_tree_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "tree",
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_kdtree_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "kdtree",
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_quadtree_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "quadtree",
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_octree_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "octree",
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_bst_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_bptree3d_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree3d",
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_bst3d_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst3d",
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_vptree_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "vptree",
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_knn_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "knn",
+        "backend": "sharded_vectorized",
+        "n_neighbors": 512
+      }
+    },
+    {
+      "name": "corrtrack_hnsw_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "hnsw",
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_annoy_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "annoy",
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_fft_lowpass_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "sketch_method": "fft_lowpass",
+        "query_radius": 4,
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_fft_topk_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "sketch_method": "fft_topk",
+        "query_radius": 4,
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_median_blocks_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "sketch_method": "median_blocks",
+        "n_vectors": 24,
+        "query_radius": 4,
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_median_phase_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "sketch_method": "median_phase",
+        "n_vectors": 24,
+        "query_radius": 4,
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_kdtree_fft_lowpass_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "kdtree",
+        "sketch_method": "fft_lowpass",
+        "query_radius": 4,
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_grid_fft_lowpass_sharded_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "grid",
+        "sketch_method": "fft_lowpass",
+        "backend": "sharded_vectorized"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_sharded_cyth",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "sharded_cython"
+      }
+    },
+    {
+      "name": "corrtrack_kdtree_sharded_cyth",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "kdtree",
+        "backend": "sharded_cython"
+      }
+    },
+    {
+      "name": "corrtrack_grid_sharded_cyth",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "grid",
+        "backend": "sharded_cython"
+      }
+    },
+    {
+      "name": "corrtrack_bst_sharded_cyth",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "sharded_cython"
+      }
+    },
+    {
+      "name": "corrtrack_octree_sharded_cyth",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "octree",
+        "backend": "sharded_cython"
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+"""Dataset-level configuration for CorrTrack experiments."""
+
+from functools import partial
+
+from datasets.asos_loader import load_dataset
+
+
+RESULT_FOLDER = "/storage/simple/projects/iroko-lirmm/CorrTrack/_run_isdm/iroko/xp-benoit2/b5_6_1/results/"
+COUNTRIES = ["fr","br"]
+VARIABLES = ["air_temperature"]
+N_SERIES = [10]
+N_YEARS = [8]
+
+DATA_LOADER = partial(load_dataset, root="datasets/asos-airports")

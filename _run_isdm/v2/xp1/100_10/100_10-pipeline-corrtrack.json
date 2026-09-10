@@ -1,0 +1,157 @@
+{
+  "name": "test_bf_corr_100_10",
+  "dataset": "/storage/simple/projects/iroko-lirmm/CorrTrack/datasets/asos-airports/fr-air_temperature.csv",
+  "baseline": false,
+  "clean": false,
+  "incremental": true,
+  "output": "results",
+  "params": {
+    "n_series": 100,
+    "n_years": 10,
+    "neg_corr": false,
+    "std_threshold": 0.001
+  },
+  "optimize": {
+    "grid": {
+      "n_vectors": [
+        32,
+        64
+      ],
+      "grid_cell": [
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "grid_n_tables": [
+        8,
+        16
+      ],
+      "query_radius": [
+        2,
+        4,
+        6,
+        8,
+        10,
+        12
+      ],
+      "n_neighbors": [
+        32,
+        64,
+        128,
+        256,
+        512
+      ]
+    },
+    "train_ratio": 0.2,
+    "target_recall": 0.95,
+    "target_precision": 0.9,
+    "auto_derive": true,
+    "smart_grid": true,
+    "successive_halving": 3,
+    "n_series_opt": 5,
+    "n_years_opt": 1
+  },
+  "runs": [
+    {
+      "name": "corrtrack_bptree_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "vectorized",
+        "key-mode": "truncate"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_cyth",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "cython",
+        "key-mode": "truncate"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_par",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "parallel",
+        "key-mode": "truncate"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_vectpar",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "vectorized_parallel",
+        "key-mode": "truncate"
+      }
+    },
+    {
+      "name": "corrtrack_bptree_cythpar",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bptree",
+        "backend": "cython_parallel",
+        "key-mode": "truncate"
+      }
+    },
+    {
+      "name": "corrtrack_bst_vect",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "vectorized",
+        "key-mode": "truncate"
+      }
+    },
+    {
+      "name": "corrtrack_bst_cyth",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "cython",
+        "key-mode": "truncate"
+      }
+    },
+    {
+      "name": "corrtrack_bst_par",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "parallel",
+        "key-mode": "truncate"
+      }
+    },
+    {
+      "name": "corrtrack_bst_vectpar",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "vectorized_parallel",
+        "key-mode": "truncate"
+      }
+    },
+    {
+      "name": "corrtrack_bst_cythpar",
+      "mode": "corrtrack",
+      "optimize": true,
+      "params": {
+        "index-backend": "bst",
+        "backend": "cython_parallel",
+        "key-mode": "truncate"
+      }
+    }
+  ]
+}

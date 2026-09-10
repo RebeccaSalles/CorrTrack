@@ -1,0 +1,30 @@
+{
+  "name": "test_bf_corr_50_1",
+  "dataset": "/storage/simple/projects/iroko-lirmm/CorrTrack/datasets/asos-airports/fr-air_temperature.csv",
+  "baseline": 0,
+  "clean": false,
+  "incremental": true,
+  "output": "results",
+  "params": {
+    "n_series": 50,
+    "n_years": 1,
+    "neg_corr": false,
+    "std_threshold": 0.001
+  },
+  "runs": [
+    {
+      "name": "bf_vectorized",
+      "mode": "bf",
+      "params": {
+        "backend": "vectorized"
+      }
+    },
+    {
+      "name": "bf_cython",
+      "mode": "bf",
+      "params": {
+        "backend": "cython"
+      }
+    }
+  ]
+}
