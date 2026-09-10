@@ -1,0 +1,11 @@
+# Core
+numpy>=1.24
+pandas>=2.0
+matplotlib>=3.7
+flask>=2.3            # v2.viz dashboard
+
+# Optional accelerators (each backend falls back to the vectorized numpy one)
+# pip install -r requirements.txt --extra-index-url ...  # rien de spécial requis
+Cython>=3.0           # backend `cython` (kernels Pearson/projection compilés via pyximport)
+torch>=2.1            # backend `mps` (GPU Apple Silicon) + conversion CoreML
+coremltools>=7.0      # backend `coreml` (ANE, expérimental, macOS arm64)
