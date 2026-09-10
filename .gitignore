@@ -1,4 +1,31 @@
+# --- datasets (large binaries, regenerated or downloaded) ---
 datasets/examples/asos-airports/fr-wind_direction.csv
 datasets/examples/asos-airports/fr-air_temperature.csv
-datasets/examples/asos-airports/fr-wind_direction.csv
-datasets/examples/asos-airports/fr-air_temperature.csv
+datasets/examples/**/*.npz
+datasets/synth_outputs/
+
+# --- Python bytecode (a stale .pyc masks the edited sources) ---
+__pycache__/
+*.pyc
+*.pyo
+
+# --- Cython build artifacts (rebuilt inplace when the pipeline starts) ---
+_pyxbld/
+build/
+*.so
+v2/backends/_cython_kernels.c
+v2/fillcorr/_kernels.c
+
+# --- run outputs (results, logs, caches) ---
+results/
+v2/cache/
+graphify-out/
+
+# --- third-party material, not versioned (see v2/fillcorr.md) ---
+v2/fillcorr/filcorr-offline-perf-bench/
+v2/fillcorr/*.pdf
+
+# --- editor / OS noise ---
+.DS_Store
+.idea/
+*.bak
