@@ -1,0 +1,122 @@
+% CorrTrack — candidate selection: v1 vs v2 (overview funnel)
+% Compile: pdflatex slide_selection_v1_v2.tex
+\documentclass[aspectratio=169,10pt]{beamer}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{tikz}
+\usepackage{booktabs}
+\usepackage{colortbl}
+
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{frametitle}[default][left]
+\setbeamerfont{frametitle}{size=\large,series=\bfseries}
+
+\definecolor{ink}{HTML}{14181F}
+\definecolor{accent}{HTML}{2A3A57}
+\definecolor{danger}{HTML}{BD3A53}
+\definecolor{good}{HTML}{1C8676}
+\definecolor{muted}{HTML}{5C6675}
+\definecolor{dangersoft}{HTML}{F8E9EC}
+\definecolor{goodsoft}{HTML}{E6F4F1}
+
+\setbeamercolor{frametitle}{fg=ink}
+\setbeamercolor{normal text}{fg=ink}
+
+\newcommand{\fbar}[2]{%
+  \begin{tikzpicture}[baseline=0pt]
+    \fill[#2!30] (0,0) rectangle (4,0.2);
+    \fill[#2]    (0,0) rectangle (4*#1,0.2);
+  \end{tikzpicture}}
+\newcommand{\stg}[2]{{\scriptsize\textbf{#1}\hfill\texttt{\scriptsize #2}}\par}
+\newcommand{\down}{\vspace{-3pt}\centerline{\textcolor{muted}{\scriptsize$\downarrow$}}\vspace{-3pt}}
+\newcommand{\fnote}[1]{{\tiny\textcolor{muted}{#1}}\par}
+
+\begin{document}
+\begin{frame}[t]{CorrTrack — candidate selection: v1 degenerates into brute force, v2 does not}
+\footnotesize
+
+\begin{columns}[t]
+
+% ===================== v1 =====================
+\begin{column}{0.5\textwidth}
+{\color{danger}\rule{2.4em}{2.4pt}}\ %
+{\ttfamily\scriptsize\textbf{\textcolor{danger}{v1}}}\; L2 radius \texttt{cell\_size} --- only filter
+\vspace{3pt}
+
+\fnote{share of pairs passing each stage · dense data}
+\stg{Sketch}{normalized RP}
+\fbar{1.0}{danger}\par
+\down
+\stg{Selection}{$\lVert a\!-\!b\rVert \le \tau$}
+\fbar{0.96}{danger}\par
+\fnote{no intermediate filter · \texttt{freq\_threshold=0} (full\_vector)}
+\down
+\stg{Pearson validation}{exact, O($n^2$)}
+\fbar{0.92}{danger}\par
+
+\vspace{3pt}
+{\scriptsize $\lVert a\!-\!b\rVert^2 \approx 2(1\!-\!r)\ \Rightarrow\ $\textbf{\textcolor{danger}{$r \gtrsim 1-\tau^2/2$}}}\par
+\vspace{2pt}
+{\scriptsize
+\begin{tabular}{ccl}
+\toprule
+\texttt{cell\_size} & $\tau$ & keeps $r\ge$\\
+\midrule
+1 & 0.78 & \textcolor{good}{\textbf{0.70 \checkmark}}\\
+2 & 1.55 & $-0.2$ (almost all)\\
+\rowcolor{dangersoft} 3 & 2.32 & \textbf{all} ($r\ge-1$)\\
+\bottomrule
+\end{tabular}}
+
+\vspace{3pt}
+\colorbox{dangersoft}{\parbox{0.94\linewidth}{\scriptsize\textcolor{danger}{%
+\textbf{Effect} --- candidates $\approx$ all pairs $\Rightarrow$ exhaustive validation =
+\textbf{brute force in sketch space} (slower than BF). The sweep scans \texttt{cell\_size$\in$[1,2,3]}.}}}
+\end{column}
+
+% ===================== v2 =====================
+\begin{column}{0.5\textwidth}
+{\color{good}\rule{2.4em}{2.4pt}}\ %
+{\ttfamily\scriptsize\textbf{\textcolor{good}{v2}}}\; \emph{bounded} cosine gate before Pearson
+\vspace{3pt}
+
+\fnote{share of pairs passing each stage · dense data}
+\stg{Sketch}{RP / fft / median}
+\fbar{1.0}{good}\par
+\fnote{\texttt{sketch\_method} (5 variants) --- drives separability (AUC)}
+\down
+\stg{Index}{query\_radius (cdist)}
+\fbar{0.98}{good}\par
+\down
+\stg{Cosine gate}{$\cos \ge 0.7$}
+\fbar{0.44}{good}\par
+\fnote{bounded $[-1,1]$ · \textbf{always applied} (\texttt{validate\_sketches})}
+\down
+\stg{Pearson validation}{$r \ge 0.8$}
+\fbar{0.23}{good}\par
+
+\vspace{3pt}
+{\scriptsize $\cos(a,b) \approx r$ \textbf{directly} --- bounded threshold $[-1,1]$.}\par
+\vspace{2pt}
+{\scriptsize
+\begin{itemize}\setlength\itemsep{1pt}
+\item[\textcolor{good}{\checkmark}] Gate \texttt{sketch\_threshold} cuts \textbf{before} the costly Pearson
+\item[\textcolor{good}{\checkmark}] Loose index $\to$ inflates the cosine (cheap), \textbf{not} Pearson
+\item[\textcolor{good}{\checkmark}] Rest = data separability $\to$ \texttt{diagnose\_select}
+\end{itemize}}
+
+\vspace{3pt}
+\colorbox{goodsoft}{\parbox{0.94\linewidth}{\scriptsize\textcolor{good}{%
+\textbf{Effect} --- set reduced before validation $\Rightarrow$ \textbf{Pearson protected}.}}}
+\end{column}
+
+\end{columns}
+
+\vspace{2pt}
+\noindent\colorbox{accent}{\textcolor{white}{\scriptsize\,\textbf{KEY POINT}\,}}\hspace{4pt}%
+{\scriptsize The \textcolor{danger}{\textbf{v1 mechanism}} (unbounded radius, no filter before Pearson) is \textbf{absent in v2}. The ``almost everything passes'' symptom may return in \textcolor{good}{\textbf{v2}}, but \textbf{bounded by the cosine gate} (Pearson protected) and \textbf{driven by data separability}.}
+
+\end{frame}
+\end{document}
