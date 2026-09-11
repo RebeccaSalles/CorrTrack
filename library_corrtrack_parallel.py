@@ -1194,6 +1194,15 @@ def run_and_log_bruteforce(
         validation_metric=base_config.get("validation_metric", "pearson"),
     )
     corrtrack.baseline_mode = baseline_mode
+    if baseline_mode == "filcorr":
+        corrtrack.filcorr_fs = _to_float_safe(base_config.get("filcorr_fs", 0.0)) or 0.0
+        corrtrack.filcorr_ft = _to_float_safe(base_config.get("filcorr_ft", 0.5)) or 0.5
+        corrtrack.filcorr_sampling_rate = (
+            _to_float_safe(base_config.get("filcorr_sampling_rate", 1.0)) or 1.0
+        )
+        metadata.setdefault("filcorr_fs", corrtrack.filcorr_fs)
+        metadata.setdefault("filcorr_ft", corrtrack.filcorr_ft)
+        metadata.setdefault("filcorr_sampling_rate", corrtrack.filcorr_sampling_rate)
 
     if verbose is None:
         verbose = _coerce_to_bool(base_config.get("verbose", False))
@@ -1935,9 +1944,12 @@ def _resolve_baseline_mode(value, default="bruteforce"):
         "incremental": "exact_stomp",
         "incremental_bf": "exact_stomp",
         "incremental_bruteforce": "exact_stomp",
+        "fil_corr": "filcorr",
+        "fillcorr": "filcorr",
+        "fil-corr": "filcorr",
     }
     key = aliases.get(key, key)
-    if key not in {"bruteforce", "exact_stomp"}:
+    if key not in {"bruteforce", "exact_stomp", "filcorr"}:
         key = default
     return key
 
@@ -3082,15 +3094,30 @@ def _rows_as_void_keys(rows):
 
 class NumericCorrelatedFlags:
     """(2026-09-10) The `corr_flags` return of a recall_by_window pass, in numeric form:
-    the correlated set as (rows (N,5) int64, corrs (N,) float64). `len()` is the number of
+    the correlated set as (rows (N,5), corrs (N,) float64). `len()` is the number of
     correlated windows (same as the old string dict's len); `.correlated_rows()` and tuple
     unpacking give (rows, corrs), so `CorrTrack.compute_metrics_bf` consumes it directly
-    with no per-key Python normalization."""
+    with no per-key Python normalization.
+
+    (2026-09-11) `rows`' dtype follows whatever integer dtype it was constructed with
+    (int32 in the common case -- `CorrTrack.correlated_rows()`'s own accumulator storage,
+    see its note) instead of always force-upcasting to int64. Found necessary by a real
+    OOM directly caused by the OLD unconditional upcast here: it undid
+    `correlated_rows()`'s own int32 memory fix the moment this wrapper was constructed
+    around it (`execute_corrtrack_pass`'s `NumericCorrelatedFlags(*corrtrack.
+    correlated_rows())`), on the SAME memory-constrained machine. Safe for the same reason
+    as `correlated_rows()` itself: `CorrTrack.compute_metrics_bf`/`_as_row_corr_pair`
+    already re-cast to int64 themselves when they actually need it -- this wrapper is
+    usually just a transient carrier between a run and that comparison. Non-integer input
+    (a plain list of tuples, say) still normalizes to int64, matching the old behavior."""
 
     __slots__ = ("rows", "corrs")
 
     def __init__(self, rows, corrs):
-        self.rows = np.ascontiguousarray(np.asarray(rows, dtype=np.int64).reshape((-1, 5)))
+        rows_arr = np.asarray(rows)
+        if rows_arr.dtype.kind not in ("i", "u"):
+            rows_arr = rows_arr.astype(np.int64)
+        self.rows = np.ascontiguousarray(rows_arr.reshape((-1, 5)))
         c = np.ascontiguousarray(np.asarray(corrs, dtype=np.float64).reshape((-1,)))
         if c.shape[0] != self.rows.shape[0]:
             c = np.ones(self.rows.shape[0], dtype=np.float64)
@@ -4228,6 +4255,20 @@ class CorrTrack:
         self.grid_nodes = []
         self.brute_force_nodes = []
         self.exact_stomp_bf_node = None
+        self.filcorr_bf_node = None
+        # FilCorr (Zhong, Souza, Mueen -- ICDM 2020) competitor baseline knobs --
+        # see Candidates_BF_FilCorr. fs=0.0/ft=0.5 (full band, DC removed) makes
+        # FilCorr's Parseval correlation mathematically identical to standard
+        # Pearson -- that is the setting used for the SOTA speed/recall/precision
+        # comparison against this project's own bruteforce ground truth. A real
+        # band-pass ([fs, ft] narrower than the full range) computes a genuinely
+        # different quantity (filtered-signal correlation) and must not be scored
+        # against the unfiltered ground truth. Set as plain attributes (not
+        # constructor params) the same way baseline_mode itself is -- see
+        # run_and_log_bruteforce.
+        self.filcorr_fs = 0.0
+        self.filcorr_ft = 0.5
+        self.filcorr_sampling_rate = 1.0
         self.baseline_mode = "bruteforce"
         self._thread_pool = None
         self._thread_pool_workers = None
@@ -4247,7 +4288,7 @@ class CorrTrack:
         # accumulator -- see the `correlated` property below and _append_correlated_numeric.
         # The hot validation/monitor recording path appends canonical int rows here and never
         # builds a Python string-tuple key per pair.
-        self._correlated_rows = None            # (cap, 5) int64, canonical orientation
+        self._correlated_rows = None            # (cap, 5) int32, canonical orientation
         self._correlated_corrs = None           # (cap,) float64
         self._correlated_count = 0
         self._correlated_cap = 0
@@ -6331,7 +6372,27 @@ class CorrTrack:
         correlated set in canonical orientation, vectorized -- no per-pair Python, no
         string tuple. Mirrors _append_validated_numeric_step's amortized-doubling buffer.
         Timed as artifact bookkeeping (subtracted from validation_time), same as the
-        string path it replaces."""
+        string path it replaces.
+
+        (2026-09-11) Storage is int32, not int64 -- found necessary by a real OOM on a
+        memory-constrained machine (a dense real dataset, 14M+ correlated pairs, needed a
+        640MB single allocation for just this ONE doubling-growth step; the transient
+        old+new-both-alive peak during regrow was worse still). Safe by the same
+        value-range analysis this project already applied to candidate_kernels.pyx's own
+        int32 downsizing (_band_keys/_neg_band_keys/_post_capacity/_post_count, see
+        docs/implementation_log.md's 2026-09-04 (c) entry): s1/s2 (series index) and w
+        (window_size) are always tiny; t1/t2 (absolute window-start time, an integer
+        step/observation count) would need over 2^31 steps to overflow int32 -- hundreds
+        of thousands of years of hourly data. Every EXTERNAL consumer of this accumulator
+        already re-casts to int64 defensively regardless of storage dtype
+        (_canonicalize_rows, NumericCorrelatedFlags.__init__, _as_row_corr_pair all call
+        `np.asarray(..., dtype=np.int64)`), so this is purely an internal-storage change --
+        verified byte-for-byte equivalent output via
+        test_correlated_numeric_accumulator_int32_matches_int64_reference. Halves this
+        structure's own footprint (5 x int32 = 20 bytes/row vs 40) and, combined with the
+        halved transient-during-grow peak, roughly halves total accumulator memory at any
+        given correlated-pair count -- the fix that turned the observed crash into headroom.
+        """
         t0 = time.perf_counter()
         rows = _canonicalize_rows(rows)
         n_rows = int(rows.shape[0])
@@ -6352,7 +6413,7 @@ class CorrTrack:
             new_capacity = max(1024, capacity if capacity > 0 else 0)
             while new_capacity < need:
                 new_capacity *= 2
-            new_rows = np.empty((new_capacity, 5), dtype=np.int64)
+            new_rows = np.empty((new_capacity, 5), dtype=np.int32)
             new_corrs = np.empty((new_capacity,), dtype=np.float64)
             if count > 0 and self._correlated_rows is not None:
                 new_rows[:count, :] = self._correlated_rows[:count, :]
@@ -6367,13 +6428,28 @@ class CorrTrack:
         self.artifact_bookkeeping_time += time.perf_counter() - t0
 
     def correlated_rows(self):
-        """The persistent correlated set as (rows (N,5) int64 canonical, corrs (N,) float64).
+        """The persistent correlated set as (rows (N,5) canonical, corrs (N,) float64).
         Includes any rows written through the legacy string path. Zero-copy for the common
-        (accumulator-only) case."""
+        (accumulator-only) case.
+
+        (2026-09-11) `rows`' dtype is int32 (the accumulator's own storage -- see
+        _append_correlated_numeric's note), NOT int64 as originally documented here. An
+        earlier version of this fix defensively upcast to int64 on every call "to keep the
+        public contract unchanged" -- found by a real second OOM (536MB for ONE such
+        upcast of 14M rows, on the SAME memory-constrained machine that motivated the
+        int32 storage change in the first place) to just reintroduce the same peak this
+        fix exists to avoid. Verified unnecessary: EVERY actual caller already re-casts to
+        int64 itself regardless of what dtype it receives (`NumericCorrelatedFlags.__init__`,
+        `_as_row_corr_pair`, `_canonicalize_rows` all call `np.asarray(..., dtype=np.int64)`
+        internally; the two remaining direct callers, `CorrTrackMultiWindow.
+        _merge_correlated_rows` and `synth_corr_gen.py`'s `_determinate_mask` +
+        `_canonicalize_rows` use, were checked directly and are dtype-position-agnostic
+        or route through `_canonicalize_rows` before anything dtype-sensitive) -- so this
+        method returns the accumulator's own array as-is, no redundant copy."""
         n = int(self._correlated_count)
         legacy = self._correlated_legacy_dict
         acc_rows = (self._correlated_rows[:n] if n > 0 and self._correlated_rows is not None
-                    else np.empty((0, 5), dtype=np.int64))
+                    else np.empty((0, 5), dtype=np.int32))
         acc_corrs = (self._correlated_corrs[:n] if n > 0 and self._correlated_corrs is not None
                      else np.empty((0,), dtype=np.float64))
         if not legacy:
@@ -8955,9 +9031,87 @@ class CorrTrack:
             self._print_state()
         self._profile_tick()
 
+    def run_bf_filcorr(self, new_data_step, ids, verbose, testing, corr_val=True, monitor=True):
+        """FilCorr competitor baseline dispatch -- see Candidates_BF_FilCorr.
+        Structurally identical to run_bf_exact_stomp (same bookkeeping/monitor
+        wiring); only the per-step candidate-search node differs."""
+        self.verbose = verbose
+        self.testing = testing
+
+        val_mode = "thread" if self.parallel_validation else "sequential"
+        t_update = time.perf_counter() if self.profile_enabled else None
+        self._update_curr_data(new_data_step, ids)
+        if t_update is not None:
+            self._profile_add("bf.update_curr_data", time.perf_counter() - t_update)
+        self.candidates = {}
+        self._last_candidate_numeric_rows = None
+        self.validated = {}
+        if getattr(self, "_step_observer_enabled", False):
+            self._validated_step = {}
+
+        if self.filcorr_bf_node is None:
+            self.filcorr_bf_node = Candidates_BF_FilCorr(
+                self.window_size,
+                self.window_step,
+                self.n_lags,
+                self.corr_threshold,
+                neg_corr=self.neg_corr,
+                filcorr_fs=getattr(self, "filcorr_fs", 0.0),
+                filcorr_ft=getattr(self, "filcorr_ft", 0.5),
+                filcorr_sampling_rate=getattr(self, "filcorr_sampling_rate", 1.0),
+            )
+
+        accepted_rows, accepted_corrs, n_pairs, timing = self.filcorr_bf_node.run(
+            self._curr_window_step(),
+            self.ids,
+            verbose=verbose,
+            testing=testing,
+            track_min_dist=bool(getattr(self, "track_min_dist", True)),
+            numeric_rows=True,
+        )
+        self.total_candidates += int(n_pairs)
+        self.tested_candidates += int(n_pairs)
+        self.validated_candidates += int(np.asarray(accepted_rows).reshape((-1, 5)).shape[0])
+        self.candidate_time += float(timing.get("candidate_time", 0.0) or 0.0)
+
+        if getattr(self, "track_min_dist", True):
+            step_min_dist = timing.get("min_dist", np.inf)
+            step_min_pair = timing.get("pair_min_dist")
+            if step_min_pair is not None and step_min_dist < self.min_dist:
+                self.min_dist = float(step_min_dist)
+                self.pair_min_dist = step_min_pair
+
+        bookkeeping_before = self.artifact_bookkeeping_time
+        record_t0 = time.perf_counter()
+        self._record_correlated_numeric(accepted_rows, accepted_corrs, retain_validated=monitor)
+        bookkeeping_delta = max(self.artifact_bookkeeping_time - bookkeeping_before, 0.0)
+        self.validation_time += float(timing.get("validation_time", 0.0) or 0.0)
+        self.validation_time += max((time.perf_counter() - record_t0) - bookkeeping_delta, 0.0)
+
+        if monitor:
+            start_time = time.time()
+            self._monitor_corr(worker_mode=val_mode)
+            end_time = time.time()
+            self.monitor_time += end_time - start_time
+
+        if verbose:
+            self._print_state()
+        self._profile_tick()
+
     def run_bf(self, new_data_step, ids, verbose, testing, corr_val=True, monitor=True):
-        if _resolve_baseline_mode(getattr(self, "baseline_mode", "bruteforce")) == "exact_stomp":
+        _bf_mode = _resolve_baseline_mode(getattr(self, "baseline_mode", "bruteforce"))
+        if _bf_mode == "exact_stomp":
             self.run_bf_exact_stomp(
+                new_data_step,
+                ids,
+                verbose=verbose,
+                testing=testing,
+                corr_val=corr_val,
+                monitor=monitor,
+            )
+            return
+        if _bf_mode == "filcorr":
+            self.run_bf_filcorr(
                 new_data_step,
                 ids,
                 verbose=verbose,
@@ -11610,6 +11764,348 @@ class Candidates_BF_ExactSTOMP:
                 corr_arr = np.empty((0,), dtype=np.float64)
             return row_arr, corr_arr, total_pairs, timing
         return accepted, total_pairs, timing
+
+
+def _filcorr_band_indices(window_size, fs, ft, sampling_rate, remove_dc=True):
+    """Band indices `(lb, ub)` (start inclusive, end exclusive) of the positive
+    FFT spectrum kept by FilCorr's pass-band `[fs, ft]`, as in Zhong, Souza &
+    Mueen (ICDM 2020): `lb = floor(m*fs/f)`, `ub = floor(m*ft/f)`, with
+    `lb >= 1` when `remove_dc` (the Parseval derivation below assumes the DC
+    coefficient is zeroed). Ported from the colleague's `v2/fillcorr/algo.py`
+    (`feat/v2-engine` branch) -- see docs/implementation_log.md's 2026-09-11
+    entry for the full port rationale."""
+    m = int(window_size)
+    f = float(sampling_rate) if sampling_rate and sampling_rate > 0 else 1.0
+    lb = int(math.floor(m * float(fs) / f))
+    ub = int(math.floor(m * float(ft) / f))
+    if remove_dc:
+        lb = max(lb, 1)
+    ub = max(ub, lb + 1)
+    ub = min(ub, m // 2 + 1)
+    return lb, ub
+
+
+class Candidates_BF_FilCorr(Candidates_BF_ExactSTOMP):
+    """FilCorr competitor baseline (Zhong, Souza, Mueen -- ICDM 2020): Pearson
+    correlation over band-pass-filtered windows, computed through Parseval's
+    identity directly on FFT coefficients (`O(B)` per pair, `B` = band width,
+    vs `O(window_size)` for the raw-domain `Candidates_BF_ExactSTOMP`/bruteforce
+    baselines):
+
+        corr = Re(sum_k Wx[k] * conj(Wy[k])) / (sqrt(sum|Wx|^2) * sqrt(sum|Wy|^2))
+
+    where `Wx`/`Wy` are the window's FFT coefficients restricted to the band
+    `[lb, ub)`. With `fs=0.0, ft=0.5` (the default -- full band, DC removed)
+    this is mathematically identical to standard Pearson on the raw window,
+    so it can be scored against this project's own bruteforce ground truth; a
+    real band-pass filter computes a genuinely different quantity (see
+    `Candidates_BF_FilCorr.__init__`'s docstring reference).
+
+    Reuses `Candidates_BF_ExactSTOMP`'s streaming window buffer
+    (`_newStream`/`_curr_startTime`/`_time_to_pos`) and its raw-window
+    constant/spike guards (`_window_prefixes`/`_window_stats` -- these operate
+    on the UNFILTERED window and are independent of the band, so keeping them
+    preserves this project's existing near-constant/spike validation instead
+    of silently dropping it). The pairwise correlation/distance computation
+    (`run`) is FilCorr-specific: a PERSISTENT, per-window-start-time cache of
+    band-limited FFTs (`_band_fft_at`/`_evict_band_fft_cache`, bounded to the
+    `n_lags` reachability window -- see `__init__`'s note) feeds a fully
+    vectorized (n_series x n_series) Parseval correlation matrix per lag via
+    REAL matmuls (`Wx_re @ Wy_re.T + Wx_im @ Wy_im.T`, not a complex one --
+    see `run`'s note), mirroring `Candidates_BF_ExactSTOMP.run`'s own
+    vectorized dot-product matrix shape and BLAS tier.
+
+    (2026-09-11, comparability pass) NOT `algo.py`'s O(B)-per-slide
+    `incremental_update` twiddle-factor formula (the ported reference's own
+    mechanism for avoiding FFT recomputation) -- a window's band-FFT is a
+    property of that ONE window, referenced at multiple later lags/steps, so
+    plain memoization already eliminates the real redundancy found by
+    measurement (each window's FFT was being recomputed from scratch up to
+    ~n_lags/window_step times before this fix), with less correctness surface
+    than deriving/verifying the incremental slide formula. See
+    docs/implementation_log.md's 2026-09-11 (d) entry for the real numbers
+    that motivated this (before: FilCorr's val_time barely beat a naive
+    complex-matmul version; after: brought in line with -- see that entry for
+    the actual comparison against bruteforce/exact_stomp).
+
+    Math ported from the colleague's `v2/fillcorr/algo.py`
+    (`feat/v2-engine` branch); the streaming/windowing/CorrTrack-baseline
+    integration is native to this project (v2's own runner/backends were not
+    portable -- tightly coupled to v2's separate pipeline framework). See
+    docs/implementation_log.md's 2026-09-11 entry.
+    """
+
+    def __init__(self, window_size, window_step, n_lags, corr_threshold, neg_corr=False,
+                 filcorr_fs=0.0, filcorr_ft=0.5, filcorr_sampling_rate=1.0):
+        super().__init__(window_size, window_step, n_lags, corr_threshold, neg_corr=neg_corr)
+        self.filcorr_fs = float(filcorr_fs)
+        self.filcorr_ft = float(filcorr_ft)
+        self.filcorr_sampling_rate = float(filcorr_sampling_rate)
+        lb, ub = _filcorr_band_indices(
+            self.window_size, self.filcorr_fs, self.filcorr_ft, self.filcorr_sampling_rate
+        )
+        # (2026-09-11) Exact-Parseval correction, found by a real end-to-end
+        # verification test against Candidates_BF_ExactSTOMP's raw Pearson at
+        # full band (fs=0, ft=0.5) -- two distinct issues, both only matter at
+        # (or past) Nyquist, i.e. for a "full band" request (ft >= 0.5*f); any
+        # narrower band is unaffected (see below) and this project's own
+        # caveat already treats a real band-pass as a different quantity, not
+        # compared to the bruteforce ground truth.
+        #
+        # (1) Off-by-one at the upper edge: `_filcorr_band_indices` computes
+        # `ub = floor(m*ft/f)` under an EXCLUSIVE `[lb, ub)` slice. For odd m
+        # this silently drops the last valid bin whenever `m*ft/f` isn't an
+        # integer (e.g. m=33, ft=0.5 -> floor(16.5)=16, slice [1,16) excludes
+        # k=16, whose own frequency 16/33=0.4848 IS below ft=0.5 and should be
+        # kept) -- found empirically (492/some-thousand key mismatches, max
+        # |corr diff| 0.18, on odd window sizes) before being traced to this.
+        # Fixed by forcing `ub = window_size//2 + 1` whenever the request
+        # reaches/exceeds Nyquist -- the closed-form exact upper edge of the
+        # complete non-mirrored spectrum for BOTH parities (verified below).
+        #
+        # (2) The Nyquist bin itself (m even, k=m/2) has no distinct mirror
+        # (a real signal's FFT is conjugate-symmetric, X[m-k]=conj(X[k]), so
+        # every OTHER one-sided bin implicitly represents itself + its mirror
+        # -- a uniform 2x factor that cancels exactly in the correlation ratio,
+        # verified algebraically to equal `naive_filtered_pearson`'s classic
+        # time-domain reconstruction). Counting Nyquist the same as every other
+        # bin over-weights it 2x since it has nothing to be "doubled" against;
+        # it is included with POWER weight 0.5 (sqrt(0.5) in amplitude, applied
+        # in `_band_fft_at`) instead. Odd window sizes have no self-paired bin
+        # (2k=m has no integer solution) so this weighting is a no-op there.
+        #
+        # Verified (see test_filcorr_competitor.py): key-for-key and
+        # |corr diff| < 1e-9 against Candidates_BF_ExactSTOMP's raw Pearson at
+        # full band, for both even and odd window sizes.
+        m = self.window_size
+        f = self.filcorr_sampling_rate if self.filcorr_sampling_rate > 0 else 1.0
+        nyquist_bin = m // 2
+        requested_reaches_nyquist = int(math.floor(m * self.filcorr_ft / f)) >= nyquist_bin
+        full_coverage = requested_reaches_nyquist and nyquist_bin >= lb
+        if full_coverage and ub <= nyquist_bin:
+            ub = nyquist_bin + 1
+        weights = np.ones(max(ub - lb, 0), dtype=np.float64)
+        if full_coverage and (m % 2 == 0) and weights.size:
+            weights[-1] = 0.5
+        self.filcorr_lb, self.filcorr_ub = lb, ub
+        self.filcorr_band_amplitude_weight = np.sqrt(weights)
+        # (2026-09-11, comparability pass) PERSISTENT across `run()` calls,
+        # keyed by absolute window START TIME (not buffer position -- `pos`
+        # shifts as `window_data` drops old columns, `start_time` doesn't).
+        # Found by measuring, not assuming (see docs/implementation_log.md's
+        # 2026-09-11 (d) entry): the real-decomposition fix above barely
+        # moved val_time (13.99s -> 13.82s on the real benchmark), while
+        # `exact_stomp`'s own incremental dot-product cache (`_dot_by_lag`)
+        # got a 4.9x val_time win over plain bruteforce on the SAME data --
+        # tracing where the time actually went showed each window's FFT was
+        # being recomputed from scratch up to ~n_lags/window_step times (once
+        # per later step that references the SAME window position at an
+        # increasing lag), not once. Unlike `_dot_by_lag`'s per-LAG cache
+        # (needed because a raw dot PRODUCT is a property of a PAIR), a
+        # window's band-FFT is a property of that ONE window alone -- so
+        # plain memoization (compute once, reuse at every later lag
+        # reference) already eliminates the redundancy, with no need for
+        # `algo.py`'s O(B)-per-slide `incremental_update` twiddle-factor
+        # formula (extra correctness surface for, per the same rough O()
+        # estimate, comparable cost to a fresh FFT at THIS project's real
+        # window_step=12/window_size=168 -- not clearly worth it once the
+        # actual redundancy is gone). Evicted below (see `run`) once a
+        # window falls outside the `n_lags` reachability window, matching
+        # the same retention bound `window_data` itself already uses
+        # (`_newStream`'s `capacity`) -- bounded memory, not unbounded growth.
+        self._band_fft_cache = {}   # start_time -> (re, im), two (n_series, B) float64
+
+    def _band_fft_at(self, start_time):
+        """Band-limited FFT of every series' window starting at absolute time
+        `start_time`, pre-scaled by `filcorr_band_amplitude_weight` (see
+        __init__) so downstream plain dot products already carry the correct
+        exact-Parseval power weighting. Returns `(re, im)`, two REAL
+        (n_series, B) float64 arrays -- NOT a single complex array (see the
+        real-decomposition note on `run`'s correlation math). Cached
+        PERSISTENTLY across `run()` calls (see __init__'s note) -- each
+        window's FFT is computed at most once over the life of the stream."""
+        cached = self._band_fft_cache.get(start_time)
+        if cached is not None:
+            return cached
+        pos = self._time_to_pos(start_time)
+        block = np.asarray(self.window_data[:, pos:pos + self.window_size], dtype=np.float64)
+        W = np.fft.fft(block, axis=1)[:, self.filcorr_lb:self.filcorr_ub]
+        W = W * self.filcorr_band_amplitude_weight[None, :]
+        out = (np.ascontiguousarray(W.real), np.ascontiguousarray(W.imag))
+        self._band_fft_cache[start_time] = out
+        return out
+
+    def _evict_band_fft_cache(self, curr_start):
+        """Bound `_band_fft_cache` to the same `n_lags` reachability window as
+        `window_data` itself -- a window older than `curr_start - n_lags` can
+        never again be referenced (as current or as historical) by any future
+        `run()` call, so its cached FFT is dead weight. Keeps the persistent
+        cache's memory bounded over an arbitrarily long stream instead of
+        growing without limit (see __init__'s note)."""
+        if not self._band_fft_cache:
+            return
+        min_time = curr_start - self.n_lags
+        stale = [t for t in self._band_fft_cache if t < min_time]
+        for t in stale:
+            del self._band_fft_cache[t]
+
+    def run(self, new_data_step, ids, verbose=True, testing=False, track_min_dist=True, numeric_rows=True):
+        self.verbose = verbose
+        self.testing = testing
+        self._newStream(new_data_step, ids)
+
+        empty_timing = {
+            "candidate_time": 0.0,
+            "validation_time": 0.0,
+            "min_dist": np.inf,
+            "pair_min_dist": None,
+        }
+        if self.curr_window_size < self.window_size:
+            if numeric_rows:
+                return np.empty((0, 5), dtype=np.int64), np.empty((0,), dtype=np.float64), 0, empty_timing
+            return {}, 0, empty_timing
+
+        candidate_t0 = time.perf_counter()
+        curr_start = int(self._curr_startTime())
+        curr_pos = self._time_to_pos(curr_start)
+        max_lag = min(self.n_lags, curr_pos)
+        if max_lag < 0:
+            self._last_curr_start = curr_start
+            self._evict_band_fft_cache(curr_start)
+            if numeric_rows:
+                return np.empty((0, 5), dtype=np.int64), np.empty((0,), dtype=np.float64), 0, empty_timing
+            return {}, 0, empty_timing
+
+        # Raw-window guards (constant / spiked) -- same semantics as
+        # Candidates_BF_ExactSTOMP, computed on the UNFILTERED window; the
+        # band-pass filter is applied only to the correlation itself below.
+        prefixes = self._window_prefixes()
+        _sx, _sx2, _var_x, curr_nonconst, curr_spiked = self._window_stats(prefixes, curr_pos)
+        if not np.any(curr_nonconst):
+            self._last_curr_start = curr_start
+            self._evict_band_fft_cache(curr_start)
+            timing = {
+                "candidate_time": time.perf_counter() - candidate_t0,
+                "validation_time": 0.0,
+                "min_dist": np.inf,
+                "pair_min_dist": None,
+            }
+            if numeric_rows:
+                return np.empty((0, 5), dtype=np.int64), np.empty((0,), dtype=np.float64), 0, timing
+            return {}, 0, timing
+
+        # (2026-09-11, comparability pass) Real-decomposition instead of a
+        # complex matmul: Re(Wx @ conj(Wy).T) = Re(Wx)@Re(Wy).T + Im(Wx)@Im(Wy).T.
+        # The previous version computed the FULL complex product via `Wx @
+        # Wy.conj().T` then discarded the imaginary half -- complex GEMM
+        # (zgemm) does ~4x the real-valued FLOPs of the two real GEMMs (dgemm)
+        # actually needed here, since only the real part is ever used. This
+        # halves-to-quarters the dominant cost and puts FilCorr on the SAME
+        # BLAS-matmul footing `Candidates_BF_ExactSTOMP.run` itself uses
+        # (`curr_window @ hist_window.T`, one real matmul) -- the fair
+        # comparison this project's own benchmarking discipline calls for
+        # (see docs/implementation_log.md's 2026-09-11 (d) entry), not a
+        # hand-written/`prange`-parallel kernel that would hand FilCorr a
+        # multi-core edge `exact_stomp` doesn't also get.
+        Wx_re, Wx_im = self._band_fft_at(curr_start)
+        sxx = np.einsum("ik,ik->i", Wx_re, Wx_re) + np.einsum("ik,ik->i", Wx_im, Wx_im)
+
+        validation_time = 0.0
+        total_pairs = 0
+        accepted = {}
+        accepted_rows = []
+        accepted_corrs = []
+        min_dist = np.inf
+        min_pair = None
+        m = Wx_re.shape[0]
+        upper_mask = np.triu(np.ones((m, m), dtype=bool), k=1)
+
+        for lag in range(0, max_lag + 1, self.window_step):
+            hist_start = curr_start - lag
+            hist_pos = curr_pos - lag
+            if hist_pos < 0 or hist_pos + self.window_size > self.window_data.shape[1]:
+                continue
+
+            _sy, _sy2, _var_y, hist_nonconst, hist_spiked = self._window_stats(prefixes, hist_pos)
+            pair_mask = curr_nonconst[:, None] & hist_nonconst[None, :]
+            if lag == 0:
+                pair_mask &= upper_mask
+            pair_count = int(np.count_nonzero(pair_mask))
+            total_pairs += pair_count
+            if pair_count == 0:
+                continue
+
+            lag_validation_t0 = time.perf_counter()
+            Wy_re, Wy_im = self._band_fft_at(hist_start)
+            syy = np.einsum("jk,jk->j", Wy_re, Wy_re) + np.einsum("jk,jk->j", Wy_im, Wy_im)
+            sxy = Wx_re @ Wy_re.T + Wx_im @ Wy_im.T
+            denom = np.sqrt(sxx[:, None] * syy[None, :])
+            corr = np.divide(
+                sxy,
+                denom,
+                out=np.full_like(sxy, np.nan, dtype=np.float64),
+                where=denom > 0.0,
+            )
+            corr = np.clip(corr, -1.0, 1.0)
+
+            if track_min_dist:
+                dist_sq = sxx[:, None] + syy[None, :] - 2.0 * sxy
+                distances = np.sqrt(np.maximum(dist_sq, 0.0))
+                step_min_dist, step_min_pair = self._min_pair_from_mask(
+                    distances,
+                    pair_mask,
+                    curr_start,
+                    hist_start,
+                )
+                if step_min_pair is not None and step_min_dist < min_dist:
+                    min_dist = step_min_dist
+                    min_pair = step_min_pair
+
+            accept_mask = pair_mask & (~curr_spiked[:, None]) & (~hist_spiked[None, :])
+            if self.neg_corr:
+                accept_mask &= np.abs(corr) >= self.corr_threshold
+            else:
+                accept_mask &= corr >= self.corr_threshold
+
+            rows, cols = np.nonzero(accept_mask)
+            if numeric_rows:
+                if rows.size:
+                    accepted_rows.append(
+                        np.column_stack(
+                            [
+                                rows.astype(np.int64, copy=False),
+                                cols.astype(np.int64, copy=False),
+                                np.full(rows.size, curr_start, dtype=np.int64),
+                                np.full(rows.size, hist_start, dtype=np.int64),
+                                np.full(rows.size, self.window_size, dtype=np.int64),
+                            ]
+                        )
+                    )
+                    accepted_corrs.append(corr[rows, cols].astype(np.float64, copy=False))
+            else:
+                for s_idx, k_idx in zip(rows, cols):
+                    pair = self._pair_for_indices(s_idx, k_idx, curr_start, hist_start)
+                    accepted[pair] = float(corr[s_idx, k_idx])
+            validation_time += time.perf_counter() - lag_validation_t0
+
+        self._last_curr_start = curr_start
+        self._evict_band_fft_cache(curr_start)
+        timing = {
+            "candidate_time": max(time.perf_counter() - candidate_t0 - validation_time, 0.0),
+            "validation_time": max(validation_time, 0.0),
+            "min_dist": min_dist,
+            "pair_min_dist": min_pair,
+        }
+        if numeric_rows:
+            if accepted_rows:
+                row_arr = np.ascontiguousarray(np.vstack(accepted_rows), dtype=np.int64)
+                corr_arr = np.ascontiguousarray(np.concatenate(accepted_corrs), dtype=np.float64)
+            else:
+                row_arr = np.empty((0, 5), dtype=np.int64)
+                corr_arr = np.empty((0,), dtype=np.float64)
+            return row_arr, corr_arr, total_pairs, timing
+        return accepted, total_pairs, timing
+
 
 class Candidates:
     def __init__(self,n_lagged_windows,grid_dimension,cell_size,grid_max,freq_threshold,corr_threshold,n_vectors,sketch_std,n_grids,neg_corr,

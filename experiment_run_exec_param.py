@@ -28,7 +28,19 @@ NEG_CORR = True
 # Baseline used by corrtrack_run_bruteforce / full experiments.
 # - "bruteforce": stable exhaustive baseline.
 # - "exact_stomp": exact incremental rolling-dot baseline for benchmarking.
+# - "filcorr": Zhong/Souza/Mueen (ICDM 2020) competitor -- band-pass Pearson via
+#   Parseval's identity on FFT coefficients. See FILCORR_FS/FT below and
+#   Candidates_BF_FilCorr in library_corrtrack_parallel.py.
 BASELINE_MODE = "bruteforce"
+
+# FilCorr pass-band (baseline_mode="filcorr" only). fs=0.0/ft=0.5 (full band,
+# DC removed) is mathematically identical to standard Pearson -- keep this the
+# default so the baseline is comparable to bruteforce's ground truth; only
+# narrow the band for a deliberate band-pass-correlation experiment (a
+# different quantity, not to be scored against the unfiltered ground truth).
+FILCORR_FS = 0.0
+FILCORR_FT = 0.5
+FILCORR_SAMPLING_RATE = 1.0
 
 # CorrTrack main-run validation control.
 CORR_VAL = True

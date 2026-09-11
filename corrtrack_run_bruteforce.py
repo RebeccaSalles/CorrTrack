@@ -37,6 +37,13 @@ DEFAULT_NEG_CORR = getattr(_DEFAULT_EXEC_CFG, "NEG_CORR", False)
 DEFAULT_MONITOR = getattr(_DEFAULT_EXEC_CFG, "MONITOR", True)
 DEFAULT_TRACK_MIN_DIST = getattr(_DEFAULT_EXEC_CFG, "TRACK_MIN_DIST", True)
 DEFAULT_BASELINE_MODE = getattr(_DEFAULT_EXEC_CFG, "BASELINE_MODE", "bruteforce")
+# FilCorr (baseline_mode="filcorr") competitor knobs. fs=0.0/ft=0.5 (full
+# band, DC removed) is mathematically identical to standard Pearson -- the
+# setting to use so this baseline is comparable to the bruteforce ground
+# truth. See Candidates_BF_FilCorr in library_corrtrack_parallel.py.
+DEFAULT_FILCORR_FS = getattr(_DEFAULT_EXEC_CFG, "FILCORR_FS", 0.0)
+DEFAULT_FILCORR_FT = getattr(_DEFAULT_EXEC_CFG, "FILCORR_FT", 0.5)
+DEFAULT_FILCORR_SAMPLING_RATE = getattr(_DEFAULT_EXEC_CFG, "FILCORR_SAMPLING_RATE", 1.0)
 DEFAULT_VALIDATION_METRIC = getattr(_DEFAULT_EXEC_CFG, "VALIDATION_METRIC", "pearson")
 DEFAULT_TRAIN_RATIO = getattr(_DEFAULT_EXEC_CFG, "TRAIN_RATIO", 0.3)
 DEFAULT_OPTIM_TUNING_MODE = "sampling"
@@ -69,6 +76,9 @@ NEG_CORR = DEFAULT_NEG_CORR
 MONITOR = DEFAULT_MONITOR
 TRACK_MIN_DIST = DEFAULT_TRACK_MIN_DIST
 BASELINE_MODE = DEFAULT_BASELINE_MODE
+FILCORR_FS = DEFAULT_FILCORR_FS
+FILCORR_FT = DEFAULT_FILCORR_FT
+FILCORR_SAMPLING_RATE = DEFAULT_FILCORR_SAMPLING_RATE
 VALIDATION_METRIC = DEFAULT_VALIDATION_METRIC
 TRAIN_RATIO = DEFAULT_TRAIN_RATIO
 OPTIM_TUNING_MODE = DEFAULT_OPTIM_TUNING_MODE
@@ -202,6 +212,9 @@ def build_base_config():
         "parallel_validation": PARALLEL_VALIDATION,
         "max_workers": MAX_WORKERS,
         "baseline_mode": BASELINE_MODE,
+        "filcorr_fs": FILCORR_FS,
+        "filcorr_ft": FILCORR_FT,
+        "filcorr_sampling_rate": FILCORR_SAMPLING_RATE,
         "validation_metric": VALIDATION_METRIC,
         "monitor": MONITOR,
         "track_min_dist": TRACK_MIN_DIST,
@@ -316,9 +329,26 @@ def parse_args():
     parser.add_argument("--no-track-min-dist", dest="track_min_dist", action="store_false")
     parser.add_argument(
         "--baseline-mode",
-        choices=("bruteforce", "exact_stomp"),
+        choices=("bruteforce", "exact_stomp", "filcorr"),
         default=None,
-        help="Exact baseline implementation for the brute-force stage.",
+        help="Exact baseline implementation for the brute-force stage. 'filcorr' is the "
+        "Zhong/Souza/Mueen (ICDM 2020) competitor -- see --filcorr-fs/--filcorr-ft.",
+    )
+    parser.add_argument(
+        "--filcorr-fs", type=float, default=None,
+        help="FilCorr pass-band lower bound (baseline_mode=filcorr only). Default 0.0 "
+        "(full band, DC removed -- mathematically identical to standard Pearson, the "
+        "setting comparable to this project's bruteforce ground truth).",
+    )
+    parser.add_argument(
+        "--filcorr-ft", type=float, default=None,
+        help="FilCorr pass-band upper bound (baseline_mode=filcorr only). Default 0.5 "
+        "(Nyquist -- full band).",
+    )
+    parser.add_argument(
+        "--filcorr-sampling-rate", type=float, default=None,
+        help="FilCorr sampling frequency f (Hz); set fs/ft as fractions of Nyquist by "
+        "leaving this at its default (1.0).",
     )
     parser.add_argument("--train-ratio", type=float, default=None)
     parser.add_argument(
@@ -377,6 +407,9 @@ def parse_args():
         monitor=None,
         track_min_dist=None,
         baseline_mode=None,
+        filcorr_fs=None,
+        filcorr_ft=None,
+        filcorr_sampling_rate=None,
         artifact_mode=None,
         artifact_buffer_max_rows=None,
         artifact_merge_mode=None,
@@ -398,6 +431,7 @@ def main():
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
     global EXEC_MODE, NEG_CORR, MONITOR, TRACK_MIN_DIST, BASELINE_MODE, ARTIFACT_MODE, ARTIFACT_BUFFER_MAX_ROWS, ARTIFACT_MERGE_MODE, SAVE_ONLY_REQUIRED_ARTIFACTS, SAVE_MAXLAG_ARTIFACTS
+    global FILCORR_FS, FILCORR_FT, FILCORR_SAMPLING_RATE
     global DATA_LOADER, RESULT_FOLDER, MAX_WORKERS, VERBOSE, TESTING, TRAIN_RATIO, OPTIM_TUNING_MODE
     global VALIDATION_METRIC
 
@@ -424,6 +458,11 @@ def main():
         args.track_min_dist, cfg_exec, "TRACK_MIN_DIST", DEFAULT_TRACK_MIN_DIST
     )
     BASELINE_MODE = _resolve_cfg_value(args.baseline_mode, cfg_exec, "BASELINE_MODE", DEFAULT_BASELINE_MODE)
+    FILCORR_FS = _resolve_cfg_value(args.filcorr_fs, cfg_exec, "FILCORR_FS", DEFAULT_FILCORR_FS)
+    FILCORR_FT = _resolve_cfg_value(args.filcorr_ft, cfg_exec, "FILCORR_FT", DEFAULT_FILCORR_FT)
+    FILCORR_SAMPLING_RATE = _resolve_cfg_value(
+        args.filcorr_sampling_rate, cfg_exec, "FILCORR_SAMPLING_RATE", DEFAULT_FILCORR_SAMPLING_RATE
+    )
     VALIDATION_METRIC = _resolve_cfg_value(
         args.validation_metric, cfg_exec, "VALIDATION_METRIC", DEFAULT_VALIDATION_METRIC
     )

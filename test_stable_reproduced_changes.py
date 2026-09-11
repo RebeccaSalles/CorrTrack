@@ -23,6 +23,8 @@ from library_corrtrack_parallel import (
     CSV_DELIMITER,
     COMPARISON_COLUMNS,
     Candidates,
+    Candidates_BF_ExactSTOMP,
+    Candidates_BF_FilCorr,
     CorrTrack,
     CorrTrackMultiWindow,
     CorrTrack_compare,
@@ -2418,6 +2420,167 @@ class StableReproducedChangesTest(unittest.TestCase):
                 counts[metric] = record["correlated"]
 
         self.assertNotEqual(counts["pearson"], counts["kendall"])
+
+    def test_correlated_numeric_accumulator_int32_matches_int64_reference(self):
+        # (2026-09-11) _append_correlated_numeric's internal storage was downsized
+        # int64 -> int32 after a real OOM crash on a memory-constrained machine (a dense
+        # real dataset needed a 640MB single allocation just for this one accumulator's
+        # doubling-growth step). correlated_rows() also stopped defensively re-upcasting
+        # to int64 on every call, after THAT turned out to reintroduce the same peak at
+        # retrieval time (a second real OOM on the same machine, 536MB for one such
+        # upcast) -- every real consumer already re-casts to int64 itself when it needs
+        # to. Verifies the round-trip VALUES are exact for realistic AND boundary-ish
+        # large values (t1/t2 well beyond any real dataset's observation count, still far
+        # under int32's ~2.147e9 range), and that the returned dtype is int32 (the
+        # accumulator's own storage, not a copy).
+        ct = CorrTrack.__new__(CorrTrack)
+        ct._correlated_rows = None
+        ct._correlated_corrs = None
+        ct._correlated_count = 0
+        ct._correlated_cap = 0
+        ct._correlated_legacy_dict = {}
+        ct._correlated_view_cache = None
+        ct.artifact_bookkeeping_time = 0.0
+
+        rng = np.random.default_rng(0)
+        # realistic-scale rows (small series indices, moderate time indices)
+        n1 = 5000
+        rows1 = np.column_stack([
+            rng.integers(0, 200, n1), rng.integers(0, 200, n1),
+            rng.integers(0, 100_000, n1), rng.integers(0, 100_000, n1),
+            np.full(n1, 168),
+        ]).astype(np.int64)
+        corrs1 = rng.uniform(-1, 1, n1)
+        ct._append_correlated_numeric(rows1, corrs1)
+
+        # boundary-ish large time indices (tens of millions of steps -- far beyond any
+        # real dataset, still comfortably under int32's range) to stress the actual
+        # concern (t1/t2 overflow), not just small values.
+        big_t = 50_000_000
+        rows2 = np.array([
+            [0, 1, big_t, big_t - 168, 168],
+            [3, 199, big_t + 12345, big_t - 54321, 168],
+        ], dtype=np.int64)
+        corrs2 = np.array([0.71, -0.95])
+        ct._append_correlated_numeric(rows2, corrs2)
+
+        out_rows, out_corrs = ct.correlated_rows()
+        # correlated_rows() returns the accumulator's own int32 storage directly (no
+        # defensive re-copy -- see its docstring); every real consumer re-casts to int64
+        # itself, verified separately (compute_metrics_bf_numeric/_as_row_corr_pair do).
+        self.assertEqual(out_rows.dtype, np.int32)
+        self.assertEqual(out_rows.shape[0], n1 + 2)
+
+        # canonical orientation may reorder columns per-row (later start first) -- rebuild
+        # the same canonicalization on the expected input before comparing as sets.
+        expected = _canonicalize_rows(np.vstack([rows1, rows2]))
+        expected_keys = set(map(tuple, expected.tolist()))
+        actual_keys = set(map(tuple, out_rows.tolist()))
+        self.assertEqual(actual_keys, expected_keys)
+        self.assertEqual(int(out_rows[:, 2].max()), big_t + 12345)  # no truncation/overflow
+
+    def test_filcorr_candidates_node_matches_exact_stomp_pearson_full_band(self):
+        # (2026-09-11) FilCorr competitor baseline port (Zhong, Souza, Mueen --
+        # ICDM 2020, from the colleague's feat/v2-engine branch -- see
+        # docs/implementation_log.md's 2026-09-11 entry). Candidates_BF_FilCorr
+        # at full band (fs=0.0, ft=0.5, DC removed) is mathematically identical
+        # to standard Pearson -- that identity is exactly what makes it usable
+        # against this project's own bruteforce ground truth, so it must hold
+        # key-for-key and value-for-value, not just approximately. Checked at
+        # both even and odd window sizes: a real off-by-one (odd m dropping the
+        # top non-mirrored bin) and a real missing-Nyquist-bin weighting bug
+        # (even m) were both found and fixed via this exact test during
+        # implementation -- see Candidates_BF_FilCorr.__init__'s docstring.
+        rng = np.random.default_rng(7)
+        n_series = 6
+        window_step = 8
+        n_lags = 24
+        corr_threshold = 0.2
+        step_len = 4
+
+        for window_size in (32, 33, 168, 169):
+            # Enough steps for the window to actually fill (window_size <=
+            # n_steps*step_len) plus a real margin for correlated lags to show up.
+            n_steps = max(60, (window_size // step_len) + 30)
+            with self.subTest(window_size=window_size):
+                fc = Candidates_BF_FilCorr(
+                    window_size, window_step, n_lags, corr_threshold, neg_corr=True,
+                    filcorr_fs=0.0, filcorr_ft=0.5, filcorr_sampling_rate=1.0,
+                )
+                st = Candidates_BF_ExactSTOMP(
+                    window_size, window_step, n_lags, corr_threshold, neg_corr=True,
+                )
+                ids = [f"s{i}" for i in range(n_series)]
+                t = 0
+                max_abs_err = 0.0
+                total_mismatch_keys = 0
+                any_accepted = False
+                for step in range(n_steps):
+                    block = rng.standard_normal((n_series, step_len))
+                    if step > 5:
+                        block[1] = block[0] + rng.standard_normal(step_len) * 0.05
+                    idx = np.arange(t, t + step_len)
+                    new_data_step = np.vstack([idx, block])
+                    fc_rows, fc_corrs, _, _ = fc.run(
+                        new_data_step, ids, verbose=False, testing=False,
+                        track_min_dist=True, numeric_rows=True,
+                    )
+                    st_rows, st_corrs, _, _ = st.run(
+                        new_data_step, ids, verbose=False, testing=False,
+                        track_min_dist=True, numeric_rows=True,
+                    )
+                    ks_fc = {tuple(r): c for r, c in zip(fc_rows.tolist(), fc_corrs.tolist())}
+                    ks_st = {tuple(r): c for r, c in zip(st_rows.tolist(), st_corrs.tolist())}
+                    any_accepted = any_accepted or bool(ks_fc) or bool(ks_st)
+                    total_mismatch_keys += len(set(ks_fc) ^ set(ks_st))
+                    for key in set(ks_fc) & set(ks_st):
+                        max_abs_err = max(max_abs_err, abs(ks_fc[key] - ks_st[key]))
+                    t += step_len
+
+                self.assertTrue(any_accepted, "no correlated pairs at all -- test data too weak")
+                self.assertEqual(total_mismatch_keys, 0)
+                self.assertLess(max_abs_err, 1e-9)
+
+    def test_run_and_log_bruteforce_filcorr_matches_bruteforce_count(self):
+        # End-to-end dispatch check (baseline_mode="filcorr" through
+        # run_and_log_bruteforce -> CorrTrack.run_bf -> run_bf_filcorr ->
+        # Candidates_BF_FilCorr), on top of the unit-level exact-equivalence
+        # test above -- confirms the CLI/config wiring itself (not just the
+        # math) reproduces the existing "bruteforce" baseline_mode's own
+        # correlated-pair count at full band.
+        n_series = 6
+        length = 400
+        rng = np.random.default_rng(3)
+        t = np.linspace(-3, 3, length)
+        values = rng.normal(scale=0.05, size=(n_series, length))
+        values[0] = t
+        values[1] = t + rng.normal(scale=0.02, size=length)
+        data = np.vstack([np.arange(length, dtype=np.float64), values])
+        ids = [f"s{i}" for i in range(n_series)]
+
+        base_config = dict(
+            window_size=32, window_step=8, basic_window=None, n_lags=16,
+            corr_threshold=0.6, neg_corr=True, exec="sequential",
+            parallel_sketch=False, parallel_candidates=False, parallel_validation=False,
+            max_workers=0, monitor=True, track_min_dist=True,
+            artifact_mode="final", artifact_buffer_max_rows=250000, artifact_merge_mode="merged",
+            save_only_required_artifacts=True, save_maxlag_artifacts=False, verbose=False, testing=False,
+            validation_metric="pearson",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            counts = {}
+            for mode in ("bruteforce", "filcorr"):
+                cfg = dict(base_config, baseline_mode=mode, filcorr_fs=0.0, filcorr_ft=0.5,
+                           filcorr_sampling_rate=1.0)
+                record, _, _ = run_and_log_bruteforce(
+                    "diag_filcorr", data, ids, cfg, os.path.join(tmp, f"bf_{mode}.csv"),
+                    metadata={"nodes": 0}, recall_by_window=True, verbose=False, testing=False,
+                )
+                counts[mode] = record["correlated"]
+
+        self.assertGreater(counts["bruteforce"], 0)
+        self.assertEqual(counts["filcorr"], counts["bruteforce"])
 
     def test_single_window_corrtrack_unaffected_by_multi_window_support(self):
         # A plain CorrTrack (not CorrTrackMultiWindow) must behave exactly
