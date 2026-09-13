@@ -1,0 +1,50 @@
+#!/bin/bash
+# CorrTrack four-way comparison, CorrTrack side with n_vectors=64 (override on top of
+# the already-computed hyperopt-tuned params from job 3095527 -- candidate_backend and
+# occupancy stay tuned, only n_vectors changes, to isolate its effect).
+#
+#OAR -n corrtrack-fourway-nv64
+#OAR -l host=1,walltime=01:00:00
+#OAR -O abaca/logs/OAR.%jobid%.out
+#OAR -E abaca/logs/OAR.%jobid%.err
+
+set -uo pipefail
+
+CONDA_ROOT="${CONDA_ROOT:-$HOME/miniforge3}"
+CONDA_ENV="${CONDA_ENV:-corrtrack}"
+REPO_DIR="${REPO_DIR:-$HOME/corrtrack_release_dev}"
+RESULTS_ROOT="${RESULTS_ROOT:-$HOME/corrtrack_abaca_results}"
+
+RUN_DIR="$RESULTS_ROOT/fourway_nv64_${OAR_JOB_ID:-manual}"
+mkdir -p "$RUN_DIR"
+
+echo "== CorrTrack Abaca four-way comparison (n_vectors=64 override) =="
+echo "job=${OAR_JOB_ID:-manual} host=$(hostname) date=$(date --iso-8601=seconds)"
+
+# shellcheck disable=SC1091
+source "$CONDA_ROOT/etc/profile.d/conda.sh"
+conda activate "$CONDA_ENV"
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+export CORRTRACK_N_VECTORS_OVERRIDE=64
+
+cd "$REPO_DIR"
+
+echo "== build kernels (node-specific, -march=native) =="
+rm -f ./*.cpython-*.so
+rm -rf build
+python setup_cython.py build_ext --inplace -j 4 2>&1 | tee "$RUN_DIR/build.log"
+BUILD_RC=${PIPESTATUS[0]}
+echo "build_rc=$BUILD_RC"
+
+echo "== four-way comparison (n_vectors=64) =="
+python "$REPO_DIR/abaca/fourway_compare.py" 2>&1 | tee "$RUN_DIR/fourway.log"
+COMPARE_RC=${PIPESTATUS[0]}
+echo "compare_rc=$COMPARE_RC"
+
+echo "== summary =="
+echo "build_rc=$BUILD_RC compare_rc=$COMPARE_RC"
+echo "artifacts under $RUN_DIR"
