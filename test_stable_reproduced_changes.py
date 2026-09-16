@@ -20,6 +20,10 @@ import corrtrack_run_bruteforce
 import candidate_kernels
 import library_corrtrack_parallel
 from library_corrtrack_parallel import (
+    Candidates_BF_BRAID,
+    Candidates_BF_TSUBASA,
+    five_sums,
+    pearson_from_five_sums,
     CSV_DELIMITER,
     COMPARISON_COLUMNS,
     Candidates,
@@ -668,18 +672,18 @@ class StableReproducedChangesTest(unittest.TestCase):
         ]
 
         cache_no = candidate_kernels.HybridValidationCache(1024)
-        results_no_cache = cache_no.validate_pairs(
+        out_no_cache = cache_no.validate_pairs(
             data, series1, series2, curr_t1, curr_t2, window_sizes, 0, 8, 0.0, False,
-        )["results"]
+        )
 
         cache_yes = candidate_kernels.HybridValidationCache(1024)
-        results_with_cache = cache_yes.validate_pairs(
+        out_with_cache = cache_yes.validate_pairs(
             data, series1, series2, curr_t1, curr_t2, window_sizes, 0, 8, 0.0, False, current_window_sums=raw_sums, current_window_sums_sq=raw_sums_sq, current_window_sums_cu=raw_sums_cu, current_window_sums_qu=raw_sums_qu, current_window_size=w,
-        )["results"]
+        )
 
-        for exp, no_cache_row, with_cache_row in zip(expected, results_no_cache, results_with_cache):
-            self.assertAlmostEqual(no_cache_row[2], exp, places=9)
-            self.assertAlmostEqual(with_cache_row[2], exp, places=9)
+        for i, exp in enumerate(expected):
+            self.assertAlmostEqual(out_no_cache["corr"][i], exp, places=9)
+            self.assertAlmostEqual(out_with_cache["corr"][i], exp, places=9)
 
     def test_partition_sketches_full_vector_const_check_matches_per_row_norm(self):
         # (2026-07-06) Part 2.2: Sketches.partition_sketches' full_vector_candidates
@@ -3844,6 +3848,376 @@ class StableReproducedChangesTest(unittest.TestCase):
         ct_filter_off = run(candidate_apply_hamming_filter=False)
         self.assertTrue(ct_default.candidate_apply_hamming_filter)
         self.assertLessEqual(ct_default.tested_candidates, ct_filter_off.tested_candidates)
+
+    # ------------------------------------------------------------------
+    # 2026-09-16 -- competitor implementation plan, phase 0a / 0b
+    # ------------------------------------------------------------------
+
+    def test_unit_l2_window_identity_two_minus_two_corr_equals_d2(self):
+        # The identity every pruning competitor rests on (StatStream Lemma 1,
+        # CorrJoin Eq. 4, ParCorr/CSZ footnote): for centred unit-L2 windows,
+        # d^2(x_hat, y_hat) = 2 - 2 corr(x, y). Exact, so 1e-12.
+        rng = np.random.default_rng(20260916)
+        for _ in range(50):
+            n = int(rng.integers(8, 200))
+            x = rng.normal(size=n) * rng.uniform(0.1, 10) + rng.uniform(-50, 50)
+            y = rng.normal(size=n) * rng.uniform(0.1, 10) + rng.uniform(-50, 50)
+            y = 0.6 * (x - x.mean()) / x.std() + y  # inject some correlation
+            xh = (x - x.mean()) / np.sqrt(((x - x.mean()) ** 2).sum())
+            yh = (y - y.mean()) / np.sqrt(((y - y.mean()) ** 2).sum())
+            d2 = float(((xh - yh) ** 2).sum())
+            corr = float(np.corrcoef(x, y)[0, 1])
+            self.assertAlmostEqual(d2, 2.0 - 2.0 * corr, places=12)
+
+    def _competitor_norm_kwargs(self):
+        return dict(
+            basic_window=4, window_step=4, n_vectors=16, n_lags=4, seed=11, seed_toggle=22,
+            corr_threshold=0.7, exec="sequential", parallel_sketch=False,
+            parallel_candidates=False, parallel_validation=False, candidate_backend="brute_force",
+        )
+
+    def test_sketches_unit_l2_window_equals_projection_of_normalized_window(self):
+        # unit_l2_window must equal R_eff @ x_hat EXACTLY, where R_eff is the
+        # effective full-window random matrix (toggle-signed basicRandomVector
+        # blocks) and x_hat the centred unit-L2 window. Independent
+        # reconstruction of R_eff from node._toggle_weights, so this is not
+        # the code checking itself. Also confirms the default mean_l2 path is
+        # untouched: its rows must still be the unit-normalized mean-adjusted
+        # sketch, i.e. parallel to the unit_l2_window rows.
+        rng = np.random.default_rng(777)
+        ids = np.array(["a", "b", "c", "d", "e"])
+        w = 16
+        values = rng.normal(size=(5, w)) * rng.uniform(0.5, 5, size=(5, 1)) + rng.uniform(-20, 20, size=(5, 1))
+        data = np.vstack([np.arange(w), values])
+        kwargs = self._competitor_norm_kwargs()
+
+        def feed(ct):
+            for start in range(0, w, kwargs["window_step"]):
+                ct.run(data[:, start:start + kwargs["window_step"]], ids,
+                       verbose=False, testing=False, corr_val=False, monitor=False)
+
+        ct_unit = CorrTrack(window_size=w, **kwargs)
+        ct_unit.sketch_norm = "unit_l2_window"   # set before the lazy Sketches build
+        feed(ct_unit)
+        node = ct_unit.sketch_nodes[0]
+        self.assertEqual(node.sketch_norm, "unit_l2_window")
+
+        tw = np.asarray(node._toggle_weights)             # (n_basic, n_vectors, basic_window)
+        n_basic, n_vec, bw = tw.shape
+        self.assertEqual(n_basic * bw, w)
+        r_eff = tw.transpose(1, 0, 2).reshape(n_vec, w)  # (n_vectors, window)
+        # sanity: the library's R(1) must equal our reconstruction's row sums
+        np.testing.assert_allclose(np.asarray(node._random_vector_sums), r_eff.sum(axis=1), rtol=0, atol=1e-12)
+
+        centred = values - values.mean(axis=1, keepdims=True)
+        x_hat = centred / np.sqrt((centred ** 2).sum(axis=1, keepdims=True))
+        expected = x_hat @ r_eff.T                         # (n_series, n_vectors)
+
+        got = np.asarray(node._sketch_matrix)
+        self.assertEqual(got.shape, expected.shape)
+        np.testing.assert_allclose(got, expected, rtol=0, atol=1e-10)
+        # rows are NOT unit norm in general (JL: E||R x_hat||^2 = 1, but not exactly)
+        self.assertFalse(np.allclose(np.linalg.norm(got, axis=1), 1.0, atol=1e-9))
+
+        ct_mean = CorrTrack(window_size=w, **kwargs)     # default mean_l2, untouched
+        feed(ct_mean)
+        got_mean = np.asarray(ct_mean.sketch_nodes[0]._sketch_matrix)
+        np.testing.assert_allclose(np.linalg.norm(got_mean, axis=1), 1.0, rtol=0, atol=1e-12)
+        # same direction, different scale
+        cos = np.einsum("ij,ij->i", got, got_mean) / np.linalg.norm(got, axis=1)
+        np.testing.assert_allclose(cos, 1.0, rtol=0, atol=1e-10)
+
+    def test_sketches_unit_l2_window_incremental_matches_from_scratch(self):
+        # Same discipline as test_window_size_reduction_stays_incremental for
+        # mean_l2: sliding through the stream incrementally must give exactly
+        # the from-scratch sketch of the final window.
+        rng = np.random.default_rng(4242)
+        ids = np.array(["a", "b", "c"])
+        w = 16
+        values = rng.normal(size=(3, 40))
+        data = np.vstack([np.arange(40), values])
+        kwargs = self._competitor_norm_kwargs()
+
+        inc = CorrTrack(window_size=w, **kwargs)
+        inc.sketch_norm = "unit_l2_window"
+        for start in range(0, 40, 4):
+            inc.run(data[:, start:start + 4], ids, verbose=False, testing=False, corr_val=False, monitor=False)
+
+        fresh = CorrTrack(window_size=w, **kwargs)
+        fresh.sketch_norm = "unit_l2_window"
+        for start in range(40 - w, 40, 4):
+            fresh.run(data[:, start:start + 4], ids, verbose=False, testing=False, corr_val=False, monitor=False)
+
+        inc_sk = {k: np.asarray(v) for k, v in inc.sketch_nodes[0].sketches.items()}
+        fresh_sk = {k: np.asarray(v) for k, v in fresh.sketch_nodes[0].sketches.items()}
+        self.assertEqual(sorted(inc_sk), sorted(fresh_sk))
+        for k in inc_sk:
+            np.testing.assert_allclose(inc_sk[k], fresh_sk[k], rtol=0, atol=1e-9)
+
+    def test_pearson_from_five_sums_matches_numpy(self):
+        rng = np.random.default_rng(99)
+        x = rng.normal(size=(7, 64)) * 3 + 10
+        y = rng.normal(size=(7, 64)) * 0.5 - 4
+        y[2] = 0.9 * x[2] + 0.1 * y[2]
+        y[3] = -x[3]                     # perfect anticorrelation
+        x[5] = 2.0                       # constant -> must give 0.0, not nan
+        n, sx, sy, sxx, syy, sxy = five_sums(x, y, axis=1)
+        got = pearson_from_five_sums(n, sx, sy, sxx, syy, sxy)
+        expected = np.array([0.0 if i == 5 else np.corrcoef(x[i], y[i])[0, 1] for i in range(7)])
+        np.testing.assert_allclose(got, expected, rtol=0, atol=1e-12)
+        self.assertEqual(got[3], -1.0)
+        self.assertEqual(got[5], 0.0)
+        # scalar path
+        self.assertAlmostEqual(float(pearson_from_five_sums(*five_sums(x[0], y[0]))), expected[0], places=12)
+
+    # ------------------------------------------------------------------
+    # 2026-09-16 -- competitor implementation plan, phase 0c/0e + Track A1
+    # ------------------------------------------------------------------
+
+    def _assert_competitor_contract(self, record, pattern):
+        """Shared contract every competitor arm must satisfy (plan §0c/0e).
+
+        Reads the RUN_RESULT_COLUMNS record only (what reaches the paper).
+        pattern "A" (all-pairs baseline_mode arms): no pruning, so the candidate
+        set IS the pair set: total == tested, and no index probes were made.
+        pattern "B" (pruning arms): total >= tested >= correlated, probes may be > 0.
+        Both: phase timings present and non-negative; correlated <= tested.
+        """
+        total = int(record.get("total_candidates") or 0)
+        tested = int(record.get("tested") or 0)
+        validated = int(record.get("correlated") or 0)
+        self.assertGreater(tested, 0, "arm tested no pairs at all")
+        self.assertLessEqual(validated, tested)
+        for key in ("sk_time", "cand_time", "val_time"):
+            self.assertIn(key, record)
+            self.assertIsNotNone(record[key], f"{key} must be populated, not null")
+            self.assertGreaterEqual(float(record[key]), 0.0)
+        touched = [k for k in record if k.startswith("candidate_search_") and k.endswith("_touched")]
+        if pattern == "A":
+            self.assertEqual(total, tested, "no-pruning arm must have total == tested")
+            for k in touched:
+                self.assertIn(int(record[k] or 0), (0,), f"{k} must be 0 for a no-pruning arm")
+        else:
+            self.assertGreaterEqual(total, tested)
+
+    def _bf_end_to_end(self, mode, data, ids, base_config, tmp, **extra):
+        cfg = dict(base_config, baseline_mode=mode, **extra)
+        record, _, _ = run_and_log_bruteforce(
+            f"diag_{mode}", data, ids, cfg, os.path.join(tmp, f"bf_{mode}.csv"),
+            metadata={"nodes": 0}, recall_by_window=True, verbose=False, testing=False,
+        )
+        return record
+
+    def test_tsubasa_node_matches_exact_stomp_pearson(self):
+        # Candidates_BF_TSUBASA recovers Pearson from per-basic-window sketches
+        # (their Lemma 1). It is exact, so it must match exact_stomp key-for-key
+        # and value-for-value at lag 0. Exercised with window_step < basic_window
+        # so the window start is usually OFF the basic-window grid, forcing the
+        # partial head/tail segments (their arbitrary-query-window case) and
+        # the length-weighted xbar -- the case where the paper's unweighted
+        # delta would be wrong. Both even and odd window sizes.
+        rng = np.random.default_rng(11)
+        n_series = 6
+        corr_threshold = 0.2
+        for window_size, basic_window, window_step, step_len in (
+            (32, 8, 4, 4), (33, 11, 3, 3), (48, 12, 4, 4), (168, 12, 12, 6),
+        ):
+            n_steps = max(60, (window_size // step_len) + 30)
+            with self.subTest(window_size=window_size, basic_window=basic_window, step=window_step):
+                ts = Candidates_BF_TSUBASA(window_size, window_step, 0, corr_threshold, basic_window, neg_corr=True)
+                st = Candidates_BF_ExactSTOMP(window_size, window_step, 0, corr_threshold, neg_corr=True)
+                ids = [f"s{i}" for i in range(n_series)]
+                t = 0
+                max_abs_err, mismatch, any_accepted, total_ts, total_st = 0.0, 0, False, 0, 0
+                for step in range(n_steps):
+                    block = rng.standard_normal((n_series, step_len)) + rng.uniform(-5, 5, size=(n_series, 1))
+                    if step > 5:
+                        block[1] = block[0] + rng.standard_normal(step_len) * 0.05
+                        block[3] = -block[2] + rng.standard_normal(step_len) * 0.05
+                    idx = np.arange(t, t + step_len)
+                    nds = np.vstack([idx, block])
+                    ts_rows, ts_corrs, n_ts, _ = ts.run(nds, ids, verbose=False, testing=False, track_min_dist=True, numeric_rows=True)
+                    st_rows, st_corrs, n_st, _ = st.run(nds, ids, verbose=False, testing=False, track_min_dist=True, numeric_rows=True)
+                    total_ts += n_ts; total_st += n_st
+                    ks_ts = {tuple(r): c for r, c in zip(ts_rows.tolist(), ts_corrs.tolist())}
+                    ks_st = {tuple(r): c for r, c in zip(st_rows.tolist(), st_corrs.tolist())}
+                    any_accepted = any_accepted or bool(ks_ts)
+                    mismatch += len(set(ks_ts) ^ set(ks_st))
+                    for key in set(ks_ts) & set(ks_st):
+                        max_abs_err = max(max_abs_err, abs(ks_ts[key] - ks_st[key]))
+                    t += step_len
+                self.assertTrue(any_accepted, "no correlated pairs -- test data too weak")
+                self.assertEqual(mismatch, 0)
+                self.assertLess(max_abs_err, 1e-9)
+                self.assertEqual(total_ts, total_st, "pair counts must agree (no pruning)")
+                self.assertGreater(ts._segments_built, 0)
+                # cache never holds segments that have left the window
+                self.assertLessEqual(len(ts._segment_cache), window_size // basic_window + 1)
+
+    def test_tsubasa_refuses_lags(self):
+        # 0d policy applied to lags: TSUBASA has none, so the arm refuses
+        # n_lags > 0 rather than silently extending the method.
+        with self.assertRaises(ValueError):
+            Candidates_BF_TSUBASA(32, 8, 8, 0.5, 8)
+        Candidates_BF_TSUBASA(32, 8, 0, 0.5, 8)  # n_lags=0 is fine
+
+    def test_run_and_log_bruteforce_tsubasa_matches_bruteforce_and_meets_contract(self):
+        # End-to-end dispatch (baseline_mode="tsubasa" -> run_bf -> run_bf_tsubasa ->
+        # Candidates_BF_TSUBASA) reproduces bruteforce's correlated-pair count at
+        # n_lags=0, and all three Pattern-A arms satisfy the shared counter
+        # contract (plan §0c/0e) that the three-phase reporting depends on.
+        n_series = 6
+        length = 400
+        rng = np.random.default_rng(3)
+        t = np.linspace(-3, 3, length)
+        values = rng.normal(scale=0.05, size=(n_series, length))
+        values[0] = t
+        values[1] = t + rng.normal(scale=0.02, size=length)
+        values[2] = -t + rng.normal(scale=0.02, size=length)
+        data = np.vstack([np.arange(length, dtype=np.float64), values])
+        ids = [f"s{i}" for i in range(n_series)]
+        base_config = dict(
+            window_size=32, window_step=8, basic_window=8, n_lags=0,
+            corr_threshold=0.6, neg_corr=True, exec="sequential",
+            parallel_sketch=False, parallel_candidates=False, parallel_validation=False,
+            max_workers=0, monitor=True, track_min_dist=True,
+            artifact_mode="final", artifact_buffer_max_rows=250000, artifact_merge_mode="merged",
+            save_only_required_artifacts=True, save_maxlag_artifacts=False, verbose=False, testing=False,
+            validation_metric="pearson",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            counts = {}
+            for mode in ("bruteforce", "exact_stomp", "filcorr", "tsubasa"):
+                extra = dict(filcorr_fs=0.0, filcorr_ft=0.5, filcorr_sampling_rate=1.0) if mode == "filcorr" else {}
+                record = self._bf_end_to_end(mode, data, ids, base_config, tmp, **extra)
+                counts[mode] = record["correlated"]
+                if mode != "bruteforce":
+                    self._assert_competitor_contract(record, pattern="A")
+        self.assertGreater(counts["bruteforce"], 0)
+        for mode in ("exact_stomp", "filcorr", "tsubasa"):
+            self.assertEqual(counts[mode], counts["bruteforce"], mode)
+
+    # ------------------------------------------------------------------
+    # 2026-09-16 -- Track A2: BRAID / ThinBRAID
+    # ------------------------------------------------------------------
+
+    def test_braid_probing_scheme_matches_paper(self):
+        # Enhanced scheme (their §3.4, Figure 6 with b=4):
+        # l = {0,...,7; 8,10,12,14; 16,20,24,28; 32,40,...}
+        levels = Candidates_BF_BRAID._build_levels(60, 4)
+        got = {h: lags for h, lags in levels}
+        self.assertEqual(got[0], list(range(0, 8)))
+        self.assertEqual(got[1], [8, 10, 12, 14])
+        self.assertEqual(got[2], [16, 20, 24, 28])
+        self.assertEqual(got[3], [32, 40, 48, 56])
+        # with 2b > max_lag only level 0 exists and covers every lag exactly
+        levels = Candidates_BF_BRAID._build_levels(12, 16)
+        self.assertEqual(levels, [(0, list(range(0, 13)))])
+
+    def test_braid_exact_anchor_matches_exact_stomp_when_2b_exceeds_n_lags(self):
+        # The degenerate-exact configuration (plan A2 anchor): with 2*b > n_lags,
+        # level 0 covers every lag at raw resolution -- no smoothing, no
+        # interpolation -- so BRAID in "all_lags" mode must reproduce the
+        # exact_stomp lagged pair set key-for-key and value-for-value. Both the
+        # plain (rolling per-pair sums) and, at d0 >> W, the Thin variant are
+        # checked; Thin is only approximately exact so gets a loose tolerance
+        # on values but the same pair set is still required at this d0.
+        rng = np.random.default_rng(5)
+        m, W, step, n_lags = 8, 32, 4, 12
+        ids = [f"s{i}" for i in range(m)]
+        br = Candidates_BF_BRAID(W, step, n_lags, 0.3, neg_corr=True, b=16, report_mode="all_lags")
+        st = Candidates_BF_ExactSTOMP(W, step, n_lags, 0.3, neg_corr=True)
+        self.assertEqual(len(br.levels), 1)
+        mism, maxerr, acc, t = 0, 0.0, 0, 0
+        for k in range(60):
+            blk = rng.standard_normal((m, step))
+            if k > 3:
+                blk[1] = blk[0] + 0.05 * rng.standard_normal(step)
+                blk[3] = -blk[2] + 0.05 * rng.standard_normal(step)
+            nds = np.vstack([np.arange(t, t + step), blk]); t += step
+            r1, c1, n1, _ = br.run(nds, ids, verbose=False, testing=False)
+            r2, c2, n2, _ = st.run(nds, ids, verbose=False, testing=False)
+            self.assertEqual(n1, n2)
+            k1 = {tuple(r): c for r, c in zip(r1.tolist(), c1.tolist())}
+            k2 = {tuple(r): c for r, c in zip(r2.tolist(), c2.tolist())}
+            mism += len(set(k1) ^ set(k2)); acc += len(k1)
+            for kk in set(k1) & set(k2):
+                maxerr = max(maxerr, abs(k1[kk] - k2[kk]))
+        self.assertGreater(acc, 0)
+        self.assertEqual(mism, 0)
+        self.assertLess(maxerr, 1e-12)
+        self.assertGreater(br.incremental_updates, br.full_initializations, "rolling updates must engage")
+
+    def test_braid_lag_estimate_recovers_exact_earliest_local_max(self):
+        # Definition 1 applied to the exact CCF vs BRAID's interpolated estimate.
+        # In the exact anchor the agreement must be 100%. With interpolation
+        # (b=4, ~half the lags probed) agreement is necessarily imperfect on a
+        # W=64 window with single-digit lags -- the regime effect recorded in
+        # docs/implementation_log.md 2026-09-16 (k) -- so only a loose floor is
+        # asserted there, and Thin must not be *better* than plain (d0 >= W_h
+        # adds JL noise without saving anything on short windows).
+        def earliest_local_max(absr, gamma):
+            if absr.shape[0] == 1:
+                return 0 if absr[0] >= gamma else -1
+            left = np.r_[-np.inf, absr[:-1]]; right = np.r_[absr[1:], -np.inf]
+            ok = np.nonzero((absr >= left) & (absr > right) & (absr >= gamma))[0]
+            return int(ok[0]) if ok.size else -1
+        rng = np.random.default_rng(3)
+        W, n_lags, TRUE_LAG, N = 64, 30, 9, 400
+        smooth = np.convolve(rng.standard_normal(N + 40), np.ones(12) / 12, mode="same")
+        x = smooth[:N]; y = np.empty(N); y[TRUE_LAG:] = x[:-TRUE_LAG]; y[:TRUE_LAG] = x[0]
+        y = y + 0.05 * rng.standard_normal(N)
+        X = np.vstack([x, y, rng.standard_normal((2, N))]); ids = ["x", "y", "n1", "n2"]
+        def run(kw):
+            br = Candidates_BF_BRAID(W, 1, n_lags, 0.5, neg_corr=True, gamma=0.4, report_mode="braid", **kw)
+            agree = []
+            for t in range(N):
+                r, c, n, _ = br.run(np.vstack([[t], X[:, t:t + 1]]), ids, verbose=False, testing=False)
+                if t >= W + n_lags:
+                    xc = x[t - W + 1:t + 1]
+                    ccf = np.array([np.corrcoef(xc, y[t - W + 1 - l:t + 1 - l])[0, 1] for l in range(n_lags + 1)])
+                    ex = earliest_local_max(np.abs(ccf), 0.4)
+                    if ex >= 0:
+                        agree.append(int(br.last_lag_estimates[0, 1]) == ex)
+                    # "braid" mode emits at most one row per pair, at the chosen lag
+                    if r.shape[0]:
+                        self.assertEqual(len({(a, b) for a, b, *_ in r.tolist()}), r.shape[0])
+            return float(np.mean(agree))
+        exact = run(dict(b=16))
+        interp = run(dict(b=4))
+        thin = run(dict(b=4, thin=True))
+        self.assertEqual(exact, 1.0)
+        self.assertGreater(interp, 0.5)
+        self.assertLessEqual(thin, interp + 0.05)
+
+    def test_run_and_log_bruteforce_braid_dispatch_and_contract(self):
+        # End-to-end through run_and_log_bruteforce with baseline_mode="braid" in
+        # the exact-anchor configuration: must match bruteforce's correlated count
+        # and satisfy the Pattern-A contract; knobs thread through base_config.
+        n_series, length = 6, 400
+        rng = np.random.default_rng(3)
+        t = np.linspace(-3, 3, length)
+        values = rng.normal(scale=0.05, size=(n_series, length))
+        values[0] = t; values[1] = t + rng.normal(scale=0.02, size=length)
+        data = np.vstack([np.arange(length, dtype=np.float64), values])
+        ids = [f"s{i}" for i in range(n_series)]
+        base_config = dict(
+            window_size=32, window_step=8, basic_window=8, n_lags=16,
+            corr_threshold=0.6, neg_corr=True, exec="sequential",
+            parallel_sketch=False, parallel_candidates=False, parallel_validation=False,
+            max_workers=0, monitor=True, track_min_dist=True,
+            artifact_mode="final", artifact_buffer_max_rows=250000, artifact_merge_mode="merged",
+            save_only_required_artifacts=True, save_maxlag_artifacts=False, verbose=False, testing=False,
+            validation_metric="pearson",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            bf = self._bf_end_to_end("bruteforce", data, ids, base_config, tmp)
+            br = self._bf_end_to_end("braid", data, ids, base_config, tmp, braid_b=16, braid_gamma=0.4,
+                                     braid_thin=False, braid_report_mode="all_lags")
+        self.assertGreater(bf["correlated"], 0)
+        self.assertEqual(br["correlated"], bf["correlated"])
+        self.assertEqual(int(br["braid_b"]), 16)
+        self._assert_competitor_contract(br, pattern="A")
 
 
 if __name__ == "__main__":

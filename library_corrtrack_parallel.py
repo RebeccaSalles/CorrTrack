@@ -1203,6 +1203,16 @@ def run_and_log_bruteforce(
         metadata.setdefault("filcorr_fs", corrtrack.filcorr_fs)
         metadata.setdefault("filcorr_ft", corrtrack.filcorr_ft)
         metadata.setdefault("filcorr_sampling_rate", corrtrack.filcorr_sampling_rate)
+    if baseline_mode == "braid":
+        corrtrack.braid_b = int(_to_float_safe(base_config.get("braid_b", 16)) or 16)
+        corrtrack.braid_gamma = _to_float_safe(base_config.get("braid_gamma", 0.4))
+        if corrtrack.braid_gamma is None:
+            corrtrack.braid_gamma = 0.4
+        corrtrack.braid_thin = _coerce_to_bool(base_config.get("braid_thin", False), default=False)
+        corrtrack.braid_thin_d0 = int(_to_float_safe(base_config.get("braid_thin_d0", 400)) or 400)
+        corrtrack.braid_report_mode = str(base_config.get("braid_report_mode", "all_lags") or "all_lags")
+        for k in ("braid_b", "braid_gamma", "braid_thin", "braid_thin_d0", "braid_report_mode"):
+            metadata.setdefault(k, getattr(corrtrack, k))
 
     if verbose is None:
         verbose = _coerce_to_bool(base_config.get("verbose", False))
@@ -1947,9 +1957,14 @@ def _resolve_baseline_mode(value, default="bruteforce"):
         "fil_corr": "filcorr",
         "fillcorr": "filcorr",
         "fil-corr": "filcorr",
+        "tsu": "tsubasa",
+        "tsubasa_baseline": "tsubasa",
+        "thinbraid": "braid",
+        "thin_braid": "braid",
+        "braid_baseline": "braid",
     }
     key = aliases.get(key, key)
-    if key not in {"bruteforce", "exact_stomp", "filcorr"}:
+    if key not in {"bruteforce", "exact_stomp", "filcorr", "tsubasa", "braid"}:
         key = default
     return key
 
@@ -3663,7 +3678,7 @@ _MULTICHANNEL_DEFAULT_TARGET_OCCUPANCY = 10.0
 
 
 class CorrTrack:
-    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,exec="parallel",max_workers=0,data_representation="auto",candidate_backend="auto",candidate_cosine_threshold=None,candidate_cosine_threshold_offset=None,candidate_parallel_mode="recent_shards",candidate_lsh_radius=None,candidate_ann_m=None,candidate_ann_z=None,candidate_ann_ef=None,parallel_sketch=None,parallel_candidates=None,parallel_validation=None,track_min_dist=True,hybrid_validation=False,hybrid_validation_min_repeat_rate=0.25,hybrid_validation_disable_rate=None,hybrid_validation_ema_alpha=0.25,hybrid_validation_min_candidates=256,numeric_rows=True,validation_current_window_cache=False,candidate_lsh_n_bands=64,candidate_lsh_n_bands_tolerance=None,target_recall=0.95,candidate_lsh_target_occupancy=None,candidate_lsh_recall_safety_margin=None,candidate_apply_dot_gamma_filter=True,candidate_hamming_threshold=None,candidate_apply_hamming_filter=True,candidate_hamming_filter_max_frac=0.40,candidate_lsh_max_candidates_per_query=0,validation_metric="pearson",validation_incremental_approx=False,validation_incremental_m1=None,validation_incremental_m2=None,validation_incremental_max_age_steps=64,validation_incremental_cutpoint_refresh_threshold=0.5,dist_corr_algorithm="naive",concordance_n_gaps=None,concordance_min_gap=8,concordance_min_capacity=16,concordance_target_dim=738,concordance_multichannel_gamma=None,concordance_multichannel_min_channel_capacity=None,distance_corr_sketch_k=8,distance_corr_sketch_freq_low=0.1,distance_corr_sketch_freq_high=10.0,distance_corr_sketch_freq_seed=42,distance_corr_sketch_gate_tau=None,distance_corr_sketch_multichannel_gamma=None,distance_corr_sketch_apply_tier2_gate=True):
+    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,exec="parallel",max_workers=0,data_representation="auto",candidate_backend="auto",candidate_cosine_threshold=None,candidate_cosine_threshold_offset=None,candidate_parallel_mode="recent_shards",candidate_lsh_radius=None,candidate_ann_m=None,candidate_ann_z=None,candidate_ann_ef=None,parallel_sketch=None,parallel_candidates=None,parallel_validation=None,track_min_dist=True,hybrid_validation=False,hybrid_validation_min_repeat_rate=0.25,hybrid_validation_disable_rate=None,hybrid_validation_ema_alpha=0.25,hybrid_validation_min_candidates=256,numeric_rows=True,validation_current_window_cache=False,candidate_lsh_n_bands=64,candidate_lsh_n_bands_tolerance=None,target_recall=0.95,candidate_lsh_target_occupancy=None,candidate_lsh_recall_safety_margin=None,candidate_apply_dot_gamma_filter=True,candidate_hamming_threshold=None,candidate_apply_hamming_filter=True,candidate_hamming_filter_max_frac=0.40,candidate_lsh_max_candidates_per_query=0,candidate_search_n_threads=1,validation_metric="pearson",validation_incremental_approx=False,validation_incremental_m1=None,validation_incremental_m2=None,validation_incremental_max_age_steps=64,validation_incremental_cutpoint_refresh_threshold=0.5,dist_corr_algorithm="naive",concordance_n_gaps=None,concordance_min_gap=8,concordance_min_capacity=16,concordance_target_dim=738,concordance_multichannel_gamma=None,concordance_multichannel_min_channel_capacity=None,distance_corr_sketch_k=8,distance_corr_sketch_freq_low=0.1,distance_corr_sketch_freq_high=10.0,distance_corr_sketch_freq_seed=42,distance_corr_sketch_gate_tau=None,distance_corr_sketch_multichannel_gamma=None,distance_corr_sketch_apply_tier2_gate=True):
 
         if basic_window is not None and window_size % basic_window != 0:
             raise TypeError("Window size (",window_size,") is not divisable by basic window size (",basic_window,")")
@@ -4133,6 +4148,23 @@ class CorrTrack:
         self.candidate_lsh_max_candidates_per_query = max(
             0, _to_int_safe(candidate_lsh_max_candidates_per_query) or 0
         )
+        # (2026-09-13) EXPERIMENTAL, opt-in, lsh_approx-only: multi-threaded LSH bucket-scan
+        # (SignLSHBandIndex._find_pair_rows_meta_parallel, a prange-based twin of the
+        # sequential per-query kernel -- see candidate_kernels.pyx). 1 (default) = the
+        # unchanged single-threaded path. Verified BYTE-IDENTICAL to the sequential kernel's
+        # own row set at n_threads in {1,2,4,8} (direct row-set diff, not just recall/
+        # precision) and bit-identical recall/precision end to end on real data -- see
+        # docs/implementation_log.md's 2026-09-13 entry, "option 4 -- prange parallelism",
+        # including the two real bugs (a Cython reduction-variable compile error, and a real
+        # correctness bug -- an untranslated LSH-internal entry id -- both found and fixed
+        # before trusting any result). NOT a cross-query exact-dedup-preserving path
+        # internally: a pair found from both directions by two different threads costs its
+        # dot product twice instead of once (bounded, disclosed overhead), resolved by a
+        # final vectorized canonicalize+dedup pass so the returned row SET is exact anyway.
+        # Actually clamped back to 1 below, after self.parallel_candidates is resolved, when
+        # that flag is off -- this must not spin up OpenMP threads under the hood for a user
+        # who asked for sequential execution.
+        self.candidate_search_n_threads = max(1, _to_int_safe(candidate_search_n_threads) or 1)
         # (2026-07-10) HammingExactIndex ("lsh_hamming_exact") -- see
         # docs/implementation_log.md, "outside-the-box backends" entry.
         # candidate_hamming_threshold=None means auto-derive
@@ -4243,6 +4275,15 @@ class CorrTrack:
         self.parallel_candidates = parallel_candidates_flag
         self.parallel_validation = parallel_validation_flag
         self.parallel_any = self.parallel_sketch or self.parallel_candidates or self.parallel_validation
+        # (2026-09-13) candidate_search_n_threads (option 4, the prange LSH bucket-scan
+        # kernel) must not spin up OpenMP threads under the hood when the user has asked for
+        # sequential execution -- gate it behind the SAME parallel_candidates flag that
+        # already governs this project's other candidate-search parallelism (grid-node
+        # sharding). A user who set exec="sequential"/parallel_candidates=False gets exactly
+        # that: candidate_search_n_threads is silently clamped back to 1 (unchanged
+        # behavior) regardless of what was passed in, rather than threading anyway.
+        if not self.parallel_candidates:
+            self.candidate_search_n_threads = 1
 
         self.n_nodes = max_workers
         if not self.parallel_any:
@@ -4256,6 +4297,15 @@ class CorrTrack:
         self.brute_force_nodes = []
         self.exact_stomp_bf_node = None
         self.filcorr_bf_node = None
+        self.tsubasa_bf_node = None   # (2026-09-16) see Candidates_BF_TSUBASA
+        self.braid_bf_node = None     # (2026-09-16) see Candidates_BF_BRAID
+        # BRAID / ThinBRAID knobs (paper values: b=16, gamma=0.4, d=400/2^h). Plain
+        # attributes like the filcorr_* ones; threaded by run_and_log_bruteforce.
+        self.braid_b = 16
+        self.braid_gamma = 0.4
+        self.braid_thin = False
+        self.braid_thin_d0 = 400
+        self.braid_report_mode = "all_lags"
         # FilCorr (Zhong, Souza, Mueen -- ICDM 2020) competitor baseline knobs --
         # see Candidates_BF_FilCorr. fs=0.0/ft=0.5 (full band, DC removed) makes
         # FilCorr's Parseval correlation mathematically identical to standard
@@ -4506,6 +4556,7 @@ class CorrTrack:
                 candidate_hamming_filter_max_frac=self.candidate_hamming_filter_max_frac,
                 candidate_lsh_max_candidates_per_query=self.candidate_lsh_max_candidates_per_query,
                 candidate_hamming_threshold=self.candidate_hamming_threshold,
+                candidate_search_n_threads=self.candidate_search_n_threads,
             )
             self.grid_nodes.append(node)
         if self.concordance_multichannel_backend or self.distance_corr_sketch_multichannel_backend:
@@ -6756,49 +6807,47 @@ class CorrTrack:
                     )
                 except Exception:
                     result = None
-                if result is not None:
+                if result is not None and "ok" in result:
+                    # (2026-09-13) Vectorized consumption of the Cython cache's bulk
+                    # numpy arrays -- was a per-candidate Python for-loop unpacking a
+                    # freshly Cython-built list of tuples (itself already the dominant
+                    # cost of validate_pairs's Python-visible return value), found by
+                    # profiling to inflate validation_time ~15x over hybrid_validation
+                    # disabled despite a 92-99% cache hit rate. See candidate_kernels.pyx's
+                    # matching comment.
                     active = bool(result.get("active", False))
                     self._hybrid_validation_active = active
                     self._hybrid_validation_rate_ema = float(result.get("repeat_rate_ema", 0.0))
                     if active:
                         self.hybrid_validation_attempts += int(result.get("repeat_count", 0) or 0)
                         self.hybrid_validation_steps_active += 1
-                    tested = 0
-                    accepted_indices = []
-                    accepted_corrs = []
-                    if track_min_dist:
-                        min_dist, min_pair_idx = self.min_dist, None
-                    for idx, entry in enumerate(result.get("results", ())):
-                        ok = bool(entry[0])
-                        if not ok:
-                            continue
-                        tested += 1
-                        is_correlated = bool(entry[1])
-                        corr = float(entry[2])
-                        dist = float(entry[3])
-                        is_constant = bool(entry[4])
-                        used_hybrid = bool(entry[6]) if len(entry) > 6 else False
-                        if used_hybrid:
-                            self.hybrid_validation_hits += 1
-                        if is_constant:
-                            self.constant_candidates += 1
-                        if track_min_dist and dist < min_dist:
-                            min_dist = dist
-                            min_pair_idx = idx
-                        if is_correlated:
-                            accepted_indices.append(idx)
-                            accepted_corrs.append(corr)
-                    if track_min_dist and min_pair_idx is not None:
-                        self.min_dist = float(min_dist)
-                        self.pair_min_dist = self._numeric_row_to_pair(rows[min_pair_idx])
-                    if accepted_indices:
-                        self._record_correlated_numeric(
-                            rows[np.asarray(accepted_indices, dtype=np.int64)],
-                            np.asarray(accepted_corrs, dtype=np.float64),
-                            retain_validated=retain_validated,
-                        )
-                    self.tested_candidates += tested
-                    self.validated_candidates += len(accepted_indices)
+                    ok_mask = np.asarray(result["ok"], dtype=bool)
+                    tested = int(ok_mask.sum())
+                    if tested:
+                        is_corr = np.asarray(result["is_corr"], dtype=bool) & ok_mask
+                        corr = np.asarray(result["corr"], dtype=np.float64)
+                        dist = np.asarray(result["dist"], dtype=np.float64)
+                        is_const = np.asarray(result["is_const"], dtype=bool) & ok_mask
+                        used_hybrid = np.asarray(result["used_hybrid"], dtype=bool) & ok_mask
+                        self.hybrid_validation_hits += int(used_hybrid.sum())
+                        self.constant_candidates += int(is_const.sum())
+                        if track_min_dist:
+                            valid_idx = np.flatnonzero(ok_mask)
+                            local_pos = int(np.argmin(dist[valid_idx]))
+                            local_min_dist = float(dist[valid_idx[local_pos]])
+                            if local_min_dist < self.min_dist:
+                                self.min_dist = local_min_dist
+                                self.pair_min_dist = self._numeric_row_to_pair(rows[valid_idx[local_pos]])
+                        if np.any(is_corr):
+                            self._record_correlated_numeric(
+                                rows[is_corr],
+                                corr[is_corr],
+                                retain_validated=retain_validated,
+                            )
+                        self.tested_candidates += tested
+                        self.validated_candidates += int(is_corr.sum())
+                    else:
+                        self.tested_candidates += 0
                     return
             if hybrid_min_candidates <= 0 or n_pairs >= hybrid_min_candidates:
                 self._reset_hybrid_validation_runtime()
@@ -8992,6 +9041,7 @@ class CorrTrack:
                 self.n_lags,
                 self.corr_threshold,
                 neg_corr=self.neg_corr,
+                preprocess=self.preprocess,
             )
 
         accepted_rows, accepted_corrs, n_pairs, timing = self.exact_stomp_bf_node.run(
@@ -9059,9 +9109,148 @@ class CorrTrack:
                 filcorr_fs=getattr(self, "filcorr_fs", 0.0),
                 filcorr_ft=getattr(self, "filcorr_ft", 0.5),
                 filcorr_sampling_rate=getattr(self, "filcorr_sampling_rate", 1.0),
+                preprocess=self.preprocess,
             )
 
         accepted_rows, accepted_corrs, n_pairs, timing = self.filcorr_bf_node.run(
+            self._curr_window_step(),
+            self.ids,
+            verbose=verbose,
+            testing=testing,
+            track_min_dist=bool(getattr(self, "track_min_dist", True)),
+            numeric_rows=True,
+        )
+        self.total_candidates += int(n_pairs)
+        self.tested_candidates += int(n_pairs)
+        self.validated_candidates += int(np.asarray(accepted_rows).reshape((-1, 5)).shape[0])
+        self.candidate_time += float(timing.get("candidate_time", 0.0) or 0.0)
+
+        if getattr(self, "track_min_dist", True):
+            step_min_dist = timing.get("min_dist", np.inf)
+            step_min_pair = timing.get("pair_min_dist")
+            if step_min_pair is not None and step_min_dist < self.min_dist:
+                self.min_dist = float(step_min_dist)
+                self.pair_min_dist = step_min_pair
+
+        bookkeeping_before = self.artifact_bookkeeping_time
+        record_t0 = time.perf_counter()
+        self._record_correlated_numeric(accepted_rows, accepted_corrs, retain_validated=monitor)
+        bookkeeping_delta = max(self.artifact_bookkeeping_time - bookkeeping_before, 0.0)
+        self.validation_time += float(timing.get("validation_time", 0.0) or 0.0)
+        self.validation_time += max((time.perf_counter() - record_t0) - bookkeeping_delta, 0.0)
+
+        if monitor:
+            start_time = time.time()
+            self._monitor_corr(worker_mode=val_mode)
+            end_time = time.time()
+            self.monitor_time += end_time - start_time
+
+        if verbose:
+            self._print_state()
+        self._profile_tick()
+
+    def run_bf_tsubasa(self, new_data_step, ids, verbose, testing, corr_val=True, monitor=True):
+        """TSUBASA competitor baseline dispatch -- see Candidates_BF_TSUBASA.
+        (2026-09-16) Structurally identical to run_bf_filcorr / run_bf_exact_stomp
+        (same bookkeeping/monitor wiring); only the per-step node differs.
+        Pattern A of docs/competitor_implementation_plan.md."""
+        self.verbose = verbose
+        self.testing = testing
+
+        val_mode = "thread" if self.parallel_validation else "sequential"
+        t_update = time.perf_counter() if self.profile_enabled else None
+        self._update_curr_data(new_data_step, ids)
+        if t_update is not None:
+            self._profile_add("bf.update_curr_data", time.perf_counter() - t_update)
+        self.candidates = {}
+        self._last_candidate_numeric_rows = None
+        self.validated = {}
+        if getattr(self, "_step_observer_enabled", False):
+            self._validated_step = {}
+
+        if self.tsubasa_bf_node is None:
+            self.tsubasa_bf_node = Candidates_BF_TSUBASA(
+                self.window_size,
+                self.window_step,
+                self.n_lags,
+                self.corr_threshold,
+                self.basic_window,
+                neg_corr=self.neg_corr,
+                preprocess=self.preprocess,
+            )
+
+        accepted_rows, accepted_corrs, n_pairs, timing = self.tsubasa_bf_node.run(
+            self._curr_window_step(),
+            self.ids,
+            verbose=verbose,
+            testing=testing,
+            track_min_dist=bool(getattr(self, "track_min_dist", True)),
+            numeric_rows=True,
+        )
+        self.total_candidates += int(n_pairs)
+        self.tested_candidates += int(n_pairs)
+        self.validated_candidates += int(np.asarray(accepted_rows).reshape((-1, 5)).shape[0])
+        self.candidate_time += float(timing.get("candidate_time", 0.0) or 0.0)
+
+        if getattr(self, "track_min_dist", True):
+            step_min_dist = timing.get("min_dist", np.inf)
+            step_min_pair = timing.get("pair_min_dist")
+            if step_min_pair is not None and step_min_dist < self.min_dist:
+                self.min_dist = float(step_min_dist)
+                self.pair_min_dist = step_min_pair
+
+        bookkeeping_before = self.artifact_bookkeeping_time
+        record_t0 = time.perf_counter()
+        self._record_correlated_numeric(accepted_rows, accepted_corrs, retain_validated=monitor)
+        bookkeeping_delta = max(self.artifact_bookkeeping_time - bookkeeping_before, 0.0)
+        self.validation_time += float(timing.get("validation_time", 0.0) or 0.0)
+        self.validation_time += max((time.perf_counter() - record_t0) - bookkeeping_delta, 0.0)
+
+        if monitor:
+            start_time = time.time()
+            self._monitor_corr(worker_mode=val_mode)
+            end_time = time.time()
+            self.monitor_time += end_time - start_time
+
+        if verbose:
+            self._print_state()
+        self._profile_tick()
+
+    def run_bf_braid(self, new_data_step, ids, verbose, testing, corr_val=True, monitor=True):
+        """BRAID / ThinBRAID competitor baseline dispatch -- see Candidates_BF_BRAID.
+        (2026-09-16) Structurally identical to run_bf_filcorr / run_bf_exact_stomp
+        (same bookkeeping/monitor wiring); only the per-step node differs.
+        Pattern A of docs/competitor_implementation_plan.md."""
+        self.verbose = verbose
+        self.testing = testing
+
+        val_mode = "thread" if self.parallel_validation else "sequential"
+        t_update = time.perf_counter() if self.profile_enabled else None
+        self._update_curr_data(new_data_step, ids)
+        if t_update is not None:
+            self._profile_add("bf.update_curr_data", time.perf_counter() - t_update)
+        self.candidates = {}
+        self._last_candidate_numeric_rows = None
+        self.validated = {}
+        if getattr(self, "_step_observer_enabled", False):
+            self._validated_step = {}
+
+        if self.braid_bf_node is None:
+            self.braid_bf_node = Candidates_BF_BRAID(
+                self.window_size,
+                self.window_step,
+                self.n_lags,
+                self.corr_threshold,
+                neg_corr=self.neg_corr,
+                preprocess=self.preprocess,
+                b=int(getattr(self, "braid_b", 16)),
+                gamma=float(getattr(self, "braid_gamma", 0.4)),
+                thin=bool(getattr(self, "braid_thin", False)),
+                thin_d0=int(getattr(self, "braid_thin_d0", 400)),
+                report_mode=str(getattr(self, "braid_report_mode", "all_lags")),
+            )
+
+        accepted_rows, accepted_corrs, n_pairs, timing = self.braid_bf_node.run(
             self._curr_window_step(),
             self.ids,
             verbose=verbose,
@@ -9112,6 +9301,26 @@ class CorrTrack:
             return
         if _bf_mode == "filcorr":
             self.run_bf_filcorr(
+                new_data_step,
+                ids,
+                verbose=verbose,
+                testing=testing,
+                corr_val=corr_val,
+                monitor=monitor,
+            )
+            return
+        if _bf_mode == "tsubasa":
+            self.run_bf_tsubasa(
+                new_data_step,
+                ids,
+                verbose=verbose,
+                testing=testing,
+                corr_val=corr_val,
+                monitor=monitor,
+            )
+            return
+        if _bf_mode == "braid":
+            self.run_bf_braid(
                 new_data_step,
                 ids,
                 verbose=verbose,
@@ -10171,11 +10380,71 @@ class Sketches:
 
     def _sketch_norm_mode_code(self):
         mode = (self.sketch_norm or "mean_l2").lower()
-        if mode == "mean_l2":
+        # (2026-09-16) "unit_l2_window" (competitor arms: ParCorr/CSZ, CorrJoin,
+        # StatStream normalize the WINDOW before reducing) rides the mean_l2
+        # kernel path -- the kernels are untouched -- and is rescaled afterwards
+        # by _apply_unit_l2_window_norm. See docs/competitor_implementation_plan.md
+        # phase 0a and docs/implementation_log.md's 2026-09-16 (i) entry.
+        if mode in ("mean_l2", "unit_l2_window"):
             return 1
         if mode == "mean":
             return 2
         return 0
+
+    def _sketch_norm_is_unit_l2_window(self):
+        return (self.sketch_norm or "mean_l2").lower() == "unit_l2_window"
+
+    def _apply_unit_l2_window_norm(self, raw_matrix, norm_matrix):
+        """Rescale the sketch to the projection of the unit-L2-normalized window.
+
+        For any linear reduction R (random projection here; also PAA and DFT
+        for the CorrJoin/StatStream arms), R(x_hat) with
+        x_hat = (x - mean(x)) / ||x - mean(x)||_2 equals
+        (R(x) - mean(x) * R(1)) / ||x - mean(x)||_2. The numerator is exactly
+        what _mean_adjust_matrix already computes from the raw sketch and the
+        precomputed R(1) (= _random_vector_sums); the denominator is
+        sqrt(var_sum) from the raw window sums maintained in _newStream. So
+        this costs no new state and stays incremental. The identity it buys
+        is corr(x, y) = 1 - d^2(x_hat, y_hat) / 2, the one every pruning
+        competitor rests on (comparison plan §4.1, §3.1, §2.1).
+
+        This is also exactly what the CorrJoin authors' code does
+        (2-CorrJoin.R: paamN <- (paam - meanT) / tauT with
+        tauT = sqrt(sum x^2 - n*mean^2)) -- normalize AFTER the linear
+        reduction using the window's own statistics.
+
+        No-op (returns norm_matrix unchanged) for every other sketch_norm, so
+        the default "mean_l2" path is byte-identical.
+        """
+        if not self._sketch_norm_is_unit_l2_window():
+            return norm_matrix
+        if raw_matrix is None:
+            return norm_matrix
+        raw = np.asarray(raw_matrix, dtype=np.float64)
+        if raw.size == 0:
+            return norm_matrix
+        if raw.ndim == 1:
+            raw = raw[None, :]
+        n_series = raw.shape[0]
+        if (
+            self._raw_window_sums is None
+            or self._raw_window_sums_sq is None
+            or self.curr_window_size is None
+            or self.curr_window_size <= 0
+            or self._raw_window_sums.shape[0] < n_series
+        ):
+            return norm_matrix
+        adjusted = self._mean_adjust_matrix(raw)
+        n = float(self.curr_window_size)
+        sum1 = np.asarray(self._raw_window_sums[:n_series], dtype=np.float64)
+        sum2 = np.asarray(self._raw_window_sums_sq[:n_series], dtype=np.float64)
+        var_sum = np.maximum(sum2 - (sum1 * sum1) / n, 0.0)
+        denom = np.sqrt(var_sum)
+        out = np.zeros_like(adjusted)
+        valid = np.isfinite(denom) & (denom > 0.0)
+        if np.any(valid):
+            out[valid] = adjusted[valid] / denom[valid, None]
+        return out
     
     def _generate_randomVectors(self):
         base_rng = np.random.RandomState(self.seed_randomVector)
@@ -10707,6 +10976,7 @@ class Sketches:
                     )
                 except Exception:
                     pass
+        norm_matrix = self._apply_unit_l2_window_norm(raw_matrix, norm_matrix)
         self._sketch_matrix = norm_matrix
         series_ids = list(self.series_ids)
         if len(series_ids) < n_series:
@@ -10803,6 +11073,7 @@ class Sketches:
                             )
                         except Exception:
                             pass
+                norm_matrix = self._apply_unit_l2_window_norm(raw_matrix, norm_matrix)
                 self._sketch_matrix = norm_matrix
                 series_ids = list(self.series_ids)
                 if len(series_ids) < n_series:
@@ -10974,6 +11245,7 @@ class Sketches:
                     )
                 except Exception:
                     pass
+        norm_matrix = self._apply_unit_l2_window_norm(raw_matrix, norm_matrix)
         self._sketch_matrix = norm_matrix
         if t0 is not None:
             self._profile_add("sketch.incremental_append_state", time.perf_counter() - t0)
@@ -11077,7 +11349,7 @@ class Sketches:
 
     def _normalize_sketch(self, v):
         mode = (self.sketch_norm or "mean_l2").lower()
-        if mode == "mean_l2":
+        if mode in ("mean_l2", "unit_l2_window"):
             return self._mean_l2_normalize_sketch(v)
         if mode == "mean":
             return self._mean_only_normalize_sketch(v)
@@ -11091,7 +11363,7 @@ class Sketches:
         if arr.ndim == 1:
             arr = arr[None, :]
         mode = (self.sketch_norm or "mean_l2").lower()
-        if mode == "mean_l2":
+        if mode in ("mean_l2", "unit_l2_window"):
             adjusted = self._mean_adjust_matrix(arr)
             norms = np.linalg.norm(adjusted, axis=1, keepdims=True)
             out = np.zeros_like(adjusted)
@@ -11312,6 +11584,59 @@ class Sketches:
         # Return copies so the caller can safely merge
         return dict(self.sketches), list(self.partitions)
 
+def pearson_from_five_sums(n, sx, sy, sxx, syy, sxy, out_dtype=np.float64):
+    """Pearson correlation from the five sufficient statistics, vectorized.
+
+    (2026-09-16) Phase 0b of docs/competitor_implementation_plan.md. The
+    five sums (sum x, sum y, sum x^2, sum y^2, sum xy) over a common
+    support of length `n` are the algebraic core shared by exact_stomp,
+    CorrJoin (their Eq. 2 incremental update; and 2-CorrJoin.R's closing
+    `corr <- (n*xyMult - Sx*Sy) / sqrt((n*Sxx - Sx^2)(n*Syy - Sy^2))`),
+    BRAID (their Eqs. 5, 6, 11 per level and lag) and TSUBASA (their
+    Lemma 1 combines per-basic-window versions of these). Kept a plain
+    function over arrays so each consumer can shape its own accumulation.
+
+    Zero-variance (constant) windows on either side yield correlation 0.0,
+    matching the constant-window guard the exact baselines already apply.
+    Inputs broadcast; `n` may be a scalar or an array of per-pair lengths.
+    """
+    n = np.asarray(n, dtype=np.float64)
+    sx = np.asarray(sx, dtype=np.float64)
+    sy = np.asarray(sy, dtype=np.float64)
+    sxx = np.asarray(sxx, dtype=np.float64)
+    syy = np.asarray(syy, dtype=np.float64)
+    sxy = np.asarray(sxy, dtype=np.float64)
+    cov = n * sxy - sx * sy
+    var_x = np.maximum(n * sxx - sx * sx, 0.0)
+    var_y = np.maximum(n * syy - sy * sy, 0.0)
+    denom = np.sqrt(var_x * var_y)
+    out = np.zeros(np.broadcast(cov, denom).shape, dtype=out_dtype)
+    valid = np.isfinite(denom) & (denom > 0.0)
+    if np.any(valid):
+        with np.errstate(divide="ignore", invalid="ignore"):
+            res = np.where(valid, cov / np.where(valid, denom, 1.0), 0.0)
+        out[...] = np.clip(res, -1.0, 1.0)
+    return out
+
+
+def five_sums(x, y, axis=-1):
+    """Return (n, sum x, sum y, sum x^2, sum y^2, sum xy) along `axis`.
+
+    Companion to pearson_from_five_sums; see that docstring.
+    """
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    n = x.shape[axis]
+    return (
+        n,
+        x.sum(axis=axis),
+        y.sum(axis=axis),
+        (x * x).sum(axis=axis),
+        (y * y).sum(axis=axis),
+        (x * y).sum(axis=axis),
+    )
+
+
 class Candidates_BF:
     def __init__(self,window_size,window_step,n_lags,corr_threshold):       
         self.verbose = None
@@ -11471,7 +11796,8 @@ class Candidates_BF:
 class Candidates_BF_ExactSTOMP:
     """Exact online baseline using rolling lagged dot-product matrices."""
 
-    def __init__(self, window_size, window_step, n_lags, corr_threshold, neg_corr=False):
+    def __init__(self, window_size, window_step, n_lags, corr_threshold, neg_corr=False,
+                preprocess=False):
         self.verbose = None
         self.testing = False
         self.window_size = int(window_size)
@@ -11479,7 +11805,10 @@ class Candidates_BF_ExactSTOMP:
         self.n_lags = (int(n_lags) // self.window_step) * self.window_step
         self.corr_threshold = float(corr_threshold)
         self.neg_corr = bool(neg_corr)
+        self.preprocess = bool(preprocess)
         self.window_data = None
+        self.window_data_diff = None
+        self._preprocess_diff_last_origin = None
         self.window_index = None
         self.series_ids = []
         self.curr_window_size = self.window_size
@@ -11509,11 +11838,33 @@ class Candidates_BF_ExactSTOMP:
         extra = max(self.window_step, step_len)
         capacity = self.n_lags + self.window_size + extra
 
+        if self.preprocess:
+            # same carry-over trick as CorrTrack._update_window_data_diff: prepend the
+            # last raw value seen so this step's diffed chunk stays column-aligned with
+            # new_data_step_values (and hence with window_data/window_index).
+            if self._preprocess_diff_last_origin is not None:
+                joined = np.append(
+                    np.transpose([self._preprocess_diff_last_origin]), new_data_step_values, axis=1
+                )
+            elif step_len > 0:
+                joined = np.append(new_data_step_values[:, :1], new_data_step_values, axis=1)
+            else:
+                joined = new_data_step_values
+            if joined.shape[1] <= 1:
+                diff_step_values = np.zeros((joined.shape[0], joined.shape[1]), dtype=np.float64)
+            else:
+                diff_step_values = joined[:, 1:] - joined[:, :-1]
+            if step_len > 0:
+                self._preprocess_diff_last_origin = new_data_step_values[:, -1]
+
         if self.window_data is None:
             self.window_data = new_data_step_values
             self.window_index = new_data_step_index[-self.window_data.shape[1]:]
+            if self.preprocess:
+                self.window_data_diff = diff_step_values
         else:
             projected = self.window_data.shape[1] + step_len
+            drop = 0
             if projected > capacity:
                 drop = min(self.window_data.shape[1], projected - capacity)
                 if drop > 0:
@@ -11521,6 +11872,15 @@ class Candidates_BF_ExactSTOMP:
                     self.window_data = self.window_data[:, drop:]
             self.window_index = np.append(self.window_index, new_data_step_index)
             self.window_data = np.append(self.window_data, new_data_step_values, axis=1)
+            if self.preprocess:
+                # trimmed by the exact same `drop` as window_data, so the two buffers
+                # never diverge in column count / alignment.
+                if drop > 0 and self.window_data_diff is not None:
+                    self.window_data_diff = self.window_data_diff[:, drop:]
+                if self.window_data_diff is None:
+                    self.window_data_diff = diff_step_values
+                else:
+                    self.window_data_diff = np.append(self.window_data_diff, diff_step_values, axis=1)
 
         self.series_ids = list(ids)
         self._update_curr_window_size()
@@ -11534,8 +11894,18 @@ class Candidates_BF_ExactSTOMP:
     def _time_to_pos(self, start_time):
         return int(start_time - self.window_index[0])
 
+    def _current_data(self):
+        # single point of truth for which buffer the actual correlation math reads --
+        # raw window_data by default, or the incrementally-differenced window_data_diff
+        # when preprocess=True. Mirrors CorrTrack._get_validation_window_data exactly, so
+        # this baseline's ground truth is consistent with the online algorithm's own
+        # notion of "correlation" instead of silently always scoring raw levels.
+        if self.preprocess and self.window_data_diff is not None:
+            return self.window_data_diff
+        return self.window_data
+
     def _window_prefixes(self):
-        data = np.asarray(self.window_data, dtype=np.float64)
+        data = np.asarray(self._current_data(), dtype=np.float64)
 
         def _prefix(values):
             out = np.cumsum(values, axis=1, dtype=np.float64)
@@ -11569,7 +11939,7 @@ class Candidates_BF_ExactSTOMP:
         return sx, sx2, var_sum, nonconst, spiked
 
     def _dot_for_lag(self, lag, curr_pos, hist_pos, curr_start):
-        data = self.window_data
+        data = self._current_data()
         dot = self._dot_by_lag.get(lag)
         advance = None
         if self._last_curr_start is not None:
@@ -11647,7 +12017,7 @@ class Candidates_BF_ExactSTOMP:
             return {}, 0, empty_timing
 
         candidate_t0 = time.perf_counter()
-        data = self.window_data
+        data = self._current_data()
         curr_start = int(self._curr_startTime())
         curr_pos = self._time_to_pos(curr_start)
         max_lag = min(self.n_lags, curr_pos)
@@ -11836,8 +12206,9 @@ class Candidates_BF_FilCorr(Candidates_BF_ExactSTOMP):
     """
 
     def __init__(self, window_size, window_step, n_lags, corr_threshold, neg_corr=False,
-                 filcorr_fs=0.0, filcorr_ft=0.5, filcorr_sampling_rate=1.0):
-        super().__init__(window_size, window_step, n_lags, corr_threshold, neg_corr=neg_corr)
+                 filcorr_fs=0.0, filcorr_ft=0.5, filcorr_sampling_rate=1.0, preprocess=False):
+        super().__init__(window_size, window_step, n_lags, corr_threshold, neg_corr=neg_corr,
+                         preprocess=preprocess)
         self.filcorr_fs = float(filcorr_fs)
         self.filcorr_ft = float(filcorr_ft)
         self.filcorr_sampling_rate = float(filcorr_sampling_rate)
@@ -11928,7 +12299,7 @@ class Candidates_BF_FilCorr(Candidates_BF_ExactSTOMP):
         if cached is not None:
             return cached
         pos = self._time_to_pos(start_time)
-        block = np.asarray(self.window_data[:, pos:pos + self.window_size], dtype=np.float64)
+        block = np.asarray(self._current_data()[:, pos:pos + self.window_size], dtype=np.float64)
         W = np.fft.fft(block, axis=1)[:, self.filcorr_lb:self.filcorr_ub]
         W = W * self.filcorr_band_amplitude_weight[None, :]
         out = (np.ascontiguousarray(W.real), np.ascontiguousarray(W.imag))
@@ -12107,6 +12478,565 @@ class Candidates_BF_FilCorr(Candidates_BF_ExactSTOMP):
         return accepted, total_pairs, timing
 
 
+class Candidates_BF_TSUBASA(Candidates_BF_ExactSTOMP):
+    """TSUBASA competitor baseline (Xu, Liu, Nargesian -- SIGMOD 2022).
+
+    Exact all-pairs Pearson correlation over the current window, recovered
+    from per-basic-window sketches by their Lemma 1 instead of from the raw
+    window. Integration follows `Candidates_BF_FilCorr` exactly (Pattern A of
+    docs/competitor_implementation_plan.md): same window buffer, same
+    constant/spike guards, same accept rule and 5-column output, so it is
+    interchangeable with `bruteforce` / `exact_stomp` / `filcorr` as a
+    ground-truth arm. Its distinct claim versus `exact_stomp` is "per-pair
+    precomputed segment sketches" versus "rolling lagged dot products"; it is
+    NOT a pruning method (their own conclusion lists threshold pruning as
+    future work), so `total_candidates == tested_candidates == all pairs`.
+
+    Sketch per segment (basic window) j, all computed once when the segment
+    is first fully available and cached until it leaves the lag horizon:
+      per series : mean_j, M2_j = sum_{i in j} (x_i - mean_j)^2   (= B_j sigma_j^2)
+      per pair   : CS_j  = sum_{i in j} (x_i - mean_j)(y_i - ybar_j)
+    CS_j is exactly their B_j * sigma_xj * sigma_yj * c_j -- same information,
+    same size, but no divide-then-multiply by sigma and no special case for a
+    constant segment. Their Lemma 1 is then the ANOVA decomposition
+
+      Corr(x, y) = sum_j [ CS_j + B_j d_xj d_yj ]
+                 / sqrt( sum_j [ M2_xj + B_j d_xj^2 ] * sum_j [ M2_yj + B_j d_yj^2 ] )
+      d_xj = mean_xj - xbar,  xbar = (sum_j B_j mean_xj) / W
+
+    Note on d_xj: the paper writes xbar as the UNWEIGHTED mean of segment means,
+    which is exact only when every B_j is equal. The window's head and tail
+    segments are partial whenever the window start is not on the basic-window
+    grid (their "arbitrary query window" case), so the length-weighted xbar is
+    used here; it coincides with theirs for equal segments and it is what makes
+    the bruteforce anchor hold exactly. Partial head/tail segments are computed
+    from raw each step, as their Lemma 1 discussion prescribes; full interior
+    segments come from the cache.
+
+    Lags: TSUBASA has none (comparison plan §5b.5, [N]); both series are read
+    on the same window. Per the 0d policy the arm REFUSES n_lags > 0 rather
+    than silently extending the method.
+
+    Memory: the per-pair sketch is O(m^2) per cached segment -- ~14 MB at
+    m=500 / 14 segments, ~224 MB at m=2000 (implementation plan §9). When
+    m > basic_window the sketch is larger than the raw segment it summarizes;
+    that is a property of TSUBASA in this regime and is reported, not hidden.
+
+    Timing split (matches the three-phase reporting of comparison plan §5b.1):
+      candidate_time  = building new segment sketches ("summarize")
+      validation_time = Lemma-1 combination + threshold ("verify")
+    """
+
+    def __init__(self, window_size, window_step, n_lags, corr_threshold, basic_window,
+                 neg_corr=False, preprocess=False):
+        super().__init__(window_size, window_step, n_lags, corr_threshold,
+                         neg_corr=neg_corr, preprocess=preprocess)
+        if int(n_lags) != 0:
+            raise ValueError(
+                "baseline_mode='tsubasa' has no lag support (TSUBASA reads both series on "
+                "the same query window; SIGMOD 2022). Run it with n_lags=0, or report N/A "
+                "on lagged runs -- see docs/competitor_implementation_plan.md §0d."
+            )
+        self.basic_window = int(basic_window)
+        if self.basic_window <= 0:
+            raise ValueError("basic_window must be positive for baseline_mode='tsubasa'")
+        self.supports_neg_corr = "native"   # their Algorithm 2: abs(c) > theta
+        self.supports_lags = False
+        self._grid_origin = None            # absolute time of the first observation
+        self._segment_cache = {}            # seg_start_time -> (B, mean(m,), M2(m,), CS(m,m))
+        self._segments_built = 0
+
+    # state: the base dump_state/load_state persist __dict__, which covers
+    # _grid_origin and the segment cache.
+
+    # ---- sketching -----------------------------------------------------
+    def _segment_sketch(self, data, pos, length):
+        """(B, mean, M2, CS) for data[:, pos:pos+length], centred per row."""
+        seg = np.asarray(data[:, pos:pos + length], dtype=np.float64)
+        mean = seg.mean(axis=1)
+        centred = seg - mean[:, None]
+        m2 = np.einsum("ij,ij->i", centred, centred)
+        cs = centred @ centred.T
+        return int(length), mean, m2, cs
+
+    def _segments_for_window(self, curr_start, curr_pos):
+        """Yield (seg_start_time, pos, length, is_full) covering the current window,
+        aligned to the absolute basic-window grid anchored at the first observation."""
+        B = self.basic_window
+        origin = int(self._grid_origin)
+        w_start = int(curr_start)
+        w_end = w_start + self.window_size          # exclusive
+        t = w_start
+        while t < w_end:
+            k = (t - origin) // B
+            seg_start = origin + k * B
+            seg_end = seg_start + B
+            a, b = max(t, seg_start), min(w_end, seg_end)
+            is_full = (a == seg_start) and (b == seg_end)
+            yield seg_start, curr_pos + (a - w_start), b - a, is_full
+            t = b
+
+    def _evict_segment_cache(self, curr_start):
+        cutoff = int(curr_start)
+        for key in [k for k in self._segment_cache if k + self.basic_window <= cutoff]:
+            del self._segment_cache[key]
+
+    # ---- main ----------------------------------------------------------
+    def run(self, new_data_step, ids, verbose=True, testing=False, track_min_dist=True, numeric_rows=True):
+        self.verbose = verbose
+        self.testing = testing
+        if self._grid_origin is None:
+            self._grid_origin = int(np.asarray(new_data_step[0, :])[0])
+        self._newStream(new_data_step, ids)
+
+        empty_timing = {"candidate_time": 0.0, "validation_time": 0.0,
+                        "min_dist": np.inf, "pair_min_dist": None}
+        if self.curr_window_size < self.window_size:
+            if numeric_rows:
+                return np.empty((0, 5), dtype=np.int64), np.empty((0,), dtype=np.float64), 0, empty_timing
+            return {}, 0, empty_timing
+
+        candidate_t0 = time.perf_counter()
+        curr_start = int(self._curr_startTime())
+        curr_pos = self._time_to_pos(curr_start)
+        data = np.asarray(self._current_data(), dtype=np.float64)
+        m = data.shape[0]
+
+        # raw-window guards, identical to exact_stomp / filcorr
+        prefixes = self._window_prefixes()
+        _sx, _sx2, _var_x, nonconst, spiked = self._window_stats(prefixes, curr_pos)
+        if not np.any(nonconst):
+            self._evict_segment_cache(curr_start)
+            timing = dict(empty_timing, candidate_time=time.perf_counter() - candidate_t0)
+            if numeric_rows:
+                return np.empty((0, 5), dtype=np.int64), np.empty((0,), dtype=np.float64), 0, timing
+            return {}, 0, timing
+
+        # --- summarize: segment sketches (cached for full segments) ---
+        segs = []
+        for seg_start, pos, length, is_full in self._segments_for_window(curr_start, curr_pos):
+            if is_full:
+                sk = self._segment_cache.get(seg_start)
+                if sk is None:
+                    sk = self._segment_sketch(data, pos, length)
+                    self._segment_cache[seg_start] = sk
+                    self._segments_built += 1
+            else:
+                sk = self._segment_sketch(data, pos, length)   # partial head/tail: from raw
+            segs.append(sk)
+        self._evict_segment_cache(curr_start)
+        candidate_time = time.perf_counter() - candidate_t0
+
+        # --- verify: Lemma 1 (length-weighted, see class docstring) ---
+        val_t0 = time.perf_counter()
+        W = float(self.window_size)
+        lengths = np.array([sk[0] for sk in segs], dtype=np.float64)
+        means = np.stack([sk[1] for sk in segs], axis=0)              # (ns, m)
+        xbar = (lengths[:, None] * means).sum(axis=0) / W             # (m,)
+        delta = means - xbar[None, :]                                  # (ns, m)
+        denom_terms = np.zeros(m, dtype=np.float64)
+        numer = np.zeros((m, m), dtype=np.float64)
+        sumsq = np.zeros(m, dtype=np.float64)                          # for raw distance
+        sumxy = np.zeros((m, m), dtype=np.float64)
+        for j, (Bj, mean_j, m2_j, cs_j) in enumerate(segs):
+            dj = delta[j]
+            denom_terms += m2_j + Bj * dj * dj
+            numer += cs_j + Bj * np.outer(dj, dj)
+            if track_min_dist:
+                sumsq += m2_j + Bj * mean_j * mean_j
+                sumxy += cs_j + Bj * np.outer(mean_j, mean_j)
+        denom = np.sqrt(np.outer(denom_terms, denom_terms))
+        corr = np.divide(numer, denom, out=np.full_like(numer, np.nan), where=denom > 0.0)
+        corr = np.clip(corr, -1.0, 1.0)
+
+        pair_mask = nonconst[:, None] & nonconst[None, :] & np.triu(np.ones((m, m), dtype=bool), k=1)
+        total_pairs = int(np.count_nonzero(pair_mask))
+        min_dist, min_pair = np.inf, None
+        if track_min_dist and total_pairs:
+            dist_sq = sumsq[:, None] + sumsq[None, :] - 2.0 * sumxy
+            min_dist, min_pair = self._min_pair_from_mask(
+                np.sqrt(np.maximum(dist_sq, 0.0)), pair_mask, curr_start, curr_start)
+
+        accept = pair_mask & (~spiked[:, None]) & (~spiked[None, :])
+        if self.neg_corr:
+            accept &= np.abs(corr) >= self.corr_threshold
+        else:
+            accept &= corr >= self.corr_threshold
+        rows, cols = np.nonzero(accept)
+        validation_time = time.perf_counter() - val_t0
+
+        timing = {"candidate_time": max(candidate_time, 0.0),
+                  "validation_time": max(validation_time, 0.0),
+                  "min_dist": min_dist, "pair_min_dist": min_pair}
+        if numeric_rows:
+            if rows.size:
+                row_arr = np.column_stack([
+                    rows.astype(np.int64, copy=False), cols.astype(np.int64, copy=False),
+                    np.full(rows.size, curr_start, dtype=np.int64),
+                    np.full(rows.size, curr_start, dtype=np.int64),
+                    np.full(rows.size, self.window_size, dtype=np.int64)])
+                corr_arr = corr[rows, cols].astype(np.float64, copy=False)
+            else:
+                row_arr = np.empty((0, 5), dtype=np.int64)
+                corr_arr = np.empty((0,), dtype=np.float64)
+            return np.ascontiguousarray(row_arr), np.ascontiguousarray(corr_arr), total_pairs, timing
+        accepted = {self._pair_for_indices(s_idx, k_idx, curr_start, curr_start): float(corr[s_idx, k_idx])
+                    for s_idx, k_idx in zip(rows, cols)}
+        return accepted, total_pairs, timing
+
+
+class Candidates_BF_BRAID(Candidates_BF_ExactSTOMP):
+    """BRAID / ThinBRAID competitor baseline (Sakurai, Papadimitriou, Faloutsos --
+    SIGMOD 2005; Sakurai, Faloutsos, Papadimitriou -- TKDD 2010).
+
+    Lag-first, NO pruning: every pair is kept (their top-level loop is
+    `for each pair X, Y do ProductKeeping(X, Y)`; ThinBRAID cuts the per-tick
+    UPDATE to O(k) but output stays O(k^2 log n), their Table II). Pattern A of
+    docs/competitor_implementation_plan.md, cloned from `Candidates_BF_FilCorr`.
+
+    Three ideas, ported as written:
+      1. sufficient statistics -- five sums per (pair, probed lag), Eqs. 5/6/11;
+      2. geometric probing -- lags l in {0..2b-1} at level 0 and 2^h * i,
+         i in [b, 2b), at level h (enhanced scheme, their §3.4; b=16 in their
+         experiments); cubic-spline interpolation between probed lags;
+      3. smoothing -- level h works on non-overlapping block means of width 2^h,
+         Ax_h(t) = (Ax_{h-1}(2t-1) + Ax_{h-1}(2t)) / 2, Eq. 8, so R(l) ~= R_h(l/2^h).
+    ThinBRAID (`thin=True`): per (series, level, lag) random +/-1 projections of
+    dimension d_h = thin_d0 / 2^h (their §6.4 setting, d = 400/2^h) replace the
+    per-pair dot matrices; Sxy is recovered by their Eq. 24,
+    Sxy = (Sxx + Syy - ||Px - Py||^2) / 2. Per-tick update is then O(k) instead of
+    O(k^2), which is what fits at k = 2000 (implementation plan §9).
+
+    Two harness adaptations, both labelled, neither an algorithmic change:
+      * BRAID's lag correlation (Eq. 2) is over the common part of ONE growing
+        stream, max lag m = n/2. This harness compares TWO full windows,
+        curr = x[t-W, t) against hist = y[t-W-l, t-l), exactly as
+        `Candidates_BF_ExactSTOMP` does, with a fixed `n_lags`. The five sums are
+        therefore rolling window sums at each level, rolled the same way
+        exact_stomp rolls `_dot_by_lag` (subtract the outgoing block columns,
+        add the incoming) whenever `window_step` is a multiple of the level's
+        block width, and recomputed otherwise -- exact_stomp's own
+        `can_increment` policy. Smoothing blocks are anchored to absolute time
+        so they are stable as the window slides.
+      * The lag domain here is integer and small (<= n_lags), so the fitted
+        spline is evaluated on the integer lag grid and local maxima are read
+        off it, instead of Brent's method. The paper states the maximizer and
+        interpolator are orthogonal to the method.
+
+    Output modes (`report_mode`):
+      "all_lags": for every harness lag (multiples of window_step, as exact_stomp)
+                  emit (pair, lag) with |R_hat(lag)| >= corr_threshold. This is the
+                  common-denominator pair set the four-way comparison uses.
+      "braid":    their Definition 1 -- per pair, the EARLIEST local maximum of
+                  |R_hat(l)| over l in [0, n_lags] that is >= gamma. One row per
+                  pair, at its chosen lag. Feeds the lag-agreement metric
+                  (comparison plan §5a.3).
+    Both modes also expose `self.last_lag_estimates` (m x m, the chosen lag per
+    pair, -1 if none) after each step.
+
+    Anchor: with 2*b > n_lags, level 0 alone covers every lag exactly (no
+    smoothing, no interpolation; the spline passes through its knots), so
+    "all_lags" must reproduce the exact_stomp / bruteforce lagged pair set.
+    """
+
+    def __init__(self, window_size, window_step, n_lags, corr_threshold, neg_corr=False,
+                 preprocess=False, b=16, gamma=0.4, thin=False, thin_d0=400, thin_seed=20260916,
+                 report_mode="all_lags", track_lag_estimates=False):
+        super().__init__(window_size, window_step, n_lags, corr_threshold,
+                         neg_corr=neg_corr, preprocess=preprocess)
+        self.b = int(b)
+        if self.b < 1:
+            raise ValueError("BRAID needs b >= 1 coefficients per level")
+        self.gamma = float(gamma)
+        self.thin = bool(thin)
+        self.thin_d0 = int(thin_d0)
+        self.thin_seed = int(thin_seed)
+        if report_mode not in ("all_lags", "braid"):
+            raise ValueError("report_mode must be 'all_lags' or 'braid'")
+        self.report_mode = report_mode
+        # lag estimates (Definition 1) are needed for "braid" output and for the
+        # lag-agreement metric; computing them costs three passes over an
+        # (L, m, m) block, so they are opt-in for "all_lags" runs.
+        self.track_lag_estimates = bool(track_lag_estimates) or report_mode == "braid"
+        self._spline_ops = {}                     # (knots tuple, grid tuple) -> (L, K) operator
+        self.supports_neg_corr = "specified"    # Definition 1 uses |R(l)|; never a dedicated experiment
+        self.supports_lags = True
+        # probed lag set (enhanced scheme), grouped by level
+        self.max_lag = int(self.n_lags)
+        self.levels = self._build_levels(self.max_lag, self.b)
+        self.probed_lags = sorted({l for _, lags in self.levels for l in lags})
+        # rolling state: (h, l) -> dot matrix (m x m)  |  thin: (h, l) -> Py (m x d); h -> Px (m x d)
+        self._dot_by_hl = {}          # plain BRAID: (h, lag_h) -> rolling (m x m) dot matrix
+        self._rand_by_h = {}          # ThinBRAID: (h, W_h) -> random projection matrix
+        self._px_cache = None         # ThinBRAID: ((h, block start), curr @ R) for the current step
+        self._last_curr_start = None
+        self.incremental_updates = 0
+        self.full_initializations = 0
+        self.last_lag_estimates = None
+
+    # ---- probing scheme -------------------------------------------------
+    @staticmethod
+    def _build_levels(max_lag, b):
+        """[(h, [lags at level h])] -- level 0: 0..2b-1; level h>=1: 2^h * i, i in [b, 2b)."""
+        levels = []
+        lags0 = [l for l in range(0, 2 * b) if l <= max_lag]
+        levels.append((0, lags0))
+        h = 1
+        while True:
+            block = 1 << h
+            lags = [block * i for i in range(b, 2 * b) if block * i <= max_lag]
+            if not lags:
+                break
+            levels.append((h, lags))
+            if block * (2 * b - 1) >= max_lag:
+                break
+            h += 1
+        return levels
+
+    # ---- smoothing --------------------------------------------------------
+    def _smoothed(self, data, h):
+        """Block means of width 2^h over the whole buffer, blocks anchored to absolute
+        time (block k covers index times [origin + k*2^h, origin + (k+1)*2^h)).
+        Returns (A_h (m x n_blocks), first_block_start_pos) so callers can map a raw
+        position to its block."""
+        block = 1 << h
+        if block == 1:
+            return data, 0
+        first_time = int(self.window_index[0])
+        # first block start at or after the buffer start, aligned to absolute grid
+        offset = (-first_time) % block
+        n_blocks = (data.shape[1] - offset) // block
+        if n_blocks <= 0:
+            return np.empty((data.shape[0], 0)), offset
+        trimmed = data[:, offset:offset + n_blocks * block]
+        return trimmed.reshape(data.shape[0], n_blocks, block).mean(axis=2), offset
+
+    def _rand_for(self, h, length):
+        key = (h, length)
+        if key not in self._rand_by_h:
+            d = max(1, self.thin_d0 >> h)
+            rng = np.random.RandomState(self.thin_seed + 7919 * h + length)
+            self._rand_by_h[key] = rng.choice([-1.0, 1.0], size=(length, d)) / np.sqrt(d)
+        return self._rand_by_h[key]
+
+    # ---- lagged sums at one level -------------------------------------
+    def _level_sums(self, A, offset, h, lag_h, curr_pos_raw, advance_blocks):
+        """Five-sum ingredients at level h for lag lag_h (in blocks):
+        curr block window vs hist block window, each W_h blocks long."""
+        block = 1 << h
+        W_h = self.window_size // block
+        # raw curr window start -> block index (window start must sit on the block grid
+        # for a clean W_h-block window; otherwise take the last W_h complete blocks inside it)
+        cb_end = (curr_pos_raw + self.window_size - offset) // block          # exclusive
+        cb_start = cb_end - W_h
+        hb_start = cb_start - lag_h
+        if hb_start < 0 or cb_start < 0 or cb_end > A.shape[1]:
+            return None
+        curr = A[:, cb_start:cb_end]
+        hist = A[:, hb_start:hb_start + W_h]
+        sx = curr.sum(axis=1); sxx = np.einsum("ij,ij->i", curr, curr)
+        sy = hist.sum(axis=1); syy = np.einsum("ij,ij->i", hist, hist)
+        key = (h, lag_h)
+        if not self.thin:
+            dot = self._dot_by_hl.get(key)
+            if dot is not None and advance_blocks is not None and 0 < advance_blocks <= W_h \
+                    and cb_start - advance_blocks >= 0 and hb_start - advance_blocks >= 0:
+                oc = A[:, cb_start - advance_blocks:cb_start]; oh = A[:, hb_start - advance_blocks:hb_start]
+                nc = curr[:, -advance_blocks:]; nh = hist[:, -advance_blocks:]
+                dot = dot - oc @ oh.T + nc @ nh.T
+                self.incremental_updates += 1
+            else:
+                dot = curr @ hist.T
+                self.full_initializations += 1
+            self._dot_by_hl[key] = dot
+            sxy = dot
+        else:
+            # ThinBRAID: Px shared across lags at this level; Py per lag. Rolling
+            # projections with absolute-time-anchored random rows would need the
+            # same alignment bookkeeping; recomputed per step here (O(m W_h d)),
+            # which preserves the O(k)-state / O(k^2 d)-output shape of their Table II.
+            # Nothing is stored across steps: state is O(m d) transient per level,
+            # which is the whole point at k = 2000 where plain BRAID's per-pair
+            # matrices are ~2.2 GB (implementation plan §9).
+            R = self._rand_for(h, W_h)
+            px_key = (h, cb_start)
+            if self._px_cache is not None and self._px_cache[0] == px_key:
+                px = self._px_cache[1]                      # lag-independent at this level/step
+            else:
+                px = curr @ R
+                self._px_cache = (px_key, px)
+            py = hist @ R
+            self.full_initializations += 1
+            d2 = (np.einsum("ij,ij->i", px, px)[:, None] + np.einsum("ij,ij->i", py, py)[None, :]
+                  - 2.0 * px @ py.T)
+            sxy = 0.5 * (sxx[:, None] + syy[None, :] - d2)          # their Eq. 24
+        return W_h, sx, sy, sxx, syy, sxy
+
+    # ---- interpolation ------------------------------------------------------
+    def _spline_operator(self, knots, grid):
+        """(L, K) matrix E with R_hat(grid) = E @ R(knots), for the cubic spline
+        through the knots. Cubic-spline interpolation is linear in the knot values
+        and the knot set is fixed by the probing scheme, so the fit-and-evaluate is
+        precomputed once per (knots, grid) by pushing the K unit vectors through
+        scipy's CubicSpline (default not-a-knot end conditions) -- identical output,
+        one matmul per step instead of a banded solve over m^2 curves."""
+        key = (tuple(knots), tuple(grid))
+        op = self._spline_ops.get(key)
+        if op is None:
+            K = len(knots)
+            if K >= 2:
+                from scipy.interpolate import CubicSpline
+                cs = CubicSpline(np.asarray(knots, dtype=np.float64), np.eye(K), axis=0, extrapolate=True)
+                op = np.asarray(cs(np.asarray(grid, dtype=np.float64)), dtype=np.float64)   # (L, K)
+            else:
+                op = np.ones((len(grid), 1), dtype=np.float64)
+            self._spline_ops[key] = op
+        return op
+
+    # ---- main ------------------------------------------------------------
+    def run(self, new_data_step, ids, verbose=True, testing=False, track_min_dist=True, numeric_rows=True):
+        self.verbose = verbose
+        self.testing = testing
+        self._newStream(new_data_step, ids)
+        empty_timing = {"candidate_time": 0.0, "validation_time": 0.0, "min_dist": np.inf, "pair_min_dist": None}
+        if self.curr_window_size < self.window_size:
+            if numeric_rows:
+                return np.empty((0, 5), dtype=np.int64), np.empty((0,), dtype=np.float64), 0, empty_timing
+            return {}, 0, empty_timing
+
+        t0 = time.perf_counter()
+        curr_start = int(self._curr_startTime())
+        curr_pos = self._time_to_pos(curr_start)
+        data = np.asarray(self._current_data(), dtype=np.float64)
+        m = data.shape[0]
+        advance = None if self._last_curr_start is None else int(curr_start - self._last_curr_start)
+
+        prefixes = self._window_prefixes()
+        _sx, _sx2, _var_x, curr_nonconst, curr_spiked = self._window_stats(prefixes, curr_pos)
+        if not np.any(curr_nonconst):
+            self._last_curr_start = curr_start
+            timing = dict(empty_timing, candidate_time=time.perf_counter() - t0)
+            if numeric_rows:
+                return np.empty((0, 5), dtype=np.int64), np.empty((0,), dtype=np.float64), 0, timing
+            return {}, 0, timing
+
+        # --- summarize + probe: R_h at every probed lag (this is BRAID's whole cost) ---
+        max_lag_avail = min(self.max_lag, curr_pos)
+        knots, values = [], []
+        for h, lags in self.levels:
+            block = 1 << h
+            A, offset = self._smoothed(data, h)
+            if A.shape[1] == 0:
+                continue
+            adv_blocks = (advance // block) if (advance is not None and advance % block == 0) else None
+            for l in lags:
+                if l > max_lag_avail:
+                    continue
+                res = self._level_sums(A, offset, h, l // block, curr_pos, adv_blocks)
+                if res is None:
+                    continue
+                W_h, sx, sy, sxx, syy, sxy = res
+                r = pearson_from_five_sums(W_h, sx[:, None], sy[None, :], sxx[:, None], syy[None, :], sxy)
+                knots.append(l); values.append(r)
+        self._last_curr_start = curr_start
+        candidate_time = time.perf_counter() - t0
+        if not knots:
+            if numeric_rows:
+                return np.empty((0, 5), dtype=np.int64), np.empty((0,), dtype=np.float64), 0, \
+                       dict(empty_timing, candidate_time=candidate_time)
+            return {}, 0, dict(empty_timing, candidate_time=candidate_time)
+
+        # --- verify: interpolate (one precomputed linear operator), threshold / locate maxima ---
+        v0 = time.perf_counter()
+        order = np.argsort(knots)
+        knots_arr = np.asarray(knots, dtype=np.int64)[order]
+        vals = np.stack([values[i] for i in order], axis=0).reshape(len(knots), m * m)   # (K, m*m)
+        harness_lags = np.arange(0, max_lag_avail + 1, self.window_step, dtype=np.int64)
+        need_full = self.track_lag_estimates
+        grid = np.arange(0, max_lag_avail + 1, dtype=np.int64) if need_full else harness_lags
+        E = self._spline_operator(knots_arr.tolist(), grid.tolist())
+        r_flat = np.clip(E @ vals, -1.0, 1.0)                                              # (L, m*m)
+        # exact at the knots by construction; enforce numerically
+        knot_pos = {int(l): k_i for k_i, l in enumerate(knots_arr.tolist())}
+        for g_i, l in enumerate(grid.tolist()):
+            if l in knot_pos:
+                r_flat[g_i] = vals[knot_pos[l]]
+        r_hat = r_flat.reshape(grid.size, m, m)
+        lag_of_grid = {int(l): g_i for g_i, l in enumerate(grid.tolist())}
+        upper = np.triu(np.ones((m, m), dtype=bool), k=1)
+
+        # earliest local maximum of |R_hat| >= gamma, per pair (Definition 1)
+        lag_est = None
+        if need_full:
+            L = r_hat.shape[0]
+            lag_est = np.full((m, m), -1, dtype=np.int64)
+            if L == 1:
+                lag_est[np.abs(r_hat[0]) >= self.gamma] = 0
+            else:
+                absr = np.abs(r_hat)
+                is_max = absr >= self.gamma
+                is_max[0] &= absr[0] > absr[1]
+                is_max[1:-1] &= (absr[1:-1] >= absr[:-2]) & (absr[1:-1] > absr[2:])
+                is_max[-1] &= absr[-1] >= absr[-2]
+                any_max = is_max.any(axis=0)
+                lag_est[any_max] = is_max.argmax(axis=0)[any_max]
+        self.last_lag_estimates = lag_est
+
+        rows_out, corr_out = [], []
+        total_pairs = 0
+        min_dist, min_pair = np.inf, None
+        if self.report_mode == "all_lags":
+            for lag in range(0, max_lag_avail + 1, self.window_step):
+                hist_pos = curr_pos - lag
+                if hist_pos < 0:
+                    continue
+                _sy, _sy2, _var_y, hist_nonconst, hist_spiked = self._window_stats(prefixes, hist_pos)
+                pair_mask = curr_nonconst[:, None] & hist_nonconst[None, :]
+                if lag == 0:
+                    pair_mask &= upper
+                total_pairs += int(np.count_nonzero(pair_mask))
+                g_i = lag_of_grid[lag]
+                r_l = r_hat[g_i]
+                score_l = np.abs(r_l) if self.neg_corr else r_l
+                accept = pair_mask & (~curr_spiked[:, None]) & (~hist_spiked[None, :]) & (score_l >= self.corr_threshold)
+                rr, cc = np.nonzero(accept)
+                if rr.size:
+                    rows_out.append(np.column_stack([rr, cc, np.full(rr.size, curr_start), np.full(rr.size, curr_start - lag),
+                                                     np.full(rr.size, self.window_size)]).astype(np.int64))
+                    corr_out.append(r_l[rr, cc])
+                if track_min_dist and lag in (0,):
+                    dist = np.sqrt(np.maximum(2.0 - 2.0 * r_l, 0.0))
+                    md, mp = self._min_pair_from_mask(dist, pair_mask, curr_start, curr_start - lag)
+                    if mp is not None and md < min_dist:
+                        min_dist, min_pair = md, mp
+        else:
+            pair_mask = curr_nonconst[:, None] & curr_nonconst[None, :] & upper
+            total_pairs = int(np.count_nonzero(pair_mask))
+            has = pair_mask & (lag_est >= 0) & (~curr_spiked[:, None])
+            rr, cc = np.nonzero(has)
+            if rr.size:
+                lags_sel = lag_est[rr, cc]
+                rows_out.append(np.column_stack([rr, cc, np.full(rr.size, curr_start), curr_start - lags_sel,
+                                                 np.full(rr.size, self.window_size)]).astype(np.int64))
+                corr_out.append(r_hat[lags_sel, rr, cc])
+        validation_time = time.perf_counter() - v0
+
+        timing = {"candidate_time": max(candidate_time, 0.0), "validation_time": max(validation_time, 0.0),
+                  "min_dist": min_dist, "pair_min_dist": min_pair}
+        if numeric_rows:
+            if rows_out:
+                row_arr = np.ascontiguousarray(np.vstack(rows_out), dtype=np.int64)
+                corr_arr = np.ascontiguousarray(np.concatenate(corr_out), dtype=np.float64)
+            else:
+                row_arr = np.empty((0, 5), dtype=np.int64); corr_arr = np.empty((0,), dtype=np.float64)
+            return row_arr, corr_arr, total_pairs, timing
+        accepted = {}
+        for arr, cs in zip(rows_out, corr_out):
+            for (s_idx, k_idx, cs_t, hs_t, _w), c in zip(arr.tolist(), cs.tolist()):
+                accepted[self._pair_for_indices(s_idx, k_idx, cs_t, hs_t)] = float(c)
+        return accepted, total_pairs, timing
+
+
 class Candidates:
     def __init__(self,n_lagged_windows,grid_dimension,cell_size,grid_max,freq_threshold,corr_threshold,n_vectors,sketch_std,n_grids,neg_corr,
                  sign_prefilter_scale=1.3,sign_prefilter_extra=1, seed=None, full_vector=False, candidate_backend=None,
@@ -12121,7 +13051,8 @@ class Candidates:
                  candidate_apply_dot_gamma_filter=True,
                  candidate_hamming_threshold=None,
                  candidate_apply_hamming_filter=True, candidate_hamming_filter_max_frac=0.40,
-                 candidate_lsh_max_candidates_per_query=0):
+                 candidate_lsh_max_candidates_per_query=0,
+                 candidate_search_n_threads=1):
         self.verbose = None
         self.neg_corr = neg_corr
         # Parameters grids
@@ -12206,6 +13137,9 @@ class Candidates:
             0, _to_int_safe(candidate_lsh_max_candidates_per_query) or 0
         )
         self.candidate_hamming_threshold = _to_int_safe(candidate_hamming_threshold)
+        # (2026-09-13) See CorrTrack's identical field for the full rationale -- forwarded
+        # here unchanged. 1 (default) = single-threaded, byte-identical to prior behavior.
+        self.candidate_search_n_threads = max(1, _to_int_safe(candidate_search_n_threads) or 1)
         # Flat sorted index storage (legacy backend).
         self._entries = []  # (value, window_id_key, window_id[, vector])
         self._values = []   # parallel list of values for bisect
@@ -13055,9 +13989,20 @@ class Candidates:
         return (str(sid), int(start_time), int(window_size))
 
     def _get_or_create_window_idx(self, window_id):
+        # (2026-09-14) Returns (idx, sid_idx, sid_rank) instead of just idx --
+        # every call site immediately re-fetched self._win_sid_idx[idx]/
+        # self._win_sid_rank[idx] right after calling this (confirmed via
+        # grep across all 5 call sites, identical pattern each time), a
+        # redundant pair of Python list-index lookups on top of an already-
+        # Python per-item call. Returning the values already computed here
+        # removes that redundant half of the per-series insertion-loop cost
+        # found while investigating "no Python in the hamming_exact hot
+        # path" -- see docs/implementation_log.md's 2026-09-14 entry. Free-
+        # list/dict slot-reuse semantics below are UNCHANGED (same branches,
+        # same order of operations); this only changes what gets returned.
         idx = self._window_idx.get(window_id)
         if idx is not None:
-            return idx
+            return idx, int(self._win_sid_idx[idx]), int(self._win_sid_rank[idx])
         sid, start_time, window_size = window_id
         sid_idx = self._sid_idx_map.get(sid)
         if sid_idx is None:
@@ -13067,25 +14012,27 @@ class Candidates:
         if sid_rank is None:
             sid_rank = len(self._sid_sort_rank_map)
             self._sid_sort_rank_map[sid] = sid_rank
+        sid_idx = int(sid_idx)
+        sid_rank = int(sid_rank)
         # (2026-09-07) Reuse a freed slot (pushed by _clean_old_sketches when
         # an expiring window's key is dropped) before ever growing
         # _win_sid's length -- see _win_free_idx's field comment.
         if self._win_free_idx:
             idx = self._win_free_idx.pop()
             self._win_sid[idx] = sid
-            self._win_sid_idx[idx] = int(sid_idx)
-            self._win_sid_rank[idx] = int(sid_rank)
+            self._win_sid_idx[idx] = sid_idx
+            self._win_sid_rank[idx] = sid_rank
             self._win_time[idx] = int(start_time)
             self._win_w[idx] = int(window_size)
         else:
             idx = len(self._win_sid)
             self._win_sid.append(sid)
-            self._win_sid_idx.append(int(sid_idx))
-            self._win_sid_rank.append(int(sid_rank))
+            self._win_sid_idx.append(sid_idx)
+            self._win_sid_rank.append(sid_rank)
             self._win_time.append(int(start_time))
             self._win_w.append(int(window_size))
         self._window_idx[window_id] = idx
-        return idx
+        return idx, sid_idx, sid_rank
 
     def _release_window_idx(self, window_id):
         # (2026-09-07) Companion to _get_or_create_window_idx -- called from
@@ -13743,9 +14690,7 @@ class Candidates:
                 if copy_n > 0:
                     fixed[:copy_n] = vec[:copy_n]
                 vec = fixed
-            win_idx = self._get_or_create_window_idx(k)
-            sid_meta = int(self._win_sid_idx[win_idx])
-            rank_meta = int(self._win_sid_rank[win_idx])
+            win_idx, sid_meta, rank_meta = self._get_or_create_window_idx(k)
             time_meta = int(k[1])
             window_meta = int(k[2])
             if self._vector_match_enabled:
@@ -13827,9 +14772,7 @@ class Candidates:
                     fixed[:copy_n] = vec[:copy_n]
                 vec = fixed
 
-            win_idx = self._get_or_create_window_idx(key)
-            sid_meta = int(self._win_sid_idx[win_idx])
-            rank_meta = int(self._win_sid_rank[win_idx])
+            win_idx, sid_meta, rank_meta = self._get_or_create_window_idx(key)
             win_indices.append(win_idx)
             sid_indices.append(sid_meta)
             sid_ranks.append(rank_meta)
@@ -13982,9 +14925,7 @@ class Candidates:
                     fixed[:copy_n] = vec[:copy_n]
                 vec = fixed
 
-            win_idx = self._get_or_create_window_idx(key)
-            sid_meta = int(self._win_sid_idx[win_idx])
-            rank_meta = int(self._win_sid_rank[win_idx])
+            win_idx, sid_meta, rank_meta = self._get_or_create_window_idx(key)
             win_indices.append(win_idx)
             sid_indices.append(sid_meta)
             sid_ranks.append(rank_meta)
@@ -14132,9 +15073,7 @@ class Candidates:
                     fixed[:copy_n] = vec[:copy_n]
                 vec = fixed
 
-            win_idx = self._get_or_create_window_idx(key)
-            sid_meta = int(self._win_sid_idx[win_idx])
-            rank_meta = int(self._win_sid_rank[win_idx])
+            win_idx, sid_meta, rank_meta = self._get_or_create_window_idx(key)
             win_indices.append(win_idx)
             sid_indices.append(sid_meta)
             sid_ranks.append(rank_meta)
@@ -14276,9 +15215,7 @@ class Candidates:
                     fixed[:copy_n] = vec[:copy_n]
                 vec = fixed
 
-            win_idx = self._get_or_create_window_idx(k)
-            sid_meta = int(self._win_sid_idx[win_idx])
-            rank_meta = int(self._win_sid_rank[win_idx])
+            win_idx, sid_meta, rank_meta = self._get_or_create_window_idx(k)
             time_meta = int(k[1])
             window_meta = int(k[2])
 
@@ -14845,10 +15782,22 @@ class Candidates:
                 float(self.candidate_cosine_threshold),
                 float(tau),
             )
+            use_parallel_lsh = (
+                self.candidate_search_n_threads > 1
+                and hasattr(self._lsh_index, "find_pair_rows_full_cosine_parallel")
+            )
             if self.neg_corr and hasattr(self._lsh_index, "find_pair_rows_full_cosine_signed"):
-                row_finder = self._lsh_index.find_pair_rows_full_cosine_signed
+                if use_parallel_lsh and hasattr(self._lsh_index, "find_pair_rows_full_cosine_signed_parallel"):
+                    row_finder = self._lsh_index.find_pair_rows_full_cosine_signed_parallel
+                    row_args = row_args + (int(self.candidate_search_n_threads),)
+                else:
+                    row_finder = self._lsh_index.find_pair_rows_full_cosine_signed
             elif hasattr(self._lsh_index, "find_pair_rows_full_cosine"):
-                row_finder = self._lsh_index.find_pair_rows_full_cosine
+                if use_parallel_lsh:
+                    row_finder = self._lsh_index.find_pair_rows_full_cosine_parallel
+                    row_args = row_args + (int(self.candidate_search_n_threads),)
+                else:
+                    row_finder = self._lsh_index.find_pair_rows_full_cosine
             if row_finder is not None:
                 if numeric_rows and dist_pairs is None:
                     t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None

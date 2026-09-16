@@ -16,9 +16,6 @@ venv/
 # Cython build tree (setup_cython.py build_ext --inplace)
 /build/
 
-# Local development notes (kept private)
-/docs/
-/tasks/
 
 # Large local datasets and experiment outputs (not part of the source release)
 /tmp_artifacts/

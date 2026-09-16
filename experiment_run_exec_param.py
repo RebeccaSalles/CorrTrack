@@ -32,6 +32,9 @@ NEG_CORR = True
 #   Parseval's identity on FFT coefficients. See FILCORR_FS/FT below and
 #   Candidates_BF_FilCorr in library_corrtrack_parallel.py.
 BASELINE_MODE = "bruteforce"
+# (2026-09-16) "tsubasa" is also accepted: Xu/Liu/Nargesian SIGMOD 2022, exact Pearson
+#   from per-basic-window sketches (their Lemma 1). Uses BASIC_WINDOW as the segment
+#   size; has no lag support, so it requires N_LAGS = 0 (the arm refuses otherwise).
 
 # FilCorr pass-band (baseline_mode="filcorr" only). fs=0.0/ft=0.5 (full band,
 # DC removed) is mathematically identical to standard Pearson -- keep this the
@@ -41,6 +44,13 @@ BASELINE_MODE = "bruteforce"
 FILCORR_FS = 0.0
 FILCORR_FT = 0.5
 FILCORR_SAMPLING_RATE = 1.0
+# BRAID / ThinBRAID (baseline_mode="braid"; Sakurai et al. SIGMOD 2005 / TKDD 2010).
+#   Paper values. 2*BRAID_B > N_LAGS makes BRAID exact (level 0 covers every lag).
+BRAID_B = 16
+BRAID_GAMMA = 0.4
+BRAID_THIN = False
+BRAID_THIN_D0 = 400
+BRAID_REPORT_MODE = "all_lags"
 
 # CorrTrack main-run validation control.
 CORR_VAL = True

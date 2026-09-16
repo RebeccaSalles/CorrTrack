@@ -1,0 +1,79 @@
+#!/bin/bash
+# CorrTrack Abaca smoke test (rollout stage 1).
+# Builds the Cython kernels for this node, runs the regression suite, runs a
+# tiny end-to-end CorrTrack pipeline, and writes a reproducibility manifest.
+#
+# Submit from the Sophia frontend, from the CorrTrack working tree:
+#   oarsub -S ./abaca/smoke.oar
+#
+#OAR -n corrtrack-smoke
+#OAR -q abaca
+#OAR -l host=1/core=8,walltime=01:15:00
+#OAR -O abaca/logs/OAR.%jobid%.out
+#OAR -E abaca/logs/OAR.%jobid%.err
+
+set -uo pipefail
+
+CONDA_ROOT="${CONDA_ROOT:-$HOME/miniforge3}"
+CONDA_ENV="${CONDA_ENV:-corrtrack}"
+REPO_DIR="${REPO_DIR:-$HOME/corrtrack_release_dev}"
+RESULTS_ROOT="${RESULTS_ROOT:-$HOME/corrtrack_abaca_results}"
+
+RUN_DIR="$RESULTS_ROOT/smoke_${OAR_JOB_ID:-manual}"
+mkdir -p "$RUN_DIR"
+
+echo "== CorrTrack Abaca smoke =="
+echo "job=${OAR_JOB_ID:-manual} host=$(hostname) date=$(date --iso-8601=seconds)"
+echo "repo=$REPO_DIR  env=$CONDA_ENV  run_dir=$RUN_DIR"
+
+# --- activate the pinned environment -------------------------------------
+# shellcheck disable=SC1091
+source "$CONDA_ROOT/etc/profile.d/conda.sh"
+conda activate "$CONDA_ENV"
+
+# --- controlled thread environment (Dask-style parallelism path) ---------
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+cd "$REPO_DIR"
+
+# --- reproducibility manifest -------------------------------------------
+bash abaca/capture_manifest.sh "$RUN_DIR"
+
+# --- build the Cython kernels for THIS node's CPU -----------------------
+# setup_cython.py uses -march=native, so kernels are node-specific; always
+# rebuild in-job and never reuse .so across cluster/node types.
+echo "== build kernels =="
+# drop any .so / build tree carried in from git (built on another machine)
+rm -f ./*.cpython-*.so
+rm -rf build
+python setup_cython.py build_ext --inplace -j 4 2>&1 | tee "$RUN_DIR/build.log"
+BUILD_RC=${PIPESTATUS[0]}
+echo "build_rc=$BUILD_RC"
+python -c "import candidate_kernels, sketch_kernels, partition_kernels, monitor_kernels; print('kernels import OK')" \
+    2>&1 | tee -a "$RUN_DIR/build.log"
+
+# --- regression suite --------------------------------------------------
+echo "== pytest regression suite =="
+python -m pytest test_stable_reproduced_changes.py -q \
+    2>&1 | tee "$RUN_DIR/pytest.log"
+PYTEST_RC=${PIPESTATUS[0]}
+echo "pytest_rc=$PYTEST_RC"
+
+# --- tiny end-to-end pipeline ---------------------------------------------
+echo "== tiny end-to-end CorrTrack run =="
+# no --verbose: it dumps full sketch arrays (~850 MB of stdout on this config)
+python run_corrtrack_experiment.py \
+    --dataset-config experiment_dataset_synth_demo.py \
+    --result-folder "$RUN_DIR/synth_demo" \
+    --testing \
+    2>&1 | tail -c 2000000 | tee "$RUN_DIR/pipeline.log"
+PIPE_RC=${PIPESTATUS[0]}
+echo "pipeline_rc=$PIPE_RC"
+
+echo "== summary =="
+echo "build_rc=$BUILD_RC pytest_rc=$PYTEST_RC pipeline_rc=$PIPE_RC"
+echo "artifacts under $RUN_DIR"
+[ "$BUILD_RC" -eq 0 ] && [ "$PYTEST_RC" -eq 0 ] && [ "$PIPE_RC" -eq 0 ] && echo "SMOKE OK" || echo "SMOKE FAILED"

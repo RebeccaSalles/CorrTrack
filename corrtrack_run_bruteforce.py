@@ -44,6 +44,16 @@ DEFAULT_BASELINE_MODE = getattr(_DEFAULT_EXEC_CFG, "BASELINE_MODE", "bruteforce"
 DEFAULT_FILCORR_FS = getattr(_DEFAULT_EXEC_CFG, "FILCORR_FS", 0.0)
 DEFAULT_FILCORR_FT = getattr(_DEFAULT_EXEC_CFG, "FILCORR_FT", 0.5)
 DEFAULT_FILCORR_SAMPLING_RATE = getattr(_DEFAULT_EXEC_CFG, "FILCORR_SAMPLING_RATE", 1.0)
+DEFAULT_BRAID_B = getattr(_DEFAULT_EXEC_CFG, "BRAID_B", 16)
+DEFAULT_BRAID_GAMMA = getattr(_DEFAULT_EXEC_CFG, "BRAID_GAMMA", 0.4)
+DEFAULT_BRAID_THIN = getattr(_DEFAULT_EXEC_CFG, "BRAID_THIN", False)
+DEFAULT_BRAID_THIN_D0 = getattr(_DEFAULT_EXEC_CFG, "BRAID_THIN_D0", 400)
+DEFAULT_BRAID_REPORT_MODE = getattr(_DEFAULT_EXEC_CFG, "BRAID_REPORT_MODE", "all_lags")
+BRAID_B = DEFAULT_BRAID_B
+BRAID_GAMMA = DEFAULT_BRAID_GAMMA
+BRAID_THIN = DEFAULT_BRAID_THIN
+BRAID_THIN_D0 = DEFAULT_BRAID_THIN_D0
+BRAID_REPORT_MODE = DEFAULT_BRAID_REPORT_MODE
 DEFAULT_VALIDATION_METRIC = getattr(_DEFAULT_EXEC_CFG, "VALIDATION_METRIC", "pearson")
 DEFAULT_TRAIN_RATIO = getattr(_DEFAULT_EXEC_CFG, "TRAIN_RATIO", 0.3)
 DEFAULT_OPTIM_TUNING_MODE = "sampling"
@@ -215,6 +225,11 @@ def build_base_config():
         "filcorr_fs": FILCORR_FS,
         "filcorr_ft": FILCORR_FT,
         "filcorr_sampling_rate": FILCORR_SAMPLING_RATE,
+        "braid_b": BRAID_B,
+        "braid_gamma": BRAID_GAMMA,
+        "braid_thin": BRAID_THIN,
+        "braid_thin_d0": BRAID_THIN_D0,
+        "braid_report_mode": BRAID_REPORT_MODE,
         "validation_metric": VALIDATION_METRIC,
         "monitor": MONITOR,
         "track_min_dist": TRACK_MIN_DIST,
@@ -329,10 +344,13 @@ def parse_args():
     parser.add_argument("--no-track-min-dist", dest="track_min_dist", action="store_false")
     parser.add_argument(
         "--baseline-mode",
-        choices=("bruteforce", "exact_stomp", "filcorr"),
+        choices=("bruteforce", "exact_stomp", "filcorr", "tsubasa", "braid"),
         default=None,
         help="Exact baseline implementation for the brute-force stage. 'filcorr' is the "
-        "Zhong/Souza/Mueen (ICDM 2020) competitor -- see --filcorr-fs/--filcorr-ft.",
+        "Zhong/Souza/Mueen (ICDM 2020) competitor -- see --filcorr-fs/--filcorr-ft. "
+        "'tsubasa' is Xu/Liu/Nargesian (SIGMOD 2022): exact Pearson from per-basic-window "
+        "sketches (Lemma 1); no lag support, requires n_lags=0. 'braid' is Sakurai et al. "
+        "(SIGMOD 2005 / TKDD 2010): geometric lag probing + smoothing + spline; see --braid-*.",
     )
     parser.add_argument(
         "--filcorr-fs", type=float, default=None,
@@ -350,6 +368,18 @@ def parse_args():
         help="FilCorr sampling frequency f (Hz); set fs/ft as fractions of Nyquist by "
         "leaving this at its default (1.0).",
     )
+    parser.add_argument("--braid-b", type=int, default=None,
+        help="BRAID coefficients per level (baseline_mode=braid). Paper: 16. "
+             "2*b > n_lags makes BRAID exact (level 0 covers every lag).")
+    parser.add_argument("--braid-gamma", type=float, default=None,
+        help="BRAID lag-detection threshold on |R(l)| (Definition 1). Paper: 0.4.")
+    parser.add_argument("--braid-thin", dest="braid_thin", action="store_true", default=None,
+        help="Use ThinBRAID (TKDD 2010): per-series random projections instead of per-pair sums.")
+    parser.add_argument("--braid-thin-d0", type=int, default=None,
+        help="ThinBRAID projection dimension at level 0 (d_h = d0 / 2^h). Paper: 400.")
+    parser.add_argument("--braid-report-mode", choices=("all_lags", "braid"), default=None,
+        help="'all_lags': thresholded pairs at every harness lag (common-denominator comparison). "
+             "'braid': one row per pair at its earliest local max of |R| >= gamma (their output).")
     parser.add_argument("--train-ratio", type=float, default=None)
     parser.add_argument(
         "--validation-metric",
@@ -410,6 +440,11 @@ def parse_args():
         filcorr_fs=None,
         filcorr_ft=None,
         filcorr_sampling_rate=None,
+        braid_b=None,
+        braid_gamma=None,
+        braid_thin=None,
+        braid_thin_d0=None,
+        braid_report_mode=None,
         artifact_mode=None,
         artifact_buffer_max_rows=None,
         artifact_merge_mode=None,
@@ -432,6 +467,7 @@ def main():
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
     global EXEC_MODE, NEG_CORR, MONITOR, TRACK_MIN_DIST, BASELINE_MODE, ARTIFACT_MODE, ARTIFACT_BUFFER_MAX_ROWS, ARTIFACT_MERGE_MODE, SAVE_ONLY_REQUIRED_ARTIFACTS, SAVE_MAXLAG_ARTIFACTS
     global FILCORR_FS, FILCORR_FT, FILCORR_SAMPLING_RATE
+    global BRAID_B, BRAID_GAMMA, BRAID_THIN, BRAID_THIN_D0, BRAID_REPORT_MODE
     global DATA_LOADER, RESULT_FOLDER, MAX_WORKERS, VERBOSE, TESTING, TRAIN_RATIO, OPTIM_TUNING_MODE
     global VALIDATION_METRIC
 
@@ -463,6 +499,11 @@ def main():
     FILCORR_SAMPLING_RATE = _resolve_cfg_value(
         args.filcorr_sampling_rate, cfg_exec, "FILCORR_SAMPLING_RATE", DEFAULT_FILCORR_SAMPLING_RATE
     )
+    BRAID_B = int(_resolve_cfg_value(args.braid_b, cfg_exec, "BRAID_B", DEFAULT_BRAID_B))
+    BRAID_GAMMA = float(_resolve_cfg_value(args.braid_gamma, cfg_exec, "BRAID_GAMMA", DEFAULT_BRAID_GAMMA))
+    BRAID_THIN = bool(_resolve_cfg_value(args.braid_thin, cfg_exec, "BRAID_THIN", DEFAULT_BRAID_THIN))
+    BRAID_THIN_D0 = int(_resolve_cfg_value(args.braid_thin_d0, cfg_exec, "BRAID_THIN_D0", DEFAULT_BRAID_THIN_D0))
+    BRAID_REPORT_MODE = str(_resolve_cfg_value(args.braid_report_mode, cfg_exec, "BRAID_REPORT_MODE", DEFAULT_BRAID_REPORT_MODE))
     VALIDATION_METRIC = _resolve_cfg_value(
         args.validation_metric, cfg_exec, "VALIDATION_METRIC", DEFAULT_VALIDATION_METRIC
     )

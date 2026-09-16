@@ -882,6 +882,7 @@ def make_density_targeted_dataset(
     corr_sign: str = "pos",
     n_epochs: int = 6,
     duty: float = 1.0,
+    burst_length_windows: Optional[Union[int, Tuple[int, int]]] = None,
     r_max: float = 0.99,
     corr_margin: float = 0.03,
     near_threshold_fraction: float = 0.05,
@@ -896,6 +897,16 @@ def make_density_targeted_dataset(
     (correlated (pair,lag,window) tuples / all tested tuples) equals
     `target_density` within `tolerance`, with the exact ground-truth set
     returned. See the module comment above and the plan file.
+
+    `burst_length_windows`: None (default) -> each ON epoch is correlated for its FULL
+    span (the original, persistent model). If set (an int, or a (lo, hi) range), each
+    group draws its own burst length k (windows) once, and each of its ON epochs is
+    correlated for only a short k-window burst centered inside that epoch, OFF the rest
+    of the epoch -- i.e. many short, isolated correlation events instead of one long
+    segment. Motivated by a real finding (2026-09-11): on real data, brute-force recall
+    correlates far more with how many CONSECUTIVE windows a correlation persists (0.51 at
+    1-2 windows -> 0.82 at 32+) than with its strength -- a discovery-latency effect the
+    old persistent-only generator could never exercise.
 
     Returns a dict:
       data            (n, m+1) float32 -- col 0 is a 1..n index, cols 1..m the series
@@ -922,6 +933,18 @@ def make_density_targeted_dataset(
         raise ValueError("n too short for even one evaluation window")
     n_eval = int(min(int(n_eval_steps), max_windows))
 
+    # burst mode: an ON epoch is correlated for only ~burst_k windows out of the
+    # ~windows_per_epoch it spans, not the whole epoch -- on_frac_density (used only to
+    # pick a starting (ng, g), the correction loop re-solves against the real measured
+    # density regardless) must reflect that much smaller true ON-window fraction.
+    on_frac_density = on_frac
+    if burst_length_windows is not None:
+        _epoch_len_est = max(step, (n // n_epochs // step) * step)
+        _windows_per_epoch = max(1, _epoch_len_est // step)
+        _burst_mid = (float(burst_length_windows) if np.isscalar(burst_length_windows)
+                     else float(sum(burst_length_windows)) / 2.0)
+        on_frac_density = on_frac * min(1.0, _burst_mid / _windows_per_epoch)
+
     # Candidates_BF tests, per full step: C(m,2) synchronous tuples + m*m per NONZERO lag
     # bucket (every ordered (current, history) pair, self-pairs included). This is the
     # denominator the sweep's effective density (bf_correlated / bf_tested) divides by,
@@ -942,7 +965,7 @@ def make_density_targeted_dataset(
     def _d_exact(ng, gg):
         if gg < 2 or ng < 1 or ng * gg > m:
             return 0.0
-        return ng * gg * (gg - 1) / 2.0 * on_frac / tested_per_step
+        return ng * gg * (gg - 1) / 2.0 * on_frac_density / tested_per_step
 
     def _solve_ng_g(target, model_gain=1.0):
         want = target / max(model_gain, 1e-6)
@@ -1015,7 +1038,7 @@ def make_density_targeted_dataset(
                 a[_rng.choice(k, size=n_near, replace=False)] = a_lo
             return a
 
-        offsets, loadings, group_of, c_signals = {}, {}, {}, []
+        offsets, loadings, group_of, c_signals, burst_k_by_group = {}, {}, {}, [], {}
         for gi, grp in enumerate(groups):
             c = _gen_shared_driver_signal(n, sigma_c, _rng)
             c /= _win_std(c)                       # unit windowed std, same as eps
@@ -1027,18 +1050,39 @@ def make_density_targeted_dataset(
                 offsets[si] = max(0, min(L_test - 1, O_group + jit))
                 loadings[si] = float(a[mi_local])
                 group_of[si] = gi
+            if burst_length_windows is not None:
+                if np.isscalar(burst_length_windows):
+                    k = int(burst_length_windows)
+                else:
+                    lo_k, hi_k = int(burst_length_windows[0]), int(burst_length_windows[1])
+                    k = int(_rng.integers(lo_k, hi_k + 1))
+                burst_k_by_group[gi] = max(1, k)
 
         # per-group sample-level state timeline. Transitions are SHARP (state changes
         # exactly on a step-aligned epoch boundary) so the monitor event log is exact;
         # windows that straddle a transition are inherently ambiguous and are excluded
-        # from the per-window GT / metric on both sides (see _verify).
+        # from the per-window GT / metric on both sides (see _verify). In burst mode, an
+        # ON epoch is correlated for only a short burst_k-window span centered inside the
+        # epoch (rest of the epoch OFF) instead of the whole epoch.
         s_samp_by_group = {}
         for gi in range(len(groups)):
             ss = np.empty(n, dtype=np.int8)
             for e_idx in range(n_epochs):
                 lo = e_idx * epoch_len
                 hi = n if e_idx == n_epochs - 1 else (e_idx + 1) * epoch_len
-                ss[lo:hi] = int(states[gi, e_idx])
+                s = int(states[gi, e_idx])
+                if s != 0 and burst_length_windows is not None:
+                    k = burst_k_by_group[gi]
+                    span = min(w + (k - 1) * step, hi - lo)
+                    # lo is step-aligned (epoch_len is a multiple of step); the centering
+                    # offset must stay a multiple of step too, or the burst can land off
+                    # the window grid entirely and contribute zero evaluable windows.
+                    center_off = (max(0, (hi - lo - span) // 2) // step) * step
+                    b_start = lo + center_off
+                    ss[lo:hi] = 0
+                    ss[b_start:b_start + span] = s
+                else:
+                    ss[lo:hi] = s
             s_samp_by_group[gi] = ss
 
         # ungrouped series: plain base process
@@ -1082,7 +1126,10 @@ def make_density_targeted_dataset(
                 s0 = ss[lo_c]
                 ok &= s0 != 0
                 if chg.size:
-                    nc = np.searchsorted(chg, lo_c, side="left")
+                    # a change AT lo_c itself doesn't break constancy of [lo_c, hi) (the
+                    # transition already happened before this window) -- need the first
+                    # change STRICTLY after lo_c, hence side="right", not "left".
+                    nc = np.searchsorted(chg, lo_c, side="right")
                     has_change = (nc < chg.size) & (chg[np.minimum(nc, chg.size - 1)] < hi)
                     ok &= ~has_change
                 return ok, s0
@@ -1216,7 +1263,7 @@ def make_density_targeted_dataset(
             idx = np.flatnonzero(same & (g1 == gi))
             if chg.size == 0:
                 continue
-            nc = np.searchsorted(chg, lo[idx], side="left")
+            nc = np.searchsorted(chg, lo[idx], side="right")   # see _analytic_gt's note
             has_change = (nc < chg.size) & (chg[np.minimum(nc, chg.size - 1)] < hi[idx])
             keep[idx[has_change]] = False
         return keep
@@ -1282,6 +1329,9 @@ def make_density_targeted_dataset(
         "group_size": int(result["g"]), "n_groups": int(result["n_groups"]),
         "lag_band": b, "corr_sign": corr_sign, "n_epochs": int(n_epochs),
         "duty": float(duty), "on_frac": float(on_frac),
+        "burst_length_windows": (list(burst_length_windows)
+                                 if isinstance(burst_length_windows, (list, tuple))
+                                 else burst_length_windows),
         "base_proc": base_proc, "preprocess": bool(preprocess),
         "r_max": float(r_max), "corr_margin": float(corr_margin),
         "near_threshold_fraction": float(near_threshold_fraction),

@@ -6,7 +6,7 @@ import numpy as np
 cimport numpy as np
 from libc.math cimport sqrt, fabs, floor, ceil, log2, log, exp, lgamma, acos, atan2, cos, sin
 from libc.math cimport M_PI, NAN
-from libc.stdlib cimport malloc, realloc, free
+from libc.stdlib cimport malloc, calloc, realloc, free
 from libc.stdint cimport int64_t, uint64_t, uint8_t, int32_t
 from cython.parallel cimport prange, threadid
 
@@ -568,6 +568,97 @@ cdef inline int64_t _popcount64_swar(uint64_t x) nogil:
     x = (x & <uint64_t>0x3333333333333333ULL) + ((x >> 2) & <uint64_t>0x3333333333333333ULL)
     x = (x + (x >> 4)) & <uint64_t>0x0f0f0f0f0f0f0f0fULL
     return <int64_t>((x * <uint64_t>0x0101010101010101ULL) >> 56)
+
+
+# (2026-09-13) Option-4 investigation: these three helpers exist ONLY so
+# _find_pair_rows_meta_parallel's prange loop body never uses an in-place
+# operator (+=/-=) on a variable declared at the enclosing function's top level --
+# Cython infers ANY such variable as a cross-iteration OpenMP "reduction" for the
+# whole parallel region (summed across all iterations/threads at the end), which
+# is wrong here and outright refuses to compile ("Cannot read reduction variable
+# in loop body") since these are meant to be fresh per-iteration scratch, not an
+# accumulation across queries. Moving each accumulation into its own nogil
+# function sidesteps the issue entirely -- the accumulator lives on that
+# function's own stack frame, invisible to the caller's prange analysis; the
+# caller only ever does a single plain `=` assignment of the return value,
+# mirroring _row_l2_sq_until's existing pattern just above (`acc = acc + ...`,
+# never `+=`) already used successfully inside a prange loop earlier in this file.
+cdef inline Py_ssize_t _lsh_scan_touched_bands(int32_t[:, :] band_keys,
+                                               int32_t[:, :] neg_band_keys,
+                                               int64_t **post_members,
+                                               int32_t *post_count,
+                                               int64_t *visited_stamp,
+                                               int64_t *touched_buf,
+                                               Py_ssize_t n_bands,
+                                               Py_ssize_t n_variants,
+                                               Py_ssize_t band_mode,
+                                               int64_t complement_mask,
+                                               Py_ssize_t bucket_count,
+                                               int64_t q_entry,
+                                               int64_t stamp,
+                                               Py_ssize_t max_candidates_per_query) nogil:
+    cdef Py_ssize_t band_idx, variant, flat, n_members, mi
+    cdef Py_ssize_t touched_count = 0
+    cdef int64_t key, cur_key, node
+    cdef bint budget_hit = False
+    cdef int64_t *members
+    for band_idx in range(n_bands):
+        if budget_hit:
+            break
+        key = band_keys[q_entry, band_idx]
+        for variant in range(n_variants):
+            if budget_hit:
+                break
+            if band_mode == 0:
+                cur_key = key if variant == 0 else (key ^ complement_mask)
+            else:
+                cur_key = key if variant == 0 else neg_band_keys[q_entry, band_idx]
+            flat = band_idx * bucket_count + cur_key
+            n_members = post_count[flat]
+            members = post_members[flat]
+            for mi in range(n_members):
+                node = members[mi]
+                if node != q_entry and visited_stamp[node] != stamp:
+                    visited_stamp[node] = stamp
+                    touched_buf[touched_count] = node
+                    touched_count = touched_count + 1
+                    if max_candidates_per_query > 0 and touched_count >= max_candidates_per_query:
+                        budget_hit = True
+                        break
+    return touched_count
+
+
+cdef inline Py_ssize_t _hamming_best_dist(int64_t[:, ::1] words,
+                                          uint64_t[:] word_masks,
+                                          Py_ssize_t n_words,
+                                          int64_t q_entry,
+                                          int64_t cand,
+                                          bint signed_abs) nogil:
+    cdef Py_ssize_t hw
+    cdef Py_ssize_t hpos = 0, hneg = 0, hbest
+    cdef uint64_t qw_word, cw_word, xw_mask
+    for hw in range(n_words):
+        qw_word = <uint64_t>words[q_entry, hw]
+        cw_word = <uint64_t>words[cand, hw]
+        xw_mask = word_masks[hw]
+        hpos = hpos + _popcount64_swar((qw_word ^ cw_word) & xw_mask)
+        if signed_abs:
+            hneg = hneg + _popcount64_swar((qw_word ^ (~cw_word)) & xw_mask)
+    hbest = hpos
+    if signed_abs and hneg < hbest:
+        hbest = hneg
+    return hbest
+
+
+cdef inline double _dot_score(double[:, ::1] vectors,
+                              int64_t q_entry,
+                              int64_t cand,
+                              Py_ssize_t n_vectors) nogil:
+    cdef Py_ssize_t d
+    cdef double score = 0.0
+    for d in range(n_vectors):
+        score = score + vectors[q_entry, d] * vectors[cand, d]
+    return score
 
 
 cdef Py_ssize_t _dedupe_pair_buffer(int64_t *buf, Py_ssize_t count):
@@ -4151,6 +4242,19 @@ cdef class SignLSHBandIndex:
     cpdef object find_pair_rows_full_cosine_signed(self, long[:] recent_entry_ids, double gamma, double tau):
         return self._find_pair_rows_meta(recent_entry_ids, gamma, True)
 
+    # (2026-09-13) Option-4 investigation -- see _find_pair_rows_meta_parallel's own
+    # comment (defined after _find_pair_rows_meta below) for the design.
+    # n_threads<=1 dispatches straight to the unchanged sequential path.
+    cpdef object find_pair_rows_full_cosine_parallel(self, long[:] recent_entry_ids, double gamma, double tau, Py_ssize_t n_threads=1):
+        if n_threads <= 1:
+            return self._find_pair_rows_meta(recent_entry_ids, gamma, False)
+        return self._find_pair_rows_meta_parallel(recent_entry_ids, gamma, False, n_threads)
+
+    cpdef object find_pair_rows_full_cosine_signed_parallel(self, long[:] recent_entry_ids, double gamma, double tau, Py_ssize_t n_threads=1):
+        if n_threads <= 1:
+            return self._find_pair_rows_meta(recent_entry_ids, gamma, True)
+        return self._find_pair_rows_meta_parallel(recent_entry_ids, gamma, True, n_threads)
+
     cdef object _empty_stats(self, double gamma):
         return {
             "num_index_candidates": 0, "num_valid_index_candidates": 0,
@@ -4239,6 +4343,37 @@ cdef class SignLSHBandIndex:
         cdef uint64_t qw_word, cw_word, xw_mask
         cdef bint budget_hit
 
+        # (2026-09-14) Same fix as HammingExactIndex's identical redundant-enumeration
+        # finding (docs/implementation_log.md's 2026-09-14 entry) -- when the queries in
+        # one call are all mutually simultaneous (this project's own real usage: every
+        # entry in recent_entry_ids was inserted at the same time this same step, before
+        # any of them search), a same-time pair (A, B) gets independently discovered
+        # twice: once when A's query finds B in a shared bucket, once more when B's query
+        # finds A. is_recent + an EXPLICIT time_idx match + a sid_idx tie-break lets each
+        # same-time pair be discovered from exactly one direction -- drops work, not
+        # coverage (pair_seen already deduped the output before this fix).
+        #
+        # Two real bugs caught here before trusting this, not assumed safe:
+        # 1. The time_idx check is NOT redundant with is_recent in general (only in this
+        #    project's own call pattern): a caller may legally pass a MIXED-time
+        #    recent_entry_ids batch (e.g. re-querying the whole alive population across
+        #    several rounds, as
+        #    test_lsh_sign_dot_index_flat_posting_list_survives_repeated_insert_drop_churn
+        #    does), where a rank/id check alone would wrongly skip genuinely
+        #    different-time comparisons whenever the older side happens to tie-break lower.
+        # 2. The tie-break must be sid_idx, NOT sid_rank: sid_rank_in is a general,
+        #    caller-supplied insert_many parameter with no uniqueness guarantee -- that
+        #    same test passes the ROUND NUMBER for it (shared by every series inserted in
+        #    that round), so a `<=` comparison on sid_rank ties for EVERY same-round pair,
+        #    making BOTH directions skip and silently dropping the pair entirely (measured:
+        #    recall collapsed from 100% to ~1%). sid_idx is the one field guaranteed unique
+        #    per logical series by construction -- different series can never share it.
+        cdef uint8_t[:] is_recent = np.zeros(self._count, dtype=np.uint8)
+        for i in range(n_recent):
+            q_entry = <int64_t>recent_entry_ids[i]
+            if 0 <= q_entry < self._count:
+                is_recent[q_entry] = 1
+
         count = 0
         for i in range(n_recent):
             q_entry = <int64_t>recent_entry_ids[i]
@@ -4292,7 +4427,8 @@ cdef class SignLSHBandIndex:
                     members = self._post_members[flat]
                     for mi in range(n_members):
                         node = members[mi]
-                        if node != q_entry and visited_stamp[node] != stamp:
+                        if (node != q_entry and visited_stamp[node] != stamp
+                                and not (is_recent[node] and time_idx[node] == q_time and sid_idx[node] <= q_sid)):
                             visited_stamp[node] = stamp
                             touched_buf[touched_count] = node
                             touched_count += 1
@@ -4491,6 +4627,262 @@ cdef class SignLSHBandIndex:
         if out_i == count:
             return rows
         return rows[:out_i, :]
+
+    cdef object _find_pair_rows_meta_parallel(self, long[:] recent_entry_ids, double gamma, bint signed_abs, Py_ssize_t n_threads):
+        # (2026-09-13) Option-4 investigation (docs/implementation_log.md's 2026-09-13
+        # entry, "option 4 -- prange parallelism"): _find_pair_rows_meta's per-query loop
+        # (one iteration per newly-arrived series each step) is embarrassingly parallel --
+        # each query's bucket scan is independent of every other query's -- but the
+        # sequential version's shared, mutating state (_touched_buf, _visited_stamp,
+        # _pair_seen_*) is not safe to share across threads without real synchronization.
+        # This mirrors the bptree/sorted-arrays kernel's own proven prange pattern (see the
+        # cosine-meta prange loop earlier in this file): each thread gets its OWN touched
+        # buffer and visited-stamp array (both sized to the full index capacity, so no
+        # cross-thread writes are ever possible) and its own growable output-pair buffer
+        # (the same _append_pair helper the bptree kernel uses). The one real behavior
+        # difference from the sequential path: _pair_seen's cross-query pre-dot dedup is
+        # dropped (it would need real cross-thread synchronization to stay safe), so a pair
+        # discovered from BOTH directions by two different threads in the same batch pays
+        # for the dot product twice instead of once -- a small, bounded amount of duplicate
+        # work, not a correctness issue, since the merge step below still produces exactly
+        # the same final deduped row set (verified against the sequential path on both a
+        # small synthetic case and real data -- see test_candidate_search_parallel_lsh_
+        # matches_sequential and verify_parallel_lsh.py).
+        cdef Py_ssize_t n_recent = recent_entry_ids.shape[0]
+        cdef Py_ssize_t i, out_i, t, tt
+        cdef int64_t a, b
+        cdef int64_t sid_a, sid_b, rank_a, rank_b, time_a, time_b, size_a, size_b
+        cdef Py_ssize_t total_touched = 0, total_valid = 0, total = 0
+        cdef double t0 = time.perf_counter()
+        # Per-query scratch, thread-private by construction (assigned before read every
+        # iteration, never touched with an in-place operator directly in the loop body --
+        # see the comment above _lsh_scan_touched_bands for why that distinction matters).
+        cdef int tid
+        cdef int64_t q_entry, q_win, q_sid, q_time, q_w, stamp, cand
+        cdef Py_ssize_t touched_count, k, hbest
+        cdef bint passes
+        cdef double score
+
+        if n_recent == 0 or self._count == 0:
+            self.last_stats = self._empty_stats(gamma)
+            return np.empty((0, 5), dtype=np.int64)
+
+        if n_threads < 1:
+            n_threads = 1
+        if n_threads > n_recent:
+            n_threads = n_recent
+
+        if self._apply_hamming_filter and self._hamming_frac_auto and not self._hamming_max_bits_sized:
+            self._finalize_hamming_threshold(gamma)
+
+        cdef double[:, ::1] vectors = self._vectors
+        cdef uint8_t[:] alive = self._alive
+        cdef int64_t[:] window_idx = self._window_idx
+        cdef int64_t[:] sid_idx = self._sid_idx
+        cdef int64_t[:] time_idx = self._time
+        cdef int64_t[:] window_size = self._window_size
+        cdef int32_t[:, :] band_keys = self._band_keys
+        cdef int32_t[:, :] neg_band_keys = self._neg_band_keys
+        cdef Py_ssize_t n_variants = 2 if signed_abs else 1
+        cdef int64_t[:, ::1] words = self._words
+        cdef uint64_t[:] word_masks = self._word_masks
+        cdef Py_ssize_t capacity = self._capacity
+
+        cdef int64_t **touched_bufs = <int64_t **>malloc(n_threads * sizeof(int64_t *))
+        cdef int64_t **visited_stamps = <int64_t **>malloc(n_threads * sizeof(int64_t *))
+        cdef int64_t **out_bufs = <int64_t **>malloc(n_threads * sizeof(int64_t *))
+        cdef Py_ssize_t *out_counts = <Py_ssize_t *>malloc(n_threads * sizeof(Py_ssize_t))
+        cdef Py_ssize_t *out_caps = <Py_ssize_t *>malloc(n_threads * sizeof(Py_ssize_t))
+        cdef bint *failed = <bint *>malloc(n_threads * sizeof(bint))
+        cdef Py_ssize_t *touched_total = <Py_ssize_t *>malloc(n_threads * sizeof(Py_ssize_t))
+        cdef Py_ssize_t *valid_total = <Py_ssize_t *>malloc(n_threads * sizeof(Py_ssize_t))
+
+        if (touched_bufs == NULL or visited_stamps == NULL or out_bufs == NULL
+                or out_counts == NULL or out_caps == NULL or failed == NULL
+                or touched_total == NULL or valid_total == NULL):
+            if touched_bufs != NULL: free(touched_bufs)
+            if visited_stamps != NULL: free(visited_stamps)
+            if out_bufs != NULL: free(out_bufs)
+            if out_counts != NULL: free(out_counts)
+            if out_caps != NULL: free(out_caps)
+            if failed != NULL: free(failed)
+            if touched_total != NULL: free(touched_total)
+            if valid_total != NULL: free(valid_total)
+            raise MemoryError()
+
+        for t in range(n_threads):
+            failed[t] = False
+            out_counts[t] = 0
+            out_caps[t] = 1024
+            out_bufs[t] = <int64_t *>malloc(out_caps[t] * 2 * sizeof(int64_t))
+            touched_bufs[t] = <int64_t *>malloc(capacity * sizeof(int64_t)) if capacity > 0 else NULL
+            visited_stamps[t] = <int64_t *>calloc(<size_t>capacity, sizeof(int64_t)) if capacity > 0 else NULL
+            touched_total[t] = 0
+            valid_total[t] = 0
+            if out_bufs[t] == NULL or (capacity > 0 and (touched_bufs[t] == NULL or visited_stamps[t] == NULL)):
+                failed[t] = True
+
+        with nogil:
+            for i in prange(n_recent, schedule='static', num_threads=n_threads):
+                tid = threadid()
+                if failed[tid]:
+                    continue
+                q_entry = <int64_t>recent_entry_ids[i]
+                if q_entry < 0 or q_entry >= self._count or not alive[q_entry]:
+                    continue
+                q_win = window_idx[q_entry]
+                q_sid = sid_idx[q_entry]
+                q_time = time_idx[q_entry]
+                q_w = window_size[q_entry]
+                stamp = <int64_t>(i + 1)
+                # (2026-09-13) touched_count comes from a single plain `=` call into a
+                # standalone nogil helper (not accumulated via += right here) -- see the
+                # comment above _lsh_scan_touched_bands for why that distinction matters
+                # inside a prange loop body (Cython's reduction-variable inference).
+                touched_count = _lsh_scan_touched_bands(
+                    band_keys, neg_band_keys, self._post_members, self._post_count,
+                    visited_stamps[tid], touched_bufs[tid], self._n_bands, n_variants,
+                    self._band_mode, self._complement_mask, self._bucket_count,
+                    q_entry, stamp, self._max_candidates_per_query,
+                )
+                touched_total[tid] += touched_count
+                for k in range(touched_count):
+                    cand = touched_bufs[tid][k]
+                    if not alive[cand]:
+                        continue
+                    if not (time_idx[cand] >= self._min_valid_time
+                            and window_idx[cand] != q_win
+                            and window_size[cand] == q_w
+                            and not (sid_idx[cand] == q_sid and time_idx[cand] == q_time)):
+                        continue
+                    valid_total[tid] += 1
+                    if self._apply_hamming_filter:
+                        hbest = _hamming_best_dist(words, word_masks, self._n_words, q_entry, cand, signed_abs)
+                        if hbest > self._hamming_max_bits:
+                            continue
+                    if self._apply_dot_filter:
+                        score = _dot_score(vectors, q_entry, cand, self._n_vectors)
+                        passes = _passes_dot_gamma_gate(score, gamma, signed_abs, True)
+                        if not passes:
+                            continue
+                    if not _append_pair(&out_bufs[tid], &out_counts[tid], &out_caps[tid], q_win, window_idx[cand]):
+                        failed[tid] = True
+                        break
+
+        for t in range(n_threads):
+            if failed[t]:
+                for tt in range(n_threads):
+                    if out_bufs[tt] != NULL: free(out_bufs[tt])
+                    if touched_bufs[tt] != NULL: free(touched_bufs[tt])
+                    if visited_stamps[tt] != NULL: free(visited_stamps[tt])
+                free(out_bufs); free(touched_bufs); free(visited_stamps)
+                free(out_counts); free(out_caps); free(failed)
+                free(touched_total); free(valid_total)
+                raise MemoryError()
+            total += out_counts[t]
+            total_touched += touched_total[t]
+            total_valid += valid_total[t]
+
+        cdef np.ndarray[np.int64_t, ndim=2] rows
+        cdef int64_t[:, :] row_view
+        cdef int64_t[:] win_sid_idx, win_sid_rank, win_time, win_w
+
+        if total <= 0:
+            for t in range(n_threads):
+                free(out_bufs[t]); free(touched_bufs[t]); free(visited_stamps[t])
+            free(out_bufs); free(touched_bufs); free(visited_stamps)
+            free(out_counts); free(out_caps); free(failed)
+            free(touched_total); free(valid_total)
+            self.last_stats = {
+                "num_index_candidates": int(total_touched), "num_valid_index_candidates": int(total_valid),
+                "lsh_candidates_touched": int(total_touched), "lsh_candidates_returned": 0,
+                "num_recent_queries": int(n_recent), "num_entries": int(self._alive_count),
+                "gamma": float(gamma), "tau": 0.0, "num_rows": 0,
+                "lsh_query_time": float(time.perf_counter() - t0), "n_threads": int(n_threads),
+            }
+            return np.empty((0, 5), dtype=np.int64)
+
+        rows = np.empty((total, 5), dtype=np.int64)
+        row_view = rows
+        win_sid_idx = self._win_sid_idx_arr
+        win_sid_rank = self._win_sid_rank_arr
+        win_time = self._win_time_arr
+        win_w = self._win_size_arr
+        out_i = 0
+        for t in range(n_threads):
+            for i in range(out_counts[t]):
+                a = out_bufs[t][2 * i]
+                b = out_bufs[t][2 * i + 1]
+                if a < 0 or b < 0 or a >= self._win_capacity or b >= self._win_capacity:
+                    continue
+                size_a = win_w[a]
+                size_b = win_w[b]
+                if size_a != size_b:
+                    continue
+                sid_a = win_sid_idx[a]
+                sid_b = win_sid_idx[b]
+                if sid_a < 0 or sid_b < 0:
+                    continue
+                rank_a = win_sid_rank[a]
+                rank_b = win_sid_rank[b]
+                time_a = win_time[a]
+                time_b = win_time[b]
+                if sid_a == sid_b:
+                    row_view[out_i, 0] = sid_a
+                    row_view[out_i, 1] = sid_b
+                    if time_a >= time_b:
+                        row_view[out_i, 2] = time_a
+                        row_view[out_i, 3] = time_b
+                    else:
+                        row_view[out_i, 2] = time_b
+                        row_view[out_i, 3] = time_a
+                    row_view[out_i, 4] = size_a
+                elif time_a == time_b:
+                    if rank_a <= rank_b:
+                        row_view[out_i, 0] = sid_a
+                        row_view[out_i, 1] = sid_b
+                    else:
+                        row_view[out_i, 0] = sid_b
+                        row_view[out_i, 1] = sid_a
+                    row_view[out_i, 2] = time_a
+                    row_view[out_i, 3] = time_b
+                    row_view[out_i, 4] = size_a
+                elif time_a < time_b:
+                    row_view[out_i, 0] = sid_b
+                    row_view[out_i, 1] = sid_a
+                    row_view[out_i, 2] = time_b
+                    row_view[out_i, 3] = time_a
+                    row_view[out_i, 4] = size_a
+                else:
+                    row_view[out_i, 0] = sid_a
+                    row_view[out_i, 1] = sid_b
+                    row_view[out_i, 2] = time_a
+                    row_view[out_i, 3] = time_b
+                    row_view[out_i, 4] = size_a
+                out_i += 1
+
+        for t in range(n_threads):
+            free(out_bufs[t]); free(touched_bufs[t]); free(visited_stamps[t])
+        free(out_bufs); free(touched_bufs); free(visited_stamps)
+        free(out_counts); free(out_caps); free(failed)
+        free(touched_total); free(valid_total)
+
+        cdef object rows_final = rows[:out_i, :] if out_i != total else rows
+        if rows_final.shape[0] > 1:
+            keys = np.ascontiguousarray(rows_final).view(
+                np.dtype((np.void, rows_final.dtype.itemsize * 5))
+            ).ravel()
+            _, uniq_idx = np.unique(keys, return_index=True)
+            rows_final = np.ascontiguousarray(rows_final[np.sort(uniq_idx)])
+
+        self.last_stats = {
+            "num_index_candidates": int(total_touched), "num_valid_index_candidates": int(total_valid),
+            "lsh_candidates_touched": int(total_touched), "lsh_candidates_returned": int(rows_final.shape[0]),
+            "num_recent_queries": int(n_recent), "num_entries": int(self._alive_count),
+            "gamma": float(gamma), "tau": 0.0, "num_rows": int(rows_final.shape[0]),
+            "lsh_query_time": float(time.perf_counter() - t0), "n_threads": int(n_threads),
+        }
+        return rows_final
 
 cdef class HammingExactIndex:
     """Exact packed-bit Hamming pre-filter (candidate_backend="lsh_hamming_exact").
@@ -4994,6 +5386,39 @@ cdef class HammingExactIndex:
         cdef int64_t[:] window_size = self._window_size
         cdef int64_t[:] alive_list = self._alive_list
 
+        # (2026-09-14) Fix for the measured ~1.9x redundant-enumeration finding
+        # (docs/implementation_log.md's 2026-09-14 entry, "Hamming-exact enumeration
+        # redundancy"): every one of the n_recent queries this step scans the FULL alive
+        # set, which includes the OTHER n_recent-1 sibling queries (all inserted at the
+        # SAME time this same step, before any of them search) -- so a same-time pair
+        # (A, B) gets independently discovered TWICE: once when A's query scans and finds
+        # B, once more when B's query scans and finds A. This is the ONLY source of true
+        # redundancy here (a "recent vs older" comparison is never repeated -- verified by
+        # direct reasoning: the older side's own time was already fixed before the newer
+        # side's window existed, so no future or past step ever re-examines that exact
+        # (t1, t2) combination). is_recent + an EXPLICIT time_idx match + a sid_idx
+        # tie-break below makes each same-time pair discoverable from exactly one
+        # direction, chosen by a fixed, arbitrary-but-consistent order (lower sid_idx's
+        # query claims it) -- this drops work, not coverage: pair_seen already deduped the
+        # OUTPUT before this fix, so the candidate SET returned is unaffected, only the
+        # redundant computation is skipped.
+        #
+        # Two real bugs caught here before trusting this, not assumed safe (both found
+        # directly, via SignLSHBandIndex's identical copy of this fix failing a real test
+        # first): the time_idx check is required, not just defensive -- a caller may
+        # legally pass a MIXED-time recent_entry_ids batch, where a rank/id check alone
+        # would wrongly skip genuinely different-time comparisons; and the tie-break must
+        # be sid_idx, not sid_rank -- sid_rank_in is a general caller-supplied parameter
+        # with no uniqueness guarantee (one test passes the round number for it, shared by
+        # every series in that round), so a `<=` on sid_rank ties for same-round pairs and
+        # silently drops them from both directions. sid_idx is the one field guaranteed
+        # unique per logical series by construction.
+        cdef uint8_t[:] is_recent = np.zeros(self._count, dtype=np.uint8)
+        for i in range(n_recent):
+            q_entry = <int64_t>recent_entry_ids[i]
+            if 0 <= q_entry < self._count:
+                is_recent[q_entry] = 1
+
         count = 0
         for i in range(n_recent):
             q_entry = <int64_t>recent_entry_ids[i]
@@ -5019,6 +5444,8 @@ cdef class HammingExactIndex:
             for node_pos in range(self._alive_count):
                 node = alive_list[node_pos]
                 if node == q_entry:
+                    continue
+                if is_recent[node] and time_idx[node] == q_time and sid_idx[node] <= q_sid:
                     continue
                 hpos = 0
                 hneg = 0
@@ -5414,7 +5841,28 @@ cdef class HybridValidationCache:
         else:
             active_now = self._repeat_rate_ema >= min_repeat_rate
 
-        results = []
+        # (2026-09-13) Preallocated numpy output arrays instead of a Python
+        # list-of-tuples built one Python object per candidate -- profiling a
+        # real dense run found this loop's OWN Python-object-construction cost
+        # (repeated here again on the Python-side consumer, which re-iterated
+        # the list) dominated validation_time by ~15x versus hybrid_validation
+        # disabled, even at a 92-99% cache hit rate. Same fix shape as the
+        # 2026-09-10 numeric-representation work (bulk numpy arrays in, bulk
+        # numpy arrays out, no per-row Python object on the hot path).
+        cdef np.ndarray[np.uint8_t, ndim=1] ok_arr = np.zeros(n_items, dtype=np.uint8)
+        cdef np.ndarray[np.uint8_t, ndim=1] is_corr_arr = np.zeros(n_items, dtype=np.uint8)
+        cdef np.ndarray[np.float64_t, ndim=1] corr_arr = np.full(n_items, np.nan, dtype=np.float64)
+        cdef np.ndarray[np.float64_t, ndim=1] dist_arr = np.full(n_items, np.inf, dtype=np.float64)
+        cdef np.ndarray[np.uint8_t, ndim=1] is_const_arr = np.zeros(n_items, dtype=np.uint8)
+        cdef np.ndarray[np.uint8_t, ndim=1] is_spiked_arr = np.zeros(n_items, dtype=np.uint8)
+        cdef np.ndarray[np.uint8_t, ndim=1] used_hybrid_arr = np.zeros(n_items, dtype=np.uint8)
+        cdef uint8_t[:] ok_mv = ok_arr
+        cdef uint8_t[:] is_corr_mv = is_corr_arr
+        cdef double[:] corr_mv = corr_arr
+        cdef double[:] dist_mv = dist_arr
+        cdef uint8_t[:] is_const_mv = is_const_arr
+        cdef uint8_t[:] is_spiked_mv = is_spiked_arr
+        cdef uint8_t[:] used_hybrid_mv = used_hybrid_arr
         for i in range(n_items):
             s1 = series1[i]
             s2 = series2[i]
@@ -5545,8 +5993,7 @@ cdef class HybridValidationCache:
                         sxy += new_x * new_y
 
             if not valid_pair:
-                results.append((False, False, float("nan"), float("inf"), False, False, False))
-                continue
+                continue    # ok_mv[i] stays 0, other arrays keep their prefilled defaults
 
             self._validate_from_stats(
                 w,
@@ -5591,7 +6038,13 @@ cdef class HybridValidationCache:
             next_stats[next_slot, 8] = sy4
             next_stats[next_slot, 9] = sxy
 
-            results.append((True, bool(is_corr), corr, dist, bool(is_const), bool(is_spiked), bool(used_hybrid)))
+            ok_mv[i] = 1
+            is_corr_mv[i] = 1 if is_corr else 0
+            corr_mv[i] = corr
+            dist_mv[i] = dist
+            is_const_mv[i] = 1 if is_const else 0
+            is_spiked_mv[i] = 1 if is_spiked else 0
+            used_hybrid_mv[i] = 1 if used_hybrid else 0
 
         self._occupied_arr = next_occ_arr
         self._key_s1_arr = next_s1_arr
@@ -5610,7 +6063,13 @@ cdef class HybridValidationCache:
             "repeat_count": int(repeat_count),
             "repeat_rate": float(rate),
             "repeat_rate_ema": float(self._repeat_rate_ema),
-            "results": results,
+            "ok": ok_arr,
+            "is_corr": is_corr_arr,
+            "corr": corr_arr,
+            "dist": dist_arr,
+            "is_const": is_const_arr,
+            "is_spiked": is_spiked_arr,
+            "used_hybrid": used_hybrid_arr,
         }
 
 
