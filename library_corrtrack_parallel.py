@@ -183,6 +183,27 @@ RUN_RESULT_COLUMNS: Sequence[str] = (
     "candidate_backend",
     "candidate_lsh_n_bands",
     "candidate_lsh_n_bands_tolerance",
+    # (2026-09-16/17) competitor-arm knobs and the negative-correlation disclosure tag
+    "supports_neg_corr",
+    "parcorr_k",
+    "parcorr_f",
+    "parcorr_c",
+    "parcorr_neighbor_probe",
+    "parcorr_cell_size",
+    "braid_b",
+    "braid_gamma",
+    "braid_thin",
+    "braid_thin_d0",
+    "braid_report_mode",
+    "statstream_n_coeffs",
+    "statstream_index_dims",
+    "statstream_apply_dft_filter",
+    "statstream_eps",
+    "corrjoin_ks",
+    "corrjoin_ke",
+    "corrjoin_kb",
+    "corrjoin_eps1",
+    "corrjoin_eps2",
     "candidate_apply_dot_gamma_filter",
     "candidate_hamming_threshold",
     "candidate_apply_hamming_filter",
@@ -308,6 +329,27 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     "validation_metric",
     "candidate_lsh_n_bands",
     "candidate_lsh_n_bands_tolerance",
+    # (2026-09-16/17) competitor-arm knobs and the negative-correlation disclosure tag
+    "supports_neg_corr",
+    "parcorr_k",
+    "parcorr_f",
+    "parcorr_c",
+    "parcorr_neighbor_probe",
+    "parcorr_cell_size",
+    "braid_b",
+    "braid_gamma",
+    "braid_thin",
+    "braid_thin_d0",
+    "braid_report_mode",
+    "statstream_n_coeffs",
+    "statstream_index_dims",
+    "statstream_apply_dft_filter",
+    "statstream_eps",
+    "corrjoin_ks",
+    "corrjoin_ke",
+    "corrjoin_kb",
+    "corrjoin_eps1",
+    "corrjoin_eps2",
     # (2026-09-08) Was already being computed into _run_corrtrack_proxy_anchor's own
     # `record` dict (see that function's "candidate_lsh_target_occupancy" assignment)
     # but silently dropped on the way to CSV -- _row_from_mapping only ever emits
@@ -947,6 +989,8 @@ def execute_corrtrack_pass(
     )
     # (2026-07-06) Part 1 -- see docs/implementation_log.md.
     record["candidate_lsh_n_bands"] = getattr(corrtrack, "candidate_lsh_n_bands", None)
+    for _pk in ("parcorr_k", "parcorr_f", "parcorr_c", "parcorr_neighbor_probe", "parcorr_cell_size", "supports_neg_corr", "statstream_n_coeffs", "statstream_index_dims", "statstream_apply_dft_filter", "statstream_eps", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2"):
+        record[_pk] = getattr(corrtrack, _pk, None)
     record["candidate_apply_dot_gamma_filter"] = getattr(corrtrack, "candidate_apply_dot_gamma_filter", None)
     record["candidate_hamming_threshold"] = getattr(corrtrack, "candidate_hamming_threshold", None)
     record["candidate_apply_hamming_filter"] = getattr(corrtrack, "candidate_apply_hamming_filter", None)
@@ -1135,6 +1179,15 @@ def execute_corrtrack_pass(
     return record, runtime_parts, corr_flags
 
 
+_BASELINE_SUPPORTS_NEG_CORR = {
+    "bruteforce": "native",
+    "exact_stomp": "native",
+    "filcorr": "enabled_by_us",
+    "braid": "specified",
+    "tsubasa": "native",
+}
+
+
 def run_and_log_bruteforce(
     dataset_id: str,
     data: np.ndarray,
@@ -1194,6 +1247,12 @@ def run_and_log_bruteforce(
         validation_metric=base_config.get("validation_metric", "pearson"),
     )
     corrtrack.baseline_mode = baseline_mode
+    # (2026-09-17) Evidence tier of the arm's negative-correlation handling, written to the
+    # record (comparison plan section 5b.5). Pattern-A arms are all-pairs, so the tag is per
+    # method: FilCorr's Eq. 7 takes the max of *signed* correlations and our port adds abs();
+    # BRAID's Definition 1 uses |R(l)| but never ran a negative-correlation experiment;
+    # TSUBASA's Alg. 2 tests |c| > theta in every experiment.
+    corrtrack.supports_neg_corr = _BASELINE_SUPPORTS_NEG_CORR.get(baseline_mode, "native")
     if baseline_mode == "filcorr":
         corrtrack.filcorr_fs = _to_float_safe(base_config.get("filcorr_fs", 0.0)) or 0.0
         corrtrack.filcorr_ft = _to_float_safe(base_config.get("filcorr_ft", 0.5)) or 0.5
@@ -1401,6 +1460,8 @@ def run_and_log_corrtrack(
     )
     # (2026-07-06) Part 1 -- see docs/implementation_log.md.
     record["candidate_lsh_n_bands"] = getattr(corrtrack, "candidate_lsh_n_bands", None)
+    for _pk in ("parcorr_k", "parcorr_f", "parcorr_c", "parcorr_neighbor_probe", "parcorr_cell_size", "supports_neg_corr", "statstream_n_coeffs", "statstream_index_dims", "statstream_apply_dft_filter", "statstream_eps", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2"):
+        record[_pk] = getattr(corrtrack, _pk, None)
     record["candidate_apply_dot_gamma_filter"] = getattr(corrtrack, "candidate_apply_dot_gamma_filter", None)
     record["candidate_hamming_threshold"] = getattr(corrtrack, "candidate_hamming_threshold", None)
     record["candidate_apply_hamming_filter"] = getattr(corrtrack, "candidate_apply_hamming_filter", None)
@@ -1705,6 +1766,8 @@ def _resolve_candidate_backend(value, default="auto"):
     # judged riskier than the cost of a little dead code.
     if key in {"flat"}:
         raise ValueError("candidate_backend='flat' has been removed")
+    if key in ("parcorr_grid", "statstream_grid", "corrjoin_double_filter"):
+        return key                      # (2026-09-17) competitor arms -- see ParCorrGridIndex / StatStreamGridIndex / CorrJoinDoubleFilterIndex
     if key not in {"brute_force", "auto", "lsh_sign_dot", "lsh_hamming_exact"}:
         key = default
     return key
@@ -1744,15 +1807,24 @@ _DATA_REPRESENTATION_ALIASES = {
     "sketch_concordance": "sketch_concordance", "concordance": "sketch_concordance",
     "sketch_multichannel": "sketch_multichannel",
     "distance_corr_sketch_multichannel": "sketch_multichannel", "dcor_sketch_multichannel": "sketch_multichannel",
+    # (2026-09-17) StatStream digest -- see Sketches._sketches_dft / StatStreamGridIndex
+    "sketch_dft": "sketch_dft", "dft": "sketch_dft", "statstream": "sketch_dft",
+    # (2026-09-17) CorrJoin representation -- see Sketches._sketches_paa / CorrJoinDoubleFilterIndex
+    "sketch_paa_svd": "sketch_paa_svd", "paa_svd": "sketch_paa_svd", "corrjoin": "sketch_paa_svd", "paa": "sketch_paa_svd",
 }
-_VALID_DATA_REPRESENTATIONS = {"auto", "raw", "sketch_proj", "sketch_concordance", "sketch_multichannel"}
+_VALID_DATA_REPRESENTATIONS = {"auto", "raw", "sketch_proj", "sketch_concordance", "sketch_multichannel", "sketch_dft", "sketch_paa_svd"}
 _CANDIDATE_BACKEND_AXIS_ALIASES = {
     "auto": "auto",
     "lsh_approx": "lsh_approx", "lsh_sign_dot": "lsh_approx", "lsh": "lsh_approx",
     "hamming_exact": "hamming_exact", "lsh_hamming_exact": "hamming_exact",
     "brute_force": "brute_force", "exhaustive": "brute_force", "true_brute_force": "brute_force", "unconditional": "brute_force",
+    # (2026-09-17) ParCorr / Cole-Shasha-Zhao competitor arm -- see ParCorrGridIndex.
+    "parcorr_grid": "parcorr_grid", "parcorr": "parcorr_grid", "csz": "parcorr_grid",
+    "cole_shasha_zhao": "parcorr_grid", "sketch_grid": "parcorr_grid",
+    "statstream_grid": "statstream_grid", "dft_grid": "statstream_grid",
+    "corrjoin_double_filter": "corrjoin_double_filter", "corrjoin_grid": "corrjoin_double_filter", "double_filter": "corrjoin_double_filter",
 }
-_VALID_CANDIDATE_BACKEND_AXIS = {"auto", "lsh_approx", "hamming_exact", "brute_force"}
+_VALID_CANDIDATE_BACKEND_AXIS = {"auto", "lsh_approx", "hamming_exact", "brute_force", "parcorr_grid", "statstream_grid", "corrjoin_double_filter"}
 
 
 def _resolve_data_representation(value, validation_metric):
@@ -1810,7 +1882,40 @@ def _resolve_internal_dispatch(data_representation, candidate_backend, validatio
     if be == "brute_force":
         return be, "brute_force"
 
+    if rep == "sketch_dft":
+        if be in ("auto", "statstream_grid"):
+            return "statstream_grid", "statstream_grid"
+        if be != "brute_force":
+            raise ValueError(
+                "data_representation='sketch_dft' (StatStream digest) is indexed by "
+                f"candidate_backend='statstream_grid' (or 'brute_force'), not {candidate_backend!r}."
+            )
+    if rep == "sketch_paa_svd":
+        if be in ("auto", "corrjoin_double_filter"):
+            return "corrjoin_double_filter", "corrjoin_double_filter"
+        if be != "brute_force":
+            raise ValueError(
+                "data_representation='sketch_paa_svd' (CorrJoin) is indexed by "
+                f"candidate_backend='corrjoin_double_filter' (or 'brute_force'), not {candidate_backend!r}."
+            )
+    if be == "corrjoin_double_filter" and rep != "sketch_paa_svd":
+        raise ValueError(
+            "candidate_backend='corrjoin_double_filter' (CorrJoin) needs data_representation='sketch_paa_svd', "
+            f"not {rep!r}."
+        )
+    if be == "statstream_grid" and rep != "sketch_dft":
+        raise ValueError(
+            "candidate_backend='statstream_grid' (StatStream) needs data_representation='sketch_dft', "
+            f"not {rep!r}."
+        )
+    if be == "parcorr_grid" and rep != "sketch_proj":
+        raise ValueError(
+            "candidate_backend='parcorr_grid' (ParCorr / Cole-Shasha-Zhao) indexes the random-"
+            f"projection sketch and needs data_representation='sketch_proj', not {rep!r}."
+        )
     if rep == "sketch_proj":
+        if be == "parcorr_grid":
+            return be, "parcorr_grid"
         return be, ("lsh_hamming_exact" if be == "hamming_exact" else "auto")
     if rep == "sketch_concordance":
         return be, "incremental_concordance_multichannel"
@@ -1845,7 +1950,7 @@ _INSTINCT_INDEX_BACKENDS = {"instinct"}
 # formerly shared this same marker -- all removed per the release-
 # restructuring cleanup (see docs/implementation_log.md's 2026-07-27
 # entries); corrtrack_release_backup2 preserves the pre-cleanup tree.
-_LSH_SIGN_DOT_BACKENDS = {"lsh_sign_dot", "lsh_hamming_exact"}
+_LSH_SIGN_DOT_BACKENDS = {"lsh_sign_dot", "lsh_hamming_exact", "parcorr_grid", "statstream_grid", "corrjoin_double_filter"}  # competitor arms share the index interface (2026-09-17)
 
 
 def _resolve_candidate_similarity(value, default="l2"):
@@ -2369,6 +2474,19 @@ def _extract_feature_overrides(params):
     hybrid_kwargs = _resolve_hybrid_validation_kwargs(overrides=params)
     for key, value in hybrid_kwargs.items():
         overrides[key] = value
+    # (2026-09-17) ParCorr / Cole-Shasha-Zhao arm knobs (candidate_backend="parcorr_grid").
+    for key, caster in (("parcorr_k", _to_int_safe), ("parcorr_f", _to_float_safe),
+                        ("parcorr_c", _to_float_safe), ("parcorr_neighbor_probe", None),
+                        ("statstream_n_coeffs", _to_int_safe), ("statstream_index_dims", _to_int_safe),
+                        ("statstream_apply_dft_filter", None),
+                        ("corrjoin_ks", _to_int_safe), ("corrjoin_ke", _to_int_safe), ("corrjoin_kb", _to_int_safe)):
+        if params.get(key) is not None:
+            if caster is None:
+                overrides[key] = _coerce_to_bool(params.get(key), default=False)
+            else:
+                val = caster(params.get(key))
+                if val is not None:
+                    overrides[key] = val
     return overrides
 
 
@@ -3678,7 +3796,7 @@ _MULTICHANNEL_DEFAULT_TARGET_OCCUPANCY = 10.0
 
 
 class CorrTrack:
-    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,exec="parallel",max_workers=0,data_representation="auto",candidate_backend="auto",candidate_cosine_threshold=None,candidate_cosine_threshold_offset=None,candidate_parallel_mode="recent_shards",candidate_lsh_radius=None,candidate_ann_m=None,candidate_ann_z=None,candidate_ann_ef=None,parallel_sketch=None,parallel_candidates=None,parallel_validation=None,track_min_dist=True,hybrid_validation=False,hybrid_validation_min_repeat_rate=0.25,hybrid_validation_disable_rate=None,hybrid_validation_ema_alpha=0.25,hybrid_validation_min_candidates=256,numeric_rows=True,validation_current_window_cache=False,candidate_lsh_n_bands=64,candidate_lsh_n_bands_tolerance=None,target_recall=0.95,candidate_lsh_target_occupancy=None,candidate_lsh_recall_safety_margin=None,candidate_apply_dot_gamma_filter=True,candidate_hamming_threshold=None,candidate_apply_hamming_filter=True,candidate_hamming_filter_max_frac=0.40,candidate_lsh_max_candidates_per_query=0,candidate_search_n_threads=1,validation_metric="pearson",validation_incremental_approx=False,validation_incremental_m1=None,validation_incremental_m2=None,validation_incremental_max_age_steps=64,validation_incremental_cutpoint_refresh_threshold=0.5,dist_corr_algorithm="naive",concordance_n_gaps=None,concordance_min_gap=8,concordance_min_capacity=16,concordance_target_dim=738,concordance_multichannel_gamma=None,concordance_multichannel_min_channel_capacity=None,distance_corr_sketch_k=8,distance_corr_sketch_freq_low=0.1,distance_corr_sketch_freq_high=10.0,distance_corr_sketch_freq_seed=42,distance_corr_sketch_gate_tau=None,distance_corr_sketch_multichannel_gamma=None,distance_corr_sketch_apply_tier2_gate=True):
+    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,exec="parallel",max_workers=0,data_representation="auto",candidate_backend="auto",candidate_cosine_threshold=None,candidate_cosine_threshold_offset=None,candidate_parallel_mode="recent_shards",candidate_lsh_radius=None,candidate_ann_m=None,candidate_ann_z=None,candidate_ann_ef=None,parallel_sketch=None,parallel_candidates=None,parallel_validation=None,track_min_dist=True,hybrid_validation=False,hybrid_validation_min_repeat_rate=0.25,hybrid_validation_disable_rate=None,hybrid_validation_ema_alpha=0.25,hybrid_validation_min_candidates=256,numeric_rows=True,validation_current_window_cache=False,candidate_lsh_n_bands=64,candidate_lsh_n_bands_tolerance=None,target_recall=0.95,candidate_lsh_target_occupancy=None,candidate_lsh_recall_safety_margin=None,candidate_apply_dot_gamma_filter=True,candidate_hamming_threshold=None,candidate_apply_hamming_filter=True,candidate_hamming_filter_max_frac=0.40,candidate_lsh_max_candidates_per_query=0,candidate_search_n_threads=1,validation_metric="pearson",validation_incremental_approx=False,validation_incremental_m1=None,validation_incremental_m2=None,validation_incremental_max_age_steps=64,validation_incremental_cutpoint_refresh_threshold=0.5,dist_corr_algorithm="naive",concordance_n_gaps=None,concordance_min_gap=8,concordance_min_capacity=16,concordance_target_dim=738,concordance_multichannel_gamma=None,concordance_multichannel_min_channel_capacity=None,distance_corr_sketch_k=8,distance_corr_sketch_freq_low=0.1,distance_corr_sketch_freq_high=10.0,distance_corr_sketch_freq_seed=42,distance_corr_sketch_gate_tau=None,distance_corr_sketch_multichannel_gamma=None,distance_corr_sketch_apply_tier2_gate=True,parcorr_k=2,parcorr_f=0.7,parcorr_c=0.7,parcorr_neighbor_probe=False,statstream_n_coeffs=16,statstream_index_dims=4,statstream_apply_dft_filter=True,corrjoin_ks=15,corrjoin_ke=30,corrjoin_kb=3):
 
         if basic_window is not None and window_size % basic_window != 0:
             raise TypeError("Window size (",window_size,") is not divisable by basic window size (",basic_window,")")
@@ -4047,6 +4165,85 @@ class CorrTrack:
         # "mean" was built for lsh_mag_dot, which was never adopted).
         self.sketch_norm = "mean_l2"
         self._internal_dispatch = resolved_candidate_backend
+        # (2026-09-17) ParCorr / Cole-Shasha-Zhao arm (candidate_backend="parcorr_grid").
+        # Both papers normalize the WINDOW before projecting (comparison plan §2
+        # constraint 2, §4a.1), which is phase 0a's sketch_norm="unit_l2_window";
+        # neither has a negative-correlation mechanism, so neg_corr=True is refused
+        # here rather than silently extended (implementation plan §0d, user-decided).
+        # cell_size is Cole-Shasha-Zhao's c * d with d = sqrt(2(1-T)) (plan §2.3);
+        # parcorr_c defaults to the midpoint of their published sweep [0.1, 1.3] and
+        # MUST be calibrated per §2.3 -- the default is a starting point, not a result.
+        self.parcorr_k = int(parcorr_k)
+        self.parcorr_f = float(parcorr_f)
+        self.parcorr_c = float(parcorr_c)
+        self.parcorr_neighbor_probe = bool(parcorr_neighbor_probe)
+        self.parcorr_cell_size = None
+        if self._internal_dispatch == "parcorr_grid":
+            if neg_corr:
+                raise ValueError(
+                    "candidate_backend='parcorr_grid': ParCorr and Cole-Shasha-Zhao have no "
+                    "negative-correlation mechanism. Run with neg_corr=False; on neg_corr=True runs "
+                    "this arm reports N/A (docs/competitor_implementation_plan.md §0d)."
+                )
+            self.sketch_norm = "unit_l2_window"
+            self.parcorr_cell_size = self.parcorr_c * math.sqrt(max(2.0 * (1.0 - float(corr_threshold)), 0.0))
+            if int(n_vectors) % self.parcorr_k != 0:
+                raise ValueError(
+                    f"parcorr_grid: n_vectors={n_vectors} must be divisible by parcorr_k={self.parcorr_k} "
+                    "(the sketch is partitioned into groups of k coordinates)."
+                )
+        # (2026-09-17) StatStream arm (data_representation="sketch_dft", candidate_backend
+        # "statstream_grid"). Digest = first n DFT coefficients of the unit-L2-normalized
+        # window (their Lemma 4), so the sketch has 2n real dims and n_vectors is set to 2n
+        # here regardless of the caller's value. eps = sqrt(1 - T) (Lemma 2). Negative
+        # correlation and lags are SPECIFIED by the paper, never evaluated ([S]); enabled as
+        # their spec and our evaluation (plan §0d), tagged "specified" in the record.
+        self.sketch_representation = "proj"
+        self.statstream_n_coeffs = int(statstream_n_coeffs)
+        self.statstream_index_dims = int(statstream_index_dims)
+        self.statstream_apply_dft_filter = bool(statstream_apply_dft_filter)
+        self.statstream_eps = None
+        if self._internal_dispatch == "statstream_grid":
+            self.sketch_representation = "dft"
+            self.sketch_norm = "unit_l2_window"        # documentation only: _sketches_dft normalizes itself
+            self.statstream_eps = math.sqrt(max(1.0 - float(corr_threshold), 0.0))
+            n_vectors = 2 * self.statstream_n_coeffs
+            if 2 * self.statstream_n_coeffs > int(window_size):
+                raise ValueError(
+                    f"sketch_dft: statstream_n_coeffs={self.statstream_n_coeffs} needs 2n <= window_size={window_size} (Lemma 7)."
+                )
+        # (2026-09-17) CorrJoin arm (data_representation="sketch_paa_svd", candidate_backend
+        # "corrjoin_double_filter"). Reproduction of the authors' R code. Synchronous only
+        # (n_lags > 0 refused); negative correlation unreachable through its own filters
+        # (refused, see CorrJoinDoubleFilterIndex). eps from Alg. 1 line 1 / the R's
+        # `sqrt(2*theta/frameSize)`; n_vectors := ks + ke.
+        self.corrjoin_ks, self.corrjoin_ke, self.corrjoin_kb = int(corrjoin_ks), int(corrjoin_ke), int(corrjoin_kb)
+        self.corrjoin_eps1 = self.corrjoin_eps2 = None
+        if self._internal_dispatch == "corrjoin_double_filter":
+            if neg_corr:
+                raise ValueError(
+                    "candidate_backend='corrjoin_double_filter': CorrJoin's two Euclidean filters prune "
+                    "anti-correlated pairs before its |corr| acceptance, so negative correlation is not "
+                    "reachable in the published method. Run with neg_corr=False; N/A on neg_corr=True runs (plan §0d)."
+                )
+            if int(n_lags) != 0:
+                raise ValueError("candidate_backend='corrjoin_double_filter': CorrJoin is synchronous (comparison plan §3.2); run with n_lags=0.")
+            W = int(window_size)
+            for name, k in (("corrjoin_ks", self.corrjoin_ks), ("corrjoin_ke", self.corrjoin_ke)):
+                if k < 1 or W % k != 0:
+                    raise ValueError(f"{name}={k} must divide window_size={W}; divisors: {[d for d in range(2, W + 1) if W % d == 0]}")
+            theta = max(1.0 - float(corr_threshold), 0.0)
+            self.corrjoin_eps1 = math.sqrt(2.0 * self.corrjoin_ks * theta / W)
+            self.corrjoin_eps2 = math.sqrt(2.0 * self.corrjoin_ke * theta / W)
+            self.sketch_representation = "paa"
+            self.sketch_norm = "unit_l2_window"
+            n_vectors = self.corrjoin_ks + self.corrjoin_ke
+        if self._internal_dispatch in ("parcorr_grid", "corrjoin_double_filter"):
+            self.supports_neg_corr = "not_available"
+        elif self._internal_dispatch == "statstream_grid":
+            self.supports_neg_corr = "specified"
+        else:
+            self.supports_neg_corr = "native"
         # (2026-07-28) The ordinal representation is a CorrTrack-level
         # dispatch concept, not a Candidates-level index backend --
         # Candidates itself is always constructed with a real index backend
@@ -4557,6 +4754,15 @@ class CorrTrack:
                 candidate_lsh_max_candidates_per_query=self.candidate_lsh_max_candidates_per_query,
                 candidate_hamming_threshold=self.candidate_hamming_threshold,
                 candidate_search_n_threads=self.candidate_search_n_threads,
+                parcorr_k=self.parcorr_k,
+                parcorr_f=self.parcorr_f,
+                parcorr_cell_size=self.parcorr_cell_size,
+                parcorr_neighbor_probe=self.parcorr_neighbor_probe,
+                statstream_eps=self.statstream_eps,
+                statstream_index_dims=self.statstream_index_dims,
+                statstream_apply_dft_filter=self.statstream_apply_dft_filter,
+                corrjoin_ks=self.corrjoin_ks, corrjoin_ke=self.corrjoin_ke, corrjoin_kb=self.corrjoin_kb,
+                corrjoin_eps1=self.corrjoin_eps1, corrjoin_eps2=self.corrjoin_eps2,
             )
             self.grid_nodes.append(node)
         if self.concordance_multichannel_backend or self.distance_corr_sketch_multichannel_backend:
@@ -7872,6 +8078,10 @@ class CorrTrack:
                         self.neg_corr,
                         self.sketch_norm,
                         full_vector_candidates=self.full_vector_candidates,
+                        representation=getattr(self, "sketch_representation", "proj"),
+                        dft_n_coeffs=getattr(self, "statstream_n_coeffs", None),
+                        paa_ks=getattr(self, "corrjoin_ks", None),
+                        paa_ke=getattr(self, "corrjoin_ke", None),
                     )
                 )
         if len(self.sketch_nodes) > self.n_sketch_nodes:
@@ -7989,6 +8199,10 @@ class CorrTrack:
                     self.neg_corr,
                     self.sketch_norm,
                     full_vector_candidates=self.full_vector_candidates,
+                    representation=getattr(self, "sketch_representation", "proj"),
+                    dft_n_coeffs=getattr(self, "statstream_n_coeffs", None),
+                    paa_ks=getattr(self, "corrjoin_ks", None),
+                    paa_ke=getattr(self, "corrjoin_ke", None),
                 )
             )
         if len(self.sketch_nodes) > self.n_sketch_nodes:
@@ -9910,8 +10124,20 @@ class CorrTrackMultiWindow:
 
 
 class Sketches:
-    def __init__(self,window_size,basic_window,window_step,seed,seed_toggle,n_vectors,grid_dimension,grid_nodes,preprocess,neg_corr=False,sketch_norm="mean_l2",full_vector_candidates=False):
+    def __init__(self,window_size,basic_window,window_step,seed,seed_toggle,n_vectors,grid_dimension,grid_nodes,preprocess,neg_corr=False,sketch_norm="mean_l2",full_vector_candidates=False,representation="proj",dft_n_coeffs=None,paa_ks=None,paa_ke=None):
         self.verbose = None
+        # (2026-09-17) "proj" = the random-projection sketch (CorrTrack's own, and
+        # ParCorr/CSZ's). "dft" = StatStream's digest: the first dft_n_coeffs DFT
+        # coefficients (real and imaginary parts -> 2n real dims) of the unit-L2-
+        # normalized window; see _sketches_dft. Zhu & Shasha VLDB 2002, Lemmas 2-7.
+        self.representation = str(representation or "proj").lower()
+        self.dft_n_coeffs = int(dft_n_coeffs) if dft_n_coeffs else None
+        self._dft_basis = None
+        # "paa" = CorrJoin's representation: [PAA_ks(x_hat) | PAA_ke(x_hat)] (ks + ke dims),
+        # x_hat the unit-L2-normalized window. See _sketches_paa.
+        self.paa_ks = int(paa_ks) if paa_ks else None
+        self.paa_ke = int(paa_ke) if paa_ke else None
+        self._paa_basis = None
         # Parameters windows
         self.window_size = window_size
         self.basic_window = basic_window #divides window_size
@@ -10879,6 +11105,14 @@ class Sketches:
 
     def _get_sketches(self):
         if self.curr_window_size >= self.window_size:
+            if self.representation == "dft":
+                self._sketches_dft()
+                self._update_previous_startTime()
+                return True
+            if self.representation == "paa":
+                self._sketches_paa()
+                self._update_previous_startTime()
+                return True
             if self.basicRandomVector is None:
                 self._generate_randomVectors()
             if len(self.incrementable_index) > 0 and (self.incrementable_index[0] <= self._curr_startTime() or self.previous_startTime == self._curr_startTime()):
@@ -10893,6 +11127,102 @@ class Sketches:
                 print("\nSkip sketches (window not full)")
             self._update_previous_startTime()
             return False
+
+    def _dft_basis_matrix(self):
+        """(W, 2n) real basis: columns [Re e^{-j2 pi m i/W}, -Im ...] for m = 1..n, scaled
+        1/sqrt(W) as in StatStream §3.3. Bin 0 is excluded, which is Lemma 4's X_hat_0 = 0:
+        the mean only enters bin 0, so bins 1..n of DFT(x) equal those of DFT(x - mean)."""
+        if self._dft_basis is None:
+            W = int(self.window_size)
+            n = int(self.dft_n_coeffs or 16)
+            if n < 1 or 2 * n > W:
+                raise ValueError(f"sketch_dft: need 1 <= n_coeffs <= W/2 (got n={n}, W={W}; Lemma 7 needs n < W/2)")
+            i = np.arange(W, dtype=np.float64)[:, None]
+            m = np.arange(1, n + 1, dtype=np.float64)[None, :]
+            ang = -2.0 * np.pi * m * i / W
+            self._dft_basis = np.ascontiguousarray(np.hstack([np.cos(ang), np.sin(ang)]) / np.sqrt(W))
+        return self._dft_basis
+
+    def _sketches_dft(self):
+        """StatStream digest of the current window: X_hat_m = X_m / sigma_x for m = 1..n
+        (their Lemma 4), i.e. the DFT of the unit-L2-normalized window, as 2n reals.
+        By Lemma 2, corr(x,y) >= 1 - eps^2  =>  ||X_hat - Y_hat||_2n <= eps, and by Lemma 7
+        every coordinate lies in [-sqrt(2)/2, sqrt(2)/2]. Recomputed from the window each
+        step; StatStream's Lemma 6 per-basic-window digest update is an O(W/b) constant-
+        factor optimization of this same quantity and is not implemented (charged to this
+        arm's sk_time, stated in the plan)."""
+        current_window = np.array(self._curr_window(), dtype=np.float64, copy=False)
+        n_series = current_window.shape[0]
+        curr_start = self._curr_startTime()
+        window_size = self.window_size
+        self.sketches = {}
+        if n_series == 0:
+            self._sketch_matrix = None
+            self._sketch_keys = []
+            return
+        B = self._dft_basis_matrix()
+        raw = current_window @ B                                       # (m, 2n), bins 1..n only
+        centred = current_window - current_window.mean(axis=1, keepdims=True)
+        denom = np.sqrt(np.einsum("ij,ij->i", centred, centred))
+        out = np.zeros_like(raw)
+        valid = np.isfinite(denom) & (denom > 0.0)
+        if np.any(valid):
+            out[valid] = raw[valid] / denom[valid, None]
+        self._sketch_matrix = out
+        series_ids = list(self.series_ids)
+        if len(series_ids) < n_series:
+            series_ids = series_ids + [None] * (n_series - len(series_ids))
+        self._sketch_keys = [(series_ids[sidx], curr_start, window_size) for sidx in range(n_series)]
+        self.sketches = dict(zip(self._sketch_keys, out))
+
+    def _paa_basis_matrix(self):
+        """(W, ks + ke) averaging basis: column j of the first block is 1/f_s on frame j
+        (f_s = W/ks), likewise 1/f_e for the second block. PAA is the frame-mean map of
+        the CorrJoin authors' `PAA(x, frameSize)`; requires ks | W and ke | W."""
+        if self._paa_basis is None:
+            W = int(self.window_size); ks = int(self.paa_ks or 15); ke = int(self.paa_ke or 30)
+            for name, k in (("ks", ks), ("ke", ke)):
+                if k < 1 or W % k != 0:
+                    divs = [d for d in range(2, W + 1) if W % d == 0]
+                    raise ValueError(
+                        f"sketch_paa_svd: {name}={k} must divide window_size={W} (CorrJoin's PAA frames). "
+                        f"Divisors of {W}: {divs}. The paper uses ks=15, ke=30 with W=1020."
+                    )
+            B = np.zeros((W, ks + ke), dtype=np.float64)
+            fs, fe = W // ks, W // ke
+            for j in range(ks):
+                B[j * fs:(j + 1) * fs, j] = 1.0 / fs
+            for j in range(ke):
+                B[j * fe:(j + 1) * fe, ks + j] = 1.0 / fe
+            self._paa_basis = B
+        return self._paa_basis
+
+    def _sketches_paa(self):
+        """CorrJoin representation: [PAA_ks(x_hat) | PAA_ke(x_hat)] per series. PAA is
+        linear and maps a constant to itself, so PAA(x_hat) = (PAA(x) - mean(x)) / ||x -
+        mean(x)|| -- exactly `paamN <- (paam - meanT)/tauT` in the authors' 2-CorrJoin.R.
+        Their PAA and SVD are recomputed per window; so is this (log 2026-09-16 (h))."""
+        current_window = np.array(self._curr_window(), dtype=np.float64, copy=False)
+        n_series = current_window.shape[0]
+        curr_start = self._curr_startTime(); window_size = self.window_size
+        self.sketches = {}
+        if n_series == 0:
+            self._sketch_matrix = None; self._sketch_keys = []; return
+        B = self._paa_basis_matrix()
+        mean = current_window.mean(axis=1)
+        centred = current_window - mean[:, None]
+        denom = np.sqrt(np.einsum("ij,ij->i", centred, centred))
+        raw = current_window @ B - mean[:, None]                 # PAA(x) - mean(x), both blocks
+        out = np.zeros_like(raw)
+        valid = np.isfinite(denom) & (denom > 0.0)
+        if np.any(valid):
+            out[valid] = raw[valid] / denom[valid, None]
+        self._sketch_matrix = out
+        series_ids = list(self.series_ids)
+        if len(series_ids) < n_series:
+            series_ids = series_ids + [None] * (n_series - len(series_ids))
+        self._sketch_keys = [(series_ids[sidx], curr_start, window_size) for sidx in range(n_series)]
+        self.sketches = dict(zip(self._sketch_keys, out))
 
     def _clean_obsolete_basicDots(self):
         while len(self.incrementable_index)>0 and self.incrementable_index[0] < self._curr_startTime():
@@ -12858,18 +13188,31 @@ class Candidates_BF_BRAID(Candidates_BF_ExactSTOMP):
             # Nothing is stored across steps: state is O(m d) transient per level,
             # which is the whole point at k = 2000 where plain BRAID's per-pair
             # matrices are ~2.2 GB (implementation plan §9).
+            # (2026-09-17) Project the *mean-adjusted* windows. The JL error of the
+            # distance estimate scales with ||x - y||^2; on raw sensor data that term is
+            # dominated by W_h * (mean_x - mean_y)^2 while the quantity Pearson needs is
+            # the centred cross-sum, orders of magnitude smaller (Motes temperature:
+            # recall 0.12 at T=0.9 before this change). Centering is linear and uses the
+            # sums already in hand, so the state shape of their Table II is unchanged;
+            # the exact sx*sy/W_h is added back so the five-sum formula downstream sees
+            # a consistent raw sxy. Deviation from the paper's Eq. 24 as written, disclosed.
             R = self._rand_for(h, W_h)
-            px_key = (h, cb_start)
+            # key on the *absolute* time of the window start: cb_start is a buffer-relative
+            # block index and stays constant once the buffer rolls, which served a stale
+            # px on every step after the first eviction (found 2026-09-17 on Motes data)
+            px_key = (h, int(self.window_index[0]) + offset + cb_start * block)
             if self._px_cache is not None and self._px_cache[0] == px_key:
                 px = self._px_cache[1]                      # lag-independent at this level/step
             else:
-                px = curr @ R
+                px = (curr - (sx / W_h)[:, None]) @ R
                 self._px_cache = (px_key, px)
-            py = hist @ R
+            py = (hist - (sy / W_h)[:, None]) @ R
             self.full_initializations += 1
+            sxx_c = sxx - sx * sx / W_h
+            syy_c = syy - sy * sy / W_h
             d2 = (np.einsum("ij,ij->i", px, px)[:, None] + np.einsum("ij,ij->i", py, py)[None, :]
                   - 2.0 * px @ py.T)
-            sxy = 0.5 * (sxx[:, None] + syy[None, :] - d2)          # their Eq. 24
+            sxy = 0.5 * (sxx_c[:, None] + syy_c[None, :] - d2) + np.outer(sx, sy) / W_h   # Eq. 24 on centred windows
         return W_h, sx, sy, sxx, syy, sxy
 
     # ---- interpolation ------------------------------------------------------
@@ -13037,6 +13380,653 @@ class Candidates_BF_BRAID(Candidates_BF_ExactSTOMP):
         return accepted, total_pairs, timing
 
 
+class ParCorrGridIndex:
+    """ParCorr / Cole-Shasha-Zhao candidate index (Pattern B backend).
+
+    Yagoubi, Akbarinia, Kolev, Levchenko, Masseglia, Valduriez, Shasha -- DMKD 2018,
+    whose candidate search is Cole, Shasha & Zhao -- KDD 2005 §5.3 (comparison plan
+    §4a.0). Same public interface as `SignLSHBandIndex` / `HammingExactIndex`
+    (insert_many / find_pair_rows_full_cosine / drop_before_time / last_stats), so
+    `Candidates` dispatches to it unchanged; pure numpy, deliberately at the same
+    engineering tier as the other reimplemented arms (comparison plan §5b.3).
+
+    Mechanism, as published:
+      * the sketch (random +/-1 projection of the **unit-L2-normalized window**,
+        `sketch_norm="unit_l2_window"`, phase 0a) of length r is split into
+        n_grids = r // k groups of k coordinates (paper: r = 60, k = 2 -> 30 grids);
+      * each group is a k-dimensional regular grid of cell side `cell_size`;
+      * two windows are a candidate pair if they fall in the **same cell in at
+        least ceil(f * n_grids) grids** (paper: f = 0.7, calibrated to 0.95 recall
+        on a sample -- comparison plan §2.1);
+      * no dot-product gate: the paper verifies every candidate's exact
+        correlation (100% precision by construction), which is what the
+        harness's shared validation kernel does downstream.
+
+    `neighbor_probe=False` (default) is ParCorr: same-cell only; the paper lists
+    neighbouring-cell search as future work. `neighbor_probe=True` is
+    Cole-Shasha-Zhao: probe the 3^k neighbouring cells and keep a group hit only
+    if the k-dim group distance is <= cell_size (their "within distance c x d in
+    more than a fraction f of the groups"). One arm, two ablations (plan §4a.3).
+
+    `cell_size` is CSZ's `c * d` with d = sqrt(2(1-T)), the correlation-derived
+    distance in the normalized-window space (JL-preserved by the sketch); `c` is
+    the published knob to sweep over [0.1, 1.3] (comparison plan §2.3). NOT the v1
+    `_compute_base_cell_size` formula, by decision.
+
+    Negative correlation: not supported by either paper (comparison plan §5b.5,
+    user-confirmed). The signed query raises; CorrTrack refuses `neg_corr=True`
+    for this backend at construction (0d policy: refuse rather than extend).
+    """
+
+    def __init__(self, n_vectors, k=2, f=0.7, cell_size=None, neighbor_probe=False,
+                 initial_capacity=1024, n_lagged_windows=1):
+        self._n_vectors = int(n_vectors)
+        self.k = int(k)
+        if self.k < 1 or self.k > self._n_vectors:
+            raise ValueError("parcorr_k must be in [1, n_vectors]")
+        self.n_grids = self._n_vectors // self.k
+        if self.n_grids < 1:
+            raise ValueError("n_vectors // parcorr_k must be >= 1")
+        self.f = float(f)
+        if not (0.0 < self.f <= 1.0):
+            raise ValueError("parcorr_f must be in (0, 1]")
+        self.required_hits = max(1, int(math.ceil(self.f * self.n_grids - 1e-12)))
+        if cell_size is None or not np.isfinite(cell_size) or cell_size <= 0:
+            raise ValueError("cell_size must be a positive float (CSZ's c * sqrt(2(1-T)))")
+        self.cell_size = float(cell_size)
+        self.neighbor_probe = bool(neighbor_probe)
+        self.n_lagged_windows = int(n_lagged_windows)
+        self.supports_neg_corr = "not_available"
+        cap = max(16, int(initial_capacity))
+        self._vectors = np.empty((cap, self._n_vectors), dtype=np.float64)
+        self._keys = np.empty((cap, self.n_grids), dtype=np.int64)     # hashed cell key per grid
+        self._win = np.empty(cap, dtype=np.int64)
+        self._sid = np.empty(cap, dtype=np.int64)
+        self._rank = np.empty(cap, dtype=np.int64)
+        self._time = np.empty(cap, dtype=np.int64)
+        self._w = np.empty(cap, dtype=np.int64)
+        self._alive = np.zeros(cap, dtype=bool)
+        self._count = 0
+        self._alive_count = 0
+        self._dead_count = 0
+        self._min_valid_time = -1
+        # postings: per grid, dict cell_key -> python list of entry ids (lazy deletion)
+        self._post = [dict() for _ in range(self.n_grids)]
+        self.last_stats = {}
+        if self.neighbor_probe:
+            offs = np.array(np.meshgrid(*([np.arange(-1, 2)] * self.k), indexing="ij")).reshape(self.k, -1).T
+            self._neighbor_offsets = offs.astype(np.int64)          # (3^k, k)
+        else:
+            self._neighbor_offsets = np.zeros((1, self.k), dtype=np.int64)
+
+    # ---- capacity ----------------------------------------------------------
+    def _grow(self, need):
+        cap = self._vectors.shape[0]
+        if self._count + need <= cap:
+            return
+        new_cap = max(cap * 2, self._count + need)
+        def g(a, shape):
+            out = np.empty(shape, dtype=a.dtype); out[: self._count] = a[: self._count]; return out
+        self._vectors = g(self._vectors, (new_cap, self._n_vectors))
+        self._keys = g(self._keys, (new_cap, self.n_grids))
+        for name in ("_win", "_sid", "_rank", "_time", "_w"):
+            setattr(self, name, g(getattr(self, name), (new_cap,)))
+        alive = np.zeros(new_cap, dtype=bool); alive[: self._count] = self._alive[: self._count]
+        self._alive = alive
+
+    # ---- cell keys ---------------------------------------------------------
+    def _cells(self, vectors):
+        """(n, n_grids, k) integer cell coordinates of each group."""
+        n = vectors.shape[0]
+        sub = vectors[:, : self.n_grids * self.k].reshape(n, self.n_grids, self.k)
+        return np.floor(sub / self.cell_size).astype(np.int64)
+
+    @staticmethod
+    def _hash_cells(cells):
+        """(n, n_grids) int64 keys from (n, n_grids, k) integer coordinates."""
+        h = np.zeros(cells.shape[:2], dtype=np.int64)
+        for d in range(cells.shape[2]):
+            h = h * np.int64(0x9E3779B1) + (cells[:, :, d] + np.int64(1 << 31))
+        return h
+
+    # ---- interface ---------------------------------------------------------
+    def notify_expected_n_series(self, observed_m):
+        return None
+
+    def clear_recent(self):
+        return None
+
+    def insert_many(self, values_in, window_idx_in, vectors_in=None, sid_idx_in=None,
+                    time_in=None, window_size_in=None, sid_rank_in=None):
+        win = np.asarray(window_idx_in, dtype=np.int64).ravel()
+        n = win.shape[0]
+        if n == 0:
+            return np.empty(0, dtype=np.int64)
+        vec = np.ascontiguousarray(vectors_in, dtype=np.float64).reshape(n, -1)
+        if vec.shape[1] != self._n_vectors:
+            raise ValueError(f"vector dim {vec.shape[1]} != n_vectors {self._n_vectors}")
+        self._grow(n)
+        i0, i1 = self._count, self._count + n
+        self._vectors[i0:i1] = vec
+        self._win[i0:i1] = win
+        self._sid[i0:i1] = np.asarray(sid_idx_in, dtype=np.int64).ravel()
+        self._rank[i0:i1] = np.asarray(sid_rank_in, dtype=np.int64).ravel() if sid_rank_in is not None else self._sid[i0:i1]
+        self._time[i0:i1] = np.asarray(time_in, dtype=np.int64).ravel()
+        self._w[i0:i1] = np.asarray(window_size_in, dtype=np.int64).ravel()
+        self._alive[i0:i1] = True
+        keys = self._hash_cells(self._cells(vec))
+        self._keys[i0:i1] = keys
+        for g in range(self.n_grids):
+            post = self._post[g]
+            kg = keys[:, g]
+            for j in range(n):
+                post.setdefault(int(kg[j]), []).append(i0 + j)
+        self._count = i1
+        self._alive_count += n
+        return np.arange(i0, i1, dtype=np.int64)
+
+    def drop_before_time(self, min_valid_time):
+        self._min_valid_time = int(min_valid_time)
+        live = self._alive[: self._count]
+        stale = live & (self._time[: self._count] < self._min_valid_time)
+        n_stale = int(np.count_nonzero(stale))
+        if n_stale == 0:
+            return
+        self._alive[: self._count][stale] = False
+        self._alive_count -= n_stale
+        self._dead_count += n_stale
+        # compact postings when the dead outnumber the living
+        if self._dead_count > max(64, self._alive_count):
+            alive_idx = np.nonzero(self._alive[: self._count])[0]
+            self._post = [dict() for _ in range(self.n_grids)]
+            for g in range(self.n_grids):
+                post = self._post[g]; kg = self._keys[:, g]
+                for e in alive_idx.tolist():
+                    post.setdefault(int(kg[e]), []).append(e)
+            self._dead_count = 0
+
+    def find_pair_rows_full_cosine_signed(self, recent_entry_ids, gamma, tau):
+        raise NotImplementedError(
+            "ParCorr / Cole-Shasha-Zhao have no negative-correlation mechanism (comparison plan "
+            "§5b.5); run this arm with neg_corr=False. Refused rather than extended (plan §0d)."
+        )
+
+    def find_pair_rows_full_cosine(self, recent_entry_ids, gamma, tau):
+        t0 = time.perf_counter()
+        recent = np.asarray(recent_entry_ids, dtype=np.int64).ravel()
+        n_recent = recent.shape[0]
+        touched = 0; unique_pairs = 0; dist_checks = 0
+        pairs = []
+        alive = self._alive
+        keys = self._keys
+        if n_recent and self._count:
+            cells_recent = None
+            if self.neighbor_probe:
+                cells_recent = self._cells(self._vectors[recent])           # (n_recent, n_grids, k)
+            for qi in range(n_recent):
+                q = int(recent[qi])
+                if not alive[q]:
+                    continue
+                q_sid, q_time, q_win = int(self._sid[q]), int(self._time[q]), int(self._win[q])
+                votes = {}
+                for g in range(self.n_grids):
+                    post = self._post[g]
+                    if self.neighbor_probe:
+                        base = cells_recent[qi, g]
+                        probe_keys = self._hash_cells((base[None, None, :] + self._neighbor_offsets[:, None, :]).reshape(1, -1, self.k))[0]
+                        cand_lists = [post.get(int(pk)) for pk in probe_keys.tolist()]
+                        cands = [e for lst in cand_lists if lst for e in lst]
+                    else:
+                        cands = post.get(int(keys[q, g]))
+                        if not cands:
+                            continue
+                    for e in cands:
+                        if e == q or not alive[e]:
+                            continue
+                        touched += 1
+                        if self.neighbor_probe:
+                            # CSZ: group distance <= cell_size ("within distance c x d")
+                            dist_checks += 1
+                            dq = self._vectors[q, g * self.k:(g + 1) * self.k] - self._vectors[e, g * self.k:(g + 1) * self.k]
+                            if float(dq @ dq) > self.cell_size * self.cell_size:
+                                continue
+                        votes[e] = votes.get(e, 0) + 1
+                for e, v in votes.items():
+                    if v < self.required_hits:
+                        continue
+                    e_sid, e_time = int(self._sid[e]), int(self._time[e])
+                    if e_sid == q_sid and e_time == q_time:
+                        continue                                          # same window
+                    # each unordered pair once: emit from the later-time entry, tie-break sid
+                    if e_time > q_time or (e_time == q_time and e_sid < q_sid):
+                        continue
+                    unique_pairs += 1
+                    pairs.append((q, e))
+        self.last_stats = {
+            "num_index_candidates": int(touched), "num_enumerated_candidates": int(touched),
+            "num_valid_index_candidates": int(touched), "num_unique_index_candidates": int(touched),
+            "num_duplicate_index_candidates": 0,
+            "num_unique_pre_dot_pairs": int(unique_pairs), "num_duplicate_pre_dot_pairs": 0,
+            "num_dot_checks": 0, "num_distance_checks": int(dist_checks),
+            "num_after_similarity": int(unique_pairs), "num_after_dot": int(unique_pairs),
+            "num_pairs_before_dedupe": int(unique_pairs), "num_pairs_after_dedupe": int(unique_pairs),
+            "num_rows": int(unique_pairs), "num_recent_queries": int(n_recent),
+            "num_entries": int(self._alive_count), "num_blocks": int(self.n_grids),
+            "gamma": float(gamma), "tau": float(self.cell_size),
+            "lsh_candidates_touched": int(touched), "lsh_dot_checks": 0,
+            "lsh_candidates_returned": int(unique_pairs),
+            "lsh_query_time": float(time.perf_counter() - t0),
+            "lsh_num_nodes_total": int(self._count), "lsh_num_nodes_alive": int(self._alive_count),
+            "lsh_dead_node_ratio": float(self._dead_count) / float(self._count) if self._count else 0.0,
+            "parcorr_required_hits": int(self.required_hits), "parcorr_n_grids": int(self.n_grids),
+        }
+        if not pairs:
+            return np.empty((0, 5), dtype=np.int64)
+        a = np.fromiter((p[0] for p in pairs), dtype=np.int64, count=len(pairs))
+        b = np.fromiter((p[1] for p in pairs), dtype=np.int64, count=len(pairs))
+        sid_a, sid_b = self._sid[a], self._sid[b]
+        t_a, t_b = self._time[a], self._time[b]
+        w_a = self._w[a]
+        rows = np.empty((len(pairs), 5), dtype=np.int64)
+        # canonical: later time first; equal time -> lower rank first (matches the Cython indexes)
+        later_first = t_a >= t_b
+        rows[:, 0] = np.where(later_first, sid_a, sid_b)
+        rows[:, 1] = np.where(later_first, sid_b, sid_a)
+        rows[:, 2] = np.where(later_first, t_a, t_b)
+        rows[:, 3] = np.where(later_first, t_b, t_a)
+        eq = t_a == t_b
+        if np.any(eq):
+            ra, rb = self._rank[a], self._rank[b]
+            swap = eq & (ra > rb)
+            rows[swap, 0], rows[swap, 1] = sid_b[swap], sid_a[swap]
+        rows[:, 4] = w_a
+        return rows
+
+
+class StatStreamGridIndex:
+    """StatStream candidate index (Zhu & Shasha -- VLDB 2002 §3.6/3.7; Pattern B).
+
+    Operates on the `sketch_dft` representation: X_hat = first n DFT coefficients of the
+    unit-L2-normalized window as 2n reals (Sketches._sketches_dft). Same public
+    interface as SignLSHBandIndex / ParCorrGridIndex.
+
+    As published:
+      * a regular grid over the first h_idx <= 2n coordinates of the bounded feature
+        cube (Lemma 7: every coordinate in [-sqrt(2)/2, sqrt(2)/2]), cell side
+        eps = sqrt(1 - T) (Lemma 2: corr >= 1 - eps^2 => ||X_hat - Y_hat||_n <= eps);
+      * a query probes its own cell and the 3^h_idx **neighbouring** cells, so any pair
+        within distance eps is found -- this is what makes the grid false-negative-free
+        (their Theorem 2);
+      * survivors pass the n-approximate filter ||X_hat - Y_hat||_2n <= eps (the paper
+        then estimates the correlation from the coefficients; here the harness's shared
+        exact validation does the final check instead, so precision is exact);
+      * negative correlation (Lemma 3): also probe the cell of -X_hat and test
+        ||X_hat + Y_hat|| <= eps. Specified by the paper, never evaluated there ([S]);
+        enabled under neg_corr=True as *their* specification and *our* evaluation
+        (implementation plan §0d).
+      * lagged correlation: the index simply keeps entries alive across the lag horizon
+        and evicts by time (their timestamped, never-globally-cleared grid, §3.6); a
+        recent query is matched against every alive entry, so lags come out at the
+        harness's step granularity (theirs: multiples of the basic window). [S] as well.
+
+    h_idx is a knob: the paper says "the first h_hat <= 2n dimensions" without a value;
+    3^h_idx probes per query bounds it in practice (default 4 = first two complex
+    coefficients). Pruning weakens as T drops (cells per axis = 2*ceil(sqrt(2)/(2 eps))):
+    4 per axis at T=0.7, 6 at T=0.9 -- consistent with their Fig. 5 pruning power.
+    """
+
+    def __init__(self, n_vectors, eps, index_dims=4, initial_capacity=1024, n_lagged_windows=1,
+                 apply_dft_distance_filter=True, neg_corr=False):
+        self._n_vectors = int(n_vectors)              # 2n
+        if eps is None or not np.isfinite(eps) or eps <= 0:
+            raise ValueError("eps must be a positive float (sqrt(1 - T))")
+        self.eps = float(eps)
+        self.index_dims = int(max(1, min(int(index_dims), self._n_vectors)))
+        self.apply_dft_distance_filter = bool(apply_dft_distance_filter)
+        self.neg_corr = bool(neg_corr)
+        self.n_lagged_windows = int(n_lagged_windows)
+        self.supports_neg_corr = "specified"
+        self.supports_lags = "specified"
+        cap = max(16, int(initial_capacity))
+        self._vectors = np.empty((cap, self._n_vectors), dtype=np.float64)
+        self._cells = np.empty((cap, self.index_dims), dtype=np.int64)
+        self._win = np.empty(cap, dtype=np.int64); self._sid = np.empty(cap, dtype=np.int64)
+        self._rank = np.empty(cap, dtype=np.int64); self._time = np.empty(cap, dtype=np.int64)
+        self._w = np.empty(cap, dtype=np.int64); self._alive = np.zeros(cap, dtype=bool)
+        self._count = 0; self._alive_count = 0; self._dead_count = 0
+        self._post = {}                                # cell key (tuple) -> list of entry ids
+        offs = np.array(np.meshgrid(*([np.arange(-1, 2)] * self.index_dims), indexing="ij")).reshape(self.index_dims, -1).T
+        self._neighbor_offsets = offs.astype(np.int64)
+        self.last_stats = {}
+
+    def _grow(self, need):
+        cap = self._vectors.shape[0]
+        if self._count + need <= cap:
+            return
+        new_cap = max(cap * 2, self._count + need)
+        def g(a, shape):
+            out = np.empty(shape, dtype=a.dtype); out[: self._count] = a[: self._count]; return out
+        self._vectors = g(self._vectors, (new_cap, self._n_vectors))
+        self._cells = g(self._cells, (new_cap, self.index_dims))
+        for name in ("_win", "_sid", "_rank", "_time", "_w"):
+            setattr(self, name, g(getattr(self, name), (new_cap,)))
+        alive = np.zeros(new_cap, dtype=bool); alive[: self._count] = self._alive[: self._count]; self._alive = alive
+
+    def _cell_coords(self, vectors):
+        return np.floor(vectors[:, : self.index_dims] / self.eps).astype(np.int64)
+
+    def notify_expected_n_series(self, observed_m):
+        return None
+
+    def clear_recent(self):
+        return None
+
+    def insert_many(self, values_in, window_idx_in, vectors_in=None, sid_idx_in=None,
+                    time_in=None, window_size_in=None, sid_rank_in=None):
+        win = np.asarray(window_idx_in, dtype=np.int64).ravel(); n = win.shape[0]
+        if n == 0:
+            return np.empty(0, dtype=np.int64)
+        vec = np.ascontiguousarray(vectors_in, dtype=np.float64).reshape(n, -1)
+        if vec.shape[1] != self._n_vectors:
+            raise ValueError(f"vector dim {vec.shape[1]} != n_vectors {self._n_vectors}")
+        self._grow(n)
+        i0, i1 = self._count, self._count + n
+        self._vectors[i0:i1] = vec; self._win[i0:i1] = win
+        self._sid[i0:i1] = np.asarray(sid_idx_in, dtype=np.int64).ravel()
+        self._rank[i0:i1] = np.asarray(sid_rank_in, dtype=np.int64).ravel() if sid_rank_in is not None else self._sid[i0:i1]
+        self._time[i0:i1] = np.asarray(time_in, dtype=np.int64).ravel()
+        self._w[i0:i1] = np.asarray(window_size_in, dtype=np.int64).ravel()
+        self._alive[i0:i1] = True
+        cells = self._cell_coords(vec); self._cells[i0:i1] = cells
+        for j in range(n):
+            self._post.setdefault(tuple(cells[j].tolist()), []).append(i0 + j)
+        self._count = i1; self._alive_count += n
+        return np.arange(i0, i1, dtype=np.int64)
+
+    def drop_before_time(self, min_valid_time):
+        live = self._alive[: self._count]
+        stale = live & (self._time[: self._count] < int(min_valid_time))
+        n_stale = int(np.count_nonzero(stale))
+        if n_stale == 0:
+            return
+        self._alive[: self._count][stale] = False
+        self._alive_count -= n_stale; self._dead_count += n_stale
+        if self._dead_count > max(64, self._alive_count):
+            alive_idx = np.nonzero(self._alive[: self._count])[0]
+            self._post = {}
+            for e in alive_idx.tolist():
+                self._post.setdefault(tuple(self._cells[e].tolist()), []).append(e)
+            self._dead_count = 0
+
+    def _probe(self, center_cell):
+        cands = []
+        for off in self._neighbor_offsets:
+            lst = self._post.get(tuple((center_cell + off).tolist()))
+            if lst:
+                cands.extend(lst)
+        return cands
+
+    def _find(self, recent_entry_ids, signed):
+        t0 = time.perf_counter()
+        recent = np.asarray(recent_entry_ids, dtype=np.int64).ravel()
+        touched = 0; dist_checks = 0; pairs = []
+        eps2 = self.eps * self.eps
+        for q in recent.tolist():
+            if not self._alive[q]:
+                continue
+            q_sid, q_time = int(self._sid[q]), int(self._time[q])
+            vq = self._vectors[q]
+            cq = self._cells[q]
+            probes = [(cq, 1.0)]
+            if signed:
+                probes.append((np.floor(-vq[: self.index_dims] / self.eps).astype(np.int64), -1.0))
+            seen = set()                      # (entry, sign): a neighbour of the +cell can also be
+            for center, sign in probes:       # the -cell's own entry, and must be tested under each sign
+                for e in self._probe(center):
+                    if e == q or not self._alive[e] or (e, sign) in seen:
+                        continue
+                    seen.add((e, sign)); touched += 1
+                    e_sid, e_time = int(self._sid[e]), int(self._time[e])
+                    if e_sid == q_sid and e_time == q_time:
+                        continue
+                    if e_time > q_time or (e_time == q_time and e_sid < q_sid):
+                        continue                              # each unordered pair once
+                    if self.apply_dft_distance_filter:
+                        dist_checks += 1
+                        d = vq - sign * self._vectors[e]
+                        if float(d @ d) > eps2:
+                            continue
+                    pairs.append((q, e))
+        n_before = len(pairs)
+        pairs = list(dict.fromkeys(pairs))
+        self.last_stats = {
+            "num_index_candidates": touched, "num_enumerated_candidates": touched,
+            "num_valid_index_candidates": touched, "num_unique_index_candidates": touched,
+            "num_duplicate_index_candidates": 0, "num_unique_pre_dot_pairs": len(pairs),
+            "num_duplicate_pre_dot_pairs": n_before - len(pairs), "num_dot_checks": 0, "num_distance_checks": dist_checks,
+            "num_after_similarity": len(pairs), "num_after_dot": len(pairs),
+            "num_pairs_before_dedupe": len(pairs), "num_pairs_after_dedupe": len(pairs),
+            "num_rows": len(pairs), "num_recent_queries": int(recent.shape[0]),
+            "num_entries": int(self._alive_count), "num_blocks": len(self._post),
+            "gamma": 0.0, "tau": float(self.eps),
+            "lsh_candidates_touched": touched, "lsh_dot_checks": 0, "lsh_candidates_returned": len(pairs),
+            "lsh_query_time": float(time.perf_counter() - t0),
+            "lsh_num_nodes_total": int(self._count), "lsh_num_nodes_alive": int(self._alive_count),
+            "lsh_dead_node_ratio": float(self._dead_count) / float(self._count) if self._count else 0.0,
+            "statstream_eps": float(self.eps), "statstream_index_dims": int(self.index_dims),
+        }
+        if not pairs:
+            return np.empty((0, 5), dtype=np.int64)
+        a = np.fromiter((p[0] for p in pairs), dtype=np.int64, count=len(pairs))
+        b = np.fromiter((p[1] for p in pairs), dtype=np.int64, count=len(pairs))
+        sid_a, sid_b, t_a, t_b = self._sid[a], self._sid[b], self._time[a], self._time[b]
+        rows = np.empty((len(pairs), 5), dtype=np.int64)
+        later_first = t_a >= t_b
+        rows[:, 0] = np.where(later_first, sid_a, sid_b); rows[:, 1] = np.where(later_first, sid_b, sid_a)
+        rows[:, 2] = np.where(later_first, t_a, t_b); rows[:, 3] = np.where(later_first, t_b, t_a)
+        eq = t_a == t_b
+        if np.any(eq):
+            swap = eq & (self._rank[a] > self._rank[b])
+            rows[swap, 0], rows[swap, 1] = sid_b[swap], sid_a[swap]
+        rows[:, 4] = self._w[a]
+        return rows
+
+    def find_pair_rows_full_cosine(self, recent_entry_ids, gamma, tau):
+        return self._find(recent_entry_ids, signed=False)
+
+    def find_pair_rows_full_cosine_signed(self, recent_entry_ids, gamma, tau):
+        return self._find(recent_entry_ids, signed=True)
+
+
+class CorrJoinDoubleFilterIndex:
+    """CorrJoin candidate index (Alizade Nikoo, Bohlen, Helmer -- PACMMOD 2023; Pattern B),
+    a reproduction of the authors' R code (`docs/reference_code/corrjoin_authors_R/`).
+
+    Input representation `sketch_paa_svd` = [PAA_ks(x_hat) | PAA_ke(x_hat)] per series
+    (Sketches._sketches_paa). At query time, over the alive population (= the current
+    window's series, since CorrJoin is synchronous and n_lags > 0 is refused):
+      1. SVD of the (m x ks) PAA block, project onto the top kb = 3 right singular vectors
+         (their `svdFunc` returns U[:, 1:nDim] %*% diag(q)); recomputed per window exactly
+         as their loop does -- a thin O(m ks^2) decomposition;
+      2. bucketing filter (their `BucketingFilter`): 3-D grid of cell side eps_1 over the
+         projections, the 27-cell neighbourhood probed, and an exact eps_1-ball test on
+         every pair met, eps_1 = sqrt(2 ks (1-T) / W). Their hardcoded `checkVal <- 9`
+         scan truncation is deliberately NOT reproduced (plan B3): full grid;
+      3. Euclidean filter on the ke block, eps_2 = sqrt(2 ke (1-T) / W);
+      4. exact correlation by the harness's shared validation kernel (their line 14).
+    Both eps are the paper's Alg. 1 line 1 (divide by W, eps_1 uses ks), confirmed against
+    `EuclThreshold <- sqrt(2*theta/frameSize)` in the R.
+
+    Negative correlation: `not_available`. Their acceptance uses |corr|, but both filters
+    above are Euclidean on the un-negated normalized vectors, so an anti-correlated pair
+    (d ~ sqrt(2(1+T))) is pruned long before it. The abs() is live but unreachable in
+    their own pipeline (verified in 2-CorrJoin.R); adding a -x_hat probe would be our
+    mechanism, not theirs. CorrTrack refuses neg_corr=True for this backend (plan §0d).
+    """
+
+    def __init__(self, n_vectors, ks, ke, kb, eps1, eps2, initial_capacity=1024, n_lagged_windows=1):
+        self.ks, self.ke, self.kb = int(ks), int(ke), int(kb)
+        self._n_vectors = int(n_vectors)
+        if self._n_vectors != self.ks + self.ke:
+            raise ValueError(f"CorrJoin index expects ks+ke={self.ks + self.ke} dims, got {self._n_vectors}")
+        if not (1 <= self.kb <= self.ks):
+            raise ValueError("kb must be in [1, ks]")
+        self.eps1, self.eps2 = float(eps1), float(eps2)
+        self.n_lagged_windows = int(n_lagged_windows)
+        self.supports_neg_corr = "not_available"
+        self.supports_lags = False
+        cap = max(16, int(initial_capacity))
+        self._vectors = np.empty((cap, self._n_vectors), dtype=np.float64)
+        self._win = np.empty(cap, dtype=np.int64); self._sid = np.empty(cap, dtype=np.int64)
+        self._rank = np.empty(cap, dtype=np.int64); self._time = np.empty(cap, dtype=np.int64)
+        self._w = np.empty(cap, dtype=np.int64); self._alive = np.zeros(cap, dtype=bool)
+        self._count = 0; self._alive_count = 0; self._dead_count = 0
+        offs = np.array(np.meshgrid(*([np.arange(-1, 2)] * self.kb), indexing="ij")).reshape(self.kb, -1).T
+        self._neighbor_offsets = offs.astype(np.int64)
+        self.last_stats = {}
+        self.last_r1 = None      # fraction of pairs surviving filter 1 (their speedup ceiling 1/r1)
+
+    def _grow(self, need):
+        cap = self._vectors.shape[0]
+        if self._count + need <= cap:
+            return
+        new_cap = max(cap * 2, self._count + need)
+        def g(a, shape):
+            out = np.empty(shape, dtype=a.dtype); out[: self._count] = a[: self._count]; return out
+        self._vectors = g(self._vectors, (new_cap, self._n_vectors))
+        for name in ("_win", "_sid", "_rank", "_time", "_w"):
+            setattr(self, name, g(getattr(self, name), (new_cap,)))
+        alive = np.zeros(new_cap, dtype=bool); alive[: self._count] = self._alive[: self._count]; self._alive = alive
+
+    def notify_expected_n_series(self, observed_m):
+        return None
+
+    def clear_recent(self):
+        return None
+
+    def insert_many(self, values_in, window_idx_in, vectors_in=None, sid_idx_in=None,
+                    time_in=None, window_size_in=None, sid_rank_in=None):
+        win = np.asarray(window_idx_in, dtype=np.int64).ravel(); n = win.shape[0]
+        if n == 0:
+            return np.empty(0, dtype=np.int64)
+        vec = np.ascontiguousarray(vectors_in, dtype=np.float64).reshape(n, -1)
+        if vec.shape[1] != self._n_vectors:
+            raise ValueError(f"vector dim {vec.shape[1]} != ks+ke {self._n_vectors}")
+        self._grow(n)
+        i0, i1 = self._count, self._count + n
+        self._vectors[i0:i1] = vec; self._win[i0:i1] = win
+        self._sid[i0:i1] = np.asarray(sid_idx_in, dtype=np.int64).ravel()
+        self._rank[i0:i1] = np.asarray(sid_rank_in, dtype=np.int64).ravel() if sid_rank_in is not None else self._sid[i0:i1]
+        self._time[i0:i1] = np.asarray(time_in, dtype=np.int64).ravel()
+        self._w[i0:i1] = np.asarray(window_size_in, dtype=np.int64).ravel()
+        self._alive[i0:i1] = True
+        self._count = i1; self._alive_count += n
+        return np.arange(i0, i1, dtype=np.int64)
+
+    def drop_before_time(self, min_valid_time):
+        live = self._alive[: self._count]
+        stale = live & (self._time[: self._count] < int(min_valid_time))
+        n_stale = int(np.count_nonzero(stale))
+        if n_stale:
+            self._alive[: self._count][stale] = False
+            self._alive_count -= n_stale; self._dead_count += n_stale
+
+    def find_pair_rows_full_cosine_signed(self, recent_entry_ids, gamma, tau):
+        raise NotImplementedError(
+            "CorrJoin has no reachable negative-correlation path: its two Euclidean filters prune "
+            "anti-correlated pairs before the |corr| acceptance (see class docstring). Run with "
+            "neg_corr=False; refused rather than extended (plan §0d)."
+        )
+
+    def find_pair_rows_full_cosine(self, recent_entry_ids, gamma, tau):
+        t0 = time.perf_counter()
+        alive_idx = np.nonzero(self._alive[: self._count])[0]
+        m = alive_idx.shape[0]
+        stats = {"lsh_candidates_touched": 0, "num_distance_checks": 0, "lsh_candidates_returned": 0}
+        if m < 2:
+            self.last_stats = self._stats(stats, m, 0, t0); return np.empty((0, 5), dtype=np.int64)
+        V = self._vectors[alive_idx]
+        # --- 1. per-window SVD of the ks block, keep kb most variable directions ---
+        Xs = V[:, : self.ks]
+        try:
+            _u, _sv, vt = np.linalg.svd(Xs, full_matrices=False)     # rows of vt = right singular vectors, descending
+            proj = Xs @ vt[: self.kb].T                                # (m, kb) == U[:, :kb] * s[:kb]
+        except np.linalg.LinAlgError:
+            proj = Xs[:, : self.kb]
+        if proj.shape[1] < self.kb:                                    # fewer than kb series: rank-deficient, pad
+            proj = np.hstack([proj, np.zeros((proj.shape[0], self.kb - proj.shape[1]))])
+        # --- 2. bucketing filter: kb-dim grid, side eps1, 27-neighbourhood, exact eps1-ball ---
+        cells = np.floor(proj / self.eps1).astype(np.int64)
+        post = {}
+        for i in range(m):
+            post.setdefault(tuple(cells[i].tolist()), []).append(i)
+        e1sq = self.eps1 * self.eps1
+        cand = []
+        touched = 0
+        for i in range(m):
+            ci = cells[i]
+            for off in self._neighbor_offsets:
+                lst = post.get(tuple((ci + off).tolist()))
+                if not lst:
+                    continue
+                for j in lst:
+                    if j <= i:
+                        continue
+                    touched += 1
+                    d = proj[i] - proj[j]
+                    if float(d @ d) <= e1sq:
+                        cand.append((i, j))
+        n_pairs_total = m * (m - 1) // 2
+        self.last_r1 = (len(cand) / n_pairs_total) if n_pairs_total else 0.0
+        # --- 3. Euclidean filter on the ke block ---
+        e2sq = self.eps2 * self.eps2
+        keep = []
+        for (i, j) in cand:
+            d = V[i, self.ks:] - V[j, self.ks:]
+            if float(d @ d) <= e2sq:
+                keep.append((i, j))
+        stats.update({"lsh_candidates_touched": touched, "num_distance_checks": touched + len(cand),
+                      "lsh_candidates_returned": len(keep)})
+        self.last_stats = self._stats(stats, m, len(cand), t0)
+        if not keep:
+            return np.empty((0, 5), dtype=np.int64)
+        a = alive_idx[np.fromiter((p[0] for p in keep), dtype=np.int64, count=len(keep))]
+        b = alive_idx[np.fromiter((p[1] for p in keep), dtype=np.int64, count=len(keep))]
+        # skip a pair of the same series (cannot happen synchronously, kept for safety)
+        ok = ~((self._sid[a] == self._sid[b]) & (self._time[a] == self._time[b]))
+        a, b = a[ok], b[ok]
+        sid_a, sid_b, t_a, t_b = self._sid[a], self._sid[b], self._time[a], self._time[b]
+        rows = np.empty((a.shape[0], 5), dtype=np.int64)
+        later_first = t_a >= t_b
+        rows[:, 0] = np.where(later_first, sid_a, sid_b); rows[:, 1] = np.where(later_first, sid_b, sid_a)
+        rows[:, 2] = np.where(later_first, t_a, t_b); rows[:, 3] = np.where(later_first, t_b, t_a)
+        eq = t_a == t_b
+        if np.any(eq):
+            swap = eq & (self._rank[a] > self._rank[b])
+            rows[swap, 0], rows[swap, 1] = sid_b[swap], sid_a[swap]
+        rows[:, 4] = self._w[a]
+        return rows
+
+    def _stats(self, st, m, n_after_bucket, t0):
+        return {
+            "num_index_candidates": st["lsh_candidates_touched"], "num_enumerated_candidates": st["lsh_candidates_touched"],
+            "num_valid_index_candidates": st["lsh_candidates_touched"], "num_unique_index_candidates": st["lsh_candidates_touched"],
+            "num_duplicate_index_candidates": 0, "num_unique_pre_dot_pairs": n_after_bucket,
+            "num_duplicate_pre_dot_pairs": 0, "num_dot_checks": 0, "num_distance_checks": st["num_distance_checks"],
+            "num_after_similarity": st["lsh_candidates_returned"], "num_after_dot": st["lsh_candidates_returned"],
+            "num_pairs_before_dedupe": st["lsh_candidates_returned"], "num_pairs_after_dedupe": st["lsh_candidates_returned"],
+            "num_rows": st["lsh_candidates_returned"], "num_recent_queries": int(m),
+            "num_entries": int(self._alive_count), "num_blocks": 1, "gamma": 0.0, "tau": float(self.eps1),
+            "lsh_candidates_touched": st["lsh_candidates_touched"], "lsh_dot_checks": 0,
+            "lsh_candidates_returned": st["lsh_candidates_returned"],
+            "lsh_query_time": float(time.perf_counter() - t0),
+            "lsh_num_nodes_total": int(self._count), "lsh_num_nodes_alive": int(self._alive_count),
+            "lsh_dead_node_ratio": float(self._dead_count) / float(self._count) if self._count else 0.0,
+            "corrjoin_after_bucketing": int(n_after_bucket), "corrjoin_r1": float(self.last_r1 or 0.0),
+            "corrjoin_eps1": float(self.eps1), "corrjoin_eps2": float(self.eps2),
+        }
+
+
 class Candidates:
     def __init__(self,n_lagged_windows,grid_dimension,cell_size,grid_max,freq_threshold,corr_threshold,n_vectors,sketch_std,n_grids,neg_corr,
                  sign_prefilter_scale=1.3,sign_prefilter_extra=1, seed=None, full_vector=False, candidate_backend=None,
@@ -13052,9 +14042,24 @@ class Candidates:
                  candidate_hamming_threshold=None,
                  candidate_apply_hamming_filter=True, candidate_hamming_filter_max_frac=0.40,
                  candidate_lsh_max_candidates_per_query=0,
-                 candidate_search_n_threads=1):
+                 candidate_search_n_threads=1,
+                 parcorr_k=2, parcorr_f=0.7, parcorr_cell_size=None, parcorr_neighbor_probe=False,
+                 statstream_eps=None, statstream_index_dims=4, statstream_apply_dft_filter=True,
+                 corrjoin_ks=15, corrjoin_ke=30, corrjoin_kb=3, corrjoin_eps1=None, corrjoin_eps2=None):
         self.verbose = None
         self.neg_corr = neg_corr
+        # (2026-09-17) CorrJoin knobs -- only read when candidate_backend resolves to corrjoin_double_filter
+        self.corrjoin_ks, self.corrjoin_ke, self.corrjoin_kb = corrjoin_ks, corrjoin_ke, corrjoin_kb
+        self.corrjoin_eps1, self.corrjoin_eps2 = corrjoin_eps1, corrjoin_eps2
+        # (2026-09-17) StatStream knobs -- only read when candidate_backend resolves to statstream_grid
+        self.statstream_eps = statstream_eps
+        self.statstream_index_dims = statstream_index_dims
+        self.statstream_apply_dft_filter = statstream_apply_dft_filter
+        # (2026-09-17) ParCorr / CSZ knobs -- only read when candidate_backend resolves to parcorr_grid
+        self.parcorr_k = parcorr_k
+        self.parcorr_f = parcorr_f
+        self.parcorr_cell_size = parcorr_cell_size
+        self.parcorr_neighbor_probe = parcorr_neighbor_probe
         # Parameters grids
         self.n_lagged_windows = n_lagged_windows
         self.curr_time = None
@@ -13319,6 +14324,40 @@ class Candidates:
                 apply_dot_filter=bool(self.candidate_apply_dot_gamma_filter),
             )
             self._candidate_backend = "lsh_hamming_exact"
+        elif self._requested_candidate_backend == "parcorr_grid" and self._vector_match_enabled and not self.return_distances:
+            # (2026-09-17) ParCorr / Cole-Shasha-Zhao -- pure-python index, same
+            # interface as the two Cython indexes above. See ParCorrGridIndex.
+            self._lsh_index = ParCorrGridIndex(
+                n_vectors=int(self._vector_dim),
+                k=int(self.parcorr_k),
+                f=float(self.parcorr_f),
+                cell_size=float(self.parcorr_cell_size),
+                neighbor_probe=bool(self.parcorr_neighbor_probe),
+                initial_capacity=1024,
+                n_lagged_windows=int(self.n_lagged_windows),
+            )
+            self._candidate_backend = "parcorr_grid"
+        elif self._requested_candidate_backend == "statstream_grid" and self._vector_match_enabled and not self.return_distances:
+            # (2026-09-17) StatStream -- see StatStreamGridIndex.
+            self._lsh_index = StatStreamGridIndex(
+                n_vectors=int(self._vector_dim),
+                eps=float(self.statstream_eps),
+                index_dims=int(self.statstream_index_dims),
+                initial_capacity=1024,
+                n_lagged_windows=int(self.n_lagged_windows),
+                apply_dft_distance_filter=bool(self.statstream_apply_dft_filter),
+                neg_corr=bool(self.neg_corr),
+            )
+            self._candidate_backend = "statstream_grid"
+        elif self._requested_candidate_backend == "corrjoin_double_filter" and self._vector_match_enabled and not self.return_distances:
+            # (2026-09-17) CorrJoin -- see CorrJoinDoubleFilterIndex.
+            self._lsh_index = CorrJoinDoubleFilterIndex(
+                n_vectors=int(self._vector_dim),
+                ks=int(self.corrjoin_ks), ke=int(self.corrjoin_ke), kb=int(self.corrjoin_kb),
+                eps1=float(self.corrjoin_eps1), eps2=float(self.corrjoin_eps2),
+                initial_capacity=1024, n_lagged_windows=int(self.n_lagged_windows),
+            )
+            self._candidate_backend = "corrjoin_double_filter"
         elif lsh_requested or hamming_exact_requested:
             raise RuntimeError(
                 f"candidate_backend='{self._requested_candidate_backend}' requires the "
@@ -17703,6 +18742,8 @@ class CorrTrack_optimize:
         record["validation_metric"] = getattr(corrtrack, "validation_metric", None)
         # (2026-07-06) Part 1 -- see docs/implementation_log.md.
         record["candidate_lsh_n_bands"] = getattr(corrtrack, "candidate_lsh_n_bands", None)
+        for _pk in ("parcorr_k", "parcorr_f", "parcorr_c", "parcorr_neighbor_probe", "parcorr_cell_size", "supports_neg_corr", "statstream_n_coeffs", "statstream_index_dims", "statstream_apply_dft_filter", "statstream_eps", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2"):
+            record[_pk] = getattr(corrtrack, _pk, None)
         record["candidate_apply_dot_gamma_filter"] = getattr(corrtrack, "candidate_apply_dot_gamma_filter", None)
         record["candidate_hamming_threshold"] = getattr(corrtrack, "candidate_hamming_threshold", None)
         record["candidate_apply_hamming_filter"] = getattr(corrtrack, "candidate_apply_hamming_filter", None)

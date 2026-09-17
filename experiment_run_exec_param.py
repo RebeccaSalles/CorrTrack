@@ -51,6 +51,31 @@ BRAID_GAMMA = 0.4
 BRAID_THIN = False
 BRAID_THIN_D0 = 400
 BRAID_REPORT_MODE = "all_lags"
+# ParCorr / Cole-Shasha-Zhao (CANDIDATE_BACKEND="parcorr_grid"; DMKD 2018 / KDD 2005).
+#   Paper values: k=2, f=0.7. PARCORR_C is CSZ's distance multiplier (cell = c*sqrt(2(1-T)));
+#   their published sweep is [0.1, 1.3] and it MUST be calibrated to target recall per
+#   docs/competitor_implementation_plan.md §2.3 -- 0.7 is the sweep midpoint, not a result.
+#   Requires NEG_CORR = False (no negative-correlation mechanism in either paper).
+PARCORR_K = 2
+PARCORR_F = 0.7
+PARCORR_C = 0.7
+PARCORR_NEIGHBOR_PROBE = False
+# StatStream (DATA_REPRESENTATION="sketch_dft", CANDIDATE_BACKEND="statstream_grid"; VLDB 2002).
+#   Paper: n=16 coefficients (swept 16-40); eps = sqrt(1-T) is derived, not a knob. The
+#   paper does not state its grid dimensionality h; 3^h neighbour probes per query.
+#   Negative correlation (Lemma 3) and lags (§3.6) are specified-not-evaluated by the paper
+#   and run as their spec / our evaluation, tagged "specified" in the record.
+STATSTREAM_N_COEFFS = 16
+STATSTREAM_INDEX_DIMS = 4
+STATSTREAM_APPLY_DFT_FILTER = True
+# CorrJoin (DATA_REPRESENTATION="sketch_paa_svd", CANDIDATE_BACKEND="corrjoin_double_filter";
+#   PACMMOD 2023, reproduced from the authors' R code). Paper: ks=15, ke=30, kb=3 with W=1020;
+#   ks and ke MUST divide WINDOW_SIZE (for W=168 use e.g. ks=14, ke=28 and say so). eps_1/eps_2
+#   are derived. Synchronous only (N_LAGS=0) and NEG_CORR=False: its filters make anti-correlated
+#   pairs unreachable (see CorrJoinDoubleFilterIndex).
+CORRJOIN_KS = 15
+CORRJOIN_KE = 30
+CORRJOIN_KB = 3
 
 # CorrTrack main-run validation control.
 CORR_VAL = True

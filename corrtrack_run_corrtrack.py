@@ -118,6 +118,19 @@ DEFAULT_VALIDATION_INCREMENTAL_CUTPOINT_REFRESH_THRESHOLD = getattr(
 # geometry, not a mathematical guarantee. Inert for every other
 # candidate_backend value.
 DEFAULT_CANDIDATE_LSH_N_BANDS = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_LSH_N_BANDS", 64)
+# (2026-09-17) ParCorr / Cole-Shasha-Zhao arm (--candidate-backend parcorr_grid)
+DEFAULT_PARCORR_K = getattr(_DEFAULT_EXEC_CFG, "PARCORR_K", 2)
+DEFAULT_PARCORR_F = getattr(_DEFAULT_EXEC_CFG, "PARCORR_F", 0.7)
+DEFAULT_PARCORR_C = getattr(_DEFAULT_EXEC_CFG, "PARCORR_C", 0.7)
+DEFAULT_PARCORR_NEIGHBOR_PROBE = getattr(_DEFAULT_EXEC_CFG, "PARCORR_NEIGHBOR_PROBE", False)
+# (2026-09-17) StatStream arm (--data-representation sketch_dft --candidate-backend statstream_grid)
+DEFAULT_STATSTREAM_N_COEFFS = getattr(_DEFAULT_EXEC_CFG, "STATSTREAM_N_COEFFS", 16)
+DEFAULT_STATSTREAM_INDEX_DIMS = getattr(_DEFAULT_EXEC_CFG, "STATSTREAM_INDEX_DIMS", 4)
+DEFAULT_STATSTREAM_APPLY_DFT_FILTER = getattr(_DEFAULT_EXEC_CFG, "STATSTREAM_APPLY_DFT_FILTER", True)
+# (2026-09-17) CorrJoin arm (--data-representation sketch_paa_svd --candidate-backend corrjoin_double_filter)
+DEFAULT_CORRJOIN_KS = getattr(_DEFAULT_EXEC_CFG, "CORRJOIN_KS", 15)
+DEFAULT_CORRJOIN_KE = getattr(_DEFAULT_EXEC_CFG, "CORRJOIN_KE", 30)
+DEFAULT_CORRJOIN_KB = getattr(_DEFAULT_EXEC_CFG, "CORRJOIN_KB", 3)
 DEFAULT_CANDIDATE_APPLY_DOT_GAMMA_FILTER = getattr(_DEFAULT_EXEC_CFG, "CANDIDATE_APPLY_DOT_GAMMA_FILTER", True)
 # HammingExactIndex (candidate_backend="hamming_exact"): exact packed-bit
 # Hamming pre-filter, no bands/buckets. None auto-derives the Hamming touch
@@ -188,6 +201,16 @@ VALIDATION_INCREMENTAL_M2 = DEFAULT_VALIDATION_INCREMENTAL_M2
 VALIDATION_INCREMENTAL_MAX_AGE_STEPS = DEFAULT_VALIDATION_INCREMENTAL_MAX_AGE_STEPS
 VALIDATION_INCREMENTAL_CUTPOINT_REFRESH_THRESHOLD = DEFAULT_VALIDATION_INCREMENTAL_CUTPOINT_REFRESH_THRESHOLD
 CANDIDATE_LSH_N_BANDS = DEFAULT_CANDIDATE_LSH_N_BANDS
+PARCORR_K = DEFAULT_PARCORR_K
+PARCORR_F = DEFAULT_PARCORR_F
+PARCORR_C = DEFAULT_PARCORR_C
+PARCORR_NEIGHBOR_PROBE = DEFAULT_PARCORR_NEIGHBOR_PROBE
+STATSTREAM_N_COEFFS = DEFAULT_STATSTREAM_N_COEFFS
+STATSTREAM_INDEX_DIMS = DEFAULT_STATSTREAM_INDEX_DIMS
+STATSTREAM_APPLY_DFT_FILTER = DEFAULT_STATSTREAM_APPLY_DFT_FILTER
+CORRJOIN_KS = DEFAULT_CORRJOIN_KS
+CORRJOIN_KE = DEFAULT_CORRJOIN_KE
+CORRJOIN_KB = DEFAULT_CORRJOIN_KB
 CANDIDATE_APPLY_DOT_GAMMA_FILTER = DEFAULT_CANDIDATE_APPLY_DOT_GAMMA_FILTER
 CANDIDATE_HAMMING_THRESHOLD = DEFAULT_CANDIDATE_HAMMING_THRESHOLD
 CANDIDATE_APPLY_HAMMING_FILTER = DEFAULT_CANDIDATE_APPLY_HAMMING_FILTER
@@ -388,6 +411,16 @@ def build_base_config():
         "validation_incremental_max_age_steps": VALIDATION_INCREMENTAL_MAX_AGE_STEPS,
         "validation_incremental_cutpoint_refresh_threshold": VALIDATION_INCREMENTAL_CUTPOINT_REFRESH_THRESHOLD,
         "candidate_lsh_n_bands": CANDIDATE_LSH_N_BANDS,
+        "parcorr_k": PARCORR_K,
+        "parcorr_f": PARCORR_F,
+        "parcorr_c": PARCORR_C,
+        "parcorr_neighbor_probe": PARCORR_NEIGHBOR_PROBE,
+        "statstream_n_coeffs": STATSTREAM_N_COEFFS,
+        "statstream_index_dims": STATSTREAM_INDEX_DIMS,
+        "statstream_apply_dft_filter": STATSTREAM_APPLY_DFT_FILTER,
+        "corrjoin_ks": CORRJOIN_KS,
+        "corrjoin_ke": CORRJOIN_KE,
+        "corrjoin_kb": CORRJOIN_KB,
         "candidate_lsh_target_occupancy": CANDIDATE_LSH_TARGET_OCCUPANCY,
         "candidate_apply_dot_gamma_filter": CANDIDATE_APPLY_DOT_GAMMA_FILTER,
         "candidate_hamming_threshold": CANDIDATE_HAMMING_THRESHOLD,
@@ -474,16 +507,40 @@ def main():
         help="Sketch representation: 'auto' (default, picks per --validation-metric: sketch_proj "
         "for pearson, sketch_concordance for spearman/kendall, sketch_multichannel for dist_corr), "
         "'raw' (no representation -- exhaustive pairwise enumeration; requires "
-        "--candidate-backend auto/brute_force), 'sketch_proj', 'sketch_concordance', or "
-        "'sketch_multichannel'. Orthogonal to --candidate-backend.",
+        "--candidate-backend auto/brute_force), 'sketch_proj', 'sketch_concordance', "
+        "'sketch_multichannel', 'sketch_dft' (StatStream digest: first n DFT coefficients of the "
+        "normalized window; pairs with --candidate-backend statstream_grid), or 'sketch_paa_svd' (CorrJoin: "
+        "PAA_ks | PAA_ke of the normalized window; pairs with corrjoin_double_filter). Orthogonal to --candidate-backend.",
     )
     parser.add_argument(
         "--candidate-backend",
         default=None,
         help="Search/index mechanism: 'auto' (default, resolves to lsh_approx), 'lsh_approx', "
-        "'hamming_exact', or 'brute_force' (exhaustive; forces data-representation to 'raw'). "
+        "'hamming_exact', 'brute_force' (exhaustive; forces data-representation to 'raw'), or "
+        "'parcorr_grid' (ParCorr / Cole-Shasha-Zhao competitor: sketch split into k-dim group "
+        "grids, vote across a fraction f; see --parcorr-*; requires neg_corr=False). "
         "Orthogonal to --data-representation.",
     )
+    parser.add_argument("--parcorr-k", type=int, default=None,
+        help="parcorr_grid: sketch coordinates per group grid. Paper: 2 (n_vectors must be divisible).")
+    parser.add_argument("--parcorr-f", type=float, default=None,
+        help="parcorr_grid: fraction of grids that must co-locate a pair. Paper: 0.7, calibrated to 0.95 recall.")
+    parser.add_argument("--parcorr-c", type=float, default=None,
+        help="parcorr_grid: Cole-Shasha-Zhao distance multiplier; cell side = c*sqrt(2(1-T)). Published sweep [0.1, 1.3]; default 0.7 is a starting point to calibrate, not a result.")
+    parser.add_argument("--statstream-n-coeffs", type=int, default=None,
+        help="sketch_dft/statstream_grid: DFT coefficients kept (2n real dims). Paper: 16 (swept 16-40).")
+    parser.add_argument("--statstream-index-dims", type=int, default=None,
+        help="statstream_grid: first h dims of the DFT cube used for the grid (3^h neighbour probes). Paper gives no value; default 4.")
+    parser.add_argument("--no-statstream-dft-filter", dest="statstream_apply_dft_filter", action="store_false", default=None,
+        help="statstream_grid: disable the n-approximate DFT-distance post-filter (grid only; Theorem 2 anchor).")
+    parser.add_argument("--corrjoin-ks", type=int, default=None,
+        help="sketch_paa_svd: PAA frames feeding the SVD. Paper: 15. Must divide window_size.")
+    parser.add_argument("--corrjoin-ke", type=int, default=None,
+        help="sketch_paa_svd: PAA frames for the Euclidean filter. Paper: 30. Must divide window_size.")
+    parser.add_argument("--corrjoin-kb", type=int, default=None,
+        help="corrjoin_double_filter: SVD dimensions kept for the bucketing grid. Paper: 3.")
+    parser.add_argument("--parcorr-neighbor-probe", dest="parcorr_neighbor_probe", action="store_true", default=None,
+        help="parcorr_grid: Cole-Shasha-Zhao variant -- probe neighbouring cells and test the group radius (ParCorr default is same-cell only).")
     parser.add_argument(
         "--candidate-lsh-n-bands",
         type=int,
@@ -735,6 +792,9 @@ def main():
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD, RESULT_FOLDER
     global PARALLEL, PARALLEL_SKETCH, PARALLEL_CANDIDATES, PARALLEL_VALIDATION
     global EXEC_MODE, NEG_CORR, CORR_VAL, MONITOR, TRACK_MIN_DIST, TRAIN_RATIO, OPTIM_TUNING_MODE, ARTIFACT_MODE, ARTIFACT_BUFFER_MAX_ROWS, ARTIFACT_MERGE_MODE, SAVE_ONLY_REQUIRED_ARTIFACTS, SAVE_MAXLAG_ARTIFACTS, DATA_LOADER, MAX_WORKERS, CANDIDATE_COSINE_THRESHOLD, HYBRID_VALIDATION, HYBRID_VALIDATION_MIN_REPEAT_RATE, HYBRID_VALIDATION_DISABLE_RATE, HYBRID_VALIDATION_EMA_ALPHA, HYBRID_VALIDATION_MIN_CANDIDATES, CANDIDATE_LSH_N_BANDS, CANDIDATE_APPLY_DOT_GAMMA_FILTER, CANDIDATE_HAMMING_THRESHOLD, CANDIDATE_APPLY_HAMMING_FILTER, CANDIDATE_HAMMING_FILTER_MAX_FRAC, CANDIDATE_LSH_MAX_CANDIDATES_PER_QUERY
+    global PARCORR_K, PARCORR_F, PARCORR_C, PARCORR_NEIGHBOR_PROBE
+    global STATSTREAM_N_COEFFS, STATSTREAM_INDEX_DIMS, STATSTREAM_APPLY_DFT_FILTER
+    global CORRJOIN_KS, CORRJOIN_KE, CORRJOIN_KB
     global DATA_REPRESENTATION, CANDIDATE_BACKEND, CANDIDATE_LSH_TARGET_OCCUPANCY, VALIDATION_METRIC, DIST_CORR_ALGORITHM, CONCORDANCE_N_GAPS, CONCORDANCE_TARGET_DIM, CONCORDANCE_MIN_GAP, CONCORDANCE_MIN_CAPACITY, CONCORDANCE_MULTICHANNEL_GAMMA, DISTANCE_CORR_SKETCH_K, DISTANCE_CORR_SKETCH_FREQ_LOW, DISTANCE_CORR_SKETCH_FREQ_HIGH, DISTANCE_CORR_SKETCH_FREQ_SEED, DISTANCE_CORR_SKETCH_GATE_TAU, DISTANCE_CORR_SKETCH_MULTICHANNEL_GAMMA, DISTANCE_CORR_SKETCH_APPLY_TIER2_GATE, VALIDATION_INCREMENTAL_APPROX, VALIDATION_INCREMENTAL_M1, VALIDATION_INCREMENTAL_M2, VALIDATION_INCREMENTAL_MAX_AGE_STEPS, VALIDATION_INCREMENTAL_CUTPOINT_REFRESH_THRESHOLD
     global VERBOSE, TESTING
 
@@ -795,6 +855,16 @@ def main():
     DATA_REPRESENTATION = _resolve_cfg_value(args.data_representation, cfg_exec, "DATA_REPRESENTATION", DEFAULT_DATA_REPRESENTATION)
     CANDIDATE_BACKEND = _resolve_cfg_value(args.candidate_backend, cfg_exec, "CANDIDATE_BACKEND", DEFAULT_CANDIDATE_BACKEND)
     CANDIDATE_LSH_N_BANDS = _resolve_cfg_value(args.candidate_lsh_n_bands, cfg_exec, "CANDIDATE_LSH_N_BANDS", DEFAULT_CANDIDATE_LSH_N_BANDS)
+    PARCORR_K = int(_resolve_cfg_value(args.parcorr_k, cfg_exec, "PARCORR_K", DEFAULT_PARCORR_K))
+    PARCORR_F = float(_resolve_cfg_value(args.parcorr_f, cfg_exec, "PARCORR_F", DEFAULT_PARCORR_F))
+    PARCORR_C = float(_resolve_cfg_value(args.parcorr_c, cfg_exec, "PARCORR_C", DEFAULT_PARCORR_C))
+    PARCORR_NEIGHBOR_PROBE = bool(_resolve_cfg_value(args.parcorr_neighbor_probe, cfg_exec, "PARCORR_NEIGHBOR_PROBE", DEFAULT_PARCORR_NEIGHBOR_PROBE))
+    STATSTREAM_N_COEFFS = int(_resolve_cfg_value(args.statstream_n_coeffs, cfg_exec, "STATSTREAM_N_COEFFS", DEFAULT_STATSTREAM_N_COEFFS))
+    STATSTREAM_INDEX_DIMS = int(_resolve_cfg_value(args.statstream_index_dims, cfg_exec, "STATSTREAM_INDEX_DIMS", DEFAULT_STATSTREAM_INDEX_DIMS))
+    STATSTREAM_APPLY_DFT_FILTER = bool(_resolve_cfg_value(args.statstream_apply_dft_filter, cfg_exec, "STATSTREAM_APPLY_DFT_FILTER", DEFAULT_STATSTREAM_APPLY_DFT_FILTER))
+    CORRJOIN_KS = int(_resolve_cfg_value(args.corrjoin_ks, cfg_exec, "CORRJOIN_KS", DEFAULT_CORRJOIN_KS))
+    CORRJOIN_KE = int(_resolve_cfg_value(args.corrjoin_ke, cfg_exec, "CORRJOIN_KE", DEFAULT_CORRJOIN_KE))
+    CORRJOIN_KB = int(_resolve_cfg_value(args.corrjoin_kb, cfg_exec, "CORRJOIN_KB", DEFAULT_CORRJOIN_KB))
     CANDIDATE_LSH_TARGET_OCCUPANCY = _resolve_cfg_value(args.candidate_lsh_target_occupancy, cfg_exec, "CANDIDATE_LSH_TARGET_OCCUPANCY", DEFAULT_CANDIDATE_LSH_TARGET_OCCUPANCY)
     CANDIDATE_APPLY_DOT_GAMMA_FILTER = _resolve_cfg_value(args.candidate_apply_dot_gamma_filter, cfg_exec, "CANDIDATE_APPLY_DOT_GAMMA_FILTER", DEFAULT_CANDIDATE_APPLY_DOT_GAMMA_FILTER)
     CANDIDATE_HAMMING_THRESHOLD = _resolve_cfg_value(args.candidate_hamming_threshold, cfg_exec, "CANDIDATE_HAMMING_THRESHOLD", DEFAULT_CANDIDATE_HAMMING_THRESHOLD)

@@ -21,5 +21,6 @@ venv/
 /tmp_artifacts/
 /correlation/
 /datasets/synth_outputs/
+/datasets/competitor/
 /datasets/examples/asos-airports/fr-air_temperature.csv
 /datasets/examples/asos-airports/fr-wind_direction.csv

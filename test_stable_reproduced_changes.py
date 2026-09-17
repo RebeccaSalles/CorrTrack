@@ -5,6 +5,7 @@ import os
 import resource
 import sys
 import tempfile
+from pathlib import Path
 import unittest
 import unittest.mock
 
@@ -20,6 +21,9 @@ import corrtrack_run_bruteforce
 import candidate_kernels
 import library_corrtrack_parallel
 from library_corrtrack_parallel import (
+    CorrJoinDoubleFilterIndex,
+    StatStreamGridIndex,
+    ParCorrGridIndex,
     Candidates_BF_BRAID,
     Candidates_BF_TSUBASA,
     five_sums,
@@ -4093,6 +4097,10 @@ class StableReproducedChangesTest(unittest.TestCase):
                 counts[mode] = record["correlated"]
                 if mode != "bruteforce":
                     self._assert_competitor_contract(record, pattern="A")
+                # (2026-09-17) the per-arm evidence tier reaches the record for Pattern A too
+                self.assertEqual(record["supports_neg_corr"],
+                                 {"bruteforce": "native", "exact_stomp": "native",
+                                  "filcorr": "enabled_by_us", "tsubasa": "native"}[mode], mode)
         self.assertGreater(counts["bruteforce"], 0)
         for mode in ("exact_stomp", "filcorr", "tsubasa"):
             self.assertEqual(counts[mode], counts["bruteforce"], mode)
@@ -4147,6 +4155,66 @@ class StableReproducedChangesTest(unittest.TestCase):
         self.assertEqual(mism, 0)
         self.assertLess(maxerr, 1e-12)
         self.assertGreater(br.incremental_updates, br.full_initializations, "rolling updates must engage")
+
+    def test_competitor_loader_orientation_ffill_and_contract(self):
+        # (2026-09-17) phase 0f: datasets/competitor_loader.py bridges the (m, T) npz files
+        # written by datasets/fetch/*.py to the runners' (T, 1 + m) DATA_LOADER contract.
+        import json as _json
+        from datasets import competitor_loader as cl
+        m, T = 4, 50
+        rng = np.random.default_rng(0)
+        data = rng.standard_normal((m, T))
+        data[1, :3] = np.nan            # leading gap -> back-filled with first observation
+        data[2, 10:14] = np.nan         # interior gap -> forward-filled
+        data[3, :] = np.nan             # dead series -> dropped
+        with tempfile.TemporaryDirectory() as tmp:
+            np.savez(os.path.join(tmp, "toy.npz"), data=data, ids=np.array([f"s{i}" for i in range(m)]),
+                     meta=_json.dumps({"source": "unit test"}))
+            old = cl.SEARCH_DIRS
+            cl.SEARCH_DIRS = (Path(tmp),)
+            try:
+                out, ids = cl.load_dataset(name="toy")
+                out2, ids2 = cl.load_dataset(name="toy", max_series=2, max_obs=20)
+                with self.assertRaises(FileNotFoundError):
+                    cl.load_dataset(name="missing_set")
+            finally:
+                cl.SEARCH_DIRS = old
+        self.assertEqual(out.shape, (T, 1 + 3))
+        self.assertEqual(list(ids), ["s0", "s1", "s2"])
+        np.testing.assert_array_equal(out[:, 0], np.arange(T))
+        np.testing.assert_allclose(out[:, 1], data[0])
+        self.assertFalse(np.isnan(out).any())
+        np.testing.assert_allclose(out[:3, 2], data[1, 3])
+        np.testing.assert_allclose(out[10:14, 3], data[2, 9])
+        self.assertEqual(out2.shape, (20, 3))
+        self.assertEqual(list(ids2), ["s0", "s1"])
+
+    def test_thinbraid_tracks_exact_after_buffer_rolls_on_offset_mean_data(self):
+        # (2026-09-17) Two defects found on real Motes data, both invisible on the
+        # zero-mean, short synthetic streams used above: (1) the shared-projection
+        # cache was keyed on a buffer-relative block index, so once the rolling
+        # buffer started evicting, every step reused the first step's px (mean
+        # |corr error| 0.67); (2) Eq. 24 applied to raw windows lets the JL error
+        # scale with W*(mean_x - mean_y)^2 while Pearson needs the centred cross-sum
+        # (mean error 0.16 even with the cache fixed). Series here have distinct
+        # offsets (18..30) and small variance, and the stream is long enough for the
+        # buffer to roll many times; ThinBRAID must stay within JL noise of exact.
+        rng = np.random.default_rng(11)
+        m, W, step, N = 12, 96, 12, 1200
+        base = np.cumsum(rng.standard_normal(N)) * 0.05
+        X = np.empty((m, N))
+        for i in range(m):
+            X[i] = 18.0 + i + 0.7 * base + 0.3 * np.cumsum(rng.standard_normal(N)) * 0.05 + 0.02 * rng.standard_normal(N)
+        ids = [f"s{i}" for i in range(m)]
+        node = Candidates_BF_BRAID(W, step, 0, 0.0, neg_corr=False, thin=True, thin_d0=400)
+        rows = corrs = None
+        for s0 in range(0, N, step):
+            rows, corrs, _, _ = node.run(np.vstack([np.arange(s0, s0 + step), X[:, s0:s0 + step]]), ids, verbose=False, testing=False)
+        C = np.corrcoef(X[:, N - W:N])
+        err = np.array([abs(float(c) - C[int(r[0]), int(r[1])]) for r, c in zip(rows, corrs)])
+        self.assertEqual(err.size, m * (m - 1) // 2)
+        self.assertLess(err.mean(), 0.03, f"mean |err| {err.mean():.4f}")
+        self.assertLess(err.max(), 0.15, f"max |err| {err.max():.4f}")
 
     def test_braid_lag_estimate_recovers_exact_earliest_local_max(self):
         # Definition 1 applied to the exact CCF vs BRAID's interpolated estimate.
@@ -4218,6 +4286,426 @@ class StableReproducedChangesTest(unittest.TestCase):
         self.assertEqual(br["correlated"], bf["correlated"])
         self.assertEqual(int(br["braid_b"]), 16)
         self._assert_competitor_contract(br, pattern="A")
+
+    # ------------------------------------------------------------------
+    # 2026-09-17 -- Track B1: ParCorr / Cole-Shasha-Zhao (candidate_backend="parcorr_grid")
+    # ------------------------------------------------------------------
+
+    def test_parcorr_grid_index_vote_and_row_semantics(self):
+        # Unit-level: the fraction-f vote across k-dim group grids, ParCorr's
+        # same-cell rule vs CSZ's neighbour+radius rule, and canonical rows
+        # matching the Cython indexes (later time first; equal time -> lower
+        # rank first). r=6, k=2 -> 3 grids; f=0.7 -> required_hits = ceil(2.1) = 3.
+        idx = ParCorrGridIndex(n_vectors=6, k=2, f=0.7, cell_size=1.0)
+        self.assertEqual(idx.n_grids, 3)
+        self.assertEqual(idx.required_hits, 3)
+        self.assertEqual(idx.supports_neg_corr, "not_available")
+        # e0 and e1: same cell in all 3 grids. e2: same cell as e0 in 2 grids only.
+        # e3: adjacent cell (within radius) in all 3 grids -> ParCorr rejects, CSZ accepts.
+        v = np.array([
+            [0.1, 0.1, 0.1, 0.1, 0.1, 0.1],   # e0  sid 0, t=10
+            [0.2, 0.3, 0.4, 0.2, 0.3, 0.1],   # e1  sid 1, t=10  (cells all 0 -> 3 hits)
+            [0.1, 0.1, 0.1, 0.1, 1.5, 1.5],   # e2  sid 2, t=10  (2 hits)
+            [-0.1, 0.1, 0.1, -0.1, 0.1, 0.1], # e3  sid 3, t=10  (cell -1 in grids 0,1; dist 0.2 < 1.0)
+        ])
+        ids = idx.insert_many(None, np.arange(4), v, np.arange(4), np.full(4, 10), np.full(4, 8), np.arange(4))
+        self.assertEqual(ids.tolist(), [0, 1, 2, 3])
+        rows = idx.find_pair_rows_full_cosine(np.arange(4), 0.7, 0.0)
+        pairs = {(int(r[0]), int(r[1])) for r in rows}
+        self.assertEqual(pairs, {(0, 1)})
+        self.assertTrue(all(r[2] == 10 and r[3] == 10 and r[4] == 8 for r in rows))
+        self.assertEqual(idx.last_stats["parcorr_required_hits"], 3)
+        self.assertGreater(idx.last_stats["lsh_candidates_touched"], 0)
+        # CSZ mode: e3 is within radius in every group -> accepted
+        csz = ParCorrGridIndex(n_vectors=6, k=2, f=0.7, cell_size=1.0, neighbor_probe=True)
+        csz.insert_many(None, np.arange(4), v, np.arange(4), np.full(4, 10), np.full(4, 8), np.arange(4))
+        rows = csz.find_pair_rows_full_cosine(np.arange(4), 0.7, 0.0)
+        self.assertEqual({(int(r[0]), int(r[1])) for r in rows}, {(0, 1), (0, 3), (1, 3)})
+        # canonical ordering for a lagged pair: later time first
+        lag = ParCorrGridIndex(n_vectors=6, k=2, f=0.7, cell_size=1.0)
+        lag.insert_many(None, np.array([0]), v[:1], np.array([0]), np.array([10]), np.array([8]), np.array([0]))
+        lag.insert_many(None, np.array([1]), v[1:2], np.array([1]), np.array([18]), np.array([8]), np.array([1]))
+        rows = lag.find_pair_rows_full_cosine(np.array([1]), 0.7, 0.0)
+        self.assertEqual(rows.tolist(), [[1, 0, 18, 10, 8]])
+        # negative correlation refused, not extended
+        with self.assertRaises(NotImplementedError):
+            idx.find_pair_rows_full_cosine_signed(np.arange(4), 0.7, 0.0)
+        # expiry drops by time
+        lag.drop_before_time(15)
+        self.assertEqual(lag._alive_count, 1)
+
+    def _parcorr_dataset(self):
+        rng = np.random.default_rng(42)
+        m, W, step, N = 60, 64, 8, 64 + 8 * 20
+        X = rng.standard_normal((m, N))
+        for i in range(0, 20, 2):
+            X[i + 1] = 0.9 * X[i] + np.sqrt(1 - 0.81) * rng.standard_normal(N)
+        data = np.vstack([np.arange(N), X])
+        ids = [f"s{i}" for i in range(m)]
+        return data, ids, W, step, N
+
+    def _parcorr_ct(self, data, ids, W, step, N, **kw):
+        ct = CorrTrack(window_size=W, basic_window=8, window_step=step, n_vectors=60, n_lags=0,
+                       corr_threshold=0.7, neg_corr=False, exec="sequential", parallel_sketch=False,
+                       parallel_candidates=False, parallel_validation=False, numeric_rows=True, **kw)
+        for s0 in range(0, N, step):
+            ct.run(data[:, s0:s0 + step], ids, verbose=False, testing=False, corr_val=True, monitor=False)
+        return ct
+
+    def test_parcorr_grid_backend_dispatch_normalization_and_tuning_surface(self):
+        # End-to-end through CorrTrack: the backend must (a) select
+        # ParCorrGridIndex, (b) switch the sketch to unit_l2_window (both papers
+        # normalize the window before projecting), (c) keep precision 1.0 (exact
+        # validation downstream), (d) show the published tuning surface: recall
+        # non-decreasing in c and in 1/f, and (e) refuse neg_corr=True.
+        data, ids, W, step, N = self._parcorr_dataset()
+        st = Candidates_BF_ExactSTOMP(W, step, 0, 0.7, neg_corr=False)
+        gt = {}
+        for s0 in range(0, N, step):
+            acc, _, _ = st.run(data[:, s0:s0 + step], ids, verbose=False, testing=False, numeric_rows=False)
+            gt.update(acc)
+        self.assertGreater(len(gt), 100)
+
+        def recall(**kw):
+            ct = self._parcorr_ct(data, ids, W, step, N, candidate_backend="parcorr_grid", **kw)
+            self.assertEqual(type(ct.grid_nodes[0]._lsh_index).__name__, "ParCorrGridIndex")
+            self.assertEqual(ct.sketch_norm, "unit_l2_window")
+            self.assertEqual(ct.sketch_nodes[0].sketch_norm, "unit_l2_window")
+            self.assertEqual(ct.supports_neg_corr, "not_available")
+            met = CorrTrack.compute_metrics_bf(ct.correlated, gt, windows=True)
+            self.assertEqual(met["precision"], 1.0)
+            return met["recall"], ct
+        r_small, _ = recall(parcorr_c=0.2)
+        r_mid, ct_mid = recall(parcorr_c=0.7)
+        r_big, _ = recall(parcorr_c=1.0)
+        r_loose_f, ct_loose = recall(parcorr_c=0.7, parcorr_f=0.5)
+        self.assertLess(r_small, r_mid)
+        self.assertLessEqual(r_mid, r_big)
+        self.assertLessEqual(r_mid, r_loose_f)
+        self.assertGreater(ct_loose.tested_candidates, ct_mid.tested_candidates)
+        # touched counter is populated (implementation-independent, plan §5b.1)
+        self.assertGreater(ct_mid.grid_nodes[0]._lsh_index.last_stats["lsh_candidates_touched"], 0)
+        with self.assertRaises(ValueError):
+            CorrTrack(window_size=W, basic_window=8, window_step=step, n_vectors=60, n_lags=0,
+                      corr_threshold=0.7, neg_corr=True, exec="sequential", candidate_backend="parcorr_grid")
+        with self.assertRaises(ValueError):   # n_vectors not divisible by k
+            CorrTrack(window_size=W, basic_window=8, window_step=step, n_vectors=61, n_lags=0,
+                      corr_threshold=0.7, neg_corr=False, exec="sequential", candidate_backend="parcorr_grid")
+
+    def test_parcorr_grid_filter_disabled_recovers_bruteforce(self):
+        # The §6.5 anchor for pruning arms: with the filter effectively disabled
+        # (one huge cell, one required hit) the candidate set is the full pair
+        # set and the validated set must equal brute force's exactly.
+        data, ids, W, step, N = self._parcorr_dataset()
+        st = Candidates_BF_ExactSTOMP(W, step, 0, 0.7, neg_corr=False)
+        gt = {}
+        for s0 in range(0, N, step):
+            acc, _, _ = st.run(data[:, s0:s0 + step], ids, verbose=False, testing=False, numeric_rows=False)
+            gt.update(acc)
+        ct = self._parcorr_ct(data, ids, W, step, N, candidate_backend="parcorr_grid",
+                              parcorr_c=1e6, parcorr_f=1e-9)
+        self.assertEqual(ct.grid_nodes[0]._lsh_index.required_hits, 1)
+        met = CorrTrack.compute_metrics_bf(ct.correlated, gt, windows=True)
+        self.assertEqual(met["recall"], 1.0)
+        self.assertEqual(met["precision"], 1.0)
+        self.assertEqual(set(ct.correlated), set(gt))
+        for k in gt:
+            self.assertAlmostEqual(ct.correlated[k], gt[k], places=9)
+
+    def test_run_and_log_corrtrack_parcorr_knobs_thread_and_pattern_b_contract(self):
+        # Knobs travel through run_params -> _extract_feature_overrides ->
+        # CorrTrack, land in the record, and the Pattern-B counter contract holds.
+        data, ids, W, step, N = self._parcorr_dataset()
+        base_config = dict(
+            window_size=W, window_step=step, basic_window=8, n_lags=0, corr_threshold=0.7,
+            neg_corr=False, exec="sequential", parallel_sketch=False, parallel_candidates=False,
+            parallel_validation=False, max_workers=0, monitor=False, track_min_dist=True,
+            artifact_mode="final", artifact_buffer_max_rows=250000, artifact_merge_mode="merged",
+            save_only_required_artifacts=True, save_maxlag_artifacts=False, verbose=False, testing=False,
+            validation_metric="pearson",
+        )
+        run_params = dict(n_vectors=60, seed=1, seed_toggle=2, preprocess=False,
+                          candidate_backend="parcorr_grid", parcorr_k=2, parcorr_f=0.5, parcorr_c=0.7,
+                          parcorr_neighbor_probe=False)
+        with tempfile.TemporaryDirectory() as tmp:
+            record, _, _ = run_and_log_corrtrack("diag_parcorr", data, ids, base_config, run_params,
+                                                 os.path.join(tmp, "run.csv"), recall_by_window=True,
+                                                 verbose=False, testing=False)
+        self.assertEqual(int(record["parcorr_k"]), 2)
+        self.assertAlmostEqual(float(record["parcorr_f"]), 0.5)
+        self.assertEqual(record["supports_neg_corr"], "not_available")
+        self.assertGreater(float(record["parcorr_cell_size"]), 0.0)
+        self._assert_competitor_contract(record, pattern="B")
+        self.assertGreater(int(record["candidate_search_lsh_candidates_touched"] or 0), 0)
+
+    # ------------------------------------------------------------------
+    # 2026-09-17 -- Track B2: StatStream (data_representation="sketch_dft" x "statstream_grid")
+    # ------------------------------------------------------------------
+
+    def test_sketch_dft_representation_is_normalized_dft_and_bounded(self):
+        # Sketches._sketches_dft must equal bins 1..n of the DFT of the centred window
+        # divided by its L2 norm (StatStream Lemma 4: X_hat_0 = 0, X_hat_i = X_i / sigma),
+        # as [Re, Im] with the paper's 1/sqrt(W) scaling; every coordinate within
+        # +-sqrt(2)/2 (Lemma 7); and Lemma 2's bound d_n(X_hat, Y_hat) <= sqrt(2(1-corr))
+        # must hold for every pair (the property the grid's no-false-negatives rests on).
+        rng = np.random.default_rng(11)
+        m, W, step, n = 12, 64, 8, 16
+        X = np.cumsum(rng.standard_normal((m, W)), axis=1) * rng.uniform(0.5, 3, (m, 1)) + rng.uniform(-5, 5, (m, 1))
+        data = np.vstack([np.arange(W), X]); ids = [f"s{i}" for i in range(m)]
+        ct = CorrTrack(window_size=W, basic_window=8, window_step=step, n_vectors=60, n_lags=0, corr_threshold=0.7,
+                       neg_corr=False, exec="sequential", parallel_sketch=False, parallel_candidates=False,
+                       parallel_validation=False, numeric_rows=True, data_representation="sketch_dft",
+                       candidate_backend="statstream_grid", statstream_n_coeffs=n)
+        for s0 in range(0, W, step):
+            ct.run(data[:, s0:s0 + step], ids, verbose=False, testing=False, corr_val=True, monitor=False)
+        sk = np.asarray(ct.sketch_nodes[0]._sketch_matrix)
+        self.assertEqual(sk.shape, (m, 2 * n))
+        self.assertEqual(ct.n_vectors, 2 * n)
+        centred = X - X.mean(axis=1, keepdims=True)
+        xhat = centred / np.linalg.norm(centred, axis=1, keepdims=True)
+        F = np.fft.fft(xhat, axis=1) / np.sqrt(W)
+        expected = np.hstack([F[:, 1:n + 1].real, F[:, 1:n + 1].imag])
+        np.testing.assert_allclose(sk, expected, rtol=0, atol=1e-12)
+        self.assertLessEqual(np.abs(sk).max(), np.sqrt(2) / 2 + 1e-12)
+        corr = np.corrcoef(X)
+        for i in range(m):
+            for j in range(i + 1, m):
+                d = np.linalg.norm(sk[i] - sk[j])
+                self.assertLessEqual(d, np.sqrt(max(2 * (1 - corr[i, j]), 0)) + 1e-9)
+
+    def _statstream_dataset(self, seed=7):
+        rng = np.random.default_rng(seed)
+        m, W, step, N = 40, 64, 8, 64 + 8 * 24
+        X = rng.standard_normal((m, N))
+        for i in range(0, 16, 2):
+            X[i + 1] = 0.9 * X[i] + np.sqrt(1 - 0.81) * rng.standard_normal(N)
+        for i in range(16, 24, 2):
+            X[i + 1] = -0.9 * X[i] + np.sqrt(1 - 0.81) * rng.standard_normal(N)      # anti-correlated
+        X[30, 16:] = X[29, :-16]; X[30, :16] = 0.0                                    # lag-16 copy
+        return np.vstack([np.arange(N), X]), [f"s{i}" for i in range(m)], W, step, N
+
+    def _gt(self, data, ids, W, step, n_lags, T, neg):
+        st = Candidates_BF_ExactSTOMP(W, step, n_lags, T, neg_corr=neg); g = {}
+        for s0 in range(0, data.shape[1], step):
+            acc, _, _ = st.run(data[:, s0:s0 + step], ids, verbose=False, testing=False, numeric_rows=False)
+            g.update(acc)
+        return g
+
+    def _statstream_ct(self, data, ids, W, step, n_lags, T, neg, **kw):
+        ct = CorrTrack(window_size=W, basic_window=8, window_step=step, n_vectors=60, n_lags=n_lags, corr_threshold=T,
+                       neg_corr=neg, exec="sequential", parallel_sketch=False, parallel_candidates=False,
+                       parallel_validation=False, numeric_rows=True, data_representation="sketch_dft",
+                       candidate_backend="statstream_grid", **kw)
+        for s0 in range(0, data.shape[1], step):
+            ct.run(data[:, s0:s0 + step], ids, verbose=False, testing=False, corr_val=True, monitor=False)
+        return ct
+
+    def test_statstream_grid_has_no_false_negatives_theorem_2(self):
+        # The sharpest anchor of any arm (plan §6.5): the paper separates two
+        # guarantees. The grid is provably false-negative-free (Theorem 2), so
+        # recall must be EXACTLY 1.0 against brute force with the DFT-distance
+        # post-filter disabled AND enabled, synchronous and lagged, positive-only
+        # and with Lemma 3's negative path -- and the validated set must equal
+        # brute force's exactly (exact validation downstream => precision 1.0).
+        data, ids, W, step, N = self._statstream_dataset()
+        for T in (0.7, 0.9):
+            for neg in (False, True):
+                for n_lags in (0, 16):
+                    g = self._gt(data, ids, W, step, n_lags, T, neg)
+                    self.assertGreater(len(g), 20)
+                    if neg:
+                        self.assertGreater(sum(1 for v in g.values() if v < 0), 0)
+                    if n_lags:
+                        self.assertGreater(sum(1 for k in g if k[2] != k[3]), 0)
+                    for dft_filter in (False, True):
+                        with self.subTest(T=T, neg=neg, n_lags=n_lags, dft_filter=dft_filter):
+                            ct = self._statstream_ct(data, ids, W, step, n_lags, T, neg,
+                                                     statstream_apply_dft_filter=dft_filter)
+                            self.assertEqual(type(ct.grid_nodes[0]._lsh_index).__name__, "StatStreamGridIndex")
+                            self.assertEqual(ct.supports_neg_corr, "specified")
+                            met = CorrTrack.compute_metrics_bf(ct.correlated, g, windows=True)
+                            self.assertEqual(met["recall"], 1.0)
+                            self.assertEqual(met["precision"], 1.0)
+                            self.assertEqual(set(ct.correlated), set(g))
+
+    def test_statstream_dft_filter_prunes_and_uncooperative_data_prunes_less(self):
+        # (a) the n-approximate DFT-distance filter reduces tested pairs without
+        # losing recall; (b) with few coefficients, white noise (uncooperative)
+        # is pruned far less than random walks (cooperative) -- the finding
+        # Cole-Shasha-Zhao / TSUBASA report, reproduced here as a regression guard.
+        data, ids, W, step, N = self._statstream_dataset()
+        g = self._gt(data, ids, W, step, 0, 0.7, False)
+        ct_on = self._statstream_ct(data, ids, W, step, 0, 0.7, False, statstream_apply_dft_filter=True)
+        ct_off = self._statstream_ct(data, ids, W, step, 0, 0.7, False, statstream_apply_dft_filter=False)
+        self.assertLess(ct_on.tested_candidates, ct_off.tested_candidates)
+        self.assertEqual(CorrTrack.compute_metrics_bf(ct_on.correlated, g, windows=True)["recall"], 1.0)
+        rng = np.random.default_rng(3)
+        m = 40
+        noise = rng.standard_normal((m, N))
+        walks = np.cumsum(rng.standard_normal((m, N)), axis=1)
+        for X in (noise, walks):
+            for i in range(0, 16, 2):
+                X[i + 1] = 0.9 * X[i] + np.sqrt(1 - 0.81) * rng.standard_normal(N) * X[i].std()
+        tested = {}
+        for name, X in (("noise", noise), ("walks", walks)):
+            d = np.vstack([np.arange(N), X])
+            ct = self._statstream_ct(d, ids, W, step, 0, 0.7, False, statstream_n_coeffs=4)
+            all_pairs = ct.tested_candidates
+            tested[name] = all_pairs
+        self.assertGreater(tested["noise"], 1.5 * tested["walks"],
+                           f"white noise should be pruned far less than random walks with n=4: {tested}")
+
+    def test_run_and_log_corrtrack_statstream_knobs_thread_and_pattern_b_contract(self):
+        data, ids, W, step, N = self._statstream_dataset()
+        base_config = dict(
+            window_size=W, window_step=step, basic_window=8, n_lags=0, corr_threshold=0.7,
+            neg_corr=False, exec="sequential", parallel_sketch=False, parallel_candidates=False,
+            parallel_validation=False, max_workers=0, monitor=False, track_min_dist=True,
+            artifact_mode="final", artifact_buffer_max_rows=250000, artifact_merge_mode="merged",
+            save_only_required_artifacts=True, save_maxlag_artifacts=False, verbose=False, testing=False,
+            validation_metric="pearson",
+        )
+        run_params = dict(n_vectors=60, seed=1, seed_toggle=2, preprocess=False,
+                          data_representation="sketch_dft", candidate_backend="statstream_grid",
+                          statstream_n_coeffs=8, statstream_index_dims=2)
+        with tempfile.TemporaryDirectory() as tmp:
+            record, _, _ = run_and_log_corrtrack("diag_statstream", data, ids, base_config, run_params,
+                                                 os.path.join(tmp, "run.csv"), recall_by_window=True,
+                                                 verbose=False, testing=False)
+        self.assertEqual(int(record["statstream_n_coeffs"]), 8)
+        self.assertEqual(int(record["statstream_index_dims"]), 2)
+        self.assertAlmostEqual(float(record["statstream_eps"]), np.sqrt(1 - 0.7))
+        self.assertEqual(record["supports_neg_corr"], "specified")
+        self._assert_competitor_contract(record, pattern="B")
+
+    # ------------------------------------------------------------------
+    # 2026-09-17 -- Track B3: CorrJoin (data_representation="sketch_paa_svd" x "corrjoin_double_filter")
+    # ------------------------------------------------------------------
+
+    def _corrjoin_dataset(self, kind, seed=42, m=120):
+        rng = np.random.default_rng(seed)
+        W, step, N = 60, 6, 60 + 6 * 16
+        X = np.cumsum(rng.standard_normal((m, N)), axis=1) if kind == "walks" else rng.standard_normal((m, N))
+        n_pos, n_neg = (m // 4) * 2, (m // 12) * 2          # planted pairs scale with m
+        for i in range(0, n_pos, 2):
+            X[i + 1] = 0.9 * X[i] + np.sqrt(1 - 0.81) * rng.standard_normal(N) * (X[i].std() if kind == "walks" else 1)
+        for i in range(n_pos, n_pos + n_neg, 2):
+            X[i + 1] = -0.9 * X[i] + np.sqrt(1 - 0.81) * rng.standard_normal(N) * (X[i].std() if kind == "walks" else 1)
+        return np.vstack([np.arange(N), X]), [f"s{i}" for i in range(m)], W, step, N
+
+    def _corrjoin_ct(self, data, ids, W, step, T, **kw):
+        ct = CorrTrack(window_size=W, basic_window=6, window_step=step, n_vectors=60, n_lags=0, corr_threshold=T,
+                       neg_corr=False, exec="sequential", parallel_sketch=False, parallel_candidates=False,
+                       parallel_validation=False, numeric_rows=True, data_representation="sketch_paa_svd",
+                       candidate_backend="corrjoin_double_filter", **kw)
+        for s0 in range(0, data.shape[1], step):
+            ct.run(data[:, s0:s0 + step], ids, verbose=False, testing=False, corr_val=True, monitor=False)
+        return ct
+
+    def test_sketch_paa_svd_representation_matches_authors_normalization(self):
+        # [PAA_ks(x_hat) | PAA_ke(x_hat)] must equal the authors' `paamN <- (paam - meanT)/tauT`
+        # with tauT = sqrt(sum x^2 - n mean^2) (2-CorrJoin.R), and equal PAA of the
+        # unit-normalized window (linearity). n_vectors becomes ks + ke. ks, ke must divide W.
+        data, ids, W, step, N = self._corrjoin_dataset("walks", m=20)
+        ct = self._corrjoin_ct(data[:, :W], ids, W, step, 0.7)
+        sk = np.asarray(ct.sketch_nodes[0]._sketch_matrix)
+        self.assertEqual(sk.shape, (20, 45)); self.assertEqual(ct.n_vectors, 45)
+        X = data[1:, :W]
+        mean = X.mean(axis=1, keepdims=True); tau = np.sqrt((X ** 2).sum(axis=1, keepdims=True) - W * mean ** 2)
+        def paa(A, k):
+            return A.reshape(A.shape[0], k, W // k).mean(axis=2)
+        expected_R = np.hstack([(paa(X, 15) - mean) / tau, (paa(X, 30) - mean) / tau])
+        xhat = (X - mean) / np.linalg.norm(X - mean, axis=1, keepdims=True)
+        expected_lin = np.hstack([paa(xhat, 15), paa(xhat, 30)])
+        np.testing.assert_allclose(sk, expected_R, rtol=0, atol=1e-10)
+        np.testing.assert_allclose(sk, expected_lin, rtol=0, atol=1e-10)
+        with self.assertRaises(ValueError):          # 14 does not divide 60
+            self._corrjoin_ct(data[:, :W], ids, W, step, 0.7, corrjoin_ks=14)
+
+    def test_corrjoin_double_filter_no_false_negatives_and_recovers_bruteforce(self):
+        # Both filters are lower bounds on the normalized distance (PAA shrinks distances,
+        # Lemma 1 of the paper), so recall must be exactly 1.0 and, with exact validation
+        # downstream, the validated set must equal brute force's. Also records r1 (fraction
+        # surviving the bucketing filter): the paper's speedup ceiling is 1/r1, and r1 must
+        # be near 1 on white noise at T=0.7 (their >=20% density finding) and well below 1
+        # on random walks at T=0.9.
+        r1 = {}
+        for kind in ("noise", "walks"):
+            data, ids, W, step, N = self._corrjoin_dataset(kind)
+            for T in (0.7, 0.9):
+                with self.subTest(kind=kind, T=T):
+                    g = self._gt(data, ids, W, step, 0, T, False)
+                    self.assertGreater(len(g), 30)
+                    ct = self._corrjoin_ct(data, ids, W, step, T)
+                    ix = ct.grid_nodes[0]._lsh_index
+                    self.assertEqual(type(ix).__name__, "CorrJoinDoubleFilterIndex")
+                    self.assertAlmostEqual(ix.eps1, np.sqrt(2 * 15 * (1 - T) / W))
+                    self.assertAlmostEqual(ix.eps2, np.sqrt(2 * 30 * (1 - T) / W))
+                    met = CorrTrack.compute_metrics_bf(ct.correlated, g, windows=True)
+                    self.assertEqual(met["recall"], 1.0)
+                    self.assertEqual(met["precision"], 1.0)
+                    self.assertEqual(set(ct.correlated), set(g))
+                    self.assertTrue(0.0 < ix.last_r1 <= 1.0)
+                    r1[(kind, T)] = ix.last_r1
+        self.assertGreater(r1[("noise", 0.7)], 0.9)
+        self.assertLess(r1[("walks", 0.9)], 0.3)
+
+    def test_corrjoin_negative_correlation_unreachable_through_its_filters(self):
+        # The paper's Alg. 1 line 14 uses |corr| and the authors' code applies abs(corr),
+        # but both upstream filters are Euclidean on the un-negated normalized vectors:
+        # an anti-correlated pair sits at distance ~ sqrt(2(1+T)) > eps_1 and is pruned
+        # before the acceptance ever sees it. Falsifiable form: insert x_hat and -x_hat,
+        # the index must return no pair. Hence supports_neg_corr = "not_available" and
+        # CorrTrack refuses neg_corr=True (and n_lags > 0: CorrJoin is synchronous).
+        W, ks, ke = 60, 15, 30
+        rng = np.random.default_rng(1)
+        x = np.cumsum(rng.standard_normal(W)); xh = (x - x.mean()) / np.linalg.norm(x - x.mean())
+        def paa(v, k): return v.reshape(k, W // k).mean(axis=1)
+        vx = np.concatenate([paa(xh, ks), paa(xh, ke)]); vy = -vx
+        T = 0.7
+        ix = CorrJoinDoubleFilterIndex(n_vectors=ks + ke, ks=ks, ke=ke, kb=3,
+                                       eps1=np.sqrt(2 * ks * (1 - T) / W), eps2=np.sqrt(2 * ke * (1 - T) / W))
+        ix.insert_many(None, np.arange(2), np.vstack([vx, vy]), np.arange(2), np.full(2, 10), np.full(2, W), np.arange(2))
+        rows = ix.find_pair_rows_full_cosine(np.arange(2), 0.0, 0.0)
+        self.assertEqual(rows.shape[0], 0)                       # perfectly anti-correlated pair: pruned
+        ix2 = CorrJoinDoubleFilterIndex(n_vectors=ks + ke, ks=ks, ke=ke, kb=3,
+                                        eps1=np.sqrt(2 * ks * (1 - T) / W), eps2=np.sqrt(2 * ke * (1 - T) / W))
+        ix2.insert_many(None, np.arange(2), np.vstack([vx, vx * 0.999 + 1e-4]), np.arange(2), np.full(2, 10), np.full(2, W), np.arange(2))
+        self.assertEqual(ix2.find_pair_rows_full_cosine(np.arange(2), 0.0, 0.0).shape[0], 1)   # near-identical: kept
+        with self.assertRaises(NotImplementedError):
+            ix.find_pair_rows_full_cosine_signed(np.arange(2), 0.0, 0.0)
+        self.assertEqual(ix.supports_neg_corr, "not_available")
+        data, ids, W, step, N = self._corrjoin_dataset("noise", m=12)
+        with self.assertRaises(ValueError):
+            CorrTrack(window_size=W, basic_window=6, window_step=step, n_vectors=60, n_lags=0, corr_threshold=0.7,
+                      neg_corr=True, exec="sequential", data_representation="sketch_paa_svd",
+                      candidate_backend="corrjoin_double_filter")
+        with self.assertRaises(ValueError):
+            CorrTrack(window_size=W, basic_window=6, window_step=step, n_vectors=60, n_lags=12, corr_threshold=0.7,
+                      neg_corr=False, exec="sequential", data_representation="sketch_paa_svd",
+                      candidate_backend="corrjoin_double_filter")
+
+    def test_run_and_log_corrtrack_corrjoin_knobs_thread_and_pattern_b_contract(self):
+        data, ids, W, step, N = self._corrjoin_dataset("walks", m=40)
+        base_config = dict(
+            window_size=W, window_step=step, basic_window=6, n_lags=0, corr_threshold=0.7,
+            neg_corr=False, exec="sequential", parallel_sketch=False, parallel_candidates=False,
+            parallel_validation=False, max_workers=0, monitor=False, track_min_dist=True,
+            artifact_mode="final", artifact_buffer_max_rows=250000, artifact_merge_mode="merged",
+            save_only_required_artifacts=True, save_maxlag_artifacts=False, verbose=False, testing=False,
+            validation_metric="pearson",
+        )
+        run_params = dict(n_vectors=60, seed=1, seed_toggle=2, preprocess=False,
+                          data_representation="sketch_paa_svd", candidate_backend="corrjoin_double_filter",
+                          corrjoin_ks=12, corrjoin_ke=20, corrjoin_kb=3)
+        with tempfile.TemporaryDirectory() as tmp:
+            record, _, _ = run_and_log_corrtrack("diag_corrjoin", data, ids, base_config, run_params,
+                                                 os.path.join(tmp, "run.csv"), recall_by_window=True,
+                                                 verbose=False, testing=False)
+        self.assertEqual(int(record["corrjoin_ks"]), 12); self.assertEqual(int(record["corrjoin_ke"]), 20)
+        self.assertAlmostEqual(float(record["corrjoin_eps1"]), np.sqrt(2 * 12 * 0.3 / W))
+        self.assertEqual(record["supports_neg_corr"], "not_available")
+        self._assert_competitor_contract(record, pattern="B")
 
 
 if __name__ == "__main__":

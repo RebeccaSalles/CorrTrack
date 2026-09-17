@@ -1,0 +1,184 @@
+"""N-way comparison of every competitor arm against bruteforce on one dataset config.
+
+Generalizes abaca/fourway_compare.py (kept as the frozen 2026-09-12 script) to the eight arms
+of the competitor plan (docs/competitor_implementation_plan.md), with the section 8 policies
+applied automatically:
+
+- neg_corr=True run: arms tagged ``not_available`` (ParCorr/CSZ, CorrJoin) are reported N/A
+  instead of run; ``enabled_by_us`` / ``specified`` arms run and carry their tag in the output.
+- n_lags > 0: TSUBASA and CorrJoin are synchronous-only and are reported N/A.
+- Counters (total_candidates / tested / correlated) are the primary comparison; wall time is
+  secondary and the pure-Python competitor indexes are marked as such.
+
+Arms: bruteforce exact_stomp filcorr tsubasa braid thinbraid corrtrack parcorr csz statstream corrjoin
+
+    python abaca/nway_compare.py --dataset-config experiment_dataset_motes_temperature.py \
+        --arms all --window-size 96 --window-step 12 --n-lags 0 --corr-threshold 0.9 \
+        --n-obs 4000 --out /tmp/nway_motes.json
+
+CorrTrack's own parameters come from ``--best-params <json>`` (its hyperopt output) when
+given, else untuned defaults (stated in the output). Competitor knobs use the paper defaults
+recorded in experiment_run_exec_param.py unless overridden with ``--set key=value``.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+REPO = os.environ.get("REPO_DIR", str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, REPO)
+os.chdir(REPO)
+
+import corrtrack_run_bruteforce as bfmod  # noqa: E402
+from library_corrtrack_parallel import CorrTrack, run_and_log_bruteforce, run_and_log_corrtrack  # noqa: E402
+
+ALL_ARMS = ("bruteforce", "exact_stomp", "filcorr", "tsubasa", "braid", "thinbraid", "corrtrack", "parcorr", "csz", "statstream", "corrjoin")
+PATTERN_A = {"bruteforce": "bruteforce", "exact_stomp": "exact_stomp", "filcorr": "filcorr", "tsubasa": "tsubasa", "braid": "braid", "thinbraid": "braid"}
+SYNC_ONLY = {"tsubasa", "corrjoin"}
+NEG_NOT_AVAILABLE = {"parcorr", "csz", "corrjoin"}
+PURE_PYTHON_INDEX = {"parcorr", "csz", "statstream", "corrjoin"}
+
+
+def _parse_set(items):
+    out = {}
+    for kv in items or ():
+        k, v = kv.split("=", 1)
+        try:
+            out[k] = json.loads(v)
+        except json.JSONDecodeError:
+            out[k] = v
+    return out
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--dataset-config", required=True)
+    ap.add_argument("--arms", default="all")
+    ap.add_argument("--window-size", type=int, default=168)
+    ap.add_argument("--window-step", type=int, default=12)
+    ap.add_argument("--basic-window", type=int, default=None)
+    ap.add_argument("--n-lags", type=int, default=0)
+    ap.add_argument("--corr-threshold", type=float, default=0.7)
+    ap.add_argument("--neg-corr", action="store_true")
+    ap.add_argument("--n-series", type=int, default=None, help="override the config's N_SERIES/N_VARS[0]")
+    ap.add_argument("--n-obs", type=int, default=None, help="override the config's N_OBS/N_YEARS[0]")
+    ap.add_argument("--train-ratio", type=float, default=None)
+    ap.add_argument("--best-params", default=None, help="CorrTrack hyperopt best_params_corrtrack.json")
+    ap.add_argument("--n-vectors", type=int, default=32)
+    ap.add_argument("--set", action="append", default=[], help="competitor knob override key=value (json), e.g. parcorr_c=0.5")
+    ap.add_argument("--out", default=None, help="JSON output path")
+    ap.add_argument("--label", default=None)
+    args = ap.parse_args()
+    knobs = _parse_set(args.set)
+    arms = list(ALL_ARMS) if args.arms == "all" else [a.strip() for a in args.arms.split(",") if a.strip()]
+    if "bruteforce" not in arms:
+        arms.insert(0, "bruteforce")
+
+    cfg_dataset = bfmod._load_dataset_config(Path(args.dataset_config))
+    bfmod._apply_dataset_config(cfg_dataset)
+    country, var, data, ids = next(bfmod.iter_datasets())
+    n_obs = args.n_obs if args.n_obs is not None else bfmod.N_YEARS[0]
+    n_var = args.n_series if args.n_series is not None else bfmod.N_VARS[0]
+    train_ratio = args.train_ratio if args.train_ratio is not None else bfmod.TRAIN_RATIO
+    test_data, ids_n_var = bfmod.prepare_test_data(data, ids, n_obs, n_var, train_ratio, tuning_mode="sampling")
+    label = args.label or f"{bfmod._dataset_slug(country, var)}_{len(ids_n_var)}_{test_data.shape[1]}"
+    print(f"dataset: {label} n_series={len(ids_n_var)} n_obs={test_data.shape[1]} W={args.window_size} step={args.window_step} "
+          f"n_lags={args.n_lags} T={args.corr_threshold} neg_corr={args.neg_corr}", flush=True)
+
+    base = dict(window_size=args.window_size, window_step=args.window_step, basic_window=args.basic_window, n_lags=args.n_lags,
+                corr_threshold=args.corr_threshold, neg_corr=args.neg_corr, exec="sequential", parallel_sketch=False,
+                parallel_candidates=False, parallel_validation=False, max_workers=0, monitor=True, track_min_dist=True,
+                artifact_mode="final", artifact_buffer_max_rows=250000, artifact_merge_mode="merged",
+                save_only_required_artifacts=True, save_maxlag_artifacts=False, verbose=False, testing=False, validation_metric="pearson")
+    if args.best_params and os.path.exists(args.best_params):
+        ct_params = json.load(open(args.best_params))
+        ct_source = args.best_params
+    else:
+        ct_params = dict(n_vectors=args.n_vectors, seed=2468, seed_toggle=1357, preprocess=False)
+        ct_source = "UNTUNED defaults"
+    common = dict(n_vectors=args.n_vectors, seed=2468, seed_toggle=1357, preprocess=False)
+    pattern_b = {
+        "corrtrack": ct_params,
+        "parcorr": dict(common, data_representation="sketch_proj", candidate_backend="parcorr_grid", parcorr_k=knobs.get("parcorr_k", 2),
+                        parcorr_f=knobs.get("parcorr_f", 0.7), parcorr_c=knobs.get("parcorr_c", 0.7), parcorr_neighbor_probe=False),
+        "csz": dict(common, data_representation="sketch_proj", candidate_backend="parcorr_grid", parcorr_k=knobs.get("parcorr_k", 2),
+                    parcorr_f=knobs.get("parcorr_f", 0.7), parcorr_c=knobs.get("parcorr_c", 0.7), parcorr_neighbor_probe=True),
+        "statstream": dict(common, data_representation="sketch_dft", candidate_backend="statstream_grid",
+                           statstream_n_coeffs=knobs.get("statstream_n_coeffs", 16), statstream_index_dims=knobs.get("statstream_index_dims", 4)),
+        "corrjoin": dict(common, data_representation="sketch_paa_svd", candidate_backend="corrjoin_double_filter",
+                         corrjoin_ks=knobs.get("corrjoin_ks", 15), corrjoin_ke=knobs.get("corrjoin_ke", 30), corrjoin_kb=knobs.get("corrjoin_kb", 3)),
+    }
+    pattern_a_extra = {
+        "filcorr": dict(filcorr_fs=knobs.get("filcorr_fs", 0.0), filcorr_ft=knobs.get("filcorr_ft", 0.5), filcorr_sampling_rate=knobs.get("filcorr_sampling_rate", 1.0)),
+        "braid": dict(braid_b=knobs.get("braid_b", 16), braid_gamma=knobs.get("braid_gamma", 0.4), braid_thin=False, braid_report_mode=knobs.get("braid_report_mode", "all_lags")),
+        "thinbraid": dict(braid_b=knobs.get("braid_b", 16), braid_gamma=knobs.get("braid_gamma", 0.4), braid_thin=True, braid_thin_d0=knobs.get("braid_thin_d0", 400), braid_report_mode=knobs.get("braid_report_mode", "all_lags")),
+    }
+
+    results = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for arm in arms:
+            if args.neg_corr and arm in NEG_NOT_AVAILABLE:
+                results[arm] = {"status": "N/A", "reason": "negative correlation not available in the method (section 8 item 1)"}
+                print(f"{arm:12s} N/A (neg_corr not available)", flush=True)
+                continue
+            if args.n_lags > 0 and arm in SYNC_ONLY:
+                results[arm] = {"status": "N/A", "reason": "synchronous-only method, n_lags > 0"}
+                print(f"{arm:12s} N/A (synchronous only)", flush=True)
+                continue
+            t0 = time.perf_counter()
+            try:
+                if arm in PATTERN_A:
+                    cfg = dict(base, baseline_mode=PATTERN_A[arm], **pattern_a_extra.get(arm, {}))
+                    record, _, flags = run_and_log_bruteforce(label, test_data, ids_n_var, cfg, f"{tmp}/{arm}.csv", metadata={"nodes": 0},
+                                                              recall_by_window=True, verbose=False, testing=False)
+                else:
+                    record, _, flags = run_and_log_corrtrack(label, test_data, ids_n_var, base, pattern_b[arm], f"{tmp}/{arm}.csv",
+                                                             metadata={"nodes": 0, "alg": arm}, recall_by_window=True, corr_val=True,
+                                                             monitor=True, verbose=False, testing=False)
+            except Exception as exc:  # noqa: BLE001 - one failing arm must not kill the battery
+                results[arm] = {"status": "ERROR", "reason": f"{type(exc).__name__}: {exc}"}
+                print(f"{arm:12s} ERROR {type(exc).__name__}: {exc}", flush=True)
+                continue
+            wall = time.perf_counter() - t0
+            r = {k: record.get(k) for k in ("correlated", "total_candidates", "tested", "sk_time", "cand_time", "val_time", "monit_time",
+                                            "supports_neg_corr", "parcorr_cell_size", "statstream_eps", "corrjoin_eps1", "corrjoin_eps2")}
+            r.update(status="ok", wall=wall, flags=flags, pure_python_index=arm in PURE_PYTHON_INDEX)
+            results[arm] = r
+            print(f"{arm:12s} done: wall={wall:.2f}s correlated={r['correlated']} total={r['total_candidates']} tested={r['tested']} "
+                  f"neg_corr_tag={r['supports_neg_corr']}", flush=True)
+
+    bf = results["bruteforce"]
+    for arm, r in results.items():
+        if r.get("status") != "ok" or arm == "bruteforce":
+            continue
+        m = CorrTrack.compute_metrics_bf(r["flags"], bf["flags"], windows=True, total_pairs_bf=bf.get("total_candidates") or bf.get("tested"))
+        r.update(precision=m.get("precision"), recall=m.get("recall"), f1=m.get("f1_score"))
+
+    print("\n=== SUMMARY ===")
+    print(f"{'arm':12s} {'status':>6s} {'wall_s':>8s} {'speedup':>8s} {'correlated':>11s} {'total_cand':>11s} {'tested':>9s} {'recall':>7s} {'precision':>9s} {'neg_corr_tag':>14s} {'index':>6s}")
+    for arm in arms:
+        r = results[arm]
+        if r["status"] != "ok":
+            print(f"{arm:12s} {r['status']:>6s}  {r['reason']}")
+            continue
+        sp = bf["wall"] / r["wall"] if r["wall"] else float("nan")
+        rec = f"{r['recall']:.4f}" if r.get("recall") is not None else "   -  "
+        prec = f"{r['precision']:.4f}" if r.get("precision") is not None else "    -    "
+        print(f"{arm:12s} {'ok':>6s} {r['wall']:8.2f} {sp:7.2f}x {r['correlated']:11d} {r['total_candidates']:11d} {r['tested']:9d} {rec:>7s} {prec:>9s} "
+              f"{str(r['supports_neg_corr']):>14s} {'py' if r['pure_python_index'] else 'cy/np':>6s}")
+    print(f"\ncorrtrack params: {ct_source}; competitor knob overrides: {knobs or 'none (paper defaults)'}")
+    if args.out:
+        out = {"dataset": label, "config": vars(args), "corrtrack_params_source": ct_source,
+               "arms": {a: {k: v for k, v in r.items() if k != "flags"} for a, r in results.items()}}
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        json.dump(out, open(args.out, "w"), indent=1, default=str)
+        print(f"wrote {args.out}")
+
+
+if __name__ == "__main__":
+    main()
