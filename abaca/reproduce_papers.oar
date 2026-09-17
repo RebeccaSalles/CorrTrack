@@ -1,0 +1,34 @@
+#!/bin/bash
+# Phase R at scale: reproduce each competitor paper's own result with our port (abaca/reproduce_papers.py).
+#   oarsub -S "./abaca/reproduce_papers.oar EXPERIMENT=all"         # or EXPERIMENT=braid|corrjoin|statstream|parcorr|filcorr|tsubasa
+#
+#OAR -n corrtrack-phaseR
+#OAR -p cluster='mercantour3'
+#OAR -l host=1,walltime=24:00:00
+#OAR -O abaca/logs/OAR.%jobid%.out
+#OAR -E abaca/logs/OAR.%jobid%.err
+set -uo pipefail
+for kv in "$@"; do export "${kv?}"; done
+CONDA_ROOT="${CONDA_ROOT:-$HOME/miniforge3}"; CONDA_ENV="${CONDA_ENV:-corrtrack}"; REPO_DIR="${REPO_DIR:-$HOME/corrtrack_release_dev}"
+EXPERIMENT="${EXPERIMENT:-all}"
+EXTRA_ARGS="${EXTRA_ARGS:-}"; EXTRA_ARGS="${EXTRA_ARGS//+/ }"
+export REPRO_OUT="${REPRO_OUT:-$HOME/corrtrack_abaca_results/reproduce_papers_${OAR_JOB_ID:-manual}}"
+mkdir -p "$REPRO_OUT"
+# shellcheck disable=SC1091
+source "$CONDA_ROOT/etc/profile.d/conda.sh"; conda activate "$CONDA_ENV"
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+cd "$REPO_DIR"; rm -f ./*.cpython-*.so; rm -rf build
+python setup_cython.py build_ext --inplace -j 4 > "$REPRO_OUT/build.log" 2>&1
+# Phase R inputs: the BRAID families at the paper's lengths (single-component sines, spike trains)
+python datasets/fetch/gen_braid_synthetic.py --family sines --m 64 --T 32768 --name braid_sines_m64 > /dev/null
+python datasets/fetch/gen_braid_synthetic.py --family spiketrains --m 32 --T 100000 --period 6500 --name braid_spiketrains_m32 > /dev/null
+if [ "$EXPERIMENT" = "braid" ] || [ "$EXPERIMENT" = "all" ]; then
+  python abaca/reproduce_papers.py braid --datasets braid_sines_m64,braid_spiketrains_m32,motes_humidity,motes_light,sunspots_daily --W 4096 --step 512 --n-lags 512 2>&1 | tee "$REPRO_OUT/braid.log"
+fi
+for e in corrjoin statstream parcorr filcorr tsubasa; do
+  if [ "$EXPERIMENT" = "$e" ] || [ "$EXPERIMENT" = "all" ]; then
+    # shellcheck disable=SC2086
+    python abaca/reproduce_papers.py "$e" $EXTRA_ARGS 2>&1 | tee "$REPRO_OUT/$e.log"
+  fi
+done
+echo "phaseR done: $REPRO_OUT"

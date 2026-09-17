@@ -473,11 +473,21 @@ def main():
     parser.add_argument("--recall-fallback-near-ratio", type=float, default=None)
     parser.add_argument("--speedup-near-ratio", type=float, default=None)
     parser.add_argument("--train-ratio", type=float, default=None)
+    # (2026-09-17) campaign cells that cap m or the stream length without a dedicated dataset
+    # config; the dataset_id (and hence the optim folder) follows the override, matching
+    # abaca/nway_compare.py --n-series/--n-obs
+    parser.add_argument("--n-series", type=int, default=None, help="override the config's N_SERIES/N_VARS (single value)")
+    parser.add_argument("--n-obs", type=int, default=None, help="override the config's N_OBS/N_YEARS (single value)")
     args = parser.parse_args()
 
     cfg_exec = _load_module(args.exec_param_config, "experiment_exec")
     cfg_dataset = _load_module(args.dataset_config, "experiment_dataset")
     _apply_dataset_config(cfg_dataset)
+    global N_VARS, N_YEARS
+    if args.n_series is not None:
+        N_VARS = [int(args.n_series)]
+    if args.n_obs is not None:
+        N_YEARS = [int(args.n_obs)]
     _apply_parallel_defaults_from_cfg(cfg_exec, args)
 
     global WINDOW_SIZE, WINDOW_STEP, BASIC_WINDOW, N_LAGS, CORR_THRESHOLD

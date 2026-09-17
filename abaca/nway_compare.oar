@@ -31,6 +31,11 @@ NEG_CORR_FLAG="${NEG_CORR_FLAG:-}"          # set to --neg-corr for the second l
 EXTRA_ARGS="${EXTRA_ARGS:-}"                # e.g. "--n-obs 20000 --set corrjoin_ks=14 --set corrjoin_ke=28"
 COMPETITOR_PARAMS="${COMPETITOR_PARAMS:-}"  # dir with best_params_<arm>.json from tune_competitors.oar
 BEST_PARAMS="${BEST_PARAMS:-}"              # CorrTrack's own best_params_corrtrack.json
+HYPEROPT_DIR="${HYPEROPT_DIR:-}"            # or: the hyperopt_corrtrack.oar OUT_DIR to search for it
+if [ -z "$BEST_PARAMS" ] && [ -n "$HYPEROPT_DIR" ]; then
+  BEST_PARAMS=$(find "$HYPEROPT_DIR" -name best_params_corrtrack.json 2>/dev/null | head -1)
+  echo "best_params from HYPEROPT_DIR: ${BEST_PARAMS:-NOT FOUND (CorrTrack will run UNTUNED and is not quotable)}"
+fi
 
 STEM="$(basename "$DATASET_CONFIG" .py)_W${WINDOW_SIZE}_s${WINDOW_STEP}_L${N_LAGS}_T${THR}${NEG_CORR_FLAG:+_neg}"
 RUN_DIR="$RESULTS_ROOT/nway_${OAR_JOB_ID:-manual}_$STEM"

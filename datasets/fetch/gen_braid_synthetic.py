@@ -6,8 +6,10 @@ periodic spike trains (period 6,500, n = 100,000), each used as a *pair* with a 
 test lag estimation; Sines is BRAID's zero-error case. It gives no further generative detail,
 so this is a documented approximation, not a reproduction:
 
-    Sines:        x_i(t) = sum_{k=1..3} a_ik sin(2 pi t / P_ik + phi_ik) + sigma eps
-                  P drawn log-uniformly in [64, 4096]
+    Sines:        x_i(t) = sum_{k=1..K} a_ik sin(2 pi t / P_ik + phi_ik) + sigma eps
+                  P drawn log-uniformly in [64, 4096]; K = --n-components (default 1: with several
+                  incommensurate periods the CCF has spurious early local maxima and BRAID's
+                  Definition 1 lag is ambiguous, which the paper's 0.000% error rules out)
     SpikeTrains:  x_i(t) = sum_j g((t - t_ij) / w_i) + sigma eps, spikes every ``period``
                   samples with jitter, Gaussian pulse of width w_i in [20, 60]
 
@@ -27,10 +29,10 @@ import numpy as np
 from _common import save_competitor_npz
 
 
-def _sines(rng, T):
+def _sines(rng, T, n_components=1):
     t = np.arange(T, dtype=np.float64)
     x = np.zeros(T)
-    for _ in range(3):
+    for _ in range(n_components):
         P = np.exp(rng.uniform(np.log(64.0), np.log(4096.0)))
         x += rng.uniform(0.5, 1.5) * np.sin(2.0 * np.pi * t / P + rng.uniform(0, 2 * np.pi))
     return x
@@ -55,6 +57,7 @@ def main() -> None:
     ap.add_argument("--m", type=int, default=2000)
     ap.add_argument("--T", type=int, default=None, help="default 32768 (sines) or 100000 (spiketrains)")
     ap.add_argument("--period", type=float, default=6500.0)
+    ap.add_argument("--n-components", type=int, default=1, help="sines: number of sine components per seed series")
     ap.add_argument("--copies", type=int, default=1, help="lagged copies per seed series")
     ap.add_argument("--max-lag", type=int, default=168)
     ap.add_argument("--noise", type=float, default=0.1)
@@ -68,7 +71,7 @@ def main() -> None:
     ids, pairs = [], []
     row = 0
     for g in range(n_groups):
-        base = _sines(rng, T + args.max_lag) if args.family == "sines" else _spikes(rng, T + args.max_lag, args.period)
+        base = _sines(rng, T + args.max_lag, args.n_components) if args.family == "sines" else _spikes(rng, T + args.max_lag, args.period)
         data[row] = base[args.max_lag:] + args.noise * rng.normal(size=T)
         ids.append(f"g{g:05d}_seed")
         seed_row = row
@@ -87,7 +90,7 @@ def main() -> None:
     save_competitor_npz(
         name, data, ids,
         {"source": "BRAID SIGMOD 2005 / TKDD 2010 section 6.1, approximated (paper gives no generator)",
-         "generator": "gen_braid_synthetic.py", "family": args.family, "m": args.m, "T": T,
+         "generator": "gen_braid_synthetic.py", "family": args.family, "n_components": args.n_components if args.family == "sines" else None, "m": args.m, "T": T,
          "period": args.period if args.family == "spiketrains" else None, "copies": args.copies,
          "max_lag": args.max_lag, "noise": args.noise, "seed": args.seed, "planted_pairs": pairs,
          "regime": "cooperative, lag-by-construction (synthetic)"},
