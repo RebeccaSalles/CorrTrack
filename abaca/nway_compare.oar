@@ -25,6 +25,7 @@ DATASET_CONFIG="${DATASET_CONFIG:-experiment_dataset_motes_temperature.py}"
 ARMS="${ARMS:-all}"
 WINDOW_SIZE="${WINDOW_SIZE:-168}"
 WINDOW_STEP="${WINDOW_STEP:-12}"
+BASIC_WINDOW="${BASIC_WINDOW:-$WINDOW_STEP}"   # = step: ParCorr's structural constraint, applied to every arm
 N_LAGS="${N_LAGS:-0}"
 THR="${THR:-0.7}"
 NEG_CORR_FLAG="${NEG_CORR_FLAG:-}"          # set to --neg-corr for the second labelled run
@@ -63,7 +64,7 @@ PYTEST_RC=${PIPESTATUS[0]}
 echo "== N-way comparison =="
 # shellcheck disable=SC2086
 python abaca/nway_compare.py --dataset-config "$DATASET_CONFIG" --arms "$ARMS" \
-  --window-size "$WINDOW_SIZE" --window-step "$WINDOW_STEP" --n-lags "$N_LAGS" --corr-threshold "$THR" \
+  --window-size "$WINDOW_SIZE" --window-step "$WINDOW_STEP" --basic-window "$BASIC_WINDOW" --n-lags "$N_LAGS" --corr-threshold "$THR" \
   ${COMPETITOR_PARAMS:+--competitor-params "$COMPETITOR_PARAMS"} ${BEST_PARAMS:+--best-params "$BEST_PARAMS"} \
   $NEG_CORR_FLAG $EXTRA_ARGS --out "$RUN_DIR/nway.json" 2>&1 | tee "$RUN_DIR/nway.log"
 COMPARE_RC=${PIPESTATUS[0]}

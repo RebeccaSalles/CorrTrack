@@ -197,7 +197,8 @@ def repro_statstream(args):
     m, T_len = args.m, args.T
     walks = 100.0 + np.cumsum(rng.uniform(0, 1, size=(m, T_len)) - 0.5, axis=1)
     ids = [f"rw{i}" for i in range(m)]
-    W, step, n = 256, 32, 16
+    # paper (plan section 4.2): sliding window 1,800 to 7,200 points at 1 s, basic window 0.5 to several minutes
+    W, step, n = args.W if args.W != 1024 else 1800, args.step if args.step != 256 else 60, 16
     test = np.vstack([np.arange(T_len), walks])
     rows = []
     for T in (0.85, 0.9):
@@ -221,9 +222,17 @@ def repro_statstream(args):
             # the paper's rule: corr_approx = 1 - d_n^2 / 2 with d_n the distance between the n-coefficient
             # digests (Parseval scaling 2/W for the positive half-spectrum). Truncation can only drop
             # energy, so d_n <= d and corr_approx >= corr: recall ~1, precision < 1, as in their Table 2.
-            en = (2.0 / W) * np.sum(np.abs(F) ** 2, axis=1)
-            d2 = en[:, None] + en[None, :] - 2.0 * (2.0 / W) * np.real(F @ F.conj().T)
-            approx = 1.0 - d2 / 2.0
+            if args.rule == "truncated":
+                # digests as stored: 1 - d_n^2/2. Truncation only drops energy, so corr_approx >= corr:
+                # recall exactly 1, precision limited by pairs just under T
+                en = (2.0 / W) * np.sum(np.abs(F) ** 2, axis=1)
+                d2 = en[:, None] + en[None, :] - 2.0 * (2.0 / W) * np.real(F @ F.conj().T)
+                approx = 1.0 - d2 / 2.0
+            else:
+                # digests renormalized to unit norm (the cosine of the kept coefficients): a two-sided
+                # approximation, which is the only reading consistent with the paper's recall < 1
+                Fn = F / np.maximum(np.linalg.norm(F, axis=1, keepdims=True), 1e-12)
+                approx = np.real(Fn @ Fn.conj().T)
             iu = np.triu_indices(m, 1)
             ex, ap = exact[iu], approx[iu]
             truth = ex >= T
@@ -233,7 +242,7 @@ def repro_statstream(args):
         for t in tp:
             prec = tp[t] / max(tp[t] + fp[t], 1); recall = tp[t] / max(tp[t] + fn[t], 1)
             print(f"m={m} T={T} t={t}: precision={prec:.4f} (paper 0.9765-0.9947) recall={recall:.4f} (paper 0.9987-1.0) | grid pruning power={pruning_power:.4f} (paper 0.01-0.09)", flush=True)
-            rows.append(dict(m=m, T=T, tolerance=t, precision=prec, recall=recall, grid_pruning_power=pruning_power, grid_recall=1.0 if rec["correlated"] else None))
+            rows.append(dict(m=m, T=T, tolerance=t, rule=args.rule, precision=prec, recall=recall, grid_pruning_power=pruning_power, grid_recall=1.0 if rec["correlated"] else None))
     _save("statstream", dict(experiment="StatStream VLDB 2002 Table 2 and Fig. 5 on random walks", W=W, basic_window=step, n_coeffs=n, rows=rows))
 
 
@@ -334,6 +343,7 @@ def main() -> None:
     ap.add_argument("--step", type=int, default=256)
     ap.add_argument("--n-lags", type=int, default=None)
     ap.add_argument("--ms", default="25,50,100,200")
+    ap.add_argument("--rule", choices=("renormalized", "truncated"), default="renormalized", help="statstream: how the approximate correlation is formed from the n-coefficient digests")
     args = ap.parse_args()
     defaults = {
         "braid": dict(datasets="motes_humidity,motes_light,sunspots_daily,braid_sines_smoke,braid_spikes_smoke", n_lags=512, m=None),

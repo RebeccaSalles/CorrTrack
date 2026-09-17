@@ -22,6 +22,7 @@ DATASET_CONFIG="${DATASET_CONFIG:-experiment_dataset_motes_temperature.py}"
 ARMS="${ARMS:-parcorr,csz,statstream,corrjoin}"
 WINDOW_SIZE="${WINDOW_SIZE:-168}"
 WINDOW_STEP="${WINDOW_STEP:-12}"
+BASIC_WINDOW="${BASIC_WINDOW:-$WINDOW_STEP}"   # = step: ParCorr's structural constraint, applied to every arm
 N_LAGS="${N_LAGS:-0}"
 THR="${THR:-0.7}"
 NEG_CORR_FLAG="${NEG_CORR_FLAG:-}"
@@ -41,6 +42,6 @@ rm -f ./*.cpython-*.so; rm -rf build
 python setup_cython.py build_ext --inplace -j 4 > "$OUT_DIR/build.log" 2>&1
 # shellcheck disable=SC2086
 python abaca/tune_competitors.py --dataset-config "$DATASET_CONFIG" --arms "$ARMS" \
-  --window-size "$WINDOW_SIZE" --window-step "$WINDOW_STEP" --n-lags "$N_LAGS" --corr-threshold "$THR" \
+  --window-size "$WINDOW_SIZE" --window-step "$WINDOW_STEP" --basic-window "$BASIC_WINDOW" --n-lags "$N_LAGS" --corr-threshold "$THR" \
   --calib-obs "$CALIB_OBS" $NEG_CORR_FLAG $EXTRA_ARGS --out-dir "$OUT_DIR" 2>&1 | tee "$OUT_DIR/tune.log"
 echo "tune_rc=${PIPESTATUS[0]} out=$OUT_DIR"

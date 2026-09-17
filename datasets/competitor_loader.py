@@ -36,6 +36,12 @@ def resolve_path(name: str) -> Path:
         for cand in (base / f"{name}.npz", base / name / f"{name}.npz"):
             if cand.exists():
                 return cand
+    # the 2026-09 sweep assets are not all named after their folder (finance_sectors/sp500.npz,
+    # streamflow/ca_streamflow.npz): one level of glob below tmp_artifacts
+    for base in SEARCH_DIRS:
+        hits = sorted(base.glob(f"*/{name}.npz"))
+        if hits:
+            return hits[0]
     raise FileNotFoundError(
         f"competitor dataset {name!r} not found under {[str(d) for d in SEARCH_DIRS]}; "
         f"run the matching script in datasets/fetch/ (see datasets/competitor_sources.md)"

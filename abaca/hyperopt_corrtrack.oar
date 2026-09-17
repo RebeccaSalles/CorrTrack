@@ -20,6 +20,7 @@ REPO_DIR="${REPO_DIR:-$HOME/corrtrack_release_dev}"
 DATASET_CONFIG="${DATASET_CONFIG:-experiment_dataset_motes_temperature.py}"
 WINDOW_SIZE="${WINDOW_SIZE:-168}"
 WINDOW_STEP="${WINDOW_STEP:-12}"
+BASIC_WINDOW="${BASIC_WINDOW:-$WINDOW_STEP}"   # = step: ParCorr's structural constraint, applied to every arm
 N_LAGS="${N_LAGS:-0}"
 THR="${THR:-0.7}"
 NEG_CORR_FLAG="${NEG_CORR_FLAG:-}"      # hyperopt runs at the cell's neg_corr setting
@@ -52,7 +53,7 @@ PY
 )
 # shellcheck disable=SC2086
 python corrtrack_param_search.py --dataset-config "$DATASET_CONFIG" --result-folder "$OUT_DIR" \
-  --window-size "$WINDOW_SIZE" --window-step "$WINDOW_STEP" --n-lags "$N_LAGS" --corr-threshold "$THR" \
+  --window-size "$WINDOW_SIZE" --window-step "$WINDOW_STEP" --basic-window "$BASIC_WINDOW" --n-lags "$N_LAGS" --corr-threshold "$THR" \
   --sequential --no-verbose "${NEG_CORR_FLAG:---no-neg-corr}" $HYPER_ARGS 2>&1 | tee "$OUT_DIR/hyperopt.log"
 RC=${PIPESTATUS[0]}
 echo "hyperopt_rc=$RC best_params=$(find "$OUT_DIR" -name best_params_corrtrack.json | head -1)"

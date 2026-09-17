@@ -38,6 +38,8 @@ os.chdir(REPO)
 
 import corrtrack_run_bruteforce as bfmod  # noqa: E402
 from library_corrtrack_parallel import CorrTrack, run_and_log_bruteforce, run_and_log_corrtrack  # noqa: E402
+from abaca.dataset_profile import profile_dataset  # noqa: E402
+import resource  # noqa: E402
 
 ALL_ARMS = ("bruteforce", "exact_stomp", "filcorr", "tsubasa", "braid", "thinbraid", "corrtrack", "parcorr", "csz", "statstream", "corrjoin")
 PATTERN_A = {"bruteforce": "bruteforce", "exact_stomp": "exact_stomp", "filcorr": "filcorr", "tsubasa": "tsubasa", "braid": "braid", "thinbraid": "braid"}
@@ -159,13 +161,31 @@ def main() -> None:
                 continue
             wall = time.perf_counter() - t0
             r = {k: record.get(k) for k in ("correlated", "total_candidates", "tested", "sk_time", "cand_time", "val_time", "monit_time",
-                                            "supports_neg_corr", "parcorr_cell_size", "statstream_eps", "corrjoin_eps1", "corrjoin_eps2")}
-            r.update(status="ok", wall=wall, flags=flags, pure_python_index=arm in PURE_PYTHON_INDEX)
+                                            "candidate_search_entries_touched", "candidate_search_blocks_touched", "lsh_candidates_touched",
+                                            "supports_neg_corr", "n_vectors", "candidate_backend", "data_representation",
+                                            "parcorr_k", "parcorr_f", "parcorr_c", "parcorr_cell_size", "statstream_n_coeffs", "statstream_index_dims",
+                                            "statstream_eps", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2",
+                                            "braid_b", "braid_gamma", "braid_thin", "filcorr_fs", "filcorr_ft")}
+            # process peak RSS (MB) after the arm: monotone across arms, so report the increment as a coarse memory signal
+            rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+            r.update(status="ok", wall=wall, flags=flags, pure_python_index=arm in PURE_PYTHON_INDEX, peak_rss_mb_after=rss,
+                     candidate_time_per_pair_window_us=(1e6 * record["cand_time"] / record["total_candidates"]) if record.get("total_candidates") else None)
             results[arm] = r
             print(f"{arm:12s} done: wall={wall:.2f}s correlated={r['correlated']} total={r['total_candidates']} tested={r['tested']} "
                   f"neg_corr_tag={r['supports_neg_corr']}", flush=True)
 
     bf = results["bruteforce"]
+    try:
+        meta = None
+        loader = getattr(bfmod.DATA_LOADER, "keywords", {}) or {}
+        if loader.get("name"):
+            from datasets.competitor_loader import load_raw
+            meta = load_raw(loader["name"])[2]
+    except Exception:  # noqa: BLE001
+        meta = None
+    profile = profile_dataset(test_data, args.window_size, args.window_step, bf_record=bf if bf.get("status") == "ok" else None, meta=meta)
+    print(f"\ndataset profile: density@T={profile.get('density_at_threshold')} low-freq energy share={profile['low_frequency_energy_share_mean']} "
+          f"(white noise {profile['white_noise_reference']:.3f}) lag1 autocorr={profile['lag1_autocorr_mean']} constant windows={profile['constant_window_fraction']:.4f}", flush=True)
     for arm, r in results.items():
         if r.get("status") != "ok" or arm == "bruteforce":
             continue
@@ -187,7 +207,7 @@ def main() -> None:
     print(f"\ncorrtrack params: {ct_source}; competitor knob overrides: {knobs or 'none'}; "
           f"CSZ-protocol tuned arms: {tuned or 'none (paper defaults)'}")
     if args.out:
-        out = {"dataset": label, "config": vars(args), "corrtrack_params_source": ct_source, "competitor_params_tuned": tuned,
+        out = {"dataset": label, "dataset_profile": profile, "config": vars(args), "corrtrack_params_source": ct_source, "competitor_params_tuned": tuned,
                "arms": {a: {k: v for k, v in r.items() if k != "flags"} for a, r in results.items()}}
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         json.dump(out, open(args.out, "w"), indent=1, default=str)
