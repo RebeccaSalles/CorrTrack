@@ -54,6 +54,13 @@ except ImportError:  # pragma: no cover
     _HAS_DASK = False
 
 try:
+    import competitor_kernels as _competitor_kernels     # (2026-09-17) Cython hot loops of the competitor indexes
+    _HAVE_COMPETITOR_KERNELS = str(getattr(_competitor_kernels, "__file__", "")).endswith((".so", ".pyd")) or ".so" in os.path.basename(str(getattr(_competitor_kernels, "__file__", "")))
+except ImportError:  # pragma: no cover
+    _competitor_kernels = None
+    _HAVE_COMPETITOR_KERNELS = False
+
+try:
     import candidate_kernels as _cand_kernels
     _cand_kernel_file = str(getattr(_cand_kernels, "__file__", ""))
     if not (
@@ -13071,7 +13078,7 @@ class Candidates_BF_BRAID(Candidates_BF_ExactSTOMP):
 
     def __init__(self, window_size, window_step, n_lags, corr_threshold, neg_corr=False,
                  preprocess=False, b=16, gamma=0.4, thin=False, thin_d0=400, thin_seed=20260916,
-                 report_mode="all_lags", track_lag_estimates=False):
+                 report_mode="all_lags", track_lag_estimates=False, thin_d_min=0):
         super().__init__(window_size, window_step, n_lags, corr_threshold,
                          neg_corr=neg_corr, preprocess=preprocess)
         self.b = int(b)
@@ -13080,6 +13087,11 @@ class Candidates_BF_BRAID(Candidates_BF_ExactSTOMP):
         self.gamma = float(gamma)
         self.thin = bool(thin)
         self.thin_d0 = int(thin_d0)
+        # (2026-09-17) The paper's d = 400 / 2^h reaches d = 6, 3, 1 at levels 6 to 8 (lags above
+        # 1,024 with b = 16), where Eq. 24 returns noise (Phase R: values of -1.0 and +0.95 against
+        # exact -0.81 and -0.04). thin_d_min = 0 is the paper as written; a floor such as 32 is
+        # our deviation and is recorded in the run metadata when used.
+        self.thin_d_min = int(thin_d_min)
         self.thin_seed = int(thin_seed)
         if report_mode not in ("all_lags", "braid"):
             raise ValueError("report_mode must be 'all_lags' or 'braid'")
@@ -13144,7 +13156,7 @@ class Candidates_BF_BRAID(Candidates_BF_ExactSTOMP):
     def _rand_for(self, h, length):
         key = (h, length)
         if key not in self._rand_by_h:
-            d = max(1, self.thin_d0 >> h)
+            d = max(1, self.thin_d0 >> h, self.thin_d_min)
             rng = np.random.RandomState(self.thin_seed + 7919 * h + length)
             self._rand_by_h[key] = rng.choice([-1.0, 1.0], size=(length, d)) / np.sqrt(d)
         return self._rand_by_h[key]
@@ -13419,7 +13431,7 @@ class ParCorrGridIndex:
     """
 
     def __init__(self, n_vectors, k=2, f=0.7, cell_size=None, neighbor_probe=False,
-                 initial_capacity=1024, n_lagged_windows=1):
+                 initial_capacity=1024, n_lagged_windows=1, use_cython=None):
         self._n_vectors = int(n_vectors)
         self.k = int(k)
         if self.k < 1 or self.k > self._n_vectors:
@@ -13437,9 +13449,13 @@ class ParCorrGridIndex:
         self.neighbor_probe = bool(neighbor_probe)
         self.n_lagged_windows = int(n_lagged_windows)
         self.supports_neg_corr = "not_available"
+        # (2026-09-17) vote loop in competitor_kernels.parcorr_probe when built (sorted-key grids,
+        # one nogil loop over grids x probes x postings); the Python postings path is the reference
+        self.use_cython = bool(_HAVE_COMPETITOR_KERNELS) if use_cython is None else bool(use_cython and _HAVE_COMPETITOR_KERNELS)
         cap = max(16, int(initial_capacity))
         self._vectors = np.empty((cap, self._n_vectors), dtype=np.float64)
         self._keys = np.empty((cap, self.n_grids), dtype=np.int64)     # hashed cell key per grid
+        self._cellc = np.empty((cap, self.n_grids, self.k), dtype=np.int64)   # exact cell coordinates (Cython path)
         self._win = np.empty(cap, dtype=np.int64)
         self._sid = np.empty(cap, dtype=np.int64)
         self._rank = np.empty(cap, dtype=np.int64)
@@ -13469,6 +13485,7 @@ class ParCorrGridIndex:
             out = np.empty(shape, dtype=a.dtype); out[: self._count] = a[: self._count]; return out
         self._vectors = g(self._vectors, (new_cap, self._n_vectors))
         self._keys = g(self._keys, (new_cap, self.n_grids))
+        self._cellc = g(self._cellc, (new_cap, self.n_grids, self.k))
         for name in ("_win", "_sid", "_rank", "_time", "_w"):
             setattr(self, name, g(getattr(self, name), (new_cap,)))
         alive = np.zeros(new_cap, dtype=bool); alive[: self._count] = self._alive[: self._count]
@@ -13514,13 +13531,16 @@ class ParCorrGridIndex:
         self._time[i0:i1] = np.asarray(time_in, dtype=np.int64).ravel()
         self._w[i0:i1] = np.asarray(window_size_in, dtype=np.int64).ravel()
         self._alive[i0:i1] = True
-        keys = self._hash_cells(self._cells(vec))
+        cells = self._cells(vec)
+        keys = self._hash_cells(cells)
         self._keys[i0:i1] = keys
-        for g in range(self.n_grids):
-            post = self._post[g]
-            kg = keys[:, g]
-            for j in range(n):
-                post.setdefault(int(kg[j]), []).append(i0 + j)
+        self._cellc[i0:i1] = cells
+        if not self.use_cython:
+            for g in range(self.n_grids):
+                post = self._post[g]
+                kg = keys[:, g]
+                for j in range(n):
+                    post.setdefault(int(kg[j]), []).append(i0 + j)
         self._count = i1
         self._alive_count += n
         return np.arange(i0, i1, dtype=np.int64)
@@ -13538,12 +13558,30 @@ class ParCorrGridIndex:
         # compact postings when the dead outnumber the living
         if self._dead_count > max(64, self._alive_count):
             alive_idx = np.nonzero(self._alive[: self._count])[0]
-            self._post = [dict() for _ in range(self.n_grids)]
-            for g in range(self.n_grids):
-                post = self._post[g]; kg = self._keys[:, g]
-                for e in alive_idx.tolist():
-                    post.setdefault(int(kg[e]), []).append(e)
+            if not self.use_cython:
+                self._post = [dict() for _ in range(self.n_grids)]
+                for g in range(self.n_grids):
+                    post = self._post[g]; kg = self._keys[:, g]
+                    for e in alive_idx.tolist():
+                        post.setdefault(int(kg[e]), []).append(e)
             self._dead_count = 0
+
+    def _find_cython(self, recent):
+        n = self._count
+        alive_idx = np.nonzero(self._alive[:n])[0].astype(np.int64)
+        na = alive_idx.shape[0]
+        orders = np.empty((self.n_grids, na), dtype=np.int64); skeys = np.empty((self.n_grids, na), dtype=np.int64)
+        for g in range(self.n_grids):
+            kg = _competitor_kernels.cell_keys(np.ascontiguousarray(self._cellc[alive_idx, g, :]))
+            srt = np.argsort(kg, kind="stable")
+            orders[g] = alive_idx[srt]; skeys[g] = kg[srt]
+        cells_recent = np.ascontiguousarray(self._cellc[recent])
+        a, b, touched, dist_checks = _competitor_kernels.parcorr_probe(
+            np.ascontiguousarray(self._vectors[:n]), np.ascontiguousarray(self._alive[:n].view(np.uint8)),
+            np.ascontiguousarray(self._sid[:n]), np.ascontiguousarray(self._time[:n]), orders, skeys,
+            np.ascontiguousarray(recent), cells_recent, np.ascontiguousarray(self._neighbor_offsets),
+            int(self.k), float(self.cell_size), bool(self.neighbor_probe), int(self.required_hits))
+        return list(zip(a.tolist(), b.tolist())), int(touched), int(dist_checks)
 
     def find_pair_rows_full_cosine_signed(self, recent_entry_ids, gamma, tau):
         raise NotImplementedError(
@@ -13559,7 +13597,10 @@ class ParCorrGridIndex:
         pairs = []
         alive = self._alive
         keys = self._keys
-        if n_recent and self._count:
+        if n_recent and self._count and self.use_cython:
+            pairs, touched, dist_checks = self._find_cython(recent)
+            unique_pairs = len(pairs)
+        elif n_recent and self._count:
             cells_recent = None
             if self.neighbor_probe:
                 cells_recent = self._cells(self._vectors[recent])           # (n_recent, n_grids, k)
@@ -13612,6 +13653,7 @@ class ParCorrGridIndex:
             "num_pairs_before_dedupe": int(unique_pairs), "num_pairs_after_dedupe": int(unique_pairs),
             "num_rows": int(unique_pairs), "num_recent_queries": int(n_recent),
             "num_entries": int(self._alive_count), "num_blocks": int(self.n_grids),
+            "index_tier": "cython" if self.use_cython else "python",
             "gamma": float(gamma), "tau": float(self.cell_size),
             "lsh_candidates_touched": int(touched), "lsh_dot_checks": 0,
             "lsh_candidates_returned": int(unique_pairs),
@@ -13676,7 +13718,11 @@ class StatStreamGridIndex:
     """
 
     def __init__(self, n_vectors, eps, index_dims=4, initial_capacity=1024, n_lagged_windows=1,
-                 apply_dft_distance_filter=True, neg_corr=False):
+                 apply_dft_distance_filter=True, neg_corr=False, use_cython=None):
+        # (2026-09-17) candidate generation runs in competitor_kernels.statstream_probe when the
+        # extension is built (sorted-key grid, 3^h probe and the distance filter in one nogil loop);
+        # the Python postings path stays as the reference and is what the parity test compares to
+        self.use_cython = bool(_HAVE_COMPETITOR_KERNELS) if use_cython is None else bool(use_cython and _HAVE_COMPETITOR_KERNELS)
         self._n_vectors = int(n_vectors)              # 2n
         if eps is None or not np.isfinite(eps) or eps <= 0:
             raise ValueError("eps must be a positive float (sqrt(1 - T))")
@@ -13738,8 +13784,9 @@ class StatStreamGridIndex:
         self._w[i0:i1] = np.asarray(window_size_in, dtype=np.int64).ravel()
         self._alive[i0:i1] = True
         cells = self._cell_coords(vec); self._cells[i0:i1] = cells
-        for j in range(n):
-            self._post.setdefault(tuple(cells[j].tolist()), []).append(i0 + j)
+        if not self.use_cython:
+            for j in range(n):
+                self._post.setdefault(tuple(cells[j].tolist()), []).append(i0 + j)
         self._count = i1; self._alive_count += n
         return np.arange(i0, i1, dtype=np.int64)
 
@@ -13753,10 +13800,26 @@ class StatStreamGridIndex:
         self._alive_count -= n_stale; self._dead_count += n_stale
         if self._dead_count > max(64, self._alive_count):
             alive_idx = np.nonzero(self._alive[: self._count])[0]
-            self._post = {}
-            for e in alive_idx.tolist():
-                self._post.setdefault(tuple(self._cells[e].tolist()), []).append(e)
+            if not self.use_cython:
+                self._post = {}
+                for e in alive_idx.tolist():
+                    self._post.setdefault(tuple(self._cells[e].tolist()), []).append(e)
             self._dead_count = 0
+
+    def _find_cython(self, recent, signed):
+        """competitor_kernels.statstream_probe over the alive entries sorted by packed cell key."""
+        n = self._count
+        alive_idx = np.nonzero(self._alive[:n])[0].astype(np.int64)
+        keys = _competitor_kernels.cell_keys(np.ascontiguousarray(self._cells[alive_idx]))
+        srt = np.argsort(keys, kind="stable")
+        order = np.ascontiguousarray(alive_idx[srt]); sorted_keys = np.ascontiguousarray(keys[srt])
+        a, b, touched, dist_checks = _competitor_kernels.statstream_probe(
+            np.ascontiguousarray(self._vectors[:n]), np.ascontiguousarray(self._cells[:n]),
+            np.ascontiguousarray(self._alive[:n].view(np.uint8)), np.ascontiguousarray(self._sid[:n]),
+            np.ascontiguousarray(self._time[:n]), order, sorted_keys, np.ascontiguousarray(recent),
+            np.ascontiguousarray(self._neighbor_offsets), float(self.eps), bool(signed), bool(self.apply_dft_distance_filter))
+        pairs = list(zip(a.tolist(), b.tolist()))
+        return pairs, int(touched), int(dist_checks), len(np.unique(keys))
 
     def _probe(self, center_cell):
         cands = []
@@ -13771,7 +13834,11 @@ class StatStreamGridIndex:
         recent = np.asarray(recent_entry_ids, dtype=np.int64).ravel()
         touched = 0; dist_checks = 0; pairs = []
         eps2 = self.eps * self.eps
-        for q in recent.tolist():
+        n_blocks = len(self._post)
+        if self.use_cython:
+            pairs, touched, dist_checks, n_blocks = self._find_cython(recent, signed)
+        else:
+          for q in recent.tolist():
             if not self._alive[q]:
                 continue
             q_sid, q_time = int(self._sid[q]), int(self._time[q])
@@ -13807,13 +13874,14 @@ class StatStreamGridIndex:
             "num_after_similarity": len(pairs), "num_after_dot": len(pairs),
             "num_pairs_before_dedupe": len(pairs), "num_pairs_after_dedupe": len(pairs),
             "num_rows": len(pairs), "num_recent_queries": int(recent.shape[0]),
-            "num_entries": int(self._alive_count), "num_blocks": len(self._post),
+            "num_entries": int(self._alive_count), "num_blocks": n_blocks,
             "gamma": 0.0, "tau": float(self.eps),
             "lsh_candidates_touched": touched, "lsh_dot_checks": 0, "lsh_candidates_returned": len(pairs),
             "lsh_query_time": float(time.perf_counter() - t0),
             "lsh_num_nodes_total": int(self._count), "lsh_num_nodes_alive": int(self._alive_count),
             "lsh_dead_node_ratio": float(self._dead_count) / float(self._count) if self._count else 0.0,
             "statstream_eps": float(self.eps), "statstream_index_dims": int(self.index_dims),
+            "index_tier": "cython" if self.use_cython else "python",
         }
         if not pairs:
             return np.empty((0, 5), dtype=np.int64)
@@ -13864,7 +13932,7 @@ class CorrJoinDoubleFilterIndex:
     mechanism, not theirs. CorrTrack refuses neg_corr=True for this backend (plan §0d).
     """
 
-    def __init__(self, n_vectors, ks, ke, kb, eps1, eps2, initial_capacity=1024, n_lagged_windows=1):
+    def __init__(self, n_vectors, ks, ke, kb, eps1, eps2, initial_capacity=1024, n_lagged_windows=1, use_cython=None):
         self.ks, self.ke, self.kb = int(ks), int(ke), int(kb)
         self._n_vectors = int(n_vectors)
         if self._n_vectors != self.ks + self.ke:
@@ -13872,6 +13940,8 @@ class CorrJoinDoubleFilterIndex:
         if not (1 <= self.kb <= self.ks):
             raise ValueError("kb must be in [1, ks]")
         self.eps1, self.eps2 = float(eps1), float(eps2)
+        # (2026-09-17) filters run in competitor_kernels when built; the Python path is the reference
+        self.use_cython = bool(_HAVE_COMPETITOR_KERNELS) if use_cython is None else bool(use_cython and _HAVE_COMPETITOR_KERNELS)
         self.n_lagged_windows = int(n_lagged_windows)
         self.supports_neg_corr = "not_available"
         self.supports_lags = False
@@ -13957,13 +14027,28 @@ class CorrJoinDoubleFilterIndex:
             proj = np.hstack([proj, np.zeros((proj.shape[0], self.kb - proj.shape[1]))])
         # --- 2. bucketing filter: kb-dim grid, side eps1, 27-neighbourhood, exact eps1-ball ---
         cells = np.floor(proj / self.eps1).astype(np.int64)
-        post = {}
-        for i in range(m):
+        n_pairs_total = m * (m - 1) // 2
+        if self.use_cython:
+            # (2026-09-17) both filters in competitor_kernels.corrjoin_double_filter (sorted-key grid)
+            keys = _competitor_kernels.cell_keys(np.ascontiguousarray(cells))
+            srt = np.argsort(keys, kind="stable")
+            a_loc, b_loc, touched, n_cand = _competitor_kernels.corrjoin_double_filter(
+                np.ascontiguousarray(proj), np.ascontiguousarray(V[:, self.ks:]), np.ascontiguousarray(cells),
+                np.ascontiguousarray(srt.astype(np.int64)), np.ascontiguousarray(keys[srt]),
+                np.ascontiguousarray(self._neighbor_offsets), float(self.eps1), float(self.eps2))
+            keep = list(zip(a_loc.tolist(), b_loc.tolist()))
+            self.last_r1 = (n_cand / n_pairs_total) if n_pairs_total else 0.0
+            stats.update({"lsh_candidates_touched": int(touched), "num_distance_checks": int(touched) + int(n_cand),
+                          "lsh_candidates_returned": len(keep)})
+            self.last_stats = self._stats(stats, m, int(n_cand), t0)
+        else:
+          post = {}
+          for i in range(m):
             post.setdefault(tuple(cells[i].tolist()), []).append(i)
-        e1sq = self.eps1 * self.eps1
-        cand = []
-        touched = 0
-        for i in range(m):
+          e1sq = self.eps1 * self.eps1
+          cand = []
+          touched = 0
+          for i in range(m):
             ci = cells[i]
             for off in self._neighbor_offsets:
                 lst = post.get(tuple((ci + off).tolist()))
@@ -13976,18 +14061,17 @@ class CorrJoinDoubleFilterIndex:
                     d = proj[i] - proj[j]
                     if float(d @ d) <= e1sq:
                         cand.append((i, j))
-        n_pairs_total = m * (m - 1) // 2
-        self.last_r1 = (len(cand) / n_pairs_total) if n_pairs_total else 0.0
-        # --- 3. Euclidean filter on the ke block ---
-        e2sq = self.eps2 * self.eps2
-        keep = []
-        for (i, j) in cand:
+          self.last_r1 = (len(cand) / n_pairs_total) if n_pairs_total else 0.0
+          # --- 3. Euclidean filter on the ke block ---
+          e2sq = self.eps2 * self.eps2
+          keep = []
+          for (i, j) in cand:
             d = V[i, self.ks:] - V[j, self.ks:]
             if float(d @ d) <= e2sq:
                 keep.append((i, j))
-        stats.update({"lsh_candidates_touched": touched, "num_distance_checks": touched + len(cand),
-                      "lsh_candidates_returned": len(keep)})
-        self.last_stats = self._stats(stats, m, len(cand), t0)
+          stats.update({"lsh_candidates_touched": touched, "num_distance_checks": touched + len(cand),
+                        "lsh_candidates_returned": len(keep)})
+          self.last_stats = self._stats(stats, m, len(cand), t0)
         if not keep:
             return np.empty((0, 5), dtype=np.int64)
         a = alive_idx[np.fromiter((p[0] for p in keep), dtype=np.int64, count=len(keep))]
@@ -14024,6 +14108,7 @@ class CorrJoinDoubleFilterIndex:
             "lsh_dead_node_ratio": float(self._dead_count) / float(self._count) if self._count else 0.0,
             "corrjoin_after_bucketing": int(n_after_bucket), "corrjoin_r1": float(self.last_r1 or 0.0),
             "corrjoin_eps1": float(self.eps1), "corrjoin_eps2": float(self.eps2),
+            "index_tier": "cython" if self.use_cython else "python",
         }
 
 

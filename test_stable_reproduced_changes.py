@@ -4218,6 +4218,60 @@ class StableReproducedChangesTest(unittest.TestCase):
         ranked = sorted([ok(1.0, 1.0, 900), ok(0.99, 0.5, 400), ok(0.80, 1.0, 100), ok(0.96, 0.01, 50)], key=lambda r: tc.score(r, 0.95))
         self.assertEqual([r["total_candidates"] for r in ranked], [400, 900, 50, 100])   # infeasible: by recall
 
+    def test_competitor_kernels_parity_with_python_paths(self):
+        # (2026-09-17) competitor_kernels.pyx: the three pure-Python competitor indexes got Cython
+        # hot loops (sorted-key grids, one nogil loop per query batch) so that wall-clock against
+        # CorrTrack's Cython candidate stage measures algorithms, not implementation tier. The
+        # Python postings paths stay as the reference: pair sets and the touched / distance-check
+        # counters must be identical on data with planted near pairs, anti pairs and rolling
+        # eviction, for every arm and both StatStream modes.
+        from library_corrtrack_parallel import _HAVE_COMPETITOR_KERNELS
+        if not _HAVE_COMPETITOR_KERNELS:
+            self.skipTest("competitor_kernels extension not built")
+        m, D, steps, lagw = 120, 24, 5, 2
+
+        def stream(rng):
+            for st in range(steps):
+                v = rng.standard_normal((m, D)); v /= np.linalg.norm(v, axis=1, keepdims=True); v *= 0.8
+                v[1::4] = v[0::4][: v[1::4].shape[0]] * 0.97 + 0.03 * rng.standard_normal((v[1::4].shape[0], D))
+                v[2::4] = -v[0::4][: v[2::4].shape[0]] * 0.97
+                yield st, v
+
+        def run_index(ix, rng, signed):
+            out = []
+            for st, v in stream(rng):
+                ids = ix.insert_many(np.zeros(m), np.full(m, st), vectors_in=v, sid_idx_in=np.arange(m), time_in=np.full(m, st * 12),
+                                     window_size_in=np.full(m, 96), sid_rank_in=np.arange(m))
+                ix.drop_before_time(st * 12 - lagw * 12)
+                rows = ix.find_pair_rows_full_cosine_signed(ids, 0.0, 0.0) if signed else ix.find_pair_rows_full_cosine(ids, 0.0, 0.0)
+                out.append((set(map(tuple, rows.tolist())), ix.last_stats["lsh_candidates_touched"], ix.last_stats["num_distance_checks"]))
+            return out
+
+        for signed in (False, True):
+            py = run_index(StatStreamGridIndex(D, 0.5, index_dims=4, n_lagged_windows=lagw, neg_corr=signed, use_cython=False), np.random.default_rng(1), signed)
+            cy = run_index(StatStreamGridIndex(D, 0.5, index_dims=4, n_lagged_windows=lagw, neg_corr=signed, use_cython=True), np.random.default_rng(1), signed)
+            self.assertEqual(py, cy, f"statstream signed={signed}")
+            self.assertTrue(any(len(o[0]) > 0 for o in py))
+        for probe in (False, True):
+            py = run_index(ParCorrGridIndex(D, k=2, f=0.7, cell_size=0.3, neighbor_probe=probe, n_lagged_windows=lagw, use_cython=False), np.random.default_rng(2), False)
+            cy = run_index(ParCorrGridIndex(D, k=2, f=0.7, cell_size=0.3, neighbor_probe=probe, n_lagged_windows=lagw, use_cython=True), np.random.default_rng(2), False)
+            self.assertEqual(py, cy, f"parcorr neighbor_probe={probe}")
+            self.assertTrue(any(len(o[0]) > 0 for o in py))
+        # CorrJoin: synchronous, one window, both filters
+        rng = np.random.default_rng(3); W, ks, ke, kb, T = 120, 10, 20, 3, 0.8
+        X = np.cumsum(rng.standard_normal((m, W)), axis=1); X[1::2] = 0.9 * X[0::2] + 0.1 * np.cumsum(rng.standard_normal((m // 2, W)), axis=1)
+        X -= X.mean(1, keepdims=True); X /= np.linalg.norm(X, axis=1, keepdims=True)
+        Bs = np.kron(np.eye(ks), np.ones((W // ks, 1))) / (W // ks); Be = np.kron(np.eye(ke), np.ones((W // ke, 1))) / (W // ke)
+        V = np.hstack([X @ Bs, X @ Be]); e1, e2 = np.sqrt(2 * ks * (1 - T) / W), np.sqrt(2 * ke * (1 - T) / W)
+        res = []
+        for cy_flag in (False, True):
+            ix = CorrJoinDoubleFilterIndex(ks + ke, ks, ke, kb, e1, e2, use_cython=cy_flag)
+            ids = ix.insert_many(np.zeros(m), np.zeros(m), vectors_in=V, sid_idx_in=np.arange(m), time_in=np.zeros(m), window_size_in=np.full(m, W), sid_rank_in=np.arange(m))
+            rows = ix.find_pair_rows_full_cosine(ids, 0.0, 0.0)
+            res.append((set(map(tuple, rows.tolist())), ix.last_stats["lsh_candidates_touched"], ix.last_stats["corrjoin_after_bucketing"], round(ix.last_r1, 12)))
+        self.assertEqual(res[0], res[1])
+        self.assertGreater(len(res[0][0]), 0)
+
     def test_thinbraid_tracks_exact_after_buffer_rolls_on_offset_mean_data(self):
         # (2026-09-17) Two defects found on real Motes data, both invisible on the
         # zero-mean, short synthetic streams used above: (1) the shared-projection

@@ -32,6 +32,12 @@ extensions = [
         include_dirs=[np.get_include()],
     ),
     Extension(
+        "competitor_kernels",
+        ["competitor_kernels.pyx"],
+        include_dirs=[np.get_include()],
+        extra_compile_args=["-O3", "-march=native"],
+    ),
+    Extension(
         "monitor_kernels",
         ["monitor_kernels.pyx"],
         include_dirs=[np.get_include()],

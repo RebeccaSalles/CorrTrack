@@ -4,7 +4,7 @@ authors published in the regime they published it, it is not a fair competitor y
 faithfulness check comparison plan section 6.5 asks for, run as an experiment rather than a unit
 test. Every subcommand prints our number next to the paper's reported value and writes a JSON.
 
-    python abaca/reproduce_papers.py braid       [--datasets motes_humidity,motes_light,sunspots_daily,braid_sines_smoke]
+    python abaca/reproduce_papers.py braid       [--datasets braid_sines_paper,braid_spiketrains_paper,motes_temperature,sunspots_daily] [--T 30000]
     python abaca/reproduce_papers.py corrjoin    [--datasets corrjoin_stock,corrjoin_chlorine,corrjoin_gas,corrjoin_synthetic] [--m 1000]
     python abaca/reproduce_papers.py statstream  [--m 500] [--T 20000]
     python abaca/reproduce_papers.py parcorr     [--datasets sp500_sub263,corrjoin_stock] [--m 1000]
@@ -54,98 +54,122 @@ def _save(name, payload):
     print(f"wrote {p}\n", flush=True)
 
 
-def _earliest_local_max(absr, gamma):
-    if absr.shape[0] == 1:
+def _earliest_local_max(absr, gamma, radius=1):
+    """Definition 1: earliest lag whose score is >= gamma and is a local maximum. `radius` widens
+    the neighbourhood the maximum must dominate: with radius=1 the exact CCF of noisy data has
+    micro-wiggles of order 1/sqrt(n) that create spurious "earliest" maxima on the shoulder of the
+    true peak (found on the Sines pilot: naive 634 vs the true peak 668, |R| differing by 0.002).
+    The paper's naive baseline is not specified beyond Definition 1; we use radius = b = 16."""
+    L = absr.shape[0]
+    if L == 1:
         return 0 if absr[0] >= gamma else -1
-    left = np.r_[-np.inf, absr[:-1]]
-    right = np.r_[absr[1:], -np.inf]
-    ok = np.nonzero((absr >= left) & (absr > right) & (absr >= gamma))[0]
-    return int(ok[0]) if ok.size else -1
+    ok = absr >= gamma
+    for d in range(1, radius + 1):
+        left = np.r_[np.full(d, -np.inf), absr[:-d]]
+        right = np.r_[absr[d:], np.full(d, -np.inf)]
+        ok &= (absr >= left) & (absr > right)
+    idx = np.nonzero(ok)[0]
+    return int(idx[0]) if idx.size else -1
 
 
 # --------------------------------------------------------------------------- BRAID
-BRAID_PAPER = {  # relative lag error in percent, TKDD 2010 Table (BRAID / ThinBRAID)
-    "braid_sines": (0.000, 1.397), "braid_spiketrains": (0.387, 0.528), "motes_humidity": (0.024, 1.178),
-    "motes_light": (0.529, 0.176), "sunspots_daily": (1.038, 0.086),
+# TKDD 2010 Tables III (BRAID) and IV (ThinBRAID): naive lag, method lag, error E = 100 |l_b - l_n| / l_n (Eq. 32)
+BRAID_PAPER = {
+    "sines": dict(naive=716, braid=716, thin=706, err_braid=0.000, err_thin=1.397, n=32768),
+    "spiketrains": dict(naive=2841, braid=2830, thin=2826, err_braid=0.387, err_thin=0.528, n=100000),
+    "humidity": dict(naive=4160, braid=4161, thin=4209, err_braid=0.024, err_thin=1.178, n=50000),
+    "light": dict(naive=567, braid=570, thin=566, err_braid=0.529, err_thin=0.176, n=32000),
+    "sunspots": dict(naive=1156, braid=1168, thin=1155, err_braid=1.038, err_thin=0.086, n=25900),
+    "motes": dict(naive=None, braid=None, thin=None, err_braid=None, err_thin=None, n=30000, note="section 6.5: #1/#10 lag 202 min, #47/#48 lag 224 min (390 and 433 epochs of 31 s)"),
 }
 
 
+def _exact_ccf_def1(x_cur, Y, end, W, max_lag, gamma):
+    """Definition 1 on the exact CCF, same windowing as our BRAID port: R(l) = corr(x[end-W:end], y[end-W-l:end-l])."""
+    xa = x_cur - x_cur.mean(); xn = np.linalg.norm(xa)
+    if xn == 0:
+        return -1, None
+    ccf = np.empty(max_lag + 1)
+    for l in range(max_lag + 1):
+        yb = Y[end - W - l:end - l]; yb = yb - yb.mean(); nb = np.linalg.norm(yb)
+        ccf[l] = 0.0 if nb == 0 else float(xa @ yb) / (xn * nb)
+    return _earliest_local_max(np.abs(ccf), gamma, radius=16), ccf
+
+
 def repro_braid(args):
-    """Relative lag error of BRAID's estimate (Definition 1 on the interpolated CCF, gamma=0.4,
-    b=16) against the same Definition 1 applied to the *exact* CCF, which is what the paper's
-    naive baseline computes; the planted lag (synthetic families, sunspot self-pair) only selects
-    which pairs are scored. Percent, mean over (pair, window) with a reference lag > 0."""
+    """The paper's regime, not a sliding-window one: one CCF over the whole sequence prefix (their n is
+    the full length, max lag m = n/2), Definition 1 (earliest local max of |R| >= gamma = 0.4), b = 16,
+    d = 400 / 2^h for ThinBRAID, error E = 100 |l_b - l_n| / l_n against the naive lag (Eq. 32). In our
+    port the "whole sequence" is a window of W = n/2 compared with the history shifted by up to n/2, so
+    the full prefix is used. Pairs: planted pairs for the synthetic families, Motes #1/#10 and #47/#48
+    (section 6.5), contiguous 25,900-day chunks of the sunspot series as separate sequences (their
+    construction), all pairs for the humidity/light stand-ins."""
     rows = []
     for name in args.datasets.split(","):
         data, ids, meta = load_raw(name)
-        m = min(data.shape[0], args.m or data.shape[0])
-        X = data[:m]
-        X = np.where(np.isnan(X), 0.0, X)
-        planted = {}
-        if "planted_pairs" in meta:
+        ids = list(ids)
+        key = next((k for k in BRAID_PAPER if k in name), None)
+        paper = BRAID_PAPER.get(key, {})
+        X = np.where(np.isnan(data), 0.0, data)
+        if key == "sunspots":
+            L = 25900
+            chunks = [X[0, i * L:(i + 1) * L] for i in range(X.shape[1] // L)]
+            X = np.vstack(chunks); ids = [f"sunspots#{i + 1}" for i in range(len(chunks))]
+            pairs = [(i, j) for i in range(len(chunks)) for j in range(i + 1, len(chunks))]
+        elif key == "motes":
+            want = [("mote01", "mote10"), ("mote47", "mote48")]
+            pairs = [(ids.index(a), ids.index(b)) for a, b in want if a in ids and b in ids]
+        elif "planted_pairs" in meta:
             idx = {s: i for i, s in enumerate(ids)}
-            planted = {(idx[p["a"]], idx[p["b"]]): p["lag"] for p in meta["planted_pairs"] if idx.get(p["a"], m) < m and idx.get(p["b"], m) < m}
-        if name.startswith("sunspots"):
-            lag = 4017                      # ~11 y in days: the solar cycle, BRAID's Sunspots lag scale
-            X = np.vstack([X[0, lag:], X[0, :-lag]])
-            planted = {(0, 1): lag}
-            ids_use = ["sn", "sn_lagged"]
+            pairs = [(idx[p["a"]], idx[p["b"]]) for p in meta["planted_pairs"]]
         else:
-            ids_use = list(ids[:m])
-        W, step, n_lags = args.W, args.step, args.n_lags
-        if name.startswith("sunspots"):
-            W, n_lags, step = 16384, 4200, 2048
-        T_len = min(X.shape[1], args.T or X.shape[1])
-        X = X[:, :T_len]
+            pairs = [(i, j) for i in range(X.shape[0]) for j in range(i + 1, X.shape[0])]
+        n = min(X.shape[1], args.T or paper.get("n") or X.shape[1])
+        # the harness rounds n_lags down to a multiple of the step, so pick step = n/20 and make
+        # W and max_lag multiples of it: W = n/2, max_lag = W - step (the paper's m = n/2)
+        step = max(1, n // 20)
+        W = (n // 2) // step * step
+        max_lag = W - step
+        n = 2 * W
+        X = X[:, :n]
+        keep = sorted({i for p in pairs for i in p})
+        X = X[keep]; ids_use = [ids[i] for i in keep]; remap = {i: k for k, i in enumerate(keep)}
+        pairs = [(remap[a], remap[b]) for a, b in pairs]
         res = {}
         for thin in (False, True):
-            node = Candidates_BF_BRAID(W, step, n_lags, 0.0, neg_corr=True, b=16, gamma=0.4, thin=thin, thin_d0=400, report_mode="braid")
-            errs, n_eval, t0 = [], 0, time.perf_counter()
-            for s0 in range(0, T_len - T_len % step, step):
+            node = Candidates_BF_BRAID(W, step, max_lag, 0.0, neg_corr=True, b=16, gamma=0.4, thin=thin, thin_d0=400, report_mode="braid")
+            t0 = time.perf_counter()
+            for s0 in range(0, n - n % step, step):
                 node.run(np.vstack([np.arange(s0, s0 + step), X[:, s0:s0 + step]]), ids_use, verbose=False, testing=False)
-                end = s0 + step
-                if end < W + n_lags or node.last_lag_estimates is None:
+            est = node.last_lag_estimates
+            per_pair = []
+            for a, b in pairs:
+                # both orientations, as the paper reports whichever sequence lags; pick the orientation
+                # in which the naive Definition 1 fires, preferring the one with the larger lag
+                cands = []
+                for (p, q) in ((a, b), (b, a)):
+                    ref, ccf = _exact_ccf_def1(X[p, n - W:n], X[q], n, W, max_lag, 0.4)
+                    if ref > 0 and est is not None and est[p, q] >= 0:
+                        cands.append((ref, int(est[p, q]), f"{ids_use[p]} lags {ids_use[q]}", float(abs(ccf[ref]))))
+                if not cands:
+                    per_pair.append(dict(pair=(ids_use[a], ids_use[b]), status="no lag correlation found by naive Definition 1"))
                     continue
-                est = node.last_lag_estimates
-                pairs = planted.items() if planted else [((a, b), None) for a in range(X.shape[0]) for b in range(a + 1, X.shape[0])]
-                cur = X[:, end - W:end]
-                for (a, b), _planted in pairs:
-                    # exact CCF reference (Definition 1, the naive baseline of the paper)
-                    xa = cur[a] - cur[a].mean(); xa_n = np.linalg.norm(xa)
-                    if xa_n == 0:
-                        continue
-                    ccf = []
-                    for l in range(n_lags + 1):
-                        yb = X[b, end - W - l:end - l]; yb = yb - yb.mean(); nb = np.linalg.norm(yb)
-                        ccf.append(0.0 if nb == 0 else float(xa @ yb) / (xa_n * nb))
-                    ref = _earliest_local_max(np.abs(np.asarray(ccf)), 0.4)
-                    if ref <= 0:
-                        continue
-                    e = int(est[a, b]) if est[a, b] >= 0 else int(est[b, a])
-                    if e < 0:
-                        continue
-                    errs.append((abs(e - ref), ref))
-                    n_eval += 1
-            arr = np.asarray(errs, dtype=float).reshape(-1, 2)
-            big = arr[arr[:, 1] >= 16] if arr.size else arr
-            res["thinbraid" if thin else "braid"] = dict(
-                # |l_est - l_ref| / l_ref, only where the reference lag is >= 16 samples: on flat CCFs
-                # (Motes: R(0)=0.9957 vs R(1)=0.9958) Definition 1 lands on 0 or 1 at random and a
-                # lag-relative error is meaningless there
-                rel_to_lag_pct_mean=float(np.mean(big[:, 0] / big[:, 1]) * 100) if big.size else None, n_ref_ge_16=int(big.shape[0]),
-                # |l_est - l_ref| / max_lag over every scored (pair, window)
-                rel_to_maxlag_pct_mean=float(np.mean(arr[:, 0]) / n_lags * 100) if arr.size else None,
-                exact_hits_pct=float(np.mean(arr[:, 0] == 0) * 100) if arr.size else None, n=n_eval, wall=time.perf_counter() - t0)
-        key = next((k for k in BRAID_PAPER if name.startswith(k)), None)
-        paper = BRAID_PAPER.get(key, (None, None))
-        def fmt(r):
-            a = r["rel_to_lag_pct_mean"]; b = r["rel_to_maxlag_pct_mean"]
-            return f"rel-to-lag {a:.3f}% (n={r['n_ref_ge_16']}) rel-to-maxlag {b:.3f}% exact-hit {r['exact_hits_pct']:.1f}%" if a is not None and b is not None else str(r)
-        print(f"{name:22s} m={X.shape[0]} T={T_len} W={W} lags={n_lags}\n   BRAID     {fmt(res['braid'])}  | paper {paper[0]}%\n"
-              f"   ThinBRAID {fmt(res['thinbraid'])}  | paper {paper[1]}%  (paper's normalization to be confirmed from the PDF)", flush=True)
-        rows.append(dict(dataset=name, m=int(X.shape[0]), T=T_len, W=W, step=step, n_lags=n_lags, ours=res, paper_braid_pct=paper[0], paper_thinbraid_pct=paper[1],
-                         reference="exact CCF earliest local max (Definition 1); pairs selected by planted lags" if planted else "exact CCF earliest local max (Definition 1), all pairs"))
-    _save("braid", dict(experiment="BRAID TKDD 2010 relative lag error", rows=rows))
+                ref, e, orient, score = max(cands, key=lambda c: c[0])
+                per_pair.append(dict(pair=(ids_use[a], ids_use[b]), orientation=orient, naive_lag=ref, method_lag=e, score=score,
+                                     error_pct=100.0 * abs(e - ref) / ref))
+            errs = [r["error_pct"] for r in per_pair if "error_pct" in r]
+            res["thinbraid" if thin else "braid"] = dict(pairs=per_pair, error_pct_mean=float(np.mean(errs)) if errs else None,
+                                                        error_pct_max=float(np.max(errs)) if errs else None, wall=time.perf_counter() - t0)
+        pb, pt = res["braid"], res["thinbraid"]
+        print(f"{name:26s} n={n} W={W} max_lag={max_lag} pairs={len(pairs)}", flush=True)
+        for r_b, r_t in zip(pb["pairs"], pt["pairs"]):
+            if "error_pct" in r_b:
+                print(f"   {r_b['orientation']:28s} naive {r_b['naive_lag']:6d} | BRAID {r_b['method_lag']:6d} E={r_b['error_pct']:.3f}% | ThinBRAID {r_t.get('method_lag', -1):6d} E={r_t.get('error_pct', float('nan')):.3f}%", flush=True)
+            else:
+                print(f"   {r_b['pair']}: {r_b['status']}", flush=True)
+        print(f"   paper: naive {paper.get('naive')} BRAID {paper.get('braid')} E={paper.get('err_braid')}% | ThinBRAID {paper.get('thin')} E={paper.get('err_thin')}%  {paper.get('note', '')}", flush=True)
+        rows.append(dict(dataset=name, paper_key=key, n=n, W=W, max_lag=max_lag, ours=res, paper=paper))
+    _save("braid", dict(experiment="BRAID TKDD 2010 Tables III and IV: lag error E = 100|l_b - l_n|/l_n over the whole sequence", rows=rows))
 
 
 # --------------------------------------------------------------------------- CorrJoin
@@ -188,62 +212,59 @@ def repro_corrjoin(args):
 
 # --------------------------------------------------------------------------- StatStream
 def repro_statstream(args):
-    """StatStream VLDB 2002 Table 2 / Fig. 5 on its own random walks: grid pruning power
-    (candidates / all pairs) from our StatStreamGridIndex, and the precision / recall of the
-    paper's *approximate* reporting rule (report a pair when the DFT-approximated correlation is
-    >= T - t) with n=16 coefficients, T in {0.85, 0.9}, t in {0.001, 0.0005}. Paper: precision
-    0.9765 to 0.9947, recall 0.9987 to 1.0, pruning power 0.01 to 0.09."""
+    """StatStream VLDB 2002 section 5 on its own random walks (s_i = 100 + sum(u - 0.5)): sliding
+    window 1 h = 3,600 points, basic windows 30 s to several minutes (b = 60 here), n = 16 sliding-window
+    DFT coefficients for the grid (Lemma 2 filter, Theorem 2: no false negatives).
+    Reported: Fig. 5 grid pruning power 0.01 to 0.09 and filter precision ~0.55 to 0.9 (16 to 40
+    coefficients); Table 2 after post-processing: S0.85, t = 0.0005 -> precision 0.9931, recall 1.0
+    (the real R0.85/R0.9 cells: 0.9765 to 0.9947 / 0.9987 to 1.0). The post-processing approximation
+    is section 3.4 curve fitting with the first 2 DFT coefficients of EACH BASIC WINDOW (Fig. 4
+    caption), summed over the k basic windows of the sliding window, with exact means and standard
+    deviations from the running sums; a pair is reported when corr_approx > T - t."""
     rng = np.random.default_rng(20260917)
     m, T_len = args.m, args.T
     walks = 100.0 + np.cumsum(rng.uniform(0, 1, size=(m, T_len)) - 0.5, axis=1)
     ids = [f"rw{i}" for i in range(m)]
-    # paper (plan section 4.2): sliding window 1,800 to 7,200 points at 1 s, basic window 0.5 to several minutes
-    W, step, n = args.W if args.W != 1024 else 1800, args.step if args.step != 256 else 60, 16
+    W = args.W if args.W != 1024 else 3600
+    b = args.step if args.step != 256 else 60
+    n_grid, n_bw = 16, 2
     test = np.vstack([np.arange(T_len), walks])
     rows = []
     for T in (0.85, 0.9):
-        # grid pruning power from the port (exact filter, recall 1 by Theorem 2)
         with tempfile.TemporaryDirectory() as tmp:
-            rec, _, _ = run_and_log_corrtrack("statstream_rw", test, ids, _base(W, step, 0, T, basic_window=step),
-                                              dict(n_vectors=2 * n, seed=1, seed_toggle=2, preprocess=False, data_representation="sketch_dft",
-                                                   candidate_backend="statstream_grid", statstream_n_coeffs=n, statstream_index_dims=4),
+            rec, _, _ = run_and_log_corrtrack("statstream_rw", test, ids, _base(W, b, 0, T, basic_window=b),
+                                              dict(n_vectors=2 * n_grid, seed=1, seed_toggle=2, preprocess=False, data_representation="sketch_dft",
+                                                   candidate_backend="statstream_grid", statstream_n_coeffs=n_grid, statstream_index_dims=4),
                                               f"{tmp}/ss.csv", recall_by_window=True, verbose=False, testing=False)
-        n_windows = (T_len - W) // step + 1
+        n_windows = (T_len - W) // b + 1
         all_pairs = n_windows * m * (m - 1) // 2
         pruning_power = rec["total_candidates"] / all_pairs
-        # the paper's approximate reporting rule, evaluated on every window
+        filter_precision = rec["correlated"] / max(rec["total_candidates"], 1)     # their Fig. 5 "precision" (before post-processing)
         tp = {t: 0 for t in (0.001, 0.0005)}; fp = dict(tp); fn = dict(tp)
-        for s0 in range(0, T_len - W + 1, step):
+        k = W // b
+        for s0 in range(0, T_len - W + 1, b):
             win = walks[:, s0:s0 + W]
-            z = win - win.mean(axis=1, keepdims=True)
-            z /= np.maximum(np.linalg.norm(z, axis=1, keepdims=True), 1e-12)
-            exact = z @ z.T
-            F = np.fft.rfft(z, axis=1)[:, 1:n + 1]           # first n coefficients after DC
-            # the paper's rule: corr_approx = 1 - d_n^2 / 2 with d_n the distance between the n-coefficient
-            # digests (Parseval scaling 2/W for the positive half-spectrum). Truncation can only drop
-            # energy, so d_n <= d and corr_approx >= corr: recall ~1, precision < 1, as in their Table 2.
-            if args.rule == "truncated":
-                # digests as stored: 1 - d_n^2/2. Truncation only drops energy, so corr_approx >= corr:
-                # recall exactly 1, precision limited by pairs just under T
-                en = (2.0 / W) * np.sum(np.abs(F) ** 2, axis=1)
-                d2 = en[:, None] + en[None, :] - 2.0 * (2.0 / W) * np.real(F @ F.conj().T)
-                approx = 1.0 - d2 / 2.0
-            else:
-                # digests renormalized to unit norm (the cosine of the kept coefficients): a two-sided
-                # approximation, which is the only reading consistent with the paper's recall < 1
-                Fn = F / np.maximum(np.linalg.norm(F, axis=1, keepdims=True), 1e-12)
-                approx = np.real(Fn @ Fn.conj().T)
+            mu = win.mean(axis=1); sd = win.std(axis=1)
+            exact = np.corrcoef(win)
+            # section 3.4: per basic window, DFT (1/sqrt(b) convention) truncated to the first n_bw coefficients;
+            # psi(x, y) ~ sum_j sum_m c^x_m conj(c^y_m) (orthogonal family, V(m) absorbed); real signal: DC + 2 Re(...)
+            blocks = win.reshape(m, k, b)
+            F = np.fft.rfft(blocks, axis=2)[:, :, :n_bw] / np.sqrt(b)
+            ip = np.real(np.einsum("ikm,jkm->ij", F[:, :, :1], F[:, :, :1].conj())) + 2.0 * np.real(np.einsum("ikm,jkm->ij", F[:, :, 1:], F[:, :, 1:].conj()))
+            approx = (ip / W - np.outer(mu, mu)) / np.maximum(np.outer(sd, sd), 1e-12)
             iu = np.triu_indices(m, 1)
             ex, ap = exact[iu], approx[iu]
             truth = ex >= T
             for t in tp:
-                rep = ap >= T - t
+                rep = ap > T - t
                 tp[t] += int((rep & truth).sum()); fp[t] += int((rep & ~truth).sum()); fn[t] += int((~rep & truth).sum())
         for t in tp:
             prec = tp[t] / max(tp[t] + fp[t], 1); recall = tp[t] / max(tp[t] + fn[t], 1)
-            print(f"m={m} T={T} t={t}: precision={prec:.4f} (paper 0.9765-0.9947) recall={recall:.4f} (paper 0.9987-1.0) | grid pruning power={pruning_power:.4f} (paper 0.01-0.09)", flush=True)
-            rows.append(dict(m=m, T=T, tolerance=t, rule=args.rule, precision=prec, recall=recall, grid_pruning_power=pruning_power, grid_recall=1.0 if rec["correlated"] else None))
-    _save("statstream", dict(experiment="StatStream VLDB 2002 Table 2 and Fig. 5 on random walks", W=W, basic_window=step, n_coeffs=n, rows=rows))
+            paper = "S0.85 t=0.0005: precision 0.9931 recall 1.0" if (T == 0.85 and t == 0.0005) else "no synthetic cell in Table 2 (real: 0.9765-0.9947 / 0.9987-1.0)"
+            print(f"m={m} W={W} b={b} T={T} t={t}: post-processing precision={prec:.4f} recall={recall:.4f} [{paper}] | grid pruning power={pruning_power:.4f} (Fig. 5: 0.01-0.09) "
+                  f"filter precision={filter_precision:.3f} (Fig. 5: ~0.55-0.9 at 16 coefficients)", flush=True)
+            rows.append(dict(m=m, W=W, b=b, T=T, tolerance=t, n_bw=n_bw, precision=prec, recall=recall, grid_pruning_power=pruning_power, filter_precision=filter_precision))
+    _save("statstream", dict(experiment="StatStream VLDB 2002 Fig. 5 and Table 2 on random walks", W=W, basic_window=b, n_grid=n_grid, n_bw=n_bw, rows=rows))
 
 
 # --------------------------------------------------------------------------- ParCorr / CSZ
@@ -343,10 +364,9 @@ def main() -> None:
     ap.add_argument("--step", type=int, default=256)
     ap.add_argument("--n-lags", type=int, default=None)
     ap.add_argument("--ms", default="25,50,100,200")
-    ap.add_argument("--rule", choices=("renormalized", "truncated"), default="renormalized", help="statstream: how the approximate correlation is formed from the n-coefficient digests")
     args = ap.parse_args()
     defaults = {
-        "braid": dict(datasets="motes_humidity,motes_light,sunspots_daily,braid_sines_smoke,braid_spikes_smoke", n_lags=512, m=None),
+        "braid": dict(datasets="braid_sines_paper,braid_spiketrains_paper,motes_temperature,motes_humidity,motes_light,sunspots_daily", m=None),
         "corrjoin": dict(datasets="corrjoin_stock,corrjoin_chlorine,corrjoin_gas,corrjoin_synthetic", m=1000),
         "statstream": dict(m=500, T=20000),
         "parcorr": dict(datasets="sp500_sub263,corrjoin_stock", m=1000),

@@ -8,7 +8,8 @@ applied automatically:
   instead of run; ``enabled_by_us`` / ``specified`` arms run and carry their tag in the output.
 - n_lags > 0: TSUBASA and CorrJoin are synchronous-only and are reported N/A.
 - Counters (total_candidates / tested / correlated) are the primary comparison; wall time is
-  secondary and the pure-Python competitor indexes are marked as such.
+  secondary. Since 2026-09-17 the competitor indexes run their candidate loops in
+  competitor_kernels (Cython); an arm is marked "py" only when that extension is missing.
 
 Arms: bruteforce exact_stomp filcorr tsubasa braid thinbraid corrtrack parcorr csz statstream corrjoin
 
@@ -37,7 +38,7 @@ sys.path.insert(0, REPO)
 os.chdir(REPO)
 
 import corrtrack_run_bruteforce as bfmod  # noqa: E402
-from library_corrtrack_parallel import CorrTrack, run_and_log_bruteforce, run_and_log_corrtrack  # noqa: E402
+from library_corrtrack_parallel import CorrTrack, run_and_log_bruteforce, run_and_log_corrtrack, _HAVE_COMPETITOR_KERNELS  # noqa: E402
 from abaca.dataset_profile import profile_dataset  # noqa: E402
 import resource  # noqa: E402
 
@@ -168,7 +169,8 @@ def main() -> None:
                                             "braid_b", "braid_gamma", "braid_thin", "filcorr_fs", "filcorr_ft")}
             # process peak RSS (MB) after the arm: monotone across arms, so report the increment as a coarse memory signal
             rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
-            r.update(status="ok", wall=wall, flags=flags, pure_python_index=arm in PURE_PYTHON_INDEX, peak_rss_mb_after=rss,
+            # (2026-09-17) the competitor indexes run their hot loops in competitor_kernels when it is built
+            r.update(status="ok", wall=wall, flags=flags, pure_python_index=(arm in PURE_PYTHON_INDEX and not _HAVE_COMPETITOR_KERNELS), peak_rss_mb_after=rss,
                      candidate_time_per_pair_window_us=(1e6 * record["cand_time"] / record["total_candidates"]) if record.get("total_candidates") else None)
             results[arm] = r
             print(f"{arm:12s} done: wall={wall:.2f}s correlated={r['correlated']} total={r['total_candidates']} tested={r['tested']} "

@@ -17,6 +17,7 @@ step=1 cell (Yellowstone slice) because BRAID probes 70 lags where exact_stomp p
 step=12 (comparison plan section 5a.3). m is capped at 2000 (the battery target); Berkeley
 Earth additionally runs the exact arms plus StatStream at the full 18,520 for scalability.
 
+    python abaca/campaign_competitors.py --design          # the (m, L) points per dataset
     python abaca/campaign_competitors.py --list
     python abaca/campaign_competitors.py --emit abaca/campaign_submit.sh   # then: bash abaca/campaign_submit.sh
     python abaca/campaign_competitors.py --emit abaca/pilot_submit.sh --select motes_temperature_W96_s12_L0_T0.9 \
@@ -91,16 +92,18 @@ class DatasetSpec:
 
 DATASETS = [
     # competitor papers' own data (registry datasets/competitor_sources.md)
-    DatasetSpec("motes_temperature", 240, 24, 27, 21, m_min=8, n_obs=20000, note="BRAID Motes 31 s epochs; L_max=21 -> n_lags 480 (~4.1 h) covers the 224 min lag"),
-    DatasetSpec("motes_humidity", 240, 24, 31, 21, m_min=8, n_obs=20000, note="BRAID Motes humidity"),
+    # horizon rule (log entry (h)): one application horizon per sampling regime, shared by every dataset of that regime.
+    # sub-daily sensors -> a day (Motes: 2,880 epochs of 31 s, like smartmeter's 48 half-hours); L_max=3 -> 576 epochs (~5 h) covers BRAID's 224 min
+    DatasetSpec("motes_temperature", 2880, 288, 27, 3, m_min=8, n_obs=40000, walltime="24:00:00", note="BRAID Motes 31 s epochs; W a day, step 2.5 h; L_max=3 -> 576 epochs covers the 224 min lag"),
+    DatasetSpec("motes_humidity", 2880, 288, 31, 3, m_min=8, n_obs=40000, walltime="24:00:00", note="BRAID Motes humidity, same regime"),
     DatasetSpec("yellowstone_bp3_7", 2000, 100, 28, 11, m_min=8, walltime="24:00:00", calib_obs=30000, extra={"corrjoin_ks": 20, "corrjoin_ke": 40}, note="FilCorr 100 Hz, W 20 s, step 1 s, L_max=11 -> lag 10 s"),
     DatasetSpec("yellowstone_raw", 2000, 100, 28, 11, m_min=8, walltime="24:00:00", calib_obs=30000, extra={"corrjoin_ks": 20, "corrjoin_ke": 40}, note="FilCorr raw counts"),
     DatasetSpec("uscrn2020_temperature", 168, 12, 153, 5, extra=dict(CORRJOIN_KNOBS), note="TSUBASA NOAA hourly; L_max=5 -> lag 48 h"),
     DatasetSpec("berkeley_tavg_anom_2010", 90, 10, 2000, 4, m_min=100, extra={"corrjoin_ks": 9, "corrjoin_ke": 18}, walltime="48:00:00", full_m=18520, note="TSUBASA Berkeley Earth daily; L_max=4 -> lag 30 d; full 18,520 anchor for the exact arms"),
-    DatasetSpec("corrjoin_stock", 240, 24, 2000, 1, m_min=100, walltime="24:00:00", note="CorrJoin daily prices; synchronous method, L fixed at 1"),
-    DatasetSpec("corrjoin_chlorine", 240, 24, 2000, 1, m_min=100, walltime="24:00:00", note="CorrJoin chlorine"),
-    DatasetSpec("corrjoin_gas", 240, 24, 2000, 1, m_min=100, walltime="24:00:00", note="CorrJoin gas"),
-    DatasetSpec("corrjoin_random", 240, 24, 2000, 1, m_min=100, walltime="24:00:00", note="CorrJoin i.i.d. uniform (uncooperative)"),
+    DatasetSpec("corrjoin_stock", 60, 5, 2000, 1, m_min=100, walltime="24:00:00", full_m=3878, note="CorrJoin daily NASDAQ closes: daily-finance regime (a quarter / a week, as sp500); 15 and 30 divide 60"),
+    DatasetSpec("corrjoin_chlorine", 240, 24, 2000, 1, m_min=100, walltime="24:00:00", full_m=4830, note="CorrJoin chlorine"),
+    DatasetSpec("corrjoin_gas", 240, 24, 2000, 1, m_min=100, walltime="24:00:00", full_m=5120, note="CorrJoin gas"),
+    DatasetSpec("corrjoin_random", 240, 24, 2000, 1, m_min=100, walltime="24:00:00", full_m=5000, note="CorrJoin i.i.d. uniform (uncooperative)"),
     DatasetSpec("statstream_rw_m2000_T20000", 256, 32, 2000, 5, m_min=100, extra={"corrjoin_ks": 16, "corrjoin_ke": 32}, walltime="24:00:00", note="StatStream random walks, CSZ's sw=256/bw=32 (generate first)"),
     DatasetSpec("braid_sines_m2000_T32768", 1024, 128, 2000, 3, m_min=100, extra={"corrjoin_ks": 16, "corrjoin_ke": 32}, walltime="24:00:00", note="BRAID Sines, planted lags <= 168 (generate first)"),
     DatasetSpec("braid_spiketrains_m2000_T100000", 1024, 128, 2000, 3, m_min=100, n_obs=40000, extra={"corrjoin_ks": 16, "corrjoin_ke": 32}, walltime="48:00:00", note="BRAID SpikeTrains (generate first)"),
@@ -111,48 +114,102 @@ DATASETS = [
     DatasetSpec("wikipedia", 30, 3, 88, 6, m_min=16, extra={"corrjoin_ks": 5, "corrjoin_ke": 10}, note="daily page views"),
     DatasetSpec("global_weather", 30, 3, 100, 6, m_min=16, extra={"corrjoin_ks": 5, "corrjoin_ke": 10}, note="daily weather"),
     DatasetSpec("smartmeter", 48, 8, 510, 3, m_min=32, extra={"corrjoin_ks": 6, "corrjoin_ke": 12}, walltime="24:00:00", note="half-hourly: W a day, step 4 h, L_max=3 -> lag 16 h"),
+    # ASOS airports (hourly weather regime, a week / 12 h, L_max=5 -> 48 h), the project's original real data; last 1 year
+    DatasetSpec("fr_air_temperature_121_1", 168, 12, 121, 5, m_min=16, extra=dict(CORRJOIN_KNOBS), note="ASOS France hourly air temperature (the 2026-09-12 four-way dataset)"),
+    DatasetSpec("fr_wind_direction_121_1", 168, 12, 121, 5, m_min=16, extra=dict(CORRJOIN_KNOBS), note="ASOS France hourly wind direction (uncooperative)"),
+    DatasetSpec("fr_wind_speed_121_1", 168, 12, 121, 5, m_min=16, extra=dict(CORRJOIN_KNOBS), note="ASOS France hourly wind speed"),
+    DatasetSpec("br_air_temperature_146_1", 168, 12, 146, 5, m_min=16, extra=dict(CORRJOIN_KNOBS), note="ASOS Brazil hourly air temperature"),
+    DatasetSpec("br_wind_direction_146_1", 168, 12, 146, 5, m_min=16, extra=dict(CORRJOIN_KNOBS), note="ASOS Brazil hourly wind direction (uncooperative)"),
+    DatasetSpec("br_flights_109_1", 168, 12, 109, 5, m_min=16, extra=dict(CORRJOIN_KNOBS), note="ASOS Brazil hourly flight counts (airport operations, hourly regime)"),
 ]
 
 STEP1_CELL = Cell("yellowstone_bp3_7", 2000, 1, 1000, 0.9, n_series=28, n_obs=30000, arms="bruteforce,exact_stomp,filcorr,braid,thinbraid,corrtrack,statstream",
                   walltime="48:00:00", calib_obs=9000, note="step=1 lagged cell (BRAID probes 70 lags vs exact_stomp 15 at step=12); step != basic_window so the grid arms are excluded")
 
 
-def sobol_points(n_points: int, seed: int = 20260917):
-    """The same scrambled Sobol sequence in the unit square for every dataset, mapped per dataset to
-    (m log-uniform in [m_min, m_max], L uniform integer in [1, L_max]); mirrors the 2026-09-16 real-data
-    sweep design (scipy.stats.qmc.Sobol, scrambled, fixed seed) with T taken out of the sequence and
-    swept in full instead."""
+def sobol_unit(n_points: int, d: int, seed: int):
+    """Scrambled Sobol points in the unit cube, the same sequence for every dataset (mirrors the
+    2026-09-16 real-data sweep: scipy.stats.qmc.Sobol, scrambled, fixed seed)."""
     from scipy.stats import qmc
     if n_points <= 0:
-        return np.zeros((0, 2))
+        return np.zeros((0, d))
     n_pow2 = 1 << max(0, int(np.ceil(np.log2(n_points))))
-    u = qmc.Sobol(d=2, scramble=True, seed=seed).random(n_pow2)
-    return u[:n_points]
+    return qmc.Sobol(d=d, scramble=True, seed=seed).random(n_pow2)[:n_points]
 
 
-def cells(points: int = 4, seed: int = 20260917) -> list[Cell]:
-    """Per dataset: one synchronous anchor (m = m_max, L = 1), `points` Sobol (m, L) points, and for
-    Berkeley Earth the full-m anchor; every cell at every T in THRESHOLDS. Rules checked
-    programmatically: step passed as basic_window (ParCorr's step == basic_window), n_lags a
-    multiple of step (StatStream's lag granularity), ks and ke divide W."""
-    u = sobol_points(points, seed)
+def _map_m(u, d):
+    return int(round(np.exp(np.log(d.m_min) + u * (np.log(d.m_max) - np.log(d.m_min)))))
+
+
+def design_points(d: DatasetSpec, m_levels: int = 4, l_levels: int = 4, replicates: int = 2, kind: str = "ladder", seed: int = 20260917):
+    """(m, L) design per dataset. Default `kind="ladder"` (2026-09-17, user): m and L grow together
+    along one work ladder plus the synchronous anchor, see below. `kind="latin"`: explicit marginal
+    levels and a Latin-square pairing, so every level of m and every level of L appears exactly once
+    per replicate.
+      m levels: geometric from m_max downwards, m_max / 2^k for k = 0 .. m_levels-1, floored at m_min
+      L levels: l_levels integers evenly spaced in [1, L_max] (1 always included; fewer if L_max is small)
+      replicate r pairs m level i with L level (i + r * shift) mod n_L, shift = ceil(n_L / replicates)
+    Replicate 0 is the diagonal and contains the synchronous anchor (m_max, L = 1). `kind="sobol"`
+    keeps the earlier scrambled-Sobol draw (anchor + 1-D sync points + 2-D lagged points)."""
+    if kind == "ladder":
+        # (2026-09-17, user) L on its own mostly multiplies the pair-window count (the 2026-09-16 sweeps
+        # showed little L effect beyond that), so m and L grow together along one work ladder:
+        # level j = 0 .. m_levels-1: m_j = m_max / 2^(m_levels-1-j), L_j = 1 + round(j (L_max-1) / (m_levels-1)),
+        # i.e. (m_max/8, 1) .. (m_max, L_max); plus the synchronous anchor (m_max, 1) for the primary
+        # head-to-head. No replicates. Work ~ m^2 L grows ~ 4x to 8x per rung.
+        pts = [(d.m_max, 1)]
+        n = max(2, m_levels)
+        for j in range(n):
+            m = max(d.m_min, int(round(d.m_max / 2 ** (n - 1 - j))))
+            L = 1 + int(round(j * (d.L_max - 1) / (n - 1))) if d.L_max > 1 else 1
+            pts.append((m, L))
+    elif kind == "sobol":
+        pts = [(d.m_max, 1)]
+        for u in sobol_unit(m_levels - 1, 1, seed)[:, 0]:
+            pts.append((_map_m(u, d), 1))
+        if d.L_max >= 2:
+            for u in sobol_unit(l_levels, 2, seed + 1):
+                L = 2 + int(np.floor(u[1] * (d.L_max - 1)))
+                pts.append((_map_m(u[0], d), min(L, d.L_max)))
+    else:
+        ms = []
+        for k in range(m_levels):
+            m = max(d.m_min, int(round(d.m_max / 2 ** k)))
+            if m not in ms:
+                ms.append(m)
+        Ls = sorted({int(round(v)) for v in np.linspace(1, d.L_max, num=min(l_levels, d.L_max))})
+        n_L = len(Ls)
+        shift = max(1, int(np.ceil(n_L / max(replicates, 1))))
+        pts = []
+        for r in range(replicates if n_L > 1 else 1):
+            for i, m in enumerate(ms):
+                pts.append((m, Ls[(i + r * shift) % n_L]))
+    out = []
+    for p in pts:
+        if p not in out:
+            out.append(p)
+    return out
+
+
+def cells(m_levels: int = 4, l_levels: int = 4, replicates: int = 2, kind: str = "ladder", seed: int = 20260917) -> list[Cell]:
+    """Per dataset: design_points() cells, every one at every T in THRESHOLDS; datasets with more series
+    than the 2k cap (Berkeley Earth, CorrJoin's files) add a full-m synchronous anchor for the exact
+    arms + StatStream (the pure-Python pruning indexes are excluded there until the Cython ports land). Rules checked programmatically: step passed as
+    basic_window (ParCorr's step == basic_window), n_lags a multiple of step (StatStream's lag
+    granularity), ks and ke divide W."""
     out = []
     for d in DATASETS:
-        designs = [(d.m_max, 1)]
-        for row in u:
-            m = int(round(np.exp(np.log(d.m_min) + row[0] * (np.log(d.m_max) - np.log(d.m_min)))))
-            L = 1 + int(np.floor(row[1] * d.L_max)) if d.L_max > 1 else 1
-            L = min(L, d.L_max)
-            if (m, L) not in designs:
-                designs.append((m, L))
+        designs = design_points(d, m_levels, l_levels, replicates, kind, seed)
         if d.full_m:
             designs.append((d.full_m, 1))
         for (m, L) in designs:
             for T in THRESHOLDS:
                 arms = d.arms
                 if d.full_m and m == d.full_m:
-                    arms = "bruteforce,exact_stomp,filcorr,tsubasa,thinbraid,corrtrack,statstream"
-                out.append(Cell(d.label, d.W, d.step, (L - 1) * d.step, T, n_series=m if m != d.m_max or d.full_m else m, n_obs=d.n_obs, arms=arms,
+                    # above the 2k cap: plain BRAID excluded (O(m^2) per-pair state, ~2.2 GB at 2k); the pruning
+                    # arms are included since their candidate loops run in competitor_kernels (2026-09-17)
+                    arms = "bruteforce,exact_stomp,filcorr,tsubasa,thinbraid,corrtrack,parcorr,csz,statstream,corrjoin"
+                out.append(Cell(d.label, d.W, d.step, (L - 1) * d.step, T, n_series=m, n_obs=d.n_obs, arms=arms,
                                 extra=dict(d.extra), walltime=("96:00:00" if (d.full_m and m == d.full_m) else d.walltime), calib_obs=d.calib_obs,
                                 note=f"{d.note} | L={L}"))
     out.append(STEP1_CELL)
@@ -166,13 +223,13 @@ GENERATE = [
 ]
 
 
-def emit(path: str, results_root: str, select=None, points: int = 4, seed: int = 20260917) -> None:
+def emit(path: str, results_root: str, select=None, m_levels: int = 4, l_levels: int = 4, replicates: int = 2, kind: str = "ladder", seed: int = 20260917) -> None:
     n_cells = 0
     lines = ["#!/bin/bash", "# generated by abaca/campaign_competitors.py; run from the CorrTrack working tree on the Sophia frontend",
              "set -uo pipefail", f"RESULTS_ROOT=${{RESULTS_ROOT:-{results_root}}}", "mkdir -p abaca/logs",
              "submit() { oarsub \"$@\" | sed -n 's/^OAR_JOB_ID=//p'; }", "",
              "# synthetic inputs (cheap, frontend-side)"] + GENERATE + [""]
-    for c in cells(points, seed):
+    for c in cells(m_levels, l_levels, replicates, kind, seed):
         if select and c.stem not in select:
             continue
         common = [f"DATASET_CONFIG={c.config}", f"WINDOW_SIZE={c.W}", f"WINDOW_STEP={c.step}", f"BASIC_WINDOW={c.step}", f"N_LAGS={c.n_lags}", f"THR={c.T}",
@@ -201,17 +258,26 @@ def main() -> None:
     ap.add_argument("--emit", default=None)
     ap.add_argument("--results-root", default="$HOME/corrtrack_abaca_results")
     ap.add_argument("--select", action="append", default=None, help="only cells with exactly this stem (repeatable); e.g. a pilot")
-    ap.add_argument("--points", type=int, default=4, help="Sobol (m, L) points per dataset, on top of the synchronous anchor at m_max")
+    ap.add_argument("--m-levels", type=int, default=4, help="m levels: m_max / 2^k, k < m_levels")
+    ap.add_argument("--l-levels", type=int, default=4, help="L levels evenly spaced in [1, L_max]")
+    ap.add_argument("--replicates", type=int, default=2, help="Latin-square replicates (each m and L level appears once per replicate)")
+    ap.add_argument("--design-kind", choices=("ladder", "latin", "sobol"), default="ladder")
     ap.add_argument("--seed", type=int, default=20260917)
+    ap.add_argument("--design", action="store_true", help="print the (m, L) design per dataset and exit")
     args = ap.parse_args()
-    cs = cells(args.points, args.seed)
+    if args.design:
+        print(f"{'dataset':32s} {'W':>5s} {'step':>4s} {'L_max':>5s} {'m_full':>6s}  (m, L windows) cells x {len(THRESHOLDS)} T")
+        for d in DATASETS:
+            print(f"{d.label:32s} {d.W:5d} {d.step:4d} {d.L_max:5d} {str(d.full_m or '-'):>6s}  {design_points(d, args.m_levels, args.l_levels, args.replicates, args.design_kind, args.seed)}")
+        return
+    cs = cells(args.m_levels, args.l_levels, args.replicates, args.design_kind, args.seed)
     if args.list or not args.emit:
         print(f"{'cell':60s} {'m':>6s} {'n_obs':>6s} {'wall':>9s} note")
         for c in cs:
             print(f"{c.stem:60s} {str(c.n_series or 'cfg'):>6s} {str(c.n_obs or 'cfg'):>6s} {c.walltime:>9s} {c.note}")
         print(f"{len(cs)} cells x 6 jobs")
     if args.emit:
-        emit(args.emit, args.results_root, args.select, args.points, args.seed)
+        emit(args.emit, args.results_root, args.select, args.m_levels, args.l_levels, args.replicates, args.design_kind, args.seed)
 
 
 if __name__ == "__main__":
