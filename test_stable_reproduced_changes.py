@@ -4189,6 +4189,35 @@ class StableReproducedChangesTest(unittest.TestCase):
         self.assertEqual(out2.shape, (20, 3))
         self.assertEqual(list(ids2), ["s0", "s1"])
 
+    def test_csz_tuning_protocol_design_and_selection_rule(self):
+        # (2026-09-17) abaca/tune_competitors.py: the strength-2 covering array over CSZ's own
+        # grid (N x g x c x f = 4*4*13*10 = 2,080 settings) must cover every pair of levels of
+        # every two factors in 130 rows (the paper's count), except pairs that no valid setting
+        # can realise (N=30 with g=4: 30 % 4 != 0). The selection rule must rank feasible
+        # settings (recall >= target, precision >= 0.02) by fewer candidates, and infeasible
+        # ones by recall, so an exact-recall arm ends up with its cheapest filter setting.
+        import importlib.util, itertools
+        spec = importlib.util.spec_from_file_location("tune_competitors", os.path.join(os.path.dirname(os.path.abspath(__file__)), "abaca", "tune_competitors.py"))
+        tc = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tc)
+        grid = tc.parameter_grid("parcorr", 96)
+        self.assertEqual(int(np.prod([len(v) for v in grid.values()])), 2080)
+        rows = tc.covering_array(grid, "parcorr")
+        self.assertEqual(len(rows), 130)
+        self.assertTrue(all(tc.valid_setting("parcorr", r) for r in rows))
+        factors = list(grid)
+        need = {(a, la, b, lb) for a, b in itertools.combinations(factors, 2) for la in grid[a] for lb in grid[b]}
+        have = {(a, r[a], b, r[b]) for r in rows for a, b in itertools.combinations(factors, 2)}
+        self.assertEqual(need - have, {("n_vectors", 30, "parcorr_k", 4)})
+        # corrjoin grid respects ks < ke, kb <= ks and divisibility of W
+        cj = [dict(zip(tc.parameter_grid("corrjoin", 96), c)) for c in itertools.product(*tc.parameter_grid("corrjoin", 96).values())]
+        for s_ in cj:
+            if tc.valid_setting("corrjoin", s_):
+                self.assertTrue(96 % s_["corrjoin_ks"] == 0 and 96 % s_["corrjoin_ke"] == 0 and s_["corrjoin_ks"] < s_["corrjoin_ke"])
+        ok = lambda rec, prec, cand: dict(status="ok", recall=rec, precision=prec, total_candidates=cand)
+        ranked = sorted([ok(1.0, 1.0, 900), ok(0.99, 0.5, 400), ok(0.80, 1.0, 100), ok(0.96, 0.01, 50)], key=lambda r: tc.score(r, 0.95))
+        self.assertEqual([r["total_candidates"] for r in ranked], [400, 900, 50, 100])   # infeasible: by recall
+
     def test_thinbraid_tracks_exact_after_buffer_rolls_on_offset_mean_data(self):
         # (2026-09-17) Two defects found on real Motes data, both invisible on the
         # zero-mean, short synthetic streams used above: (1) the shared-projection

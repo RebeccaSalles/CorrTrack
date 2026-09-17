@@ -17,8 +17,10 @@ Arms: bruteforce exact_stomp filcorr tsubasa braid thinbraid corrtrack parcorr c
         --n-obs 4000 --out /tmp/nway_motes.json
 
 CorrTrack's own parameters come from ``--best-params <json>`` (its hyperopt output) when
-given, else untuned defaults (stated in the output). Competitor knobs use the paper defaults
-recorded in experiment_run_exec_param.py unless overridden with ``--set key=value``.
+given, else untuned defaults (stated in the output). Competitor knobs come from
+``--competitor-params <dir>`` (abaca/tune_competitors.py output, the CSZ protocol) when a
+``best_params_<arm>.json`` exists there, else the paper defaults recorded in
+experiment_run_exec_param.py, unless overridden with ``--set key=value``.
 """
 from __future__ import annotations
 
@@ -70,6 +72,9 @@ def main() -> None:
     ap.add_argument("--train-ratio", type=float, default=None)
     ap.add_argument("--best-params", default=None, help="CorrTrack hyperopt best_params_corrtrack.json")
     ap.add_argument("--n-vectors", type=int, default=32)
+    ap.add_argument("--competitor-params", default=None,
+                    help="directory holding best_params_<arm>.json from abaca/tune_competitors.py (CSZ protocol); "
+                         "when a file exists for an arm its knobs replace the paper defaults")
     ap.add_argument("--set", action="append", default=[], help="competitor knob override key=value (json), e.g. parcorr_c=0.5")
     ap.add_argument("--out", default=None, help="JSON output path")
     ap.add_argument("--label", default=None)
@@ -113,6 +118,14 @@ def main() -> None:
         "corrjoin": dict(common, data_representation="sketch_paa_svd", candidate_backend="corrjoin_double_filter",
                          corrjoin_ks=knobs.get("corrjoin_ks", 15), corrjoin_ke=knobs.get("corrjoin_ke", 30), corrjoin_kb=knobs.get("corrjoin_kb", 3)),
     }
+    tuned = {}
+    if args.competitor_params:
+        for arm in pattern_b:
+            f = Path(args.competitor_params) / f"best_params_{arm}.json"
+            if f.exists():
+                bp = {k: v for k, v in json.load(open(f)).items() if not k.startswith("_")}
+                pattern_b[arm] = dict(pattern_b[arm], **bp)
+                tuned[arm] = str(f)
     pattern_a_extra = {
         "filcorr": dict(filcorr_fs=knobs.get("filcorr_fs", 0.0), filcorr_ft=knobs.get("filcorr_ft", 0.5), filcorr_sampling_rate=knobs.get("filcorr_sampling_rate", 1.0)),
         "braid": dict(braid_b=knobs.get("braid_b", 16), braid_gamma=knobs.get("braid_gamma", 0.4), braid_thin=False, braid_report_mode=knobs.get("braid_report_mode", "all_lags")),
@@ -171,9 +184,10 @@ def main() -> None:
         prec = f"{r['precision']:.4f}" if r.get("precision") is not None else "    -    "
         print(f"{arm:12s} {'ok':>6s} {r['wall']:8.2f} {sp:7.2f}x {r['correlated']:11d} {r['total_candidates']:11d} {r['tested']:9d} {rec:>7s} {prec:>9s} "
               f"{str(r['supports_neg_corr']):>14s} {'py' if r['pure_python_index'] else 'cy/np':>6s}")
-    print(f"\ncorrtrack params: {ct_source}; competitor knob overrides: {knobs or 'none (paper defaults)'}")
+    print(f"\ncorrtrack params: {ct_source}; competitor knob overrides: {knobs or 'none'}; "
+          f"CSZ-protocol tuned arms: {tuned or 'none (paper defaults)'}")
     if args.out:
-        out = {"dataset": label, "config": vars(args), "corrtrack_params_source": ct_source,
+        out = {"dataset": label, "config": vars(args), "corrtrack_params_source": ct_source, "competitor_params_tuned": tuned,
                "arms": {a: {k: v for k, v in r.items() if k != "flags"} for a, r in results.items()}}
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         json.dump(out, open(args.out, "w"), indent=1, default=str)

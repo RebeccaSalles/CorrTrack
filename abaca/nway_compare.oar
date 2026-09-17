@@ -2,8 +2,7 @@
 # CorrTrack N-way competitor comparison on one competitor-paper dataset (phase 0f sets).
 # Generalizes fourway_compare.oar: pick the dataset config and the protocol with env vars.
 #
-#   DATASET_CONFIG=experiment_dataset_motes_temperature.py N_LAGS=433 THR=0.9 \
-#     oarsub -S ./abaca/nway_compare.oar
+#   oarsub -S "./abaca/nway_compare.oar DATASET_CONFIG=experiment_dataset_motes_temperature.py N_LAGS=480 THR=0.9"
 #
 #OAR -n corrtrack-nway
 #OAR -p cluster='mercantour3'
@@ -12,6 +11,10 @@
 #OAR -E abaca/logs/OAR.%jobid%.err
 
 set -uo pipefail
+# Parameters arrive as KEY=VALUE arguments (oarsub -S "./script.oar KEY=VALUE ..."): OAR does not
+# propagate the submitter's environment to the node. Environment variables still work when the
+# script is run by hand.
+for kv in "$@"; do export "${kv?}"; done
 
 CONDA_ROOT="${CONDA_ROOT:-$HOME/miniforge3}"
 CONDA_ENV="${CONDA_ENV:-corrtrack}"
@@ -26,6 +29,8 @@ N_LAGS="${N_LAGS:-0}"
 THR="${THR:-0.7}"
 NEG_CORR_FLAG="${NEG_CORR_FLAG:-}"          # set to --neg-corr for the second labelled run
 EXTRA_ARGS="${EXTRA_ARGS:-}"                # e.g. "--n-obs 20000 --set corrjoin_ks=14 --set corrjoin_ke=28"
+COMPETITOR_PARAMS="${COMPETITOR_PARAMS:-}"  # dir with best_params_<arm>.json from tune_competitors.oar
+BEST_PARAMS="${BEST_PARAMS:-}"              # CorrTrack's own best_params_corrtrack.json
 
 STEM="$(basename "$DATASET_CONFIG" .py)_W${WINDOW_SIZE}_s${WINDOW_STEP}_L${N_LAGS}_T${THR}${NEG_CORR_FLAG:+_neg}"
 RUN_DIR="$RESULTS_ROOT/nway_${OAR_JOB_ID:-manual}_$STEM"
@@ -54,6 +59,7 @@ echo "== N-way comparison =="
 # shellcheck disable=SC2086
 python abaca/nway_compare.py --dataset-config "$DATASET_CONFIG" --arms "$ARMS" \
   --window-size "$WINDOW_SIZE" --window-step "$WINDOW_STEP" --n-lags "$N_LAGS" --corr-threshold "$THR" \
+  ${COMPETITOR_PARAMS:+--competitor-params "$COMPETITOR_PARAMS"} ${BEST_PARAMS:+--best-params "$BEST_PARAMS"} \
   $NEG_CORR_FLAG $EXTRA_ARGS --out "$RUN_DIR/nway.json" 2>&1 | tee "$RUN_DIR/nway.log"
 COMPARE_RC=${PIPESTATUS[0]}
 
