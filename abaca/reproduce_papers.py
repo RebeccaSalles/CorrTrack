@@ -7,7 +7,8 @@ test. Every subcommand prints our number next to the paper's reported value and 
     python abaca/reproduce_papers.py braid       [--datasets braid_sines_paper,braid_spiketrains_paper,motes_temperature,sunspots_daily] [--T 30000]
     python abaca/reproduce_papers.py corrjoin    [--datasets corrjoin_stock,corrjoin_chlorine,corrjoin_gas,corrjoin_synthetic] [--m 1000]
     python abaca/reproduce_papers.py statstream  [--m 500] [--T 20000]
-    python abaca/reproduce_papers.py parcorr     [--datasets sp500_sub263,corrjoin_stock] [--m 1000]
+    python abaca/reproduce_papers.py parcorr     [--datasets sp500_sub263,corrjoin_stock] [--m 1000]   (stated settings AND their calibration)
+    python abaca/reproduce_papers.py csz         [--datasets sp500_sub263,csz_steamgen]  (the CSZ protocol at the 0.99 target)
     python abaca/reproduce_papers.py filcorr     [--ms 25,50,100,200]
     python abaca/reproduce_papers.py tsubasa     [--datasets uscrn2020_temperature]
     python abaca/reproduce_papers.py all
@@ -268,32 +269,105 @@ def repro_statstream(args):
 
 
 # --------------------------------------------------------------------------- ParCorr / CSZ
+def _split_train_test(test, ratio=0.3):
+    cut = int(round(ratio * test.shape[1]))
+    return test[:, :cut], test[:, cut:]
+
+
+def _fit_window(n_rows_calib, W, step, min_windows=20):
+    """Halve W (and step) until the calibration span holds at least `min_windows` windows; a
+    calibration span shorter than a window has no ground truth and would make every setting
+    'feasible' with recall 0/0 (seen on sp500 with W = 500 and a 376-row span)."""
+    while (n_rows_calib - W) // step + 1 < min_windows and W > 20:
+        W //= 2; step = max(1, step // 2)
+    return W, step
+
+
+def _calibrate_grid(label, calib, ids, base, arm, grid_settings, target, floor=0.02):
+    """Run every setting on the calibration span against its bruteforce truth; return the settings
+    sorted by the CSZ rule (feasible first: recall >= target and precision >= floor; then fewer
+    candidates) plus the evaluations. Uses abaca/tune_competitors.py's machinery."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tune_competitors", os.path.join(REPO, "abaca", "tune_competitors.py"))
+    tc = importlib.util.module_from_spec(spec); spec.loader.exec_module(tc)
+    with tempfile.TemporaryDirectory() as tmp:
+        gt, _, gt_flags = run_and_log_bruteforce(label, calib, ids, dict(base, baseline_mode="bruteforce"), f"{tmp}/bf.csv",
+                                                 metadata={"nodes": 0}, recall_by_window=True, verbose=False, testing=False)
+        if not gt["correlated"]:
+            raise RuntimeError(f"{label}: the calibration span has no correlated pair at T={base['corr_threshold']} (windows={(calib.shape[1] - base['window_size']) // base['window_step'] + 1}); nothing to calibrate against")
+        ev = tc.Evaluator(label, calib, ids, base, tmp, gt_flags, gt["total_candidates"])
+        evals = [ev.evaluate(arm, st) for st in grid_settings]
+    ranked = sorted(evals, key=lambda r: tc.score(r, target))
+    return ranked, tc
+
+
+def _heldout(label, test, ids, base, run_params):
+    with tempfile.TemporaryDirectory() as tmp:
+        bf, _, bf_flags = run_and_log_bruteforce(label, test, ids, dict(base, baseline_mode="bruteforce"), f"{tmp}/bf.csv",
+                                                 metadata={"nodes": 0}, recall_by_window=True, verbose=False, testing=False)
+        rec, _, flags = run_and_log_corrtrack(label, test, ids, base, run_params, f"{tmp}/run.csv", recall_by_window=True, verbose=False, testing=False)
+    m = CorrTrack.compute_metrics_bf(flags, bf_flags, windows=True, total_pairs_bf=bf["total_candidates"])
+    return dict(recall=m["recall"], precision=m["precision"], candidate_ratio=rec["total_candidates"] / max(bf["total_candidates"], 1))
+
+
 def repro_parcorr(args):
     """ParCorr DMKD 2018 section 5: recall > 90% at T=0.7, > 96% at 0.8, > 95.7% at 0.9 with r=60,
-    k=2, f=0.7, w=500, b=20, precision 100% by construction. Their Yahoo Finance set is not
-    obtainable; run on the stand-ins (sp500_sub263, corrjoin_stock)."""
+    k=2, f=0.7, w=500, b=20, precision 100% by construction. Two rows per (dataset, T):
+      (a) the paper's stated settings with the cell size at CSZ's c = 0.7 (the paper gives none);
+      (b) the paper's OWN calibration procedure (section 5.3: fix r, k; calibrate on a small sample
+          until the desired recall) applied to the two quantities it leaves to the sample, the cell
+          size c and the fraction f, on the first 30% of the stream at the 0.95 target, then recall on
+          the remaining 70%. (b) is the reproduction of their protocol; (a) of their numbers as printed."""
     paper = {0.7: 90.0, 0.8: 96.0, 0.9: 95.7}
+    rows = []
+    c_grid = [round(0.1 * i, 1) for i in range(1, 21)]; f_grid = [round(0.1 * i, 1) for i in range(5, 11)]   # c beyond CSZ 1.3: ParCorr states no cell size
+    for name in args.datasets.split(","):
+        data, ids = load_dataset(name=name, max_series=args.m)
+        test = data.T
+        calib, hold = _split_train_test(test)
+        W, step = _fit_window(calib.shape[1], 500, 20)      # the paper's w = 500, b = 20 when the stream allows
+        for T in (0.7, 0.8, 0.9):
+            base = _base(W, step, 0, T, basic_window=step)
+            stated = dict(n_vectors=60, seed=1, seed_toggle=2, preprocess=False, data_representation="sketch_proj",
+                          candidate_backend="parcorr_grid", parcorr_k=2, parcorr_f=0.7, parcorr_c=0.7)
+            a = _heldout(name, hold, ids, base, stated)
+            settings = [dict(n_vectors=60, parcorr_k=2, parcorr_c=c, parcorr_f=f) for c in c_grid for f in f_grid]
+            ranked, tc = _calibrate_grid(name, calib, ids, base, "parcorr", settings, 0.95)
+            best = ranked[0]
+            b = _heldout(name, hold, ids, base, tc.run_params_for("parcorr", best["setting"]))
+            print(f"{name:16s} m={len(ids)} W={W} b={step} T={T}: (a) stated r=60,k=2,f=0.7,c=0.7 -> recall={100 * a['recall']:.1f}% cand/pairs={a['candidate_ratio']:.3f} | "
+                  f"(b) their calibration -> c={best['setting']['parcorr_c']} f={best['setting']['parcorr_f']} (calib recall {best['recall']:.3f}) held-out recall={100 * b['recall']:.1f}% "
+                  f"cand/pairs={b['candidate_ratio']:.3f} | paper > {paper[T]}%, precision {a['precision']:.3f}/{b['precision']:.3f}", flush=True)
+            rows.append(dict(dataset=name, m=len(ids), W=W, b=step, T=T, stated=a, calibrated=dict(setting=best["setting"], calib_recall=best["recall"], heldout=b), paper_recall_min_pct=paper[T]))
+    _save("parcorr", dict(experiment="ParCorr DMKD 2018 recall: stated settings vs their own calibration protocol (c, f on a 30% sample)", rows=rows))
+
+
+def repro_csz(args):
+    """Cole, Shasha, Zhao KDD 2005 section 5.4/6: with sw=256, bw=32, the combinatorial-design +
+    refinement + bootstrap protocol over N in {30,36,48,60}, g in {1..4}, c in {0.1..1.3}, f in
+    {0.1..1.0} reaches recall >= 0.99 at precision >= 0.02 on their sets (CRSP, 10 UCR sets).
+    Their data are unavailable; run the protocol (our tuner's 130-row covering array, target 0.99)
+    on sp500 and the DaISy stand-ins, calibrate on 30%, report held-out recall / precision."""
     rows = []
     for name in args.datasets.split(","):
         data, ids = load_dataset(name=name, max_series=args.m)
         test = data.T
-        W, step = 500, 20
-        if test.shape[1] < W + 10 * step:
-            W, step = 250, 10
-        for T in (0.7, 0.8, 0.9):
-            with tempfile.TemporaryDirectory() as tmp:
-                bf, _, bf_flags = run_and_log_bruteforce(name, test, ids, dict(_base(W, step, 0, T, basic_window=step), baseline_mode="bruteforce"), f"{tmp}/bf.csv",
-                                                         metadata={"nodes": 0}, recall_by_window=True, verbose=False, testing=False)
-                rec, _, flags = run_and_log_corrtrack(name, test, ids, _base(W, step, 0, T, basic_window=step),
-                                                      dict(n_vectors=60, seed=1, seed_toggle=2, preprocess=False, data_representation="sketch_proj",
-                                                           candidate_backend="parcorr_grid", parcorr_k=2, parcorr_f=0.7, parcorr_c=0.7),
-                                                      f"{tmp}/pc.csv", recall_by_window=True, verbose=False, testing=False)
-            mtr = CorrTrack.compute_metrics_bf(flags, bf_flags, windows=True, total_pairs_bf=bf["total_candidates"])
-            print(f"{name:16s} m={len(ids)} W={W} b={step} T={T}: recall={100 * mtr['recall']:.1f}% (paper > {paper[T]}%) precision={mtr['precision']:.3f} (paper 1.0) "
-                  f"candidates/pairs={rec['total_candidates'] / max(bf['total_candidates'], 1):.3f}", flush=True)
-            rows.append(dict(dataset=name, m=len(ids), W=W, b=step, T=T, recall=mtr["recall"], precision=mtr["precision"], paper_recall_min_pct=paper[T],
-                             candidate_ratio=rec["total_candidates"] / max(bf["total_candidates"], 1), note="cell size c=0.7 (CSZ); the paper does not specify it"))
-    _save("parcorr", dict(experiment="ParCorr DMKD 2018 recall at r=60, k=2, f=0.7 (stand-in data)", rows=rows))
+        calib, hold = _split_train_test(test)
+        W, step = _fit_window(calib.shape[1], 256, 32)      # the paper's sw = 256, bw = 32 when the stream allows
+        for T in (0.7, 0.9):
+            base = _base(W, step, 0, T, basic_window=step)
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("tune_competitors", os.path.join(REPO, "abaca", "tune_competitors.py"))
+            tc = importlib.util.module_from_spec(spec); spec.loader.exec_module(tc)
+            design = tc.covering_array(tc.parameter_grid("csz", W), "csz")
+            ranked, tc = _calibrate_grid(name, calib, ids, base, "csz", design, 0.99)
+            best = ranked[0]
+            feasible = tc.score(best, 0.99)[0] == 0
+            b = _heldout(name, hold, ids, base, tc.run_params_for("csz", best["setting"]))
+            print(f"{name:16s} m={len(ids)} W={W} b={step} T={T}: 130-row design, best {best['setting']} calib recall={best['recall']:.4f} prec={best['precision']:.3f} "
+                  f"{'FEASIBLE' if feasible else 'no setting reaches 0.99'} | held-out recall={b['recall']:.4f} precision={b['precision']:.3f} cand/pairs={b['candidate_ratio']:.3f} | paper: recall >= 0.99, precision >= 0.02", flush=True)
+            rows.append(dict(dataset=name, m=len(ids), W=W, b=step, T=T, best=best["setting"], calib_recall=best["recall"], calib_precision=best["precision"], feasible=feasible, heldout=b))
+    _save("csz", dict(experiment="Cole-Shasha-Zhao KDD 2005 tuning protocol at the 0.99 target (stand-in data)", rows=rows))
 
 
 # --------------------------------------------------------------------------- FilCorr
@@ -357,7 +431,7 @@ def repro_tsubasa(args):
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("experiment", choices=("braid", "corrjoin", "statstream", "parcorr", "filcorr", "tsubasa", "all"))
+    ap.add_argument("experiment", choices=("braid", "corrjoin", "statstream", "parcorr", "csz", "filcorr", "tsubasa", "all"))
     ap.add_argument("--datasets", default=None)
     ap.add_argument("--m", type=int, default=None)
     ap.add_argument("--T", type=int, default=None, help="stream length cap (rows)")
@@ -371,6 +445,7 @@ def main() -> None:
         "corrjoin": dict(datasets="corrjoin_stock,corrjoin_chlorine,corrjoin_gas,corrjoin_synthetic", m=1000),
         "statstream": dict(m=500, T=20000),
         "parcorr": dict(datasets="sp500_sub263,corrjoin_stock", m=1000),
+        "csz": dict(datasets="sp500_sub263,csz_steamgen", m=1000),
         "filcorr": dict(T=20000, n_lags=100),
         "tsubasa": dict(datasets="uscrn2020_temperature", m=None),
     }

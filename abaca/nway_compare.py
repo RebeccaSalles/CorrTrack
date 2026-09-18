@@ -7,7 +7,8 @@ applied automatically:
 - neg_corr=True run: arms tagged ``not_available`` (ParCorr/CSZ, CorrJoin) are reported N/A
   instead of run; ``enabled_by_us`` / ``specified`` arms run and carry their tag in the output.
 - n_lags > 0: TSUBASA and CorrJoin are synchronous-only and are reported N/A.
-- Counters (total_candidates / tested / correlated) are the primary comparison; wall time is
+- Counters (total_candidates / tested / correlated) and candidate_precision = correlated / total_candidates
+  (precision before validation; the density at T for an all-pairs arm) are the primary comparison; wall time is
   secondary. Since 2026-09-17 the competitor indexes run their candidate loops in
   competitor_kernels (Cython); an arm is marked "py" only when that extension is missing.
 
@@ -161,7 +162,7 @@ def main() -> None:
                 print(f"{arm:12s} ERROR {type(exc).__name__}: {exc}", flush=True)
                 continue
             wall = time.perf_counter() - t0
-            r = {k: record.get(k) for k in ("correlated", "total_candidates", "tested", "sk_time", "cand_time", "val_time", "monit_time",
+            r = {k: record.get(k) for k in ("correlated", "total_candidates", "tested", "candidate_precision", "sk_time", "cand_time", "val_time", "monit_time",
                                             "n_steps", "step_time_min", "step_time_q1", "step_time_median", "step_time_q3", "step_time_max",
                                             "step_time_whisker_lo", "step_time_whisker_hi", "step_time_outliers", "step_time_mean",
                                             "candidate_search_entries_touched", "candidate_search_blocks_touched", "lsh_candidates_touched",
@@ -197,7 +198,7 @@ def main() -> None:
         r.update(precision=m.get("precision"), recall=m.get("recall"), f1=m.get("f1_score"))
 
     print("\n=== SUMMARY ===")
-    print(f"{'arm':12s} {'status':>6s} {'wall_s':>8s} {'speedup':>8s} {'correlated':>11s} {'total_cand':>11s} {'tested':>9s} {'recall':>7s} {'precision':>9s} {'step_med_ms':>11s} {'step_q3_ms':>10s} {'neg_corr_tag':>14s} {'index':>6s}")
+    print(f"{'arm':12s} {'status':>6s} {'wall_s':>8s} {'speedup':>8s} {'correlated':>11s} {'total_cand':>11s} {'tested':>9s} {'recall':>7s} {'cand_prec':>9s} {'step_med_ms':>11s} {'step_q3_ms':>10s} {'neg_corr_tag':>14s} {'index':>6s}")
     for arm in arms:
         r = results[arm]
         if r["status"] != "ok":
@@ -205,7 +206,7 @@ def main() -> None:
             continue
         sp = bf["wall"] / r["wall"] if r["wall"] else float("nan")
         rec = f"{r['recall']:.4f}" if r.get("recall") is not None else "   -  "
-        prec = f"{r['precision']:.4f}" if r.get("precision") is not None else "    -    "
+        prec = f"{r['candidate_precision']:.4f}" if r.get("candidate_precision") is not None else "    -    "
         p50 = f"{1e3 * r['step_time_median']:.3f}" if r.get('step_time_median') is not None else "-"
         p99 = f"{1e3 * r['step_time_q3']:.3f}" if r.get('step_time_q3') is not None else "-"
         print(f"{arm:12s} {'ok':>6s} {r['wall']:8.2f} {sp:7.2f}x {r['correlated']:11d} {r['total_candidates']:11d} {r['tested']:9d} {rec:>7s} {prec:>9s} {p50:>11s} {p99:>10s} "

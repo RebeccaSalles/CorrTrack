@@ -260,6 +260,7 @@ RUN_RESULT_COLUMNS: Sequence[str] = (
     "correlated",
     "tested",
     "total_candidates",
+    "candidate_precision",
     "candidate_search_index_candidates",
     "candidate_search_valid_index_candidates",
     "candidate_search_unique_index_candidates",
@@ -1204,6 +1205,11 @@ def execute_corrtrack_pass(
     record["correlated"] = getattr(corrtrack, "validated_candidates", 0)
     record["tested"] = getattr(corrtrack, "tested_candidates", 0)
     record["total_candidates"] = getattr(corrtrack, "total_candidates", 0)
+    # (2026-09-18) precision BEFORE validation: the fraction of generated candidates that are true
+    # correlations (StatStream's Fig. 5 "precision", CorrJoin's 1/r1 complement); for an all-pairs
+    # arm this is the dataset's correlation density at the threshold
+    _tc = record["total_candidates"] or 0
+    record["candidate_precision"] = (float(record["correlated"]) / float(_tc)) if _tc else None
     record.update(_candidate_search_record_fields(corrtrack))
     pair_min_dist = getattr(corrtrack, "pair_min_dist", None)
     record["pair_min_dist"] = str(pair_min_dist) if pair_min_dist is not None else ""

@@ -26,7 +26,7 @@ python datasets/fetch/gen_braid_synthetic.py --family spiketrains --m 32 --T 100
 if [ "$EXPERIMENT" = "braid" ] || [ "$EXPERIMENT" = "all" ]; then
   python abaca/reproduce_papers.py braid --datasets braid_sines_m64,braid_spiketrains_m32,motes_humidity,motes_light,sunspots_daily --W 4096 --step 512 --n-lags 512 2>&1 | tee "$REPRO_OUT/braid.log"
 fi
-for e in corrjoin statstream parcorr filcorr tsubasa; do
+for e in corrjoin statstream parcorr csz filcorr tsubasa; do
   if [ "$EXPERIMENT" = "$e" ] || [ "$EXPERIMENT" = "all" ]; then
     # shellcheck disable=SC2086
     python abaca/reproduce_papers.py "$e" $EXTRA_ARGS 2>&1 | tee "$REPRO_OUT/$e.log"

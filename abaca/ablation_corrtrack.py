@@ -1,7 +1,7 @@
 """CorrTrack ablation (user, 2026-09-17/18): all phases off, then on one at a time, so every phase
 shows what it buys against the plain all-pairs computation. One fixed parameter set for the whole
-ladder (the hyperopt best_params when given, else the defaults), the same span and the same
-bruteforce ground truth; per variant: recall, precision, counters, sk/cand/val times, wall, and
+ladder, always the cell's hyperopt best_params (required), the same span and the same bruteforce
+ground truth; per variant: recall, precision, counters, sk/cand/val times, wall, and
 the per-step latency boxplot ticks.
 
   bruteforce        all phases off: plain all-pairs Pearson (the reference)
@@ -80,12 +80,12 @@ def main() -> None:
                 parallel_validation=False, max_workers=0, monitor=True, track_min_dist=True, artifact_mode="final", artifact_buffer_max_rows=250000,
                 artifact_merge_mode="merged", save_only_required_artifacts=True, save_maxlag_artifacts=False, verbose=False, testing=False,
                 validation_metric="pearson")
-    if args.best_params and os.path.exists(args.best_params):
-        tuned = {k: v for k, v in json.load(open(args.best_params)).items() if not k.startswith("_")}
-        src = args.best_params
-    else:
-        tuned = dict(n_vectors=32, seed=2468, seed_toggle=1357, preprocess=False)
-        src = "UNTUNED defaults"
+    # (2026-09-18, user) the ladder always runs with the TUNED parameters of the cell (CorrTrack's own
+    # hyperopt output for this dataset / W / step / L / T), never with defaults: refuse otherwise
+    if not (args.best_params and os.path.exists(args.best_params)):
+        raise SystemExit("--best-params <optim>/best_params_corrtrack.json is required: the ablation uses the cell's tuned parameters")
+    tuned = {k: v for k, v in json.load(open(args.best_params)).items() if not k.startswith("_")}
+    src = args.best_params
     todo = variants(tuned)
     if args.variants != "all":
         todo = {k: v for k, v in todo.items() if k in args.variants.split(",")}
