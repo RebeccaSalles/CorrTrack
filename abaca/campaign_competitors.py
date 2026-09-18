@@ -46,15 +46,17 @@ class Cell:
     walltime: str = "12:00:00"
     calib_obs: int = 5000
     note: str = ""
+    preprocess: bool = False          # run the cell on first differences (returns): truth, tuning and every arm alike
+    config_path: str | None = None    # dataset config elsewhere than the repo root (generated synthetic sets)
 
     @property
     def config(self):
-        return f"experiment_dataset_{self.dataset}.py"
+        return self.config_path or f"experiment_dataset_{self.dataset}.py"
 
     @property
     def stem(self):
         m = f"_m{self.n_series}" if self.n_series is not None else ""
-        return f"{self.dataset}{m}_W{self.W}_s{self.step}_L{self.n_lags}_T{self.T}"
+        return f"{self.dataset}{m}_W{self.W}_s{self.step}_L{self.n_lags}_T{self.T}{'_diff' if self.preprocess else ''}"
 
     def extra_args(self):
         parts = []
@@ -128,6 +130,25 @@ DATASETS = [
     DatasetSpec("global_asos_relative_humidity", 168, 12, 600, 5, m_min=32, extra=dict(CORRJOIN_KNOBS), walltime="24:00:00", note="global ASOS hourly relative humidity"),
     DatasetSpec("global_asos_pressure", 168, 12, 600, 5, m_min=32, extra=dict(CORRJOIN_KNOBS), walltime="24:00:00", note="global ASOS hourly pressure"),
 ]
+
+# density-controlled synthetic sets (datasets/fetch/gen_density_targeted.py, user 2026-09-18): one stationary
+# process (ar1) and one nonstationary (random walk); densities of plan section 5 item 6; m up to the 5k cap with
+# the same ladder as every other dataset (one file per rung, since the verified density is a property of the
+# protocol (m, W, step, L, T)); hourly-regime protocol W=168/12, L_max=5, as the unitless synthetic sets have no
+# horizon of their own. The effective degree of each file is recorded in its meta.
+SYNTH_PROCS = ("ar1", "rw")
+SYNTH_DENSITIES = (0.005, 0.02, 0.05)
+SYNTH_N, SYNTH_W, SYNTH_STEP = 20000, 168, 12
+SYNTH_SPEC = DatasetSpec("synth", SYNTH_W, SYNTH_STEP, 5000, 5, m_min=625)
+
+
+def synth_name(proc, dens, T, m, L):
+    return f"synth_{proc}_d{str(dens).replace('.', 'p')}_T{str(T).replace('.', 'p')}_m{m}_L{L}"
+
+
+def synth_rungs():
+    return design_points(SYNTH_SPEC, 4, 4, 2, "ladder")
+
 
 STEP1_CELL = Cell("yellowstone_bp3_7", 2000, 1, 1000, 0.9, n_series=28, n_obs=30000, arms="bruteforce,exact_stomp,filcorr,braid,thinbraid,corrtrack,statstream",
                   walltime="48:00:00", calib_obs=9000, note="step=1 lagged cell (BRAID probes 70 lags vs exact_stomp 15 at step=12); step != basic_window so the grid arms are excluded")
@@ -222,11 +243,32 @@ def cells(m_levels: int = 4, l_levels: int = 4, replicates: int = 2, kind: str =
                 out.append(Cell(d.label, d.W, d.step, (L - 1) * d.step, T, n_series=m, n_obs=d.n_obs, arms=arms,
                                 extra=dict(d.extra), walltime=("96:00:00" if (d.full_m and m == d.full_m) else d.walltime), calib_obs=d.calib_obs,
                                 note=f"{d.note} | L={L}"))
+    # (2026-09-18) returns / differences run: every dataset's synchronous anchor also runs with preprocess=True
+    # (the cooperative-vs-uncooperative axis of plan section 5 item 6: prices AND returns, one transform)
+    for d in DATASETS:
+        for T in THRESHOLDS:
+            out.append(Cell(d.label, d.W, d.step, 0, T, n_series=d.m_max, n_obs=d.n_obs, arms=d.arms, extra=dict(d.extra),
+                            walltime=d.walltime, calib_obs=d.calib_obs, preprocess=True, note=f"{d.note} | L=1, first differences"))
+    # (2026-09-18) this project's own density-controlled generator (plan section 5 item 6, density {0.5%, 2%, 5%}):
+    # one file per (process, density, T) because the verified density is a property of the protocol; m and L fixed
+    for proc in SYNTH_PROCS:
+        for dens in SYNTH_DENSITIES:
+            for (m, L) in synth_rungs():
+                for T in THRESHOLDS:
+                    name = synth_name(proc, dens, T, m, L)
+                    arms = "all" if not (m > 2000 and L > 1) else "bruteforce,exact_stomp,filcorr,tsubasa,thinbraid,corrtrack,parcorr,csz,statstream,corrjoin"
+                    out.append(Cell(name, SYNTH_W, SYNTH_STEP, (L - 1) * SYNTH_STEP, T, n_series=m, n_obs=SYNTH_N, arms=arms,
+                                    extra=dict(CORRJOIN_KNOBS), walltime="24:00:00" if m <= 2500 else "48:00:00",
+                                    config_path=f"datasets/competitor/configs/experiment_dataset_{name}.py",
+                                    note=f"synthetic {proc}, verified tuple density {dens} at T={T}, m={m}, L={L} (gen_density_targeted.py)"))
     out.append(STEP1_CELL)
     return out
 
 
 GENERATE = [
+    # density-controlled synthetic sets: one per (process, density, T), verified by bruteforce at generation
+] + [f"python datasets/fetch/gen_density_targeted.py --proc {p} --density {d} --T {T} --m {m} --n {SYNTH_N} --W {SYNTH_W} --step {SYNTH_STEP} --L {L}"
+     for p in SYNTH_PROCS for d in SYNTH_DENSITIES for (m, L) in synth_rungs() for T in THRESHOLDS] + [
     "python datasets/fetch/gen_statstream_randomwalk.py --m 5000 --T 20000",
     "python datasets/fetch/gen_braid_synthetic.py --family sines --m 5000 --T 32768 --copies 1",
     "python datasets/fetch/gen_braid_synthetic.py --family spiketrains --m 5000 --T 100000 --period 6500 --copies 1",
@@ -244,6 +286,7 @@ def emit(path: str, results_root: str, select=None, m_levels: int = 4, l_levels:
         if select and c.stem not in select:
             continue
         common = [f"DATASET_CONFIG={c.config}", f"WINDOW_SIZE={c.W}", f"WINDOW_STEP={c.step}", f"BASIC_WINDOW={c.step}", f"N_LAGS={c.n_lags}", f"THR={c.T}",
+                  f"PREPROCESS={1 if c.preprocess else 0}",
                   "EXTRA_ARGS=" + c.extra_args().replace(" ", "+")]   # one token; the .oar scripts decode "+"
         res = f"-l host=1,walltime={c.walltime}"
         lines.append(f"# --- {c.stem}: {c.note}")

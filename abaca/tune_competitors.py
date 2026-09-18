@@ -145,8 +145,11 @@ def neighbours(grid, arm, s):
     return out
 
 
+PREPROCESS = False      # set from --preprocess in main(); every evaluated setting runs in the same space as the truth
+
+
 def run_params_for(arm, s, seed=2468):
-    common = dict(seed=seed, seed_toggle=1357, preprocess=False, n_vectors=int(s.get("n_vectors", 32)))
+    common = dict(seed=seed, seed_toggle=1357, preprocess=bool(PREPROCESS), n_vectors=int(s.get("n_vectors", 32)))
     if arm in ("parcorr", "csz"):
         return dict(common, data_representation="sketch_proj", candidate_backend="parcorr_grid", parcorr_k=int(s["parcorr_k"]),
                     parcorr_c=float(s["parcorr_c"]), parcorr_f=float(s["parcorr_f"]), parcorr_neighbor_probe=(arm == "csz"))
@@ -242,6 +245,7 @@ def main() -> None:
     ap.add_argument("--n-lags", type=int, default=0)
     ap.add_argument("--corr-threshold", type=float, default=0.7)
     ap.add_argument("--neg-corr", action="store_true")
+    ap.add_argument("--preprocess", action="store_true", help="tune on first differences (the cell's preprocess flag)")
     ap.add_argument("--n-series", type=int, default=None)
     ap.add_argument("--n-obs", type=int, default=None)
     ap.add_argument("--train-ratio", type=float, default=None)
@@ -282,8 +286,10 @@ def main() -> None:
     print(f"dataset {dataset_id}: calibration span {calib.shape[1]} rows x {len(ids_n_var)} series (train_ratio={train_ratio}); "
           f"W={args.window_size} step={args.window_step} n_lags={args.n_lags} T={args.corr_threshold} target recall {target}; out {out_dir}", flush=True)
 
+    global PREPROCESS
+    PREPROCESS = bool(args.preprocess)
     base = dict(window_size=args.window_size, window_step=args.window_step, basic_window=args.basic_window, n_lags=args.n_lags,
-                corr_threshold=args.corr_threshold, neg_corr=args.neg_corr, exec="sequential", parallel_sketch=False,
+                corr_threshold=args.corr_threshold, neg_corr=args.neg_corr, preprocess=bool(args.preprocess), exec="sequential", parallel_sketch=False,
                 parallel_candidates=False, parallel_validation=False, max_workers=0, monitor=False, track_min_dist=True,
                 artifact_mode="final", artifact_buffer_max_rows=250000, artifact_merge_mode="merged",
                 save_only_required_artifacts=True, save_maxlag_artifacts=False, verbose=False, testing=False, validation_metric="pearson")
@@ -347,7 +353,7 @@ def main() -> None:
                   f"bootstrap mean={boots['mean']} lower={boots['lower']} [{status}]", flush=True)
 
             best_params = run_params_for(arm, chosen["setting"])
-            best_params.update(_tuning=dict(protocol="Cole-Shasha-Zhao KDD 2005 section 5.4", target_recall=target, status=status,
+            best_params.update(_tuning=dict(protocol="Cole-Shasha-Zhao KDD 2005 section 5.4", target_recall=target, status=status, preprocess=bool(args.preprocess),
                                             calibration_rows=int(calib.shape[1]), recall=chosen["recall"], precision=chosen["precision"],
                                             total_candidates=chosen["total_candidates"], bootstrap=boots))
             json.dump(best_params, open(out_dir / f"best_params_{arm}.json", "w"), indent=1)

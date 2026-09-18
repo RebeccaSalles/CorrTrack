@@ -15,6 +15,8 @@
 set -uo pipefail
 for kv in "$@"; do export "${kv?}"; done
 EXTRA_ARGS="${EXTRA_ARGS//+/ }"
+PREPROCESS="${PREPROCESS:-0}"                 # 1: the cell runs on first differences (all arms, the truth, the tuning)
+PREPROCESS_FLAG=$([ "$PREPROCESS" = "1" ] && echo --preprocess || echo "")
 CONDA_ROOT="${CONDA_ROOT:-$HOME/miniforge3}"
 CONDA_ENV="${CONDA_ENV:-corrtrack}"
 REPO_DIR="${REPO_DIR:-$HOME/corrtrack_release_dev}"
@@ -55,6 +57,6 @@ PY
 # shellcheck disable=SC2086
 python corrtrack_param_search.py --dataset-config "$DATASET_CONFIG" --result-folder "$OUT_DIR" \
   --window-size "$WINDOW_SIZE" --window-step "$WINDOW_STEP" --basic-window "$BASIC_WINDOW" --n-lags "$N_LAGS" --corr-threshold "$THR" \
-  --sequential --no-verbose "${NEG_CORR_FLAG:---no-neg-corr}" $HYPER_ARGS 2>&1 | tee "$OUT_DIR/hyperopt.log"
+  --sequential --no-verbose "${NEG_CORR_FLAG:---no-neg-corr}" $PREPROCESS_FLAG $HYPER_ARGS 2>&1 | tee "$OUT_DIR/hyperopt.log"
 RC=${PIPESTATUS[0]}
 echo "hyperopt_rc=$RC best_params=$(find "$OUT_DIR" -name best_params_corrtrack.json | head -1)"

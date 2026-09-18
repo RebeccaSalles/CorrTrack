@@ -61,6 +61,7 @@ def main() -> None:
     ap.add_argument("--n-lags", type=int, default=0)
     ap.add_argument("--corr-threshold", type=float, default=0.7)
     ap.add_argument("--neg-corr", action="store_true")
+    ap.add_argument("--preprocess", action="store_true", help="the cell's first-difference flag, applied to the truth and every rung")
     ap.add_argument("--n-series", type=int, default=None)
     ap.add_argument("--n-obs", type=int, default=None)
     ap.add_argument("--best-params", default=None)
@@ -76,8 +77,8 @@ def main() -> None:
     test_data, ids_n_var = bfmod.prepare_test_data(data, ids, n_obs, n_var, bfmod.TRAIN_RATIO, tuning_mode="sampling")
     label = f"{bfmod._dataset_slug(country, var)}_{len(ids_n_var)}_{test_data.shape[1]}"
     base = dict(window_size=args.window_size, window_step=args.window_step, basic_window=args.basic_window or args.window_step, n_lags=args.n_lags,
-                corr_threshold=args.corr_threshold, neg_corr=args.neg_corr, exec="sequential", parallel_sketch=False, parallel_candidates=False,
-                parallel_validation=False, max_workers=0, monitor=True, track_min_dist=True, artifact_mode="final", artifact_buffer_max_rows=250000,
+                corr_threshold=args.corr_threshold, neg_corr=args.neg_corr, preprocess=bool(args.preprocess), exec="sequential", parallel_sketch=False, parallel_candidates=False,
+                parallel_validation=False, max_workers=0, monitor=False, track_min_dist=True, artifact_mode="final", artifact_buffer_max_rows=250000,
                 artifact_merge_mode="merged", save_only_required_artifacts=True, save_maxlag_artifacts=False, verbose=False, testing=False,
                 validation_metric="pearson")
     # (2026-09-18, user) the ladder always runs with the TUNED parameters of the cell (CorrTrack's own
@@ -85,6 +86,7 @@ def main() -> None:
     if not (args.best_params and os.path.exists(args.best_params)):
         raise SystemExit("--best-params <optim>/best_params_corrtrack.json is required: the ablation uses the cell's tuned parameters")
     tuned = {k: v for k, v in json.load(open(args.best_params)).items() if not k.startswith("_")}
+    tuned["preprocess"] = bool(args.preprocess)
     src = args.best_params
     todo = variants(tuned)
     if args.variants != "all":
@@ -102,17 +104,20 @@ def main() -> None:
             t0 = time.perf_counter()
             try:
                 rec, _, flags = run_and_log_corrtrack(label, test_data, ids_n_var, base, rp, f"{tmp}/{name}.csv", metadata={"nodes": 0, "alg": name},
-                                                      recall_by_window=True, corr_val=True, monitor=True, verbose=False, testing=False)
+                                                      recall_by_window=True, corr_val=True, monitor=False, verbose=False, testing=False)
             except Exception as exc:  # noqa: BLE001
                 results[name] = {"status": "ERROR", "reason": f"{type(exc).__name__}: {exc}", "overrides": over}
                 print(f"{name:18s} ERROR {exc}", flush=True)
                 continue
             m = CorrTrack.compute_metrics_bf(flags, bf_flags, windows=True, total_pairs_bf=bf["total_candidates"])
+            U, P = int(bf["total_candidates"]), int(bf["correlated"]); fp = max(int(rec["total_candidates"]) - int(rec["correlated"]), 0)
             results[name] = {"status": "ok", "overrides": over, "wall": time.perf_counter() - t0, "recall": m.get("recall"), "precision": m.get("precision"),
+                             "candidate_precision": rec.get("candidate_precision"), "candidate_specificity": (1.0 - fp / (U - P)) if U > P else None,
                              "correlated": rec["correlated"], "total_candidates": rec["total_candidates"], "tested": rec["tested"],
                              "sk_time": rec.get("sk_time"), "cand_time": rec["cand_time"], "val_time": rec["val_time"], **{k: rec.get(k) for k in STEP_KEYS}}
             r = results[name]
-            print(f"{name:18s} wall={r['wall']:.2f}s recall={r['recall']:.4f} cand={r['total_candidates']} sk_t={r['sk_time']:.3f} cand_t={r['cand_time']:.3f} val_t={r['val_time']:.3f} "
+            spec = f"{r['candidate_specificity']:.4f}" if r.get("candidate_specificity") is not None else "-"
+            print(f"{name:18s} wall={r['wall']:.2f}s recall={r['recall']:.4f} cand={r['total_candidates']} cand_prec={r['candidate_precision']:.4f} cand_spec={spec} sk_t={r['sk_time']:.3f} cand_t={r['cand_time']:.3f} val_t={r['val_time']:.3f} "
                   f"step med/q3={r['step_time_median']:.5f}/{r['step_time_q3']:.5f}", flush=True)
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)

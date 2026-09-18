@@ -29,6 +29,9 @@ THR="${THR:-0.7}"
 NEG_CORR_FLAG="${NEG_CORR_FLAG:-}"
 CALIB_OBS="${CALIB_OBS:-5000}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
+EXTRA_ARGS="${EXTRA_ARGS//+/ }"             # '+' stands for a space inside the single EXTRA_ARGS token
+PREPROCESS="${PREPROCESS:-0}"                 # 1: the cell runs on first differences (all arms, the truth, the tuning)
+PREPROCESS_FLAG=$([ "$PREPROCESS" = "1" ] && echo --preprocess || echo "")
 OUT_DIR="${OUT_DIR:-$HOME/corrtrack_abaca_results/tuned/$(basename "$DATASET_CONFIG" .py)_W${WINDOW_SIZE}_s${WINDOW_STEP}_L${N_LAGS}_T${THR}${NEG_CORR_FLAG:+_neg}}"
 mkdir -p "$OUT_DIR"
 
@@ -44,5 +47,5 @@ python setup_cython.py build_ext --inplace -j 4 > "$OUT_DIR/build.log" 2>&1
 # shellcheck disable=SC2086
 python abaca/tune_competitors.py --dataset-config "$DATASET_CONFIG" --arms "$ARMS" \
   --window-size "$WINDOW_SIZE" --window-step "$WINDOW_STEP" --basic-window "$BASIC_WINDOW" --n-lags "$N_LAGS" --corr-threshold "$THR" \
-  --calib-obs "$CALIB_OBS" $NEG_CORR_FLAG $EXTRA_ARGS --out-dir "$OUT_DIR" 2>&1 | tee "$OUT_DIR/tune.log"
+  --calib-obs "$CALIB_OBS" $NEG_CORR_FLAG $PREPROCESS_FLAG $EXTRA_ARGS --out-dir "$OUT_DIR" 2>&1 | tee "$OUT_DIR/tune.log"
 echo "tune_rc=${PIPESTATUS[0]} out=$OUT_DIR"

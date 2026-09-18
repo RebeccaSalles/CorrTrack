@@ -478,6 +478,9 @@ def main():
     # abaca/nway_compare.py --n-series/--n-obs
     parser.add_argument("--n-series", type=int, default=None, help="override the config's N_SERIES/N_VARS (single value)")
     parser.add_argument("--n-obs", type=int, default=None, help="override the config's N_OBS/N_YEARS (single value)")
+    parser.add_argument("--preprocess", dest="preprocess_fixed", action="store_true", default=None,
+                        help="(2026-09-18) tune on first-differenced data: PARAM_GRID['preprocess'] := [True] (the cell's returns/differences run)")
+    parser.add_argument("--no-preprocess", dest="preprocess_fixed", action="store_false", help="PARAM_GRID['preprocess'] := [False]")
     args = parser.parse_args()
 
     cfg_exec = _load_module(args.exec_param_config, "experiment_exec")
@@ -658,6 +661,8 @@ def main():
     VERBOSE = _resolve_cfg_value(args.verbose, cfg_exec, "VERBOSE", DEFAULT_VERBOSE)
     TESTING = _resolve_cfg_value(args.testing, cfg_exec, "TESTING", DEFAULT_TESTING)
     PARAM_GRID = _load_grid_config(args.param_grid_config)
+    if args.preprocess_fixed is not None:
+        PARAM_GRID = dict(PARAM_GRID); PARAM_GRID["preprocess"] = [bool(args.preprocess_fixed)]
     if args.loader:
         DATA_LOADER = _load_loader(args.loader)
     if DATA_LOADER is None:

@@ -892,6 +892,7 @@ def make_density_targeted_dataset(
     save_dir: Optional[str] = None,
     verify_bf: bool = True,
     _max_correction_regens: int = 3,
+    group_size: Optional[int] = None,
 ):
     """Generate an (m, n) dataset whose brute-force effective tuple density
     (correlated (pair,lag,window) tuples / all tested tuples) equals
@@ -967,9 +968,28 @@ def make_density_targeted_dataset(
             return 0.0
         return ng * gg * (gg - 1) / 2.0 * on_frac_density / tested_per_step
 
+    # (2026-09-18) `group_size` pins g (= degree + 1) and lets the density pick n_groups only; the
+    # reachable density is then bounded by ng <= m // g, and the caller is told (RuntimeError) when the
+    # requested density needs more groups than the series allow.
+    if group_size is not None:
+        group_size = int(group_size)
+        if group_size < 2 or group_size > m:
+            raise ValueError("group_size must be in [2, m]")
+
     def _solve_ng_g(target, model_gain=1.0):
         want = target / max(model_gain, 1e-6)
         best, best_err = (1, 2), float("inf")
+        if group_size is not None:
+            gg = group_size
+            for ng in range(1, m // gg + 1):
+                err = abs(_d_exact(ng, gg) - want)
+                if err < best_err:
+                    best, best_err = (ng, gg), err
+            if _d_exact(m // gg, gg) < want * 0.9:
+                raise RuntimeError(
+                    f"density {target:.4f} is not reachable with group_size={gg}: even m//g={m // gg} groups give "
+                    f"{_d_exact(m // gg, gg):.4f}; lower the density or raise the degree")
+            return best
         for gg in range(2, m + 1):
             for ng in range(1, m // gg + 1):
                 err = abs(_d_exact(ng, gg) - want)
@@ -1236,6 +1256,20 @@ def make_density_targeted_dataset(
             break
         ng, g = ng_new, g_new
 
+    # effective degree: distinct partners per series among the verified correlated tuples (mean over the
+    # series that have at least one), the quantity a fixed `group_size` promises as group_size - 1
+    def _effective_degree(rows):
+        rows = np.asarray(rows)
+        if rows.size == 0:
+            return 0.0
+        pairs = {(int(min(a, b)), int(max(a, b))) for a, b in zip(rows[:, 0], rows[:, 1])}
+        deg = {}
+        for a, b in pairs:
+            deg[a] = deg.get(a, 0) + 1; deg[b] = deg.get(b, 0) + 1
+        return float(np.mean(list(deg.values()))) if deg else 0.0
+    for snap_ in ([best] if best is not None else []):
+        snap_["effective_degree"] = _effective_degree(snap_["gt_rows"])
+
     (X, groups, group_of, offsets, loadings, states, events, epoch_len, s_samp_by_group,
      gt_rows, gt_corrs, rec, flags, vspan, verified_density, analytic_density, g) = (
         best["X"], best["groups"], best["group_of"], best["offsets"], best["loadings"],
@@ -1327,6 +1361,7 @@ def make_density_targeted_dataset(
                       else float(result["gt_recall"])),
         "n_bf_ambiguous_windows": int(result["n_bf_ambiguous"]),
         "group_size": int(result["g"]), "n_groups": int(result["n_groups"]),
+        "effective_degree": float(best.get("effective_degree", 0.0)), "requested_group_size": group_size,
         "lag_band": b, "corr_sign": corr_sign, "n_epochs": int(n_epochs),
         "duty": float(duty), "on_frac": float(on_frac),
         "burst_length_windows": (list(burst_length_windows)
@@ -1346,7 +1381,7 @@ def make_density_targeted_dataset(
         "analytic_density": result["analytic_density"],
         "verified_density": result["verified_density"],
         "gt_precision": result["gt_precision"], "gt_recall": result["gt_recall"],
-        "group_size": result["g"], "n_groups": result["n_groups"],
+        "group_size": result["g"], "n_groups": result["n_groups"], "effective_degree": float(best.get("effective_degree", 0.0)),
         "meta": meta,
     }
     if save_dir is not None:
