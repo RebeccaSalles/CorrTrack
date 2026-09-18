@@ -92,6 +92,7 @@ class DatasetSpec:
 
 DATASETS = [
     # competitor papers' own data (registry datasets/competitor_sources.md)
+    # m_max: 5,000 cap (user, 2026-09-17; was 2,000), datasets above it keep a full-m anchor (Berkeley 18,520; gas 5,120).
     # horizon rule (log entry (h)): one application horizon per sampling regime, shared by every dataset of that regime.
     # sub-daily sensors -> a day (Motes: 2,880 epochs of 31 s, like smartmeter's 48 half-hours); L_max=3 -> 576 epochs (~5 h) covers BRAID's 224 min
     DatasetSpec("motes_temperature", 2880, 288, 27, 3, m_min=8, n_obs=40000, walltime="24:00:00", note="BRAID Motes 31 s epochs; W a day, step 2.5 h; L_max=3 -> 576 epochs covers the 224 min lag"),
@@ -99,14 +100,14 @@ DATASETS = [
     DatasetSpec("yellowstone_bp3_7", 2000, 100, 28, 11, m_min=8, walltime="24:00:00", calib_obs=30000, extra={"corrjoin_ks": 20, "corrjoin_ke": 40}, note="FilCorr 100 Hz, W 20 s, step 1 s, L_max=11 -> lag 10 s"),
     DatasetSpec("yellowstone_raw", 2000, 100, 28, 11, m_min=8, walltime="24:00:00", calib_obs=30000, extra={"corrjoin_ks": 20, "corrjoin_ke": 40}, note="FilCorr raw counts"),
     DatasetSpec("uscrn2020_temperature", 168, 12, 153, 5, extra=dict(CORRJOIN_KNOBS), note="TSUBASA NOAA hourly; L_max=5 -> lag 48 h"),
-    DatasetSpec("berkeley_tavg_anom_2010", 90, 10, 2000, 4, m_min=100, extra={"corrjoin_ks": 9, "corrjoin_ke": 18}, walltime="48:00:00", full_m=18520, note="TSUBASA Berkeley Earth daily; L_max=4 -> lag 30 d; full 18,520 anchor for the exact arms"),
-    DatasetSpec("corrjoin_stock", 60, 5, 2000, 1, m_min=100, walltime="24:00:00", full_m=3878, note="CorrJoin daily NASDAQ closes: daily-finance regime (a quarter / a week, as sp500); 15 and 30 divide 60"),
-    DatasetSpec("corrjoin_chlorine", 240, 24, 2000, 1, m_min=100, walltime="24:00:00", full_m=4830, note="CorrJoin chlorine"),
-    DatasetSpec("corrjoin_gas", 240, 24, 2000, 1, m_min=100, walltime="24:00:00", full_m=5120, note="CorrJoin gas"),
-    DatasetSpec("corrjoin_random", 240, 24, 2000, 1, m_min=100, walltime="24:00:00", full_m=5000, note="CorrJoin i.i.d. uniform (uncooperative)"),
-    DatasetSpec("statstream_rw_m2000_T20000", 256, 32, 2000, 5, m_min=100, extra={"corrjoin_ks": 16, "corrjoin_ke": 32}, walltime="24:00:00", note="StatStream random walks, CSZ's sw=256/bw=32 (generate first)"),
-    DatasetSpec("braid_sines_m2000_T32768", 1024, 128, 2000, 3, m_min=100, extra={"corrjoin_ks": 16, "corrjoin_ke": 32}, walltime="24:00:00", note="BRAID Sines, planted lags <= 168 (generate first)"),
-    DatasetSpec("braid_spiketrains_m2000_T100000", 1024, 128, 2000, 3, m_min=100, n_obs=40000, extra={"corrjoin_ks": 16, "corrjoin_ke": 32}, walltime="48:00:00", note="BRAID SpikeTrains (generate first)"),
+    DatasetSpec("berkeley_tavg_anom_2010", 90, 10, 5000, 4, m_min=100, extra={"corrjoin_ks": 9, "corrjoin_ke": 18}, walltime="48:00:00", full_m=18520, note="TSUBASA Berkeley Earth daily; L_max=4 -> lag 30 d; full 18,520 anchor for the exact arms"),
+    DatasetSpec("corrjoin_stock", 60, 5, 3878, 1, m_min=100, walltime="24:00:00", note="CorrJoin daily NASDAQ closes: daily-finance regime (a quarter / a week, as sp500); 15 and 30 divide 60"),
+    DatasetSpec("corrjoin_chlorine", 240, 24, 4830, 1, m_min=100, walltime="24:00:00", note="CorrJoin chlorine"),
+    DatasetSpec("corrjoin_gas", 240, 24, 5000, 1, m_min=100, walltime="24:00:00", note="CorrJoin gas"),
+    DatasetSpec("corrjoin_random", 240, 24, 5000, 1, m_min=100, walltime="24:00:00", note="CorrJoin i.i.d. uniform (uncooperative)"),
+    DatasetSpec("statstream_rw_m5000_T20000", 256, 32, 5000, 5, m_min=100, extra={"corrjoin_ks": 16, "corrjoin_ke": 32}, walltime="24:00:00", note="StatStream random walks, CSZ's sw=256/bw=32 (generate first)"),
+    DatasetSpec("braid_sines_m5000_T32768", 1024, 128, 5000, 3, m_min=100, extra={"corrjoin_ks": 16, "corrjoin_ke": 32}, walltime="24:00:00", note="BRAID Sines, planted lags <= 168 (generate first)"),
+    DatasetSpec("braid_spiketrains_m5000_T100000", 1024, 128, 5000, 3, m_min=100, n_obs=40000, extra={"corrjoin_ks": 16, "corrjoin_ke": 32}, walltime="48:00:00", note="BRAID SpikeTrains (generate first)"),
     # the six real sets of the 2026-09 CorrTrack sweeps, at their historical W/step (added 2026-09-17)
     DatasetSpec("sp500", 60, 5, 492, 5, m_min=32, extra={"corrjoin_ks": 6, "corrjoin_ke": 12}, note="daily financial: W a quarter, step a week, L_max=5 -> lag a month"),
     DatasetSpec("acwi_capweighted", 60, 5, 263, 5, m_min=32, extra={"corrjoin_ks": 6, "corrjoin_ke": 12}, note="daily financial, same class as sp500"),
@@ -121,6 +122,11 @@ DATASETS = [
     DatasetSpec("br_air_temperature_146_1", 168, 12, 146, 5, m_min=16, extra=dict(CORRJOIN_KNOBS), note="ASOS Brazil hourly air temperature"),
     DatasetSpec("br_wind_direction_146_1", 168, 12, 146, 5, m_min=16, extra=dict(CORRJOIN_KNOBS), note="ASOS Brazil hourly wind direction (uncooperative)"),
     DatasetSpec("br_flights_109_1", 168, 12, 109, 5, m_min=16, extra=dict(CORRJOIN_KNOBS), note="ASOS Brazil hourly flight counts (airport operations, hourly regime)"),
+    # global ASOS (181+ countries, companion session's fetch of 2026-09-17): last 2 years, stations with >= 90% coverage (~670), hourly regime
+    DatasetSpec("global_asos_air_temperature", 168, 12, 600, 5, m_min=32, extra=dict(CORRJOIN_KNOBS), walltime="24:00:00", note="global ASOS hourly air temperature, best-covered 600 stations"),
+    DatasetSpec("global_asos_wind_speed", 168, 12, 600, 5, m_min=32, extra=dict(CORRJOIN_KNOBS), walltime="24:00:00", note="global ASOS hourly wind speed (uncooperative)"),
+    DatasetSpec("global_asos_relative_humidity", 168, 12, 600, 5, m_min=32, extra=dict(CORRJOIN_KNOBS), walltime="24:00:00", note="global ASOS hourly relative humidity"),
+    DatasetSpec("global_asos_pressure", 168, 12, 600, 5, m_min=32, extra=dict(CORRJOIN_KNOBS), walltime="24:00:00", note="global ASOS hourly pressure"),
 ]
 
 STEP1_CELL = Cell("yellowstone_bp3_7", 2000, 1, 1000, 0.9, n_series=28, n_obs=30000, arms="bruteforce,exact_stomp,filcorr,braid,thinbraid,corrtrack,statstream",
@@ -205,6 +211,10 @@ def cells(m_levels: int = 4, l_levels: int = 4, replicates: int = 2, kind: str =
         for (m, L) in designs:
             for T in THRESHOLDS:
                 arms = d.arms
+                if arms == "all" and m > 2000 and L > 1:
+                    # plain BRAID keeps an m x m matrix per (level, lag): ~200 MB each at m = 5,000, tens of GB
+                    # over the probe set; ThinBRAID is its large-m form (their section 5), so it stands in
+                    arms = "bruteforce,exact_stomp,filcorr,tsubasa,thinbraid,corrtrack,parcorr,csz,statstream,corrjoin"
                 if d.full_m and m == d.full_m:
                     # above the 2k cap: plain BRAID excluded (O(m^2) per-pair state, ~2.2 GB at 2k); the pruning
                     # arms are included since their candidate loops run in competitor_kernels (2026-09-17)
@@ -217,9 +227,9 @@ def cells(m_levels: int = 4, l_levels: int = 4, replicates: int = 2, kind: str =
 
 
 GENERATE = [
-    "python datasets/fetch/gen_statstream_randomwalk.py --m 2000 --T 20000",
-    "python datasets/fetch/gen_braid_synthetic.py --family sines --m 2000 --T 32768",
-    "python datasets/fetch/gen_braid_synthetic.py --family spiketrains --m 2000 --T 100000 --period 6500",
+    "python datasets/fetch/gen_statstream_randomwalk.py --m 5000 --T 20000",
+    "python datasets/fetch/gen_braid_synthetic.py --family sines --m 5000 --T 32768 --copies 1",
+    "python datasets/fetch/gen_braid_synthetic.py --family spiketrains --m 5000 --T 100000 --period 6500 --copies 1",
 ]
 
 
@@ -227,7 +237,8 @@ def emit(path: str, results_root: str, select=None, m_levels: int = 4, l_levels:
     n_cells = 0
     lines = ["#!/bin/bash", "# generated by abaca/campaign_competitors.py; run from the CorrTrack working tree on the Sophia frontend",
              "set -uo pipefail", f"RESULTS_ROOT=${{RESULTS_ROOT:-{results_root}}}", "mkdir -p abaca/logs",
-             "submit() { oarsub \"$@\" | sed -n 's/^OAR_JOB_ID=//p'; }", "",
+             # -q abaca: the group's queue; a bare oarsub reports 'not enough resources' (2026-09-17)
+             "submit() { oarsub -q abaca \"$@\" | sed -n 's/^OAR_JOB_ID=//p'; }", "",
              "# synthetic inputs (cheap, frontend-side)"] + GENERATE + [""]
     for c in cells(m_levels, l_levels, replicates, kind, seed):
         if select and c.stem not in select:

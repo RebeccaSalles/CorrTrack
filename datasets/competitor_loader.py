@@ -86,10 +86,23 @@ def load_dataset(
     max_series: int | None = None,
     max_obs: int | None = None,
     series_ids: Iterable[str] | None = None,
+    last_obs: int | None = None,
+    min_coverage: float | None = None,
     dtype=np.float64,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """`last_obs` keeps only the trailing rows of the stream; `min_coverage` keeps the series whose
+    observed (non-NaN) fraction over that span is at least the threshold, ordered by coverage
+    (descending), so `max_series` then takes the best-covered ones. Needed for the sparse global
+    ASOS matrices (72% NaN overall; ~670 of 3,615 stations have >= 90% coverage over 2 years)."""
     name = name or country
     data, ids, _meta = load_raw(name)
+    if last_obs is not None and data.shape[1] > int(last_obs):
+        data = data[:, -int(last_obs):]
+    if min_coverage is not None:
+        cov = 1.0 - np.isnan(data).mean(axis=1)
+        keep = np.nonzero(cov >= float(min_coverage))[0]
+        keep = keep[np.argsort(-cov[keep], kind="stable")]
+        data, ids = data[keep], ids[keep]
     if series_ids is not None:
         wanted = set(map(str, series_ids))
         keep = np.array([s in wanted for s in ids], dtype=bool)

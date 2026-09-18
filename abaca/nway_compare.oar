@@ -5,6 +5,7 @@
 #   oarsub -S "./abaca/nway_compare.oar DATASET_CONFIG=experiment_dataset_motes_temperature.py N_LAGS=480 THR=0.9"
 #
 #OAR -n corrtrack-nway
+#OAR -q abaca
 #OAR -p cluster='mercantour3'
 #OAR -l host=1,walltime=12:00:00
 #OAR -O abaca/logs/OAR.%jobid%.out

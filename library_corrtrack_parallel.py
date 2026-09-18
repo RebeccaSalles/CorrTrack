@@ -246,6 +246,12 @@ RUN_RESULT_COLUMNS: Sequence[str] = (
     "val_time",
     "monit_time",
     "runtime",
+    "n_steps",
+    "step_time_p50",
+    "step_time_p90",
+    "step_time_p99",
+    "step_time_max",
+    "step_time_mean",
     "artifact_time",
     "correlated",
     "tested",
@@ -408,6 +414,12 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     "val_time",
     "monit_time",
     "runtime",
+    "n_steps",
+    "step_time_p50",
+    "step_time_p90",
+    "step_time_p99",
+    "step_time_max",
+    "step_time_mean",
     "optim_search_time",
     "optim_bootstrap_time",
     "optim_eval_time",
@@ -1078,12 +1090,17 @@ def execute_corrtrack_pass(
     artifact_bookkeeping_before = getattr(corrtrack, "artifact_bookkeeping_time", 0.0)
 
     start_time = time.time()
+    # (2026-09-17) per-step wall time of the method call itself (sketch + candidates + validation +
+    # monitor for that step, excluding artifact I/O), kept for the online-latency quantiles
+    step_times = []
     for start in range(0, data.shape[1] - window_step + 1, window_step):
         chunk = data[:, start : (start + window_step)]
+        _ts = time.perf_counter()
         if run_kind == "bf":
             corrtrack.run_bf(chunk, ids, verbose=verbose, testing=testing, corr_val=True, monitor=monitor)
         else:
             corrtrack.run(chunk, ids, verbose=verbose, testing=testing, corr_val=corr_val, monitor=monitor)
+        step_times.append(time.perf_counter() - _ts)
         if step_observer is not None:
             _t0 = time.time()
             step_observer(corrtrack)
@@ -1140,6 +1157,16 @@ def execute_corrtrack_pass(
         )
 
     runtime = max(runtime - artifact_time_overlap, 0.0)
+    # online-latency profile: quantiles of the per-step time (seconds), the steady-state part only
+    # (steps after the first full window, when every arm has a populated index/history)
+    _st = np.asarray(step_times, dtype=np.float64)
+    _warm = int(math.ceil(window_size / window_step)) if isinstance(window_size, (int, np.integer)) else 1
+    _ss = _st[_warm:] if _st.shape[0] > _warm + 4 else _st
+    record["n_steps"] = int(_st.shape[0])
+    for _q, _name in ((0.5, "p50"), (0.9, "p90"), (0.99, "p99")):
+        record[f"step_time_{_name}"] = float(np.quantile(_ss, _q)) if _ss.size else None
+    record["step_time_max"] = float(_ss.max()) if _ss.size else None
+    record["step_time_mean"] = float(_ss.mean()) if _ss.size else None
 
     if artifact_active and getattr(corrtrack, "_artifact_save_maxlag", True):
         _t0 = time.time()

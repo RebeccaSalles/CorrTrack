@@ -6,6 +6,7 @@
 #   oarsub -S "./abaca/hyperopt_corrtrack.oar DATASET_CONFIG=experiment_dataset_motes_temperature.py THR=0.9 OUT_DIR=$HOME/corrtrack_abaca_results/hyperopt/motes_T0.9"
 #
 #OAR -n corrtrack-hyperopt
+#OAR -q abaca
 #OAR -p cluster='mercantour3'
 #OAR -l host=1,walltime=12:00:00
 #OAR -O abaca/logs/OAR.%jobid%.out

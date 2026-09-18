@@ -3,6 +3,7 @@
 #   oarsub -S "./abaca/reproduce_papers.oar EXPERIMENT=all"         # or EXPERIMENT=braid|corrjoin|statstream|parcorr|filcorr|tsubasa
 #
 #OAR -n corrtrack-phaseR
+#OAR -q abaca
 #OAR -p cluster='mercantour3'
 #OAR -l host=1,walltime=24:00:00
 #OAR -O abaca/logs/OAR.%jobid%.out
