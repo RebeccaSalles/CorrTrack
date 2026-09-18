@@ -206,6 +206,9 @@ RUN_RESULT_COLUMNS: Sequence[str] = (
     "statstream_index_dims",
     "statstream_apply_dft_filter",
     "statstream_eps",
+    "statstream_report",
+    "statstream_tolerance",
+    "statstream_bw_coeffs",
     "corrjoin_ks",
     "corrjoin_ke",
     "corrjoin_kb",
@@ -363,6 +366,9 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     "statstream_index_dims",
     "statstream_apply_dft_filter",
     "statstream_eps",
+    "statstream_report",
+    "statstream_tolerance",
+    "statstream_bw_coeffs",
     "corrjoin_ks",
     "corrjoin_ke",
     "corrjoin_kb",
@@ -1017,7 +1023,7 @@ def execute_corrtrack_pass(
     )
     # (2026-07-06) Part 1 -- see docs/implementation_log.md.
     record["candidate_lsh_n_bands"] = getattr(corrtrack, "candidate_lsh_n_bands", None)
-    for _pk in ("parcorr_k", "parcorr_f", "parcorr_c", "parcorr_neighbor_probe", "parcorr_cell_size", "supports_neg_corr", "statstream_n_coeffs", "statstream_index_dims", "statstream_apply_dft_filter", "statstream_eps", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2"):
+    for _pk in ("parcorr_k", "parcorr_f", "parcorr_c", "parcorr_neighbor_probe", "parcorr_cell_size", "supports_neg_corr", "statstream_n_coeffs", "statstream_index_dims", "statstream_apply_dft_filter", "statstream_eps", "statstream_report", "statstream_tolerance", "statstream_bw_coeffs", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2"):
         record[_pk] = getattr(corrtrack, _pk, None)
     record["candidate_apply_dot_gamma_filter"] = getattr(corrtrack, "candidate_apply_dot_gamma_filter", None)
     record["candidate_hamming_threshold"] = getattr(corrtrack, "candidate_hamming_threshold", None)
@@ -1516,7 +1522,7 @@ def run_and_log_corrtrack(
     )
     # (2026-07-06) Part 1 -- see docs/implementation_log.md.
     record["candidate_lsh_n_bands"] = getattr(corrtrack, "candidate_lsh_n_bands", None)
-    for _pk in ("parcorr_k", "parcorr_f", "parcorr_c", "parcorr_neighbor_probe", "parcorr_cell_size", "supports_neg_corr", "statstream_n_coeffs", "statstream_index_dims", "statstream_apply_dft_filter", "statstream_eps", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2"):
+    for _pk in ("parcorr_k", "parcorr_f", "parcorr_c", "parcorr_neighbor_probe", "parcorr_cell_size", "supports_neg_corr", "statstream_n_coeffs", "statstream_index_dims", "statstream_apply_dft_filter", "statstream_eps", "statstream_report", "statstream_tolerance", "statstream_bw_coeffs", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2"):
         record[_pk] = getattr(corrtrack, _pk, None)
     record["candidate_apply_dot_gamma_filter"] = getattr(corrtrack, "candidate_apply_dot_gamma_filter", None)
     record["candidate_hamming_threshold"] = getattr(corrtrack, "candidate_hamming_threshold", None)
@@ -2538,7 +2544,7 @@ def _extract_feature_overrides(params):
     for key, caster in (("parcorr_k", _to_int_safe), ("parcorr_f", _to_float_safe),
                         ("parcorr_c", _to_float_safe), ("parcorr_neighbor_probe", None),
                         ("statstream_n_coeffs", _to_int_safe), ("statstream_index_dims", _to_int_safe),
-                        ("statstream_apply_dft_filter", None),
+                        ("statstream_apply_dft_filter", None), ("statstream_report", str), ("statstream_tolerance", _to_float_safe), ("statstream_bw_coeffs", _to_int_safe),
                         ("corrjoin_ks", _to_int_safe), ("corrjoin_ke", _to_int_safe), ("corrjoin_kb", _to_int_safe)):
         if params.get(key) is not None:
             if caster is None:
@@ -3856,7 +3862,7 @@ _MULTICHANNEL_DEFAULT_TARGET_OCCUPANCY = 10.0
 
 
 class CorrTrack:
-    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,exec="parallel",max_workers=0,data_representation="auto",candidate_backend="auto",candidate_cosine_threshold=None,candidate_cosine_threshold_offset=None,candidate_parallel_mode="recent_shards",candidate_lsh_radius=None,candidate_ann_m=None,candidate_ann_z=None,candidate_ann_ef=None,parallel_sketch=None,parallel_candidates=None,parallel_validation=None,track_min_dist=True,hybrid_validation=False,hybrid_validation_min_repeat_rate=0.25,hybrid_validation_disable_rate=None,hybrid_validation_ema_alpha=0.25,hybrid_validation_min_candidates=256,numeric_rows=True,validation_current_window_cache=False,candidate_lsh_n_bands=64,candidate_lsh_n_bands_tolerance=None,target_recall=0.95,candidate_lsh_target_occupancy=None,candidate_lsh_recall_safety_margin=None,candidate_apply_dot_gamma_filter=True,candidate_hamming_threshold=None,candidate_apply_hamming_filter=True,candidate_hamming_filter_max_frac=0.40,candidate_lsh_max_candidates_per_query=0,candidate_search_n_threads=1,validation_metric="pearson",validation_incremental_approx=False,validation_incremental_m1=None,validation_incremental_m2=None,validation_incremental_max_age_steps=64,validation_incremental_cutpoint_refresh_threshold=0.5,dist_corr_algorithm="naive",concordance_n_gaps=None,concordance_min_gap=8,concordance_min_capacity=16,concordance_target_dim=738,concordance_multichannel_gamma=None,concordance_multichannel_min_channel_capacity=None,distance_corr_sketch_k=8,distance_corr_sketch_freq_low=0.1,distance_corr_sketch_freq_high=10.0,distance_corr_sketch_freq_seed=42,distance_corr_sketch_gate_tau=None,distance_corr_sketch_multichannel_gamma=None,distance_corr_sketch_apply_tier2_gate=True,parcorr_k=2,parcorr_f=0.7,parcorr_c=0.7,parcorr_neighbor_probe=False,statstream_n_coeffs=16,statstream_index_dims=4,statstream_apply_dft_filter=True,corrjoin_ks=15,corrjoin_ke=30,corrjoin_kb=3):
+    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,exec="parallel",max_workers=0,data_representation="auto",candidate_backend="auto",candidate_cosine_threshold=None,candidate_cosine_threshold_offset=None,candidate_parallel_mode="recent_shards",candidate_lsh_radius=None,candidate_ann_m=None,candidate_ann_z=None,candidate_ann_ef=None,parallel_sketch=None,parallel_candidates=None,parallel_validation=None,track_min_dist=True,hybrid_validation=False,hybrid_validation_min_repeat_rate=0.25,hybrid_validation_disable_rate=None,hybrid_validation_ema_alpha=0.25,hybrid_validation_min_candidates=256,numeric_rows=True,validation_current_window_cache=False,candidate_lsh_n_bands=64,candidate_lsh_n_bands_tolerance=None,target_recall=0.95,candidate_lsh_target_occupancy=None,candidate_lsh_recall_safety_margin=None,candidate_apply_dot_gamma_filter=True,candidate_hamming_threshold=None,candidate_apply_hamming_filter=True,candidate_hamming_filter_max_frac=0.40,candidate_lsh_max_candidates_per_query=0,candidate_search_n_threads=1,validation_metric="pearson",validation_incremental_approx=False,validation_incremental_m1=None,validation_incremental_m2=None,validation_incremental_max_age_steps=64,validation_incremental_cutpoint_refresh_threshold=0.5,dist_corr_algorithm="naive",concordance_n_gaps=None,concordance_min_gap=8,concordance_min_capacity=16,concordance_target_dim=738,concordance_multichannel_gamma=None,concordance_multichannel_min_channel_capacity=None,distance_corr_sketch_k=8,distance_corr_sketch_freq_low=0.1,distance_corr_sketch_freq_high=10.0,distance_corr_sketch_freq_seed=42,distance_corr_sketch_gate_tau=None,distance_corr_sketch_multichannel_gamma=None,distance_corr_sketch_apply_tier2_gate=True,parcorr_k=2,parcorr_f=0.7,parcorr_c=0.7,parcorr_neighbor_probe=False,statstream_n_coeffs=16,statstream_index_dims=4,statstream_apply_dft_filter=True,statstream_report="approx",statstream_tolerance=0.0005,statstream_bw_coeffs=2,corrjoin_ks=15,corrjoin_ke=30,corrjoin_kb=3):
 
         if basic_window is not None and window_size % basic_window != 0:
             raise TypeError("Window size (",window_size,") is not divisable by basic window size (",basic_window,")")
@@ -4263,7 +4269,23 @@ class CorrTrack:
         self.statstream_index_dims = int(statstream_index_dims)
         self.statstream_apply_dft_filter = bool(statstream_apply_dft_filter)
         self.statstream_eps = None
+        # (2026-09-18) StatStream's OUTPUT as published (section 3.4 / Table 2): the pairs that survive the
+        # grid are reported when the correlation APPROXIMATED from the per-basic-window DFT digests (the
+        # first `statstream_bw_coeffs` = 2 coefficients of each basic window, exact means and sigmas from
+        # the running sums) exceeds T - t, t = `statstream_tolerance` (0.001 / 0.0005 in the paper). This
+        # is the arm's designed output: precision and recall below 1 are StatStream's, not the harness's.
+        # statstream_report="exact" keeps the earlier behaviour (survivors through the exact validation
+        # kernel), a favour the method does not have as published; recorded in the run record.
+        self.statstream_report = str(statstream_report or "approx").lower()
+        if self.statstream_report not in ("approx", "exact"):
+            raise ValueError("statstream_report must be 'approx' (the paper's reporting rule) or 'exact'")
+        self.statstream_tolerance = float(statstream_tolerance)
+        self.statstream_bw_coeffs = int(statstream_bw_coeffs)
+        self.statstream_approx_report = False
         if self._internal_dispatch == "statstream_grid":
+            self.statstream_approx_report = self.statstream_report == "approx"
+            if self.statstream_approx_report and int(basic_window or 0) <= 0:
+                raise ValueError("statstream_report='approx' needs an explicit basic_window (the digest length)")
             self.sketch_representation = "dft"
             self.sketch_norm = "unit_l2_window"        # documentation only: _sketches_dft normalizes itself
             self.statstream_eps = math.sqrt(max(1.0 - float(corr_threshold), 0.0))
@@ -6833,6 +6855,92 @@ class CorrTrack:
         else:
             self._correlated_legacy_dict = {}
 
+    def _statstream_digests(self, window_data, window_start, b, n_bw):
+        """Per-basic-window digests for the current buffer (their section 3 synopsis): for every series and
+        every basic window aligned to the buffer start, the first n_bw DFT coefficients (1/sqrt(b)
+        convention) and the exact sums and sums of squares. Computed once per step for all series, O(m x
+        buffer) like the sketch itself, then every pair costs O(k x n_bw) instead of O(w). StatStream keeps
+        these incrementally (Lemma 6); recomputing them per step is a constant-factor difference charged
+        to validation_time."""
+        key = (int(window_start), int(window_data.shape[0]), int(window_data.shape[1]), int(b), int(n_bw))
+        cache = getattr(self, "_statstream_digest_cache", None)
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        m, L = window_data.shape
+        nb = L // b
+        blocks = np.asarray(window_data[:, : nb * b], dtype=np.float64).reshape(m, nb, b)
+        F = np.fft.rfft(blocks, axis=2)[:, :, :n_bw] / np.sqrt(b)
+        S1 = blocks.sum(axis=2); S2 = np.einsum("ijk,ijk->ij", blocks, blocks)
+        self._statstream_digest_cache = (key, (F, S1, S2, nb))
+        return F, S1, S2, nb
+
+    def _validate_numeric_rows_statstream_approx(self, rows, retain_validated=True):
+        """StatStream's reporting rule (VLDB 2002 sections 3.4 and 5.2, Table 2), applied to the grid's
+        survivors instead of the exact validation kernel: the inner product of two windows is the sum over
+        the k basic windows of the digest inner products, each digest being the first n_bw DFT coefficients
+        of that basic window (n_bw = 2 in their precision study); means and standard deviations come from
+        the exact running sums; a pair is reported when corr_approx > T - t (|corr_approx| under neg_corr).
+        Reproduced (Phase R, 2026-09-18): S0.85 t=0.0005 -> precision 0.9925 / recall 0.9991 against the
+        paper's 0.9931 / 1.0. Reported correlations are the approximate values, as theirs are. Rows whose
+        windows are not aligned to the basic-window grid fall back to a direct digest computation."""
+        n_pairs = int(rows.shape[0])
+        if n_pairs == 0:
+            return
+        window_data = self._get_validation_window_data()
+        window_start = int(self.window_index[0])
+        b = int(self.basic_window)
+        n_bw = int(self.statstream_bw_coeffs)
+        tol = float(self.statstream_tolerance)
+        threshold = float(self.corr_threshold)
+        neg_corr = bool(self.validation_neg_corr)
+        F, S1, S2, nb = self._statstream_digests(window_data, window_start, b, n_bw)
+        w_all = rows[:, 4].astype(np.int64)
+        t1 = rows[:, 2].astype(np.int64) - window_start
+        t2 = rows[:, 3].astype(np.int64) - window_start
+        inb = (t1 >= 0) & (t2 >= 0) & (t1 + w_all <= window_data.shape[1]) & (t2 + w_all <= window_data.shape[1]) & (w_all % b == 0)
+        aligned = inb & (t1 + w_all <= nb * b) & (t2 + w_all <= nb * b) & (t1 % b == 0) & (t2 % b == 0)
+        ok = inb.copy()
+        corr = np.full(n_pairs, np.nan)
+        # rows whose windows do not sit on the buffer's basic-window grid (step not a multiple of the basic
+        # window): digests computed directly for those rows, same formula
+        for i in np.flatnonzero(inb & ~aligned):
+            w = int(w_all[i]); k = w // b
+            x = np.asarray(window_data[rows[i, 0], t1[i]:t1[i] + w], dtype=np.float64); y = np.asarray(window_data[rows[i, 1], t2[i]:t2[i] + w], dtype=np.float64)
+            fx = np.fft.rfft(x.reshape(k, b), axis=1)[:, :n_bw] / np.sqrt(b); fy = np.fft.rfft(y.reshape(k, b), axis=1)[:, :n_bw] / np.sqrt(b)
+            ip = float(np.real(np.sum(fx[:, :1] * fy[:, :1].conj())) + 2.0 * np.real(np.sum(fx[:, 1:] * fy[:, 1:].conj())))
+            sx, sy = x.std(), y.std()
+            if sx < 1e-9 or sy < 1e-9:
+                ok[i] = False
+            else:
+                corr[i] = (ip / w - x.mean() * y.mean()) / (sx * sy)
+        for w in np.unique(w_all[aligned]):
+            sel = np.flatnonzero(aligned & (w_all == w))
+            k = int(w) // b
+            blk = np.arange(k)
+            ia = (t1[sel] // b)[:, None] + blk[None, :]; ib = (t2[sel] // b)[:, None] + blk[None, :]     # (n, k) block indices
+            sa = rows[sel, 0][:, None]; sb = rows[sel, 1][:, None]
+            FX = F[sa, ia]; FY = F[sb, ib]                                                                # (n, k, n_bw)
+            ip = np.real(np.einsum("nkm,nkm->n", FX[:, :, :1], FY[:, :, :1].conj())) + 2.0 * np.real(np.einsum("nkm,nkm->n", FX[:, :, 1:], FY[:, :, 1:].conj()))
+            s1x = S1[sa, ia].sum(axis=1); s1y = S1[sb, ib].sum(axis=1); s2x = S2[sa, ia].sum(axis=1); s2y = S2[sb, ib].sum(axis=1)
+            mx, my = s1x / w, s1y / w
+            vx = np.maximum(s2x / w - mx * mx, 0.0); vy = np.maximum(s2y / w - my * my, 0.0)
+            denom = np.sqrt(vx * vy)
+            good = denom > 1e-12
+            corr[sel[good]] = (ip[good] / w - mx[good] * my[good]) / denom[good]
+            ok[sel[~good]] = False
+        tested = int(ok.sum())
+        val = np.abs(corr) if neg_corr else corr
+        accept = ok & (val > threshold - tol)
+        if bool(getattr(self, "track_min_dist", True)) and tested:
+            dist = np.where(ok, np.sqrt(np.maximum(2.0 - 2.0 * val, 0.0)), np.inf)
+            j = int(np.argmin(dist))
+            if np.isfinite(dist[j]) and dist[j] < self.min_dist:
+                self.min_dist = float(dist[j]); self.pair_min_dist = self._numeric_row_to_pair(rows[j])
+        self.tested_candidates += tested
+        self.validated_candidates += int(accept.sum())
+        if np.any(accept):
+            self._record_correlated_numeric(rows[accept], corr[accept], retain_validated=retain_validated)
+
     def _validate_numeric_rows_nonlinear(self, rows, retain_validated=True):
         """(2026-07-31) Non-Pearson validation (spearman/kendall/dist_corr).
         The EXACT path (the common case) is fully bulk-Cythonized -- ONE
@@ -7036,6 +7144,9 @@ class CorrTrack:
         # path below, completely unchanged.
         if getattr(self, "validation_metric", "pearson") != "pearson":
             self._validate_numeric_rows_nonlinear(rows, retain_validated=retain_validated)
+            return
+        if getattr(self, "statstream_approx_report", False):
+            self._validate_numeric_rows_statstream_approx(rows, retain_validated=retain_validated)
             return
 
         track_min_dist = bool(getattr(self, "track_min_dist", True))
@@ -19004,7 +19115,7 @@ class CorrTrack_optimize:
         record["validation_metric"] = getattr(corrtrack, "validation_metric", None)
         # (2026-07-06) Part 1 -- see docs/implementation_log.md.
         record["candidate_lsh_n_bands"] = getattr(corrtrack, "candidate_lsh_n_bands", None)
-        for _pk in ("parcorr_k", "parcorr_f", "parcorr_c", "parcorr_neighbor_probe", "parcorr_cell_size", "supports_neg_corr", "statstream_n_coeffs", "statstream_index_dims", "statstream_apply_dft_filter", "statstream_eps", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2"):
+        for _pk in ("parcorr_k", "parcorr_f", "parcorr_c", "parcorr_neighbor_probe", "parcorr_cell_size", "supports_neg_corr", "statstream_n_coeffs", "statstream_index_dims", "statstream_apply_dft_filter", "statstream_eps", "statstream_report", "statstream_tolerance", "statstream_bw_coeffs", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2"):
             record[_pk] = getattr(corrtrack, _pk, None)
         record["candidate_apply_dot_gamma_filter"] = getattr(corrtrack, "candidate_apply_dot_gamma_filter", None)
         record["candidate_hamming_threshold"] = getattr(corrtrack, "candidate_hamming_threshold", None)

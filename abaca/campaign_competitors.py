@@ -139,8 +139,8 @@ DATASETS = [
 SYNTH_PROCS = ("ar1", "rw")
 # densities chosen to span what the real sets show at T in {0.7 .. 0.95} (plan section 5 item 6, log 2026-09-18 (h)):
 # CorrJoin stock 0.09% to 9.7%, chlorine 0.5% to 6.5%, synthetic walk 0.05% to 8.4%, sp500 daily ~1% at 0.9,
-# gas 8% to 26%, Motes temperature 45% at 0.9, fr_air_temperature ~17.6% at 0.7 -> {0.5%, 2%, 5%, 20%}
-SYNTH_DENSITIES = (0.005, 0.02, 0.05, 0.2)
+# gas 8% to 26%, Motes temperature 45% at 0.9, fr_air_temperature ~17.6% at 0.7 -> {0.5%, 2%, 5%, 10%, 20%} (user, 2026-09-18)
+SYNTH_DENSITIES = (0.005, 0.02, 0.05, 0.1, 0.2)
 SYNTH_N, SYNTH_W, SYNTH_STEP = 20000, 168, 12
 SYNTH_SPEC = DatasetSpec("synth", SYNTH_W, SYNTH_STEP, 5000, 5, m_min=625)
 

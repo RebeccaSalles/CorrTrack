@@ -4316,6 +4316,41 @@ class StableReproducedChangesTest(unittest.TestCase):
             self.assertLessEqual(r["step_time_median"], r["step_time_q3"]); self.assertLessEqual(r["step_time_q3"], r["step_time_max"])
             self.assertLessEqual(r["step_time_whisker_lo"], r["step_time_q1"]); self.assertGreaterEqual(r["step_time_whisker_hi"], r["step_time_q3"])
 
+    def test_statstream_reports_with_its_own_approximate_rule_by_default(self):
+        # (2026-09-18) StatStream's arm reports the grid's survivors with the paper's rule (section 3.4 /
+        # Table 2): approximate correlation from 2 DFT coefficients per basic window, accept if > T - t.
+        # On its own random walks this must land near Table 2 (precision 0.9765..0.9947, recall
+        # 0.9987..1.0): recall >= 0.99 and 0.95 <= precision < 1 (some false positives, that is the point);
+        # statstream_report="exact" must reproduce the bruteforce set exactly. The record carries the mode.
+        rng = np.random.default_rng(5); m, N = 80, 5000
+        walks = 100.0 + np.cumsum(rng.uniform(0, 1, size=(m, N)) - 0.5, axis=1)
+        test = np.vstack([np.arange(N), walks]); ids = [f"rw{i}" for i in range(m)]
+        # k = W / b = 60 basic windows per sliding window, the paper's 1 h / 1 min ratio
+        base = dict(window_size=1200, window_step=20, basic_window=20, n_lags=0, corr_threshold=0.85, neg_corr=False, exec="sequential",
+                    parallel_sketch=False, parallel_candidates=False, parallel_validation=False, max_workers=0, monitor=False, track_min_dist=True,
+                    artifact_mode="final", artifact_buffer_max_rows=250000, artifact_merge_mode="merged", save_only_required_artifacts=True,
+                    save_maxlag_artifacts=False, verbose=False, testing=False, validation_metric="pearson")
+        with tempfile.TemporaryDirectory() as tmp:
+            bf, _, bf_flags = run_and_log_bruteforce("ss", test, ids, dict(base, baseline_mode="bruteforce"), os.path.join(tmp, "bf.csv"),
+                                                     metadata={"nodes": 0}, recall_by_window=True, verbose=False, testing=False)
+            out = {}
+            for rep in ("approx", "exact"):
+                rec, _, flags = run_and_log_corrtrack("ss", test, ids, base, dict(n_vectors=32, seed=1, seed_toggle=2, preprocess=False,
+                                                                                data_representation="sketch_dft", candidate_backend="statstream_grid",
+                                                                                statstream_n_coeffs=16, statstream_index_dims=4, statstream_report=rep),
+                                                      os.path.join(tmp, f"{rep}.csv"), recall_by_window=True, verbose=False, testing=False)
+                out[rep] = (rec, CorrTrack.compute_metrics_bf(flags, bf_flags, windows=True, total_pairs_bf=bf["total_candidates"]))
+        self.assertGreater(int(bf["correlated"]), 100)
+        rec, m_ = out["approx"]
+        self.assertEqual(rec["statstream_report"], "approx")
+        self.assertGreaterEqual(float(m_["recall"]), 0.99)
+        self.assertGreaterEqual(float(m_["precision"]), 0.95)
+        self.assertLess(float(m_["precision"]), 1.0)
+        rec, m_ = out["exact"]
+        self.assertEqual(rec["statstream_report"], "exact")
+        self.assertAlmostEqual(float(m_["recall"]), 1.0); self.assertAlmostEqual(float(m_["precision"]), 1.0)
+        self.assertEqual(int(rec["correlated"]), int(bf["correlated"]))
+
     def test_thinbraid_tracks_exact_after_buffer_rolls_on_offset_mean_data(self):
         # (2026-09-17) Two defects found on real Motes data, both invisible on the
         # zero-mean, short synthetic streams used above: (1) the shared-projection
@@ -4619,6 +4654,9 @@ class StableReproducedChangesTest(unittest.TestCase):
         return g
 
     def _statstream_ct(self, data, ids, W, step, n_lags, T, neg, **kw):
+        # these tests probe the GRID (Theorem 2, the DFT filter), so survivors go through the exact
+        # validation; the arm's default reporting rule (statstream_report="approx") has its own test
+        kw.setdefault("statstream_report", "exact")
         ct = CorrTrack(window_size=W, basic_window=8, window_step=step, n_vectors=60, n_lags=n_lags, corr_threshold=T,
                        neg_corr=neg, exec="sequential", parallel_sketch=False, parallel_candidates=False,
                        parallel_validation=False, numeric_rows=True, data_representation="sketch_dft",
