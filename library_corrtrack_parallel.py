@@ -2547,10 +2547,15 @@ def _extract_feature_overrides(params):
                         ("statstream_apply_dft_filter", None), ("statstream_report", str), ("statstream_tolerance", _to_float_safe), ("statstream_bw_coeffs", _to_int_safe),
                         ("corrjoin_ks", _to_int_safe), ("corrjoin_ke", _to_int_safe), ("corrjoin_kb", _to_int_safe)):
         if params.get(key) is not None:
+            raw_val = params.get(key)
+            if isinstance(raw_val, float) and math.isnan(raw_val):
+                continue                                  # NaN from a CSV/JSON round trip (hyperopt best_params) = absent
+            if caster is str and str(raw_val).strip().lower() in ("", "nan", "none"):
+                continue
             if caster is None:
-                overrides[key] = _coerce_to_bool(params.get(key), default=False)
+                overrides[key] = _coerce_to_bool(raw_val, default=False)
             else:
-                val = caster(params.get(key))
+                val = caster(raw_val)
                 if val is not None:
                     overrides[key] = val
     return overrides
@@ -6856,22 +6861,32 @@ class CorrTrack:
             self._correlated_legacy_dict = {}
 
     def _statstream_digests(self, window_data, window_start, b, n_bw):
-        """Per-basic-window digests for the current buffer (their section 3 synopsis): for every series and
-        every basic window aligned to the buffer start, the first n_bw DFT coefficients (1/sqrt(b)
-        convention) and the exact sums and sums of squares. Computed once per step for all series, O(m x
-        buffer) like the sketch itself, then every pair costs O(k x n_bw) instead of O(w). StatStream keeps
-        these incrementally (Lemma 6); recomputing them per step is a constant-factor difference charged
-        to validation_time."""
-        key = (int(window_start), int(window_data.shape[0]), int(window_data.shape[1]), int(b), int(n_bw))
-        cache = getattr(self, "_statstream_digest_cache", None)
-        if cache is not None and cache[0] == key:
-            return cache[1]
+        """Per-basic-window digests (their section 3 synopsis): for every series and every basic window
+        aligned to the buffer start, the first n_bw DFT coefficients (1/sqrt(b) convention) plus the exact
+        block sums and sums of squares. Kept in a cache keyed by the block's absolute start time, so each
+        step only computes the blocks that entered the buffer (StatStream's own per-basic-window update,
+        O(m b) per step) and blocks that left are dropped; the buffer's digest matrix is then assembled
+        from cached blocks. A change of series count or block length rebuilds the cache."""
         m, L = window_data.shape
         nb = L // b
-        blocks = np.asarray(window_data[:, : nb * b], dtype=np.float64).reshape(m, nb, b)
-        F = np.fft.rfft(blocks, axis=2)[:, :, :n_bw] / np.sqrt(b)
-        S1 = blocks.sum(axis=2); S2 = np.einsum("ijk,ijk->ij", blocks, blocks)
-        self._statstream_digest_cache = (key, (F, S1, S2, nb))
+        cache = getattr(self, "_statstream_block_cache", None)
+        if cache is None or cache["m"] != m or cache["b"] != b or cache["n_bw"] != n_bw:
+            cache = {"m": m, "b": b, "n_bw": n_bw, "blocks": {}}
+            self._statstream_block_cache = cache
+        blocks = cache["blocks"]
+        starts = [int(window_start) + j * b for j in range(nb)]
+        missing = [j for j, t0 in enumerate(starts) if t0 not in blocks]
+        if missing:
+            data = np.asarray(window_data, dtype=np.float64)
+            for j in missing:
+                seg = data[:, j * b:(j + 1) * b]
+                blocks[starts[j]] = (np.fft.rfft(seg, axis=1)[:, :n_bw] / np.sqrt(b), seg.sum(axis=1), np.einsum("ij,ij->i", seg, seg))
+        keep = set(starts)
+        for t0 in [t for t in blocks if t not in keep]:
+            del blocks[t0]
+        F = np.stack([blocks[t0][0] for t0 in starts], axis=1) if nb else np.zeros((m, 0, n_bw), dtype=complex)
+        S1 = np.stack([blocks[t0][1] for t0 in starts], axis=1) if nb else np.zeros((m, 0))
+        S2 = np.stack([blocks[t0][2] for t0 in starts], axis=1) if nb else np.zeros((m, 0))
         return F, S1, S2, nb
 
     def _validate_numeric_rows_statstream_approx(self, rows, retain_validated=True):
@@ -10304,6 +10319,11 @@ class Sketches:
         self.representation = str(representation or "proj").lower()
         self.dft_n_coeffs = int(dft_n_coeffs) if dft_n_coeffs else None
         self._dft_basis = None
+        # (2026-09-18) StatStream's Lemma 5/6 incremental DFT update state: raw complex coefficients of
+        # the current window, its running sums, the window start, the samples that will leave next
+        # step, and a refresh counter (full recompute every _dft_refresh_every steps against drift)
+        self._dft_state = None
+        self._dft_refresh_every = 64
         # "paa" = CorrJoin's representation: [PAA_ks(x_hat) | PAA_ke(x_hat)] (ks + ke dims),
         # x_hat the unit-L2-normalized window. See _sketches_paa.
         self.paa_ks = int(paa_ks) if paa_ks else None
@@ -11314,14 +11334,54 @@ class Sketches:
             self._dft_basis = np.ascontiguousarray(np.hstack([np.cos(ang), np.sin(ang)]) / np.sqrt(W))
         return self._dft_basis
 
+    def _dft_raw_incremental(self, current_window, curr_start, B):
+        """Raw DFT bins 1..n of the window as (m, 2n) reals [Re | Im], and the centred L2 norm per series,
+        maintained the way StatStream does (Lemmas 5 and 6): when the window advanced by s samples over
+        the previous call with the same series, X'_m = e^{j 2 pi m s / W} (X_m - D(leaving) + D(entering))
+        with D the 1/sqrt(W)-scaled partial DFT of the s samples that left and the s that entered, and
+        the sums S1, S2 updated the same way: O(m n s) per step instead of the O(m W n) recompute. A full
+        recompute every `_dft_refresh_every` steps bounds floating-point drift; any change of series,
+        window size or a non-contiguous advance also recomputes."""
+        m, W = current_window.shape
+        n = B.shape[1] // 2
+        st = self._dft_state
+        s_adv = None
+        if st is not None and st["m"] == m and st["W"] == W and st["start"] is not None:
+            s_adv = int(curr_start - st["start"])
+            if not (0 < s_adv <= st["head"].shape[1]) or st["count"] >= self._dft_refresh_every:
+                s_adv = None
+        if s_adv is None:
+            raw = current_window @ B
+            S1 = current_window.sum(axis=1); S2 = np.einsum("ij,ij->i", current_window, current_window)
+            count = 0
+        else:
+            leaving = st["head"][:, :s_adv]                            # the s samples that left
+            entering = current_window[:, W - s_adv:]                   # the s that entered
+            Bl = B[:s_adv]                                             # basis rows for positions 0..s-1
+            # entering samples sit at positions W..W+s-1 of the OLD frame: e^{-j2 pi m i/W} is W-periodic,
+            # so their basis rows are those of positions 0..s-1
+            d_leave = leaving @ Bl; d_enter = entering @ Bl
+            re = st["raw"][:, :n] - d_leave[:, :n] + d_enter[:, :n]; im = st["raw"][:, n:] - d_leave[:, n:] + d_enter[:, n:]
+            ang = 2.0 * np.pi * np.arange(1, n + 1) * s_adv / W
+            c, sn = np.cos(ang), np.sin(ang)
+            # multiply by e^{+j ang}: (re + j im)(c + j sn)
+            raw = np.empty_like(st["raw"]); raw[:, :n] = re * c - im * sn; raw[:, n:] = re * sn + im * c
+            S1 = st["S1"] - leaving.sum(axis=1) + entering.sum(axis=1)
+            S2 = st["S2"] - np.einsum("ij,ij->i", leaving, leaving) + np.einsum("ij,ij->i", entering, entering)
+            count = st["count"] + 1
+        head_len = int(getattr(self, "window_step", 1) or 1)
+        self._dft_state = {"m": m, "W": W, "start": curr_start, "raw": raw, "S1": S1, "S2": S2, "count": count,
+                           "head": np.array(current_window[:, :max(head_len, 1)], dtype=np.float64, copy=True)}
+        denom = np.sqrt(np.maximum(S2 - S1 * S1 / W, 0.0))
+        return raw, denom
+
     def _sketches_dft(self):
         """StatStream digest of the current window: X_hat_m = X_m / sigma_x for m = 1..n
         (their Lemma 4), i.e. the DFT of the unit-L2-normalized window, as 2n reals.
         By Lemma 2, corr(x,y) >= 1 - eps^2  =>  ||X_hat - Y_hat||_2n <= eps, and by Lemma 7
-        every coordinate lies in [-sqrt(2)/2, sqrt(2)/2]. Recomputed from the window each
-        step; StatStream's Lemma 6 per-basic-window digest update is an O(W/b) constant-
-        factor optimization of this same quantity and is not implemented (charged to this
-        arm's sk_time, stated in the plan)."""
+        every coordinate lies in [-sqrt(2)/2, sqrt(2)/2]. Since 2026-09-18 the raw coefficients
+        are maintained incrementally across steps (Lemmas 5/6, `_dft_raw_incremental`), as in
+        the paper; before that the window was recomputed each step (11 ms/step at m=200, W=3600)."""
         current_window = np.array(self._curr_window(), dtype=np.float64, copy=False)
         n_series = current_window.shape[0]
         curr_start = self._curr_startTime()
@@ -11332,9 +11392,7 @@ class Sketches:
             self._sketch_keys = []
             return
         B = self._dft_basis_matrix()
-        raw = current_window @ B                                       # (m, 2n), bins 1..n only
-        centred = current_window - current_window.mean(axis=1, keepdims=True)
-        denom = np.sqrt(np.einsum("ij,ij->i", centred, centred))
+        raw, denom = self._dft_raw_incremental(current_window, curr_start, B)
         out = np.zeros_like(raw)
         valid = np.isfinite(denom) & (denom > 0.0)
         if np.any(valid):
