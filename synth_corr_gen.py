@@ -893,6 +893,7 @@ def make_density_targeted_dataset(
     verify_bf: bool = True,
     _max_correction_regens: int = 3,
     group_size: Optional[int] = None,
+    allow_spurious: bool = False,
 ):
     """Generate an (m, n) dataset whose brute-force effective tuple density
     (correlated (pair,lag,window) tuples / all tested tuples) equals
@@ -1326,7 +1327,11 @@ def make_density_targeted_dataset(
                 "correlation construction is not clearing corr_threshold -- check base_proc "
                 "/ preprocess / window_size or raise corr_margin."
             )
-        if gt_precision < 0.95:
+        # (2026-09-18) `allow_spurious`: nonstationary raw processes (random walks at T >= 0.9 with long
+        # windows) carry spurious cross-group correlation by nature; that is the phenomenon the raw
+        # (preprocess=False) cells exist to measure, so the file is kept with its verified density above
+        # the target and the spurious fraction recorded, instead of being refused
+        if gt_precision < 0.95 and not allow_spurious:
             raise RuntimeError(
                 "make_density_targeted_dataset: brute force reported "
                 f"{1.0 - gt_precision:.1%} correlated tuples that were not planted "
@@ -1362,6 +1367,7 @@ def make_density_targeted_dataset(
         "n_bf_ambiguous_windows": int(result["n_bf_ambiguous"]),
         "group_size": int(result["g"]), "n_groups": int(result["n_groups"]),
         "effective_degree": float(best.get("effective_degree", 0.0)), "requested_group_size": group_size,
+        "spurious_fraction": (None if math.isnan(result["gt_precision"]) else float(1.0 - result["gt_precision"])), "allow_spurious": bool(allow_spurious),
         "lag_band": b, "corr_sign": corr_sign, "n_epochs": int(n_epochs),
         "duty": float(duty), "on_frac": float(on_frac),
         "burst_length_windows": (list(burst_length_windows)

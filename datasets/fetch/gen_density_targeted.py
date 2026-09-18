@@ -65,6 +65,8 @@ def main() -> None:
                                                              "(refused when unreachable); the effective degree measured on the verified truth is recorded")
     ap.add_argument("--preprocess", action="store_true", help="define the density in the differenced space")
     ap.add_argument("--tolerance", type=float, default=0.15)
+    ap.add_argument("--allow-spurious", action="store_true", help="keep the file when the base process itself produces correlated tuples that were not planted "
+                                                                   "(raw random walks at high T): the verified density then exceeds the target; the spurious fraction is recorded")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--name", default=None)
     args = ap.parse_args()
@@ -73,12 +75,15 @@ def main() -> None:
     out = make_density_targeted_dataset(m=args.m, n=args.n, target_density=args.density, corr_threshold=args.T, window_size=args.W,
                                         window_step=args.step, n_lags=n_lags, n_eval_steps=max(50, (args.n - args.W) // args.step // 4),
                                         base_proc=PROCS[args.proc], preprocess=args.preprocess, corr_sign=args.corr_sign, seed=args.seed,
-                                        tolerance=args.tolerance, verify_bf=True, group_size=(args.degree + 1) if args.degree is not None else None)
+                                        tolerance=args.tolerance, verify_bf=True, group_size=(args.degree + 1) if args.degree is not None else None,
+                                        allow_spurious=args.allow_spurious)
     data = np.asarray(out["data"], dtype=np.float64)[:, 1:].T          # (m, n)
     meta = {"source": "synth_corr_gen.make_density_targeted_dataset", "base_proc": PROCS[args.proc], "stationarity": _stationarity_tag(PROCS[args.proc]),
             "target_density": args.density, "analytic_density": out["analytic_density"], "verified_density": out["verified_density"],
             "group_size": out["group_size"], "n_groups": out["n_groups"], "degree_by_construction": int(out["group_size"]) - 1,
             "effective_degree": out.get("effective_degree"), "requested_degree": args.degree,
+            "spurious_fraction": out["meta"].get("spurious_fraction") if isinstance(out.get("meta"), dict) else None,
+            "note": "gt_rows are the planted tuples; the campaign's bruteforce arm is the operative truth (it includes any spurious tuple)",
             "protocol": {"W": args.W, "step": args.step, "n_lags": n_lags, "L": args.L, "T": args.T, "preprocess": args.preprocess, "corr_sign": args.corr_sign},
             "seed": args.seed, "regime": f"synthetic, {_stationarity_tag(PROCS[args.proc])}, density-controlled"}
     path = save_competitor_npz(name, data, list(out["ids"]), meta)

@@ -56,7 +56,7 @@ class Cell:
     @property
     def stem(self):
         m = f"_m{self.n_series}" if self.n_series is not None else ""
-        return f"{self.dataset}{m}_W{self.W}_s{self.step}_L{self.n_lags}_T{self.T}{'_diff' if self.preprocess else ''}"
+        return f"{self.dataset}{m}_W{self.W}_s{self.step}_L{self.n_lags}_T{self.T}{'_diff' if self.preprocess and not self.dataset.endswith('_diff') else ''}"
 
     def extra_args(self):
         parts = []
@@ -137,13 +137,16 @@ DATASETS = [
 # protocol (m, W, step, L, T)); hourly-regime protocol W=168/12, L_max=5, as the unitless synthetic sets have no
 # horizon of their own. The effective degree of each file is recorded in its meta.
 SYNTH_PROCS = ("ar1", "rw")
-SYNTH_DENSITIES = (0.005, 0.02, 0.05)
+# densities chosen to span what the real sets show at T in {0.7 .. 0.95} (plan section 5 item 6, log 2026-09-18 (h)):
+# CorrJoin stock 0.09% to 9.7%, chlorine 0.5% to 6.5%, synthetic walk 0.05% to 8.4%, sp500 daily ~1% at 0.9,
+# gas 8% to 26%, Motes temperature 45% at 0.9, fr_air_temperature ~17.6% at 0.7 -> {0.5%, 2%, 5%, 20%}
+SYNTH_DENSITIES = (0.005, 0.02, 0.05, 0.2)
 SYNTH_N, SYNTH_W, SYNTH_STEP = 20000, 168, 12
 SYNTH_SPEC = DatasetSpec("synth", SYNTH_W, SYNTH_STEP, 5000, 5, m_min=625)
 
 
-def synth_name(proc, dens, T, m, L):
-    return f"synth_{proc}_d{str(dens).replace('.', 'p')}_T{str(T).replace('.', 'p')}_m{m}_L{L}"
+def synth_name(proc, dens, T, m, L, diff=False):
+    return f"synth_{proc}_d{str(dens).replace('.', 'p')}_T{str(T).replace('.', 'p')}_m{m}_L{L}{'_diff' if diff else ''}"
 
 
 def synth_rungs():
@@ -243,24 +246,27 @@ def cells(m_levels: int = 4, l_levels: int = 4, replicates: int = 2, kind: str =
                 out.append(Cell(d.label, d.W, d.step, (L - 1) * d.step, T, n_series=m, n_obs=d.n_obs, arms=arms,
                                 extra=dict(d.extra), walltime=("96:00:00" if (d.full_m and m == d.full_m) else d.walltime), calib_obs=d.calib_obs,
                                 note=f"{d.note} | L={L}"))
-    # (2026-09-18) returns / differences run: every dataset's synchronous anchor also runs with preprocess=True
-    # (the cooperative-vs-uncooperative axis of plan section 5 item 6: prices AND returns, one transform)
-    for d in DATASETS:
-        for T in THRESHOLDS:
-            out.append(Cell(d.label, d.W, d.step, 0, T, n_series=d.m_max, n_obs=d.n_obs, arms=d.arms, extra=dict(d.extra),
-                            walltime=d.walltime, calib_obs=d.calib_obs, preprocess=True, note=f"{d.note} | L=1, first differences"))
-    # (2026-09-18) this project's own density-controlled generator (plan section 5 item 6, density {0.5%, 2%, 5%}):
-    # one file per (process, density, T) because the verified density is a property of the protocol; m and L fixed
+    # (2026-09-18, user) EVERY cell runs twice: on the raw levels (preprocess=False) and on first differences
+    # (preprocess=True). Raw shows robustness to nonstationarity (and its spurious correlation), differenced shows
+    # robustness to uncooperative (white) data; neither alone answers both reviewer questions (log (h)).
+    raw_cells = list(out)
+    for c in raw_cells:
+        out.append(Cell(c.dataset, c.W, c.step, c.n_lags, c.T, n_series=c.n_series, n_obs=c.n_obs, arms=c.arms, extra=dict(c.extra),
+                        walltime=c.walltime, calib_obs=c.calib_obs, preprocess=True, config_path=c.config_path, note=f"{c.note} | first differences"))
+    # this project's own density-controlled generator (plan section 5 item 6): one file per (process, density, T, m, L)
+    # because the verified density is a property of the protocol, and one per space (raw / differenced), so the
+    # differenced cell's density is defined where it runs
     for proc in SYNTH_PROCS:
         for dens in SYNTH_DENSITIES:
             for (m, L) in synth_rungs():
                 for T in THRESHOLDS:
-                    name = synth_name(proc, dens, T, m, L)
                     arms = "all" if not (m > 2000 and L > 1) else "bruteforce,exact_stomp,filcorr,tsubasa,thinbraid,corrtrack,parcorr,csz,statstream,corrjoin"
-                    out.append(Cell(name, SYNTH_W, SYNTH_STEP, (L - 1) * SYNTH_STEP, T, n_series=m, n_obs=SYNTH_N, arms=arms,
-                                    extra=dict(CORRJOIN_KNOBS), walltime="24:00:00" if m <= 2500 else "48:00:00",
-                                    config_path=f"datasets/competitor/configs/experiment_dataset_{name}.py",
-                                    note=f"synthetic {proc}, verified tuple density {dens} at T={T}, m={m}, L={L} (gen_density_targeted.py)"))
+                    for diff in (False, True):
+                        name = synth_name(proc, dens, T, m, L, diff)
+                        out.append(Cell(name, SYNTH_W, SYNTH_STEP, (L - 1) * SYNTH_STEP, T, n_series=m, n_obs=SYNTH_N, arms=arms,
+                                        extra=dict(CORRJOIN_KNOBS), walltime="24:00:00" if m <= 2500 else "48:00:00", preprocess=diff,
+                                        config_path=f"datasets/competitor/configs/experiment_dataset_{name}.py",
+                                        note=f"synthetic {proc}, verified tuple density {dens} at T={T}, m={m}, L={L}, {'differenced' if diff else 'raw'} space"))
     out.append(STEP1_CELL)
     return out
 
@@ -268,7 +274,8 @@ def cells(m_levels: int = 4, l_levels: int = 4, replicates: int = 2, kind: str =
 GENERATE = [
     # density-controlled synthetic sets: one per (process, density, T), verified by bruteforce at generation
 ] + [f"python datasets/fetch/gen_density_targeted.py --proc {p} --density {d} --T {T} --m {m} --n {SYNTH_N} --W {SYNTH_W} --step {SYNTH_STEP} --L {L}"
-     for p in SYNTH_PROCS for d in SYNTH_DENSITIES for (m, L) in synth_rungs() for T in THRESHOLDS] + [
+     + (" --preprocess" if diff else " --allow-spurious")      # raw random walks carry spurious correlation at high T: kept, recorded
+     for p in SYNTH_PROCS for d in SYNTH_DENSITIES for (m, L) in synth_rungs() for T in THRESHOLDS for diff in (False, True)] + [
     "python datasets/fetch/gen_statstream_randomwalk.py --m 5000 --T 20000",
     "python datasets/fetch/gen_braid_synthetic.py --family sines --m 5000 --T 32768 --copies 1",
     "python datasets/fetch/gen_braid_synthetic.py --family spiketrains --m 5000 --T 100000 --period 6500 --copies 1",
