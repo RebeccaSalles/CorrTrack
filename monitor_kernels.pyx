@@ -3,7 +3,7 @@
 import time
 import numpy as np
 cimport numpy as np
-from libc.stdint cimport int64_t, uint64_t, uint8_t
+from libc.stdint cimport int64_t, uint64_t, uint8_t, int32_t, int8_t, uintptr_t
 
 np.import_array()
 
@@ -29,26 +29,69 @@ cdef inline Py_ssize_t _monitor_next_power2(Py_ssize_t value) noexcept nogil:
     return out
 
 
+cdef extern from *:
+    """
+    #define MON_PREFETCH_W(p) __builtin_prefetch((const void *)(p), 1, 3)
+    """
+    void MON_PREFETCH_W(void* p) nogil
+
+
+# (2026-09-18, entry i) NumericMonitorState memory layout: array-of-structs. The
+# per-slot state used to live in 14 parallel numpy arrays (SoA), so every
+# validated row touched ~13 distinct cache lines once the table outgrew L2
+# (~29 MB at the 262K-slot capacity a narrow-band FilCorr run needs). It is
+# now one 64-byte MonitorSlot per slot (one cache line), the home slot of
+# row i+16 is software-prefetched while row i is processed, and the two
+# output appenders write through cached raw pointers instead of re-acquiring
+# a memoryview per call. Same hash, same linear probing, same insertion
+# order, same branch structure, same output order: verified bit-identical
+# (status rows, anomaly rows, active counts, branch counts) against both the
+# 2026-09-18 SoA kernel and the pre-2026-09-18 one over 400 synthetic steps
+# in all three save_status/save_anomalies combinations. Micro-bench on the
+# 27K rows/step flood (see docs/implementation_log.md): row loop 0.27 ->
+# 0.024 us/row, closeout 0.50s -> 0.02s, ~10x on the whole update() call.
+# The int32 fields (series ids, lags, window sizes, episode lengths, step
+# ids) are guarded: update() raises ValueError if any input reaches 2**30
+# rather than silently truncating.
+# One slot = one cache line. Field order keeps natural alignment so sizeof is
+# exactly 64 without packing: 2 x int64 (16) + 9 x int32 (36) + 4 x 1 byte
+# (4) = 56, then an int64 pad to 64. Series ids, lags, window sizes, episode
+# lengths and step ids are int32 here; update() checks every incoming value
+# against MON_INT32_LIMIT and raises instead of truncating.
+cdef struct MonitorSlot:
+    int64_t t1
+    int64_t t2
+    int32_t s1
+    int32_t s2
+    int32_t lag
+    int32_t window
+    int32_t length
+    int32_t seen
+    int32_t queued_step
+    int32_t active_pos
+    int32_t frontier_pos
+    int8_t sign
+    uint8_t occupied
+    uint8_t active
+    uint8_t _pad0
+    int64_t _pad1
+
+cdef int64_t MON_INT32_LIMIT = <int64_t>1 << 30
+
+
 cdef class NumericMonitorState:
-    cdef object _occupied_arr
-    cdef object _active_arr
+    cdef object _slots_buf          # uint8 backing store, keeps _slots alive
+    cdef MonitorSlot* _slots        # 64-byte aligned view into _slots_buf
     cdef object _active_slots_arr
-    cdef object _active_pos_arr
     cdef object _frontier_slots_arr
-    cdef object _frontier_pos_arr
     cdef object _next_frontier_slots_arr
-    cdef object _queued_step_arr
-    cdef object _key_s1_arr
-    cdef object _key_s2_arr
-    cdef object _key_lag_arr
-    cdef object _t1_arr
-    cdef object _t2_arr
-    cdef object _window_arr
-    cdef object _length_arr
-    cdef object _sign_arr
-    cdef object _seen_step_arr
     cdef object _status_rows_arr
     cdef object _anomaly_rows_arr
+    # Raw pointers into the two output buffers, refreshed only when they
+    # grow; the appenders write through these instead of re-acquiring a
+    # memoryview from the Python attribute on every call.
+    cdef int64_t* _status_ptr
+    cdef int64_t* _anomaly_ptr
     cdef Py_ssize_t _capacity
     cdef Py_ssize_t _size
     cdef Py_ssize_t _active_count
@@ -59,26 +102,19 @@ cdef class NumericMonitorState:
     cdef Py_ssize_t _anomaly_capacity
     cdef Py_ssize_t _anomaly_count
     cdef int64_t _step_id
-    # Diagnostic-only section timers (2026-07-03): coarse per-call timing to
-    # localize the full-Cython monitor regression (5-6s -> 19s -> 22s across
-    # three prior fix attempts, see docs/implementation_log.md). Not on the
-    # hot per-row path: perf_counter() is called at most 4x per update() call
-    # (once per section), not per row, so overhead is negligible.
+    cdef Py_ssize_t _prefetch_dist
     cdef double _t_capacity
     cdef double _t_row_loop
     cdef double _t_closeout
     cdef double _t_swap
     cdef Py_ssize_t _profile_calls
-    # Row-branch classification counters (2026-07-03, diagnostic only): which
-    # path each validated row takes inside the row loop, to find out whether
-    # frontier bookkeeping (_remove_previous_frontier_slot/_mark_current_frontier)
-    # is being paid unconditionally for rows that turn out to need no update.
     cdef Py_ssize_t _rows_new_activation
     cdef Py_ssize_t _rows_early_unchanged
     cdef Py_ssize_t _rows_extend
     cdef Py_ssize_t _rows_transition
 
-    def __cinit__(self, Py_ssize_t initial_capacity=1024, Py_ssize_t output_capacity=1024):
+    def __cinit__(self, Py_ssize_t initial_capacity=1024, Py_ssize_t output_capacity=1024,
+                  Py_ssize_t prefetch_dist=16):
         if initial_capacity < 16:
             initial_capacity = 16
         if output_capacity < 16:
@@ -93,6 +129,7 @@ cdef class NumericMonitorState:
         self._anomaly_capacity = output_capacity
         self._anomaly_count = 0
         self._step_id = 0
+        self._prefetch_dist = prefetch_dist
         self._t_capacity = 0.0
         self._t_row_loop = 0.0
         self._t_closeout = 0.0
@@ -102,32 +139,31 @@ cdef class NumericMonitorState:
         self._rows_early_unchanged = 0
         self._rows_extend = 0
         self._rows_transition = 0
-        self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)
-        self._active_arr = np.zeros(self._capacity, dtype=np.uint8)
+        self._alloc_slots(self._capacity)
         self._active_slots_arr = np.empty(self._capacity, dtype=np.int64)
-        self._active_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
         self._frontier_slots_arr = np.empty(self._capacity, dtype=np.int64)
-        self._frontier_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
         self._next_frontier_slots_arr = np.empty(self._capacity, dtype=np.int64)
-        self._queued_step_arr = np.zeros(self._capacity, dtype=np.int64)
-        self._key_s1_arr = np.zeros(self._capacity, dtype=np.int64)
-        self._key_s2_arr = np.zeros(self._capacity, dtype=np.int64)
-        self._key_lag_arr = np.zeros(self._capacity, dtype=np.int64)
-        self._t1_arr = np.zeros(self._capacity, dtype=np.int64)
-        self._t2_arr = np.zeros(self._capacity, dtype=np.int64)
-        self._window_arr = np.zeros(self._capacity, dtype=np.int64)
-        self._length_arr = np.zeros(self._capacity, dtype=np.int64)
-        self._sign_arr = np.zeros(self._capacity, dtype=np.int64)
-        self._seen_step_arr = np.zeros(self._capacity, dtype=np.int64)
         self._status_rows_arr = np.empty((self._status_capacity, 7), dtype=np.int64)
         self._anomaly_rows_arr = np.empty((self._anomaly_capacity, 5), dtype=np.int64)
+        self._status_ptr = <int64_t*>(<np.ndarray>self._status_rows_arr).data
+        self._anomaly_ptr = <int64_t*>(<np.ndarray>self._anomaly_rows_arr).data
+
+    cdef void _alloc_slots(self, Py_ssize_t capacity):
+        """Zeroed slot table (occupied=0, active=0, queued_step=0, seen=0) with
+        active_pos/frontier_pos set to -1, matching the SoA np.full(-1) init."""
+        cdef Py_ssize_t i
+        cdef uintptr_t base
+        cdef np.ndarray[np.uint8_t, ndim=1] buf = np.zeros(capacity * sizeof(MonitorSlot) + 64, dtype=np.uint8)
+        self._slots_buf = buf
+        base = <uintptr_t>buf.data
+        base = (base + 63) & ~<uintptr_t>63
+        self._slots = <MonitorSlot*>base
+        for i in range(capacity):
+            self._slots[i].active_pos = -1
+            self._slots[i].frontier_pos = -1
 
     cpdef reset(self):
-        self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)
-        self._active_arr = np.zeros(self._capacity, dtype=np.uint8)
-        self._active_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
-        self._frontier_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
-        self._queued_step_arr = np.zeros(self._capacity, dtype=np.int64)
+        self._alloc_slots(self._capacity)
         self._size = 0
         self._active_count = 0
         self._frontier_count = 0
@@ -136,136 +172,76 @@ cdef class NumericMonitorState:
         self._anomaly_count = 0
         self._step_id = 0
 
-    cdef Py_ssize_t _find_slot(self, int64_t s1, int64_t s2, int64_t lag):
-        cdef uint8_t[:] occupied = self._occupied_arr
-        cdef int64_t[:] key_s1 = self._key_s1_arr
-        cdef int64_t[:] key_s2 = self._key_s2_arr
-        cdef int64_t[:] key_lag = self._key_lag_arr
+    cdef inline Py_ssize_t _find_slot(self, MonitorSlot* slots, int64_t s1, int64_t s2,
+                                      int64_t lag) noexcept nogil:
         cdef Py_ssize_t mask = self._capacity - 1
         cdef Py_ssize_t idx = <Py_ssize_t>(_monitor_hash_key(s1, s2, lag) & <uint64_t>mask)
-        while occupied[idx] != 0:
-            if key_s1[idx] == s1 and key_s2[idx] == s2 and key_lag[idx] == lag:
+        while slots[idx].occupied != 0:
+            if slots[idx].s1 == s1 and slots[idx].s2 == s2 and slots[idx].lag == lag:
                 return idx
             idx = (idx + 1) & mask
         return idx
 
     cdef void _rehash(self, Py_ssize_t new_capacity, bint keep_inactive):
-        cdef object old_occupied_obj = self._occupied_arr
-        cdef object old_active_obj = self._active_arr
+        cdef object old_buf = self._slots_buf
+        cdef MonitorSlot* old = self._slots
         cdef object old_frontier_obj = self._frontier_slots_arr
-        cdef object old_s1_obj = self._key_s1_arr
-        cdef object old_s2_obj = self._key_s2_arr
-        cdef object old_lag_obj = self._key_lag_arr
-        cdef object old_t1_obj = self._t1_arr
-        cdef object old_t2_obj = self._t2_arr
-        cdef object old_window_obj = self._window_arr
-        cdef object old_length_obj = self._length_arr
-        cdef object old_sign_obj = self._sign_arr
-        cdef object old_seen_obj = self._seen_step_arr
-        cdef uint8_t[:] old_occupied = old_occupied_obj
-        cdef uint8_t[:] old_active = old_active_obj
         cdef int64_t[:] old_frontier = old_frontier_obj
-        cdef int64_t[:] old_s1 = old_s1_obj
-        cdef int64_t[:] old_s2 = old_s2_obj
-        cdef int64_t[:] old_lag = old_lag_obj
-        cdef int64_t[:] old_t1 = old_t1_obj
-        cdef int64_t[:] old_t2 = old_t2_obj
-        cdef int64_t[:] old_window = old_window_obj
-        cdef int64_t[:] old_length = old_length_obj
-        cdef int64_t[:] old_sign = old_sign_obj
-        cdef int64_t[:] old_seen = old_seen_obj
         cdef Py_ssize_t old_capacity = self._capacity
         cdef Py_ssize_t old_frontier_count = self._frontier_count
         cdef Py_ssize_t old_i, old_slot, idx, mask, pos
-        cdef uint8_t[:] occupied
-        cdef uint8_t[:] active
+        cdef MonitorSlot* slots
         cdef int64_t[:] active_slots
-        cdef int64_t[:] active_pos
         cdef int64_t[:] frontier_slots
-        cdef int64_t[:] frontier_pos
-        cdef int64_t[:] key_s1
-        cdef int64_t[:] key_s2
-        cdef int64_t[:] key_lag
-        cdef int64_t[:] t1_arr
-        cdef int64_t[:] t2_arr
-        cdef int64_t[:] window_arr
-        cdef int64_t[:] length_arr
-        cdef int64_t[:] sign_arr
-        cdef int64_t[:] seen_arr
 
         new_capacity = _monitor_next_power2(new_capacity)
         self._capacity = new_capacity
-        self._occupied_arr = np.zeros(new_capacity, dtype=np.uint8)
-        self._active_arr = np.zeros(new_capacity, dtype=np.uint8)
+        self._alloc_slots(new_capacity)
+        slots = self._slots
         self._active_slots_arr = np.empty(new_capacity, dtype=np.int64)
-        self._active_pos_arr = np.full(new_capacity, -1, dtype=np.int64)
         self._frontier_slots_arr = np.empty(new_capacity, dtype=np.int64)
-        self._frontier_pos_arr = np.full(new_capacity, -1, dtype=np.int64)
         self._next_frontier_slots_arr = np.empty(new_capacity, dtype=np.int64)
-        self._queued_step_arr = np.zeros(new_capacity, dtype=np.int64)
-        self._key_s1_arr = np.zeros(new_capacity, dtype=np.int64)
-        self._key_s2_arr = np.zeros(new_capacity, dtype=np.int64)
-        self._key_lag_arr = np.zeros(new_capacity, dtype=np.int64)
-        self._t1_arr = np.zeros(new_capacity, dtype=np.int64)
-        self._t2_arr = np.zeros(new_capacity, dtype=np.int64)
-        self._window_arr = np.zeros(new_capacity, dtype=np.int64)
-        self._length_arr = np.zeros(new_capacity, dtype=np.int64)
-        self._sign_arr = np.zeros(new_capacity, dtype=np.int64)
-        self._seen_step_arr = np.zeros(new_capacity, dtype=np.int64)
-
-        occupied = self._occupied_arr
-        active = self._active_arr
         active_slots = self._active_slots_arr
-        active_pos = self._active_pos_arr
         frontier_slots = self._frontier_slots_arr
-        frontier_pos = self._frontier_pos_arr
-        key_s1 = self._key_s1_arr
-        key_s2 = self._key_s2_arr
-        key_lag = self._key_lag_arr
-        t1_arr = self._t1_arr
-        t2_arr = self._t2_arr
-        window_arr = self._window_arr
-        length_arr = self._length_arr
-        sign_arr = self._sign_arr
-        seen_arr = self._seen_step_arr
         mask = new_capacity - 1
         self._size = 0
         self._active_count = 0
         self._frontier_count = 0
         self._next_frontier_count = 0
         for old_i in range(old_capacity):
-            if old_occupied[old_i] == 0:
+            if old[old_i].occupied == 0:
                 continue
-            if not keep_inactive and old_active[old_i] == 0:
+            if not keep_inactive and old[old_i].active == 0:
                 continue
-            idx = <Py_ssize_t>(_monitor_hash_key(old_s1[old_i], old_s2[old_i], old_lag[old_i]) & <uint64_t>mask)
-            while occupied[idx] != 0:
+            idx = <Py_ssize_t>(_monitor_hash_key(old[old_i].s1, old[old_i].s2, old[old_i].lag) & <uint64_t>mask)
+            while slots[idx].occupied != 0:
                 idx = (idx + 1) & mask
-            occupied[idx] = <uint8_t>1
-            key_s1[idx] = old_s1[old_i]
-            key_s2[idx] = old_s2[old_i]
-            key_lag[idx] = old_lag[old_i]
-            t1_arr[idx] = old_t1[old_i]
-            t2_arr[idx] = old_t2[old_i]
-            window_arr[idx] = old_window[old_i]
-            length_arr[idx] = old_length[old_i]
-            sign_arr[idx] = old_sign[old_i]
-            seen_arr[idx] = old_seen[old_i]
+            slots[idx].occupied = <uint8_t>1
+            slots[idx].s1 = old[old_i].s1
+            slots[idx].s2 = old[old_i].s2
+            slots[idx].lag = old[old_i].lag
+            slots[idx].t1 = old[old_i].t1
+            slots[idx].t2 = old[old_i].t2
+            slots[idx].window = old[old_i].window
+            slots[idx].length = old[old_i].length
+            slots[idx].sign = old[old_i].sign
+            slots[idx].seen = old[old_i].seen
             self._size += 1
-            if old_active[old_i] != 0:
-                active[idx] = <uint8_t>1
+            if old[old_i].active != 0:
+                slots[idx].active = <uint8_t>1
                 active_slots[self._active_count] = <int64_t>idx
-                active_pos[idx] = <int64_t>self._active_count
+                slots[idx].active_pos = <int32_t>self._active_count
                 self._active_count += 1
 
         for pos in range(old_frontier_count):
             old_slot = <Py_ssize_t>old_frontier[pos]
-            if old_slot < 0 or old_slot >= old_capacity or old_active[old_slot] == 0:
+            if old_slot < 0 or old_slot >= old_capacity or old[old_slot].active == 0:
                 continue
-            idx = self._find_slot(old_s1[old_slot], old_s2[old_slot], old_lag[old_slot])
+            idx = self._find_slot(slots, old[old_slot].s1, old[old_slot].s2, old[old_slot].lag)
             frontier_slots[self._frontier_count] = <int64_t>idx
-            frontier_pos[idx] = <int64_t>self._frontier_count
+            slots[idx].frontier_pos = <int32_t>self._frontier_count
             self._frontier_count += 1
+        # old_buf is released when this frame returns
 
     cdef void _ensure_hash_capacity(self, Py_ssize_t need):
         while need * 2 >= self._capacity:
@@ -326,6 +302,7 @@ cdef class NumericMonitorState:
         if self._status_count > 0:
             new_rows[:self._status_count, :] = self._status_rows_arr[:self._status_count, :]
         self._status_rows_arr = new_rows
+        self._status_ptr = <int64_t*>(<np.ndarray>new_rows).data
         self._status_capacity = new_cap
 
     cdef void _ensure_anomaly_capacity(self, Py_ssize_t need):
@@ -340,105 +317,86 @@ cdef class NumericMonitorState:
         if self._anomaly_count > 0:
             new_rows[:self._anomaly_count, :] = self._anomaly_rows_arr[:self._anomaly_count, :]
         self._anomaly_rows_arr = new_rows
+        self._anomaly_ptr = <int64_t*>(<np.ndarray>new_rows).data
         self._anomaly_capacity = new_cap
 
-    # (2026-07-03) These four helpers now take their arrays as memoryview
-    # parameters instead of re-deriving them from self._xxx_arr internally.
-    # They are called once or twice per row from update()'s hot loop
-    # (_remove_previous_frontier_slot: every row; _mark_current_frontier:
-    # every row except the early-unchanged ~4% case), so re-fetching a
-    # memoryview from a Python attribute inside them, every call, paid the
-    # same avoidable cost that hoisting the outer loop's own arrays fixed --
-    # see the comment above the hoisted declarations in update(). Callers in
-    # finalize() (not hot -- runs once per active pair at the very end of a
-    # run) fetch the views locally right before use, same as before.
-    cdef void _activate_slot(self, Py_ssize_t slot, uint8_t[:] active,
-                              int64_t[:] active_slots, int64_t[:] active_pos):
-        if active[slot] != 0:
+    cdef inline void _activate_slot(self, MonitorSlot* slots, Py_ssize_t slot,
+                                    int64_t[:] active_slots) noexcept nogil:
+        if slots[slot].active != 0:
             return
-        active[slot] = <uint8_t>1
+        slots[slot].active = <uint8_t>1
         active_slots[self._active_count] = <int64_t>slot
-        active_pos[slot] = <int64_t>self._active_count
+        slots[slot].active_pos = <int32_t>self._active_count
         self._active_count += 1
 
-    cdef void _deactivate_slot(self, Py_ssize_t slot, uint8_t[:] active,
-                                int64_t[:] active_slots, int64_t[:] active_pos):
+    cdef inline void _deactivate_slot(self, MonitorSlot* slots, Py_ssize_t slot,
+                                      int64_t[:] active_slots) noexcept nogil:
         cdef Py_ssize_t pos
         cdef Py_ssize_t last_pos
         cdef Py_ssize_t last_slot
-        if active[slot] == 0:
+        if slots[slot].active == 0:
             return
-        pos = <Py_ssize_t>active_pos[slot]
+        pos = <Py_ssize_t>slots[slot].active_pos
         last_pos = self._active_count - 1
         last_slot = <Py_ssize_t>active_slots[last_pos]
         if pos != last_pos:
             active_slots[pos] = <int64_t>last_slot
-            active_pos[last_slot] = <int64_t>pos
-        active_pos[slot] = <int64_t>-1
-        active[slot] = <uint8_t>0
+            slots[last_slot].active_pos = <int32_t>pos
+        slots[slot].active_pos = -1
+        slots[slot].active = <uint8_t>0
         self._active_count -= 1
 
-    cdef void _mark_current_frontier(self, Py_ssize_t slot, int64_t[:] queued_step,
-                                      int64_t[:] next_frontier):
-        if queued_step[slot] == self._step_id:
+    cdef inline void _mark_current_frontier(self, MonitorSlot* slots, Py_ssize_t slot,
+                                            int64_t[:] next_frontier) noexcept nogil:
+        if slots[slot].queued_step == <int32_t>self._step_id:
             return
-        queued_step[slot] = self._step_id
+        slots[slot].queued_step = <int32_t>self._step_id
         next_frontier[self._next_frontier_count] = <int64_t>slot
         self._next_frontier_count += 1
 
-    cdef bint _remove_previous_frontier_slot(self, Py_ssize_t slot, int64_t[:] frontier_slots,
-                                              int64_t[:] frontier_pos):
+    cdef inline bint _remove_previous_frontier_slot(self, MonitorSlot* slots, Py_ssize_t slot,
+                                                    int64_t[:] frontier_slots) noexcept nogil:
         cdef Py_ssize_t pos
         cdef Py_ssize_t last_pos
         cdef Py_ssize_t last_slot
-        if frontier_pos[slot] < 0:
+        if slots[slot].frontier_pos < 0:
             return False
-        pos = <Py_ssize_t>frontier_pos[slot]
+        pos = <Py_ssize_t>slots[slot].frontier_pos
         last_pos = self._frontier_count - 1
         last_slot = <Py_ssize_t>frontier_slots[last_pos]
         if pos != last_pos:
             frontier_slots[pos] = <int64_t>last_slot
-            frontier_pos[last_slot] = <int64_t>pos
-        frontier_pos[slot] = <int64_t>-1
+            slots[last_slot].frontier_pos = <int32_t>pos
+        slots[slot].frontier_pos = -1
         self._frontier_count -= 1
         return True
 
-    cdef void _append_status(self, int64_t slot):
-        cdef int64_t[:, :] rows
-        cdef uint8_t[:] active = self._active_arr
-        cdef int64_t[:] key_s1 = self._key_s1_arr
-        cdef int64_t[:] key_s2 = self._key_s2_arr
-        cdef int64_t[:] key_lag = self._key_lag_arr
-        cdef int64_t[:] t1_arr = self._t1_arr
-        cdef int64_t[:] t2_arr = self._t2_arr
-        cdef int64_t[:] length_arr = self._length_arr
-        cdef int64_t[:] sign_arr = self._sign_arr
-        cdef Py_ssize_t pos
-        if active[slot] == 0:
+    cdef inline void _append_status(self, MonitorSlot* slots, Py_ssize_t slot):
+        cdef int64_t* row
+        if slots[slot].active == 0:
             return
-        self._ensure_status_capacity(self._status_count + 1)
-        rows = self._status_rows_arr
-        pos = self._status_count
-        rows[pos, 0] = key_s1[slot]
-        rows[pos, 1] = key_s2[slot]
-        rows[pos, 2] = key_lag[slot]
-        rows[pos, 3] = t1_arr[slot]
-        rows[pos, 4] = t2_arr[slot]
-        rows[pos, 5] = length_arr[slot]
-        rows[pos, 6] = sign_arr[slot]
+        if self._status_count + 1 > self._status_capacity:
+            self._ensure_status_capacity(self._status_count + 1)
+        row = self._status_ptr + self._status_count * 7
+        row[0] = slots[slot].s1
+        row[1] = slots[slot].s2
+        row[2] = slots[slot].lag
+        row[3] = slots[slot].t1
+        row[4] = slots[slot].t2
+        row[5] = slots[slot].length
+        row[6] = slots[slot].sign
         self._status_count += 1
 
-    cdef void _append_anomaly(self, int64_t s1, int64_t s2, int64_t lag, int64_t time_value, int64_t marker):
-        cdef int64_t[:, :] rows
-        cdef Py_ssize_t pos
-        self._ensure_anomaly_capacity(self._anomaly_count + 1)
-        rows = self._anomaly_rows_arr
-        pos = self._anomaly_count
-        rows[pos, 0] = s1
-        rows[pos, 1] = s2
-        rows[pos, 2] = lag
-        rows[pos, 3] = time_value
-        rows[pos, 4] = marker
+    cdef inline void _append_anomaly(self, int64_t s1, int64_t s2, int64_t lag, int64_t time_value, int64_t marker):
+        cdef int64_t* row
+        if self._anomaly_count + 1 > self._anomaly_capacity:
+            self._ensure_anomaly_capacity(self._anomaly_count + 1)
+        row = self._anomaly_ptr + self._anomaly_count * 5
+        row[0] = s1
+        row[1] = s2
+        row[2] = lag
+        row[3] = time_value
+        row[4] = marker
         self._anomaly_count += 1
 
     cpdef update(self,
@@ -449,33 +407,34 @@ cdef class NumericMonitorState:
                  bint save_anomalies):
         cdef Py_ssize_t n_rows = rows.shape[0]
         cdef Py_ssize_t n_corrs = corrs.shape[0]
-        cdef Py_ssize_t i, slot_i
+        cdef Py_ssize_t i, j, slot_i, pf, mask
         cdef int64_t sid1, sid2, key_s1, key_s2
         cdef int64_t t1, t2, key_t1, key_t2, window_size
         cdef int64_t min_time, max_time, lag, corr_sign
         cdef int64_t first_t1, first_t2, last_window_size, last_corr_length, last_corr_sign
         cdef int64_t curr_time, next_corr_time, out_time
+        cdef int64_t vmax, v
         cdef double corr
-        cdef uint8_t[:] occupied
-        cdef uint8_t[:] active
-        cdef int64_t[:] arr_s1
-        cdef int64_t[:] arr_s2
-        cdef int64_t[:] arr_lag
-        cdef int64_t[:] arr_t1
-        cdef int64_t[:] arr_t2
-        cdef int64_t[:] arr_window
-        cdef int64_t[:] arr_length
-        cdef int64_t[:] arr_sign
-        cdef int64_t[:] arr_seen
+        cdef MonitorSlot* slots
+        cdef MonitorSlot* sp
         cdef int64_t[:] frontier_slots
-        cdef int64_t[:] frontier_pos
         cdef int64_t[:] active_slots
-        cdef int64_t[:] active_pos
-        cdef int64_t[:] queued_step
         cdef int64_t[:] next_frontier
         cdef object swap_obj
         cdef Py_ssize_t scan_pos
         cdef double _tp0
+
+        # int32 range guard (sequential scan of the input, ~5 loads/row).
+        vmax = 0
+        with nogil:
+            for i in range(n_rows):
+                for j in range(5):
+                    v = <int64_t>rows[i, j]
+                    if v > vmax:
+                        vmax = v
+        if vmax >= MON_INT32_LIMIT or self._step_id + 1 >= MON_INT32_LIMIT:
+            raise ValueError("NumericMonitorState: series id / time index / window size / step "
+                             "count must stay below 2**30 (got %d)" % max(vmax, self._step_id + 1))
 
         _tp0 = time.perf_counter()
         self._maybe_compact()
@@ -484,40 +443,27 @@ cdef class NumericMonitorState:
         self._step_id += 1
         self._next_frontier_count = 0
         _tp0 = time.perf_counter()
-        # Hoisted out of the loop (2026-07-03): these memoryviews were
-        # previously re-derived from self._xxx_arr on every single row, even
-        # though nothing touched during row processing (_activate_slot,
-        # _deactivate_slot, _mark_current_frontier,
-        # _remove_previous_frontier_slot, _append_status, _append_anomaly)
-        # ever reallocates the underlying arrays -- only _rehash does, and
-        # that only runs once, before this loop, via _maybe_compact()/
-        # _ensure_hash_capacity() above. Re-acquiring a memoryview from a
-        # Python attribute is not free (attribute lookup + buffer-protocol
-        # handshake); doing it ~1750 times/step x 11 arrays x ~2284 steps
-        # was a classic avoidable Cython hot-loop cost. See
-        # docs/implementation_log.md for the measured effect.
-        occupied = self._occupied_arr
-        active = self._active_arr
-        arr_s1 = self._key_s1_arr
-        arr_s2 = self._key_s2_arr
-        arr_lag = self._key_lag_arr
-        arr_t1 = self._t1_arr
-        arr_t2 = self._t2_arr
-        arr_window = self._window_arr
-        arr_length = self._length_arr
-        arr_sign = self._sign_arr
-        arr_seen = self._seen_step_arr
-        # Same hoisting, extended (2026-07-03) to the arrays used by
-        # _activate_slot/_deactivate_slot/_mark_current_frontier/
-        # _remove_previous_frontier_slot, now passed in as parameters instead
-        # of those helpers re-deriving them from self._xxx_arr on every call.
+        slots = self._slots
         active_slots = self._active_slots_arr
-        active_pos = self._active_pos_arr
-        queued_step = self._queued_step_arr
         next_frontier = self._next_frontier_slots_arr
         frontier_slots = self._frontier_slots_arr
-        frontier_pos = self._frontier_pos_arr
+        pf = self._prefetch_dist
+        mask = self._capacity - 1
         for i in range(n_rows):
+            if pf > 0 and i + pf < n_rows:
+                sid1 = <int64_t>rows[i + pf, 0]
+                sid2 = <int64_t>rows[i + pf, 1]
+                if sid1 >= 0 and sid2 >= 0:
+                    t1 = <int64_t>rows[i + pf, 2]
+                    t2 = <int64_t>rows[i + pf, 3]
+                    lag = t1 - t2 if t1 >= t2 else t2 - t1
+                    if sid1 <= sid2:
+                        key_s1 = sid1
+                        key_s2 = sid2
+                    else:
+                        key_s1 = sid2
+                        key_s2 = sid1
+                    MON_PREFETCH_W(&slots[<Py_ssize_t>(_monitor_hash_key(key_s1, key_s2, lag) & <uint64_t>mask)])
             sid1 = <int64_t>rows[i, 0]
             sid2 = <int64_t>rows[i, 1]
             if sid1 < 0 or sid2 < 0:
@@ -541,36 +487,37 @@ cdef class NumericMonitorState:
                 key_t1 = t2
                 key_t2 = t1
 
-            slot_i = self._find_slot(key_s1, key_s2, lag)
+            slot_i = self._find_slot(slots, key_s1, key_s2, lag)
+            sp = &slots[slot_i]
 
-            if occupied[slot_i] == 0:
-                occupied[slot_i] = <uint8_t>1
-                arr_s1[slot_i] = key_s1
-                arr_s2[slot_i] = key_s2
-                arr_lag[slot_i] = lag
+            if sp.occupied == 0:
+                sp.occupied = <uint8_t>1
+                sp.s1 = <int32_t>key_s1
+                sp.s2 = <int32_t>key_s2
+                sp.lag = <int32_t>lag
                 self._size += 1
 
-            self._remove_previous_frontier_slot(slot_i, frontier_slots, frontier_pos)
-            if active[slot_i] == 0:
-                self._activate_slot(slot_i, active, active_slots, active_pos)
-                arr_t1[slot_i] = key_t1
-                arr_t2[slot_i] = key_t2
-                arr_window[slot_i] = window_size
-                arr_length[slot_i] = window_size
-                arr_sign[slot_i] = corr_sign
-                arr_seen[slot_i] = self._step_id
-                self._mark_current_frontier(slot_i, queued_step, next_frontier)
+            self._remove_previous_frontier_slot(slots, slot_i, frontier_slots)
+            if sp.active == 0:
+                self._activate_slot(slots, slot_i, active_slots)
+                sp.t1 = key_t1
+                sp.t2 = key_t2
+                sp.window = <int32_t>window_size
+                sp.length = <int32_t>window_size
+                sp.sign = <int8_t>corr_sign
+                sp.seen = <int32_t>self._step_id
+                self._mark_current_frontier(slots, slot_i, next_frontier)
                 if save_anomalies:
                     self._append_anomaly(key_s1, key_s2, lag, min_time, 1)
                 self._rows_new_activation += 1
                 continue
 
-            self._mark_current_frontier(slot_i, queued_step, next_frontier)
-            first_t1 = arr_t1[slot_i]
-            first_t2 = arr_t2[slot_i]
-            last_window_size = arr_window[slot_i]
-            last_corr_length = arr_length[slot_i]
-            last_corr_sign = arr_sign[slot_i]
+            self._mark_current_frontier(slots, slot_i, next_frontier)
+            first_t1 = sp.t1
+            first_t2 = sp.t2
+            last_window_size = sp.window
+            last_corr_length = sp.length
+            last_corr_sign = sp.sign
             curr_time = max_time + window_size
             if first_t1 >= first_t2:
                 next_corr_time = first_t1 + last_corr_length + window_step
@@ -578,46 +525,41 @@ cdef class NumericMonitorState:
                 next_corr_time = first_t2 + last_corr_length + window_step
 
             if curr_time < next_corr_time:
-                arr_seen[slot_i] = self._step_id
+                sp.seen = <int32_t>self._step_id
                 self._rows_early_unchanged += 1
                 continue
             if curr_time == next_corr_time and window_size == last_window_size and corr_sign == last_corr_sign:
-                arr_length[slot_i] = last_corr_length + window_step
-                arr_seen[slot_i] = self._step_id
+                sp.length = <int32_t>(last_corr_length + window_step)
+                sp.seen = <int32_t>self._step_id
                 self._rows_extend += 1
                 continue
 
             if save_status:
-                self._append_status(slot_i)
-            arr_t1[slot_i] = key_t1
-            arr_t2[slot_i] = key_t2
-            arr_window[slot_i] = window_size
-            arr_length[slot_i] = window_size
-            arr_sign[slot_i] = corr_sign
-            arr_seen[slot_i] = self._step_id
+                self._append_status(slots, slot_i)
+            sp.t1 = key_t1
+            sp.t2 = key_t2
+            sp.window = <int32_t>window_size
+            sp.length = <int32_t>window_size
+            sp.sign = <int8_t>corr_sign
+            sp.seen = <int32_t>self._step_id
             if save_anomalies:
                 self._append_anomaly(key_s1, key_s2, lag, min_time, 1 if corr_sign == last_corr_sign else 0)
             self._rows_transition += 1
 
         self._t_row_loop += time.perf_counter() - _tp0
 
-        # arr_t1/arr_t2/arr_window/arr_length/arr_seen/arr_s1/arr_s2/arr_lag
-        # and frontier_slots are still the correct, valid views here (2026-
-        # 07-03: removed a redundant re-fetch -- none of these were ever
-        # reassigned by the row loop above, only the *values inside* them
-        # were written, which a stale-vs-fresh memoryview distinction doesn't
-        # affect). frontier_pos is also still valid for the same reason.
         _tp0 = time.perf_counter()
         while self._frontier_count > 0:
             slot_i = <Py_ssize_t>frontier_slots[self._frontier_count - 1]
-            min_time = arr_t1[slot_i] if arr_t1[slot_i] <= arr_t2[slot_i] else arr_t2[slot_i]
-            out_time = min_time + arr_length[slot_i] - (arr_window[slot_i] - window_step)
+            sp = &slots[slot_i]
+            min_time = sp.t1 if sp.t1 <= sp.t2 else sp.t2
+            out_time = min_time + sp.length - (sp.window - window_step)
             if save_anomalies:
-                self._append_anomaly(arr_s1[slot_i], arr_s2[slot_i], arr_lag[slot_i], out_time, -1)
+                self._append_anomaly(sp.s1, sp.s2, sp.lag, out_time, -1)
             if save_status:
-                self._append_status(slot_i)
-            self._remove_previous_frontier_slot(slot_i, frontier_slots, frontier_pos)
-            self._deactivate_slot(slot_i, active, active_slots, active_pos)
+                self._append_status(slots, slot_i)
+            self._remove_previous_frontier_slot(slots, slot_i, frontier_slots)
+            self._deactivate_slot(slots, slot_i, active_slots)
         self._t_closeout += time.perf_counter() - _tp0
         _tp0 = time.perf_counter()
         swap_obj = self._frontier_slots_arr
@@ -626,29 +568,26 @@ cdef class NumericMonitorState:
         self._frontier_count = self._next_frontier_count
         self._next_frontier_count = 0
         frontier_slots = self._frontier_slots_arr
-        frontier_pos = self._frontier_pos_arr
         for scan_pos in range(self._frontier_count):
-            frontier_pos[<Py_ssize_t>frontier_slots[scan_pos]] = <int64_t>scan_pos
+            slots[<Py_ssize_t>frontier_slots[scan_pos]].frontier_pos = <int32_t>scan_pos
         self._t_swap += time.perf_counter() - _tp0
         self._profile_calls += 1
 
     cpdef finalize(self, bint save_status=True):
-        cdef uint8_t[:] active = self._active_arr
+        cdef MonitorSlot* slots = self._slots
         cdef int64_t[:] active_slots = self._active_slots_arr
-        cdef int64_t[:] active_pos = self._active_pos_arr
         cdef int64_t[:] frontier_slots = self._frontier_slots_arr
-        cdef int64_t[:] frontier_pos = self._frontier_pos_arr
         cdef Py_ssize_t slot_i
         cdef Py_ssize_t pos
         for pos in range(self._frontier_count):
             slot_i = <Py_ssize_t>frontier_slots[pos]
             if slot_i >= 0 and slot_i < self._capacity:
-                frontier_pos[slot_i] = <int64_t>-1
+                slots[slot_i].frontier_pos = -1
         while self._active_count > 0:
             slot_i = <Py_ssize_t>active_slots[self._active_count - 1]
             if save_status:
-                self._append_status(slot_i)
-            self._deactivate_slot(slot_i, active, active_slots, active_pos)
+                self._append_status(slots, slot_i)
+            self._deactivate_slot(slots, slot_i, active_slots)
         self._frontier_count = 0
         self._next_frontier_count = 0
 
@@ -662,17 +601,12 @@ cdef class NumericMonitorState:
         return self._active_count
 
     cpdef Py_ssize_t occupied_count(self):
-        """Diagnostic-only (2026-07-03): total distinct (s1,s2,lag) slots ever
-        occupied, which never shrinks (deactivation only clears _active_arr,
-        not _occupied_arr) -- compare against active_count() and capacity()."""
         return self._size
 
     cpdef Py_ssize_t capacity(self):
         return self._capacity
 
     cpdef object profile_snapshot(self):
-        """Diagnostic-only (2026-07-03): cumulative section timings from update().
-        Returns (t_capacity, t_row_loop, t_closeout, t_swap, call_count)."""
         return (
             self._t_capacity,
             self._t_row_loop,
@@ -682,8 +616,6 @@ cdef class NumericMonitorState:
         )
 
     cpdef object row_branch_snapshot(self):
-        """Diagnostic-only (2026-07-03): cumulative row-loop branch counts.
-        Returns (new_activation, early_unchanged, extend, transition)."""
         return (
             self._rows_new_activation,
             self._rows_early_unchanged,

@@ -24,3 +24,9 @@ venv/
 /datasets/competitor/
 /datasets/examples/asos-airports/fr-air_temperature.csv
 /datasets/examples/asos-airports/fr-wind_direction.csv
+
+# CorrJoin authors' reference R code -- supplied privately, license unstated
+/docs/reference_code/corrjoin_authors_R/
+
+# Unpublished paper draft
+/paper/

@@ -1217,6 +1217,9 @@ static CYTHON_INLINE float __PYX_NAN() {
 #include "numpy/arrayscalars.h"
 #include "numpy/ufuncobject.h"
 #include <stdint.h>
+
+    #define MON_PREFETCH_W(p) __builtin_prefetch((const void *)(p), 1, 3)
+    
 #include "pythread.h"
 #include <stdlib.h>
 #ifdef _OPENMP
@@ -1895,13 +1898,40 @@ typedef npy_clongdouble __pyx_t_5numpy_clongdouble_t;
  * cdef inline object PyArray_MultiIterNew1(a):
  */
 typedef npy_cdouble __pyx_t_5numpy_complex_t;
+struct __pyx_t_15monitor_kernels_MonitorSlot;
 struct __pyx_opt_args_15monitor_kernels_19NumericMonitorState_finalize;
 
-/* "monitor_kernels.pyx":635
+/* "monitor_kernels.pyx":61
+ * # lengths and step ids are int32 here; update() checks every incoming value
+ * # against MON_INT32_LIMIT and raises instead of truncating.
+ * cdef struct MonitorSlot:             # <<<<<<<<<<<<<<
+ *     int64_t t1
+ *     int64_t t2
+ */
+struct __pyx_t_15monitor_kernels_MonitorSlot {
+  int64_t t1;
+  int64_t t2;
+  int32_t s1;
+  int32_t s2;
+  int32_t lag;
+  int32_t window;
+  int32_t length;
+  int32_t seen;
+  int32_t queued_step;
+  int32_t active_pos;
+  int32_t frontier_pos;
+  int8_t sign;
+  uint8_t occupied;
+  uint8_t active;
+  uint8_t _pad0;
+  int64_t _pad1;
+};
+
+/* "monitor_kernels.pyx":576
  *         self._profile_calls += 1
  * 
  *     cpdef finalize(self, bint save_status=True):             # <<<<<<<<<<<<<<
- *         cdef uint8_t[:] active = self._active_arr
+ *         cdef MonitorSlot* slots = self._slots
  *         cdef int64_t[:] active_slots = self._active_slots_arr
  */
 struct __pyx_opt_args_15monitor_kernels_19NumericMonitorState_finalize {
@@ -1909,35 +1939,25 @@ struct __pyx_opt_args_15monitor_kernels_19NumericMonitorState_finalize {
   int save_status;
 };
 
-/* "monitor_kernels.pyx":32
+/* "monitor_kernels.pyx":82
  * 
  * 
  * cdef class NumericMonitorState:             # <<<<<<<<<<<<<<
- *     cdef object _occupied_arr
- *     cdef object _active_arr
+ *     cdef object _slots_buf          # uint8 backing store, keeps _slots alive
+ *     cdef MonitorSlot* _slots        # 64-byte aligned view into _slots_buf
  */
 struct __pyx_obj_15monitor_kernels_NumericMonitorState {
   PyObject_HEAD
   struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *__pyx_vtab;
-  PyObject *_occupied_arr;
-  PyObject *_active_arr;
+  PyObject *_slots_buf;
+  struct __pyx_t_15monitor_kernels_MonitorSlot *_slots;
   PyObject *_active_slots_arr;
-  PyObject *_active_pos_arr;
   PyObject *_frontier_slots_arr;
-  PyObject *_frontier_pos_arr;
   PyObject *_next_frontier_slots_arr;
-  PyObject *_queued_step_arr;
-  PyObject *_key_s1_arr;
-  PyObject *_key_s2_arr;
-  PyObject *_key_lag_arr;
-  PyObject *_t1_arr;
-  PyObject *_t2_arr;
-  PyObject *_window_arr;
-  PyObject *_length_arr;
-  PyObject *_sign_arr;
-  PyObject *_seen_step_arr;
   PyObject *_status_rows_arr;
   PyObject *_anomaly_rows_arr;
+  int64_t *_status_ptr;
+  int64_t *_anomaly_ptr;
   Py_ssize_t _capacity;
   Py_ssize_t _size;
   Py_ssize_t _active_count;
@@ -1948,6 +1968,7 @@ struct __pyx_obj_15monitor_kernels_NumericMonitorState {
   Py_ssize_t _anomaly_capacity;
   Py_ssize_t _anomaly_count;
   int64_t _step_id;
+  Py_ssize_t _prefetch_dist;
   double _t_capacity;
   double _t_row_loop;
   double _t_closeout;
@@ -1960,7 +1981,7 @@ struct __pyx_obj_15monitor_kernels_NumericMonitorState {
 };
 
 
-/* "monitor_kernels.pyx":730
+/* "monitor_kernels.pyx":662
  * # layout) rather than inventing a new scheme, since that pattern is already
  * # established and tested in this file for an (s1, s2, lag)-keyed table.
  * cdef class SkipAheadState:             # <<<<<<<<<<<<<<
@@ -2058,27 +2079,28 @@ struct __pyx_memoryviewslice_obj {
 
 
 
-/* "monitor_kernels.pyx":32
+/* "monitor_kernels.pyx":82
  * 
  * 
  * cdef class NumericMonitorState:             # <<<<<<<<<<<<<<
- *     cdef object _occupied_arr
- *     cdef object _active_arr
+ *     cdef object _slots_buf          # uint8 backing store, keeps _slots alive
+ *     cdef MonitorSlot* _slots        # 64-byte aligned view into _slots_buf
  */
 
 struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState {
+  void (*_alloc_slots)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t);
   PyObject *(*reset)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, int __pyx_skip_dispatch);
-  Py_ssize_t (*_find_slot)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, int64_t, int64_t, int64_t);
+  Py_ssize_t (*_find_slot)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, int64_t, int64_t, int64_t);
   void (*_rehash)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t, int);
   void (*_ensure_hash_capacity)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t);
   void (*_maybe_compact)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *);
   void (*_ensure_status_capacity)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t);
   void (*_ensure_anomaly_capacity)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t);
-  void (*_activate_slot)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t, __Pyx_memviewslice, __Pyx_memviewslice, __Pyx_memviewslice);
-  void (*_deactivate_slot)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t, __Pyx_memviewslice, __Pyx_memviewslice, __Pyx_memviewslice);
-  void (*_mark_current_frontier)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t, __Pyx_memviewslice, __Pyx_memviewslice);
-  int (*_remove_previous_frontier_slot)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t, __Pyx_memviewslice, __Pyx_memviewslice);
-  void (*_append_status)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, int64_t);
+  void (*_activate_slot)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, Py_ssize_t, __Pyx_memviewslice);
+  void (*_deactivate_slot)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, Py_ssize_t, __Pyx_memviewslice);
+  void (*_mark_current_frontier)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, Py_ssize_t, __Pyx_memviewslice);
+  int (*_remove_previous_frontier_slot)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, Py_ssize_t, __Pyx_memviewslice);
+  void (*_append_status)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, Py_ssize_t);
   void (*_append_anomaly)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, int64_t, int64_t, int64_t, int64_t, int64_t);
   PyObject *(*update)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, __Pyx_memviewslice, __Pyx_memviewslice, int, int, int, int __pyx_skip_dispatch);
   PyObject *(*finalize)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, int __pyx_skip_dispatch, struct __pyx_opt_args_15monitor_kernels_19NumericMonitorState_finalize *__pyx_optional_args);
@@ -2095,9 +2117,16 @@ struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState {
   PyObject *(*copy_anomaly_rows)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, int __pyx_skip_dispatch);
 };
 static struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *__pyx_vtabptr_15monitor_kernels_NumericMonitorState;
+static CYTHON_INLINE Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState__find_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, int64_t, int64_t, int64_t);
+static CYTHON_INLINE void __pyx_f_15monitor_kernels_19NumericMonitorState__activate_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, Py_ssize_t, __Pyx_memviewslice);
+static CYTHON_INLINE void __pyx_f_15monitor_kernels_19NumericMonitorState__deactivate_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, Py_ssize_t, __Pyx_memviewslice);
+static CYTHON_INLINE void __pyx_f_15monitor_kernels_19NumericMonitorState__mark_current_frontier(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, Py_ssize_t, __Pyx_memviewslice);
+static CYTHON_INLINE int __pyx_f_15monitor_kernels_19NumericMonitorState__remove_previous_frontier_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, Py_ssize_t, __Pyx_memviewslice);
+static CYTHON_INLINE void __pyx_f_15monitor_kernels_19NumericMonitorState__append_status(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, Py_ssize_t);
+static CYTHON_INLINE void __pyx_f_15monitor_kernels_19NumericMonitorState__append_anomaly(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, int64_t, int64_t, int64_t, int64_t, int64_t);
 
 
-/* "monitor_kernels.pyx":730
+/* "monitor_kernels.pyx":662
  * # layout) rather than inventing a new scheme, since that pattern is already
  * # established and tested in this file for an (s1, s2, lag)-keyed table.
  * cdef class SkipAheadState:             # <<<<<<<<<<<<<<
@@ -2753,6 +2782,27 @@ static PyObject* __Pyx_ImportFrom(PyObject* module, PyObject* name);
 static CYTHON_INLINE int __Pyx_HasAttr(PyObject *, PyObject *);
 #endif
 
+/* IsLittleEndian.proto */
+static CYTHON_INLINE int __Pyx_Is_Little_Endian(void);
+
+/* BufferFormatCheck.proto */
+static const char* __Pyx_BufFmt_CheckString(__Pyx_BufFmt_Context* ctx, const char* ts);
+static void __Pyx_BufFmt_Init(__Pyx_BufFmt_Context* ctx,
+                              __Pyx_BufFmt_StackElem* stack,
+                              __Pyx_TypeInfo* type);
+
+/* BufferGetAndValidate.proto */
+#define __Pyx_GetBufferAndValidate(buf, obj, dtype, flags, nd, cast, stack)\
+    ((obj == Py_None || obj == NULL) ?\
+    (__Pyx_ZeroBuffer(buf), 0) :\
+    __Pyx__GetBufferAndValidate(buf, obj, dtype, flags, nd, cast, stack))
+static int  __Pyx__GetBufferAndValidate(Py_buffer* buf, PyObject* obj,
+    __Pyx_TypeInfo* dtype, int flags, int nd, int cast, __Pyx_BufFmt_StackElem* stack);
+static void __Pyx_ZeroBuffer(Py_buffer* buf);
+static CYTHON_INLINE void __Pyx_SafeReleaseBuffer(Py_buffer* info);
+static Py_ssize_t __Pyx_minusones[] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+static Py_ssize_t __Pyx_zeros[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+
 /* PyObject_GenericGetAttrNoDict.proto */
 #if CYTHON_USE_TYPE_SLOTS && CYTHON_USE_PYTYPE_LOOKUP && PY_VERSION_HEX < 0x03070000
 static CYTHON_INLINE PyObject* __Pyx_PyObject_GenericGetAttrNoDict(PyObject* obj, PyObject* attr_name);
@@ -3026,15 +3076,6 @@ static int __pyx_slices_overlap(__Pyx_memviewslice *slice1,
                                 __Pyx_memviewslice *slice2,
                                 int ndim, size_t itemsize);
 
-/* IsLittleEndian.proto */
-static CYTHON_INLINE int __Pyx_Is_Little_Endian(void);
-
-/* BufferFormatCheck.proto */
-static const char* __Pyx_BufFmt_CheckString(__Pyx_BufFmt_Context* ctx, const char* ts);
-static void __Pyx_BufFmt_Init(__Pyx_BufFmt_Context* ctx,
-                              __Pyx_BufFmt_StackElem* stack,
-                              __Pyx_TypeInfo* type);
-
 /* TypeInfoCompare.proto */
 static int __pyx_typeinfo_cmp(__Pyx_TypeInfo *a, __Pyx_TypeInfo *b);
 
@@ -3056,13 +3097,7 @@ static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_d_dc_l
 static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_ds_double(PyObject *, int writable_flag);
 
 /* ObjectToMemviewSlice.proto */
-static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(PyObject *, int writable_flag);
-
-/* ObjectToMemviewSlice.proto */
 static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(PyObject *, int writable_flag);
-
-/* ObjectToMemviewSlice.proto */
-static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_dsds_nn_int64_t(PyObject *, int writable_flag);
 
 /* MemviewDtypeToObject.proto */
 static CYTHON_INLINE PyObject *__pyx_memview_get_long(const char *itemp);
@@ -3071,6 +3106,12 @@ static CYTHON_INLINE int __pyx_memview_set_long(const char *itemp, PyObject *obj
 /* MemviewDtypeToObject.proto */
 static CYTHON_INLINE PyObject *__pyx_memview_get_double(const char *itemp);
 static CYTHON_INLINE int __pyx_memview_set_double(const char *itemp, PyObject *obj);
+
+/* ObjectToMemviewSlice.proto */
+static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(PyObject *, int writable_flag);
+
+/* ObjectToMemviewSlice.proto */
+static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_dsds_nn_int64_t(PyObject *, int writable_flag);
 
 /* RealImag.proto */
 #if CYTHON_CCOMPLEX
@@ -3266,19 +3307,20 @@ static CYTHON_INLINE npy_intp *__pyx_f_5numpy_7ndarray_5shape_shape(PyArrayObjec
 static CYTHON_INLINE npy_intp *__pyx_f_5numpy_7ndarray_7strides_strides(PyArrayObject *__pyx_v_self); /* proto*/
 static CYTHON_INLINE npy_intp __pyx_f_5numpy_7ndarray_4size_size(PyArrayObject *__pyx_v_self); /* proto*/
 static CYTHON_INLINE char *__pyx_f_5numpy_7ndarray_4data_data(PyArrayObject *__pyx_v_self); /* proto*/
+static void __pyx_f_15monitor_kernels_19NumericMonitorState__alloc_slots(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_capacity); /* proto*/
 static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_reset(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, int __pyx_skip_dispatch); /* proto*/
-static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState__find_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, int64_t __pyx_v_s1, int64_t __pyx_v_s2, int64_t __pyx_v_lag); /* proto*/
+static CYTHON_INLINE Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState__find_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_slots, int64_t __pyx_v_s1, int64_t __pyx_v_s2, int64_t __pyx_v_lag); /* proto*/
 static void __pyx_f_15monitor_kernels_19NumericMonitorState__rehash(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_new_capacity, int __pyx_v_keep_inactive); /* proto*/
 static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_hash_capacity(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_need); /* proto*/
 static void __pyx_f_15monitor_kernels_19NumericMonitorState__maybe_compact(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self); /* proto*/
 static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_status_capacity(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_need); /* proto*/
 static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_anomaly_capacity(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_need); /* proto*/
-static void __pyx_f_15monitor_kernels_19NumericMonitorState__activate_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_slot, __Pyx_memviewslice __pyx_v_active, __Pyx_memviewslice __pyx_v_active_slots, __Pyx_memviewslice __pyx_v_active_pos); /* proto*/
-static void __pyx_f_15monitor_kernels_19NumericMonitorState__deactivate_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_slot, __Pyx_memviewslice __pyx_v_active, __Pyx_memviewslice __pyx_v_active_slots, __Pyx_memviewslice __pyx_v_active_pos); /* proto*/
-static void __pyx_f_15monitor_kernels_19NumericMonitorState__mark_current_frontier(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_slot, __Pyx_memviewslice __pyx_v_queued_step, __Pyx_memviewslice __pyx_v_next_frontier); /* proto*/
-static int __pyx_f_15monitor_kernels_19NumericMonitorState__remove_previous_frontier_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_slot, __Pyx_memviewslice __pyx_v_frontier_slots, __Pyx_memviewslice __pyx_v_frontier_pos); /* proto*/
-static void __pyx_f_15monitor_kernels_19NumericMonitorState__append_status(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, int64_t __pyx_v_slot); /* proto*/
-static void __pyx_f_15monitor_kernels_19NumericMonitorState__append_anomaly(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, int64_t __pyx_v_s1, int64_t __pyx_v_s2, int64_t __pyx_v_lag, int64_t __pyx_v_time_value, int64_t __pyx_v_marker); /* proto*/
+static CYTHON_INLINE void __pyx_f_15monitor_kernels_19NumericMonitorState__activate_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_slots, Py_ssize_t __pyx_v_slot, __Pyx_memviewslice __pyx_v_active_slots); /* proto*/
+static CYTHON_INLINE void __pyx_f_15monitor_kernels_19NumericMonitorState__deactivate_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_slots, Py_ssize_t __pyx_v_slot, __Pyx_memviewslice __pyx_v_active_slots); /* proto*/
+static CYTHON_INLINE void __pyx_f_15monitor_kernels_19NumericMonitorState__mark_current_frontier(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_slots, Py_ssize_t __pyx_v_slot, __Pyx_memviewslice __pyx_v_next_frontier); /* proto*/
+static CYTHON_INLINE int __pyx_f_15monitor_kernels_19NumericMonitorState__remove_previous_frontier_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_slots, Py_ssize_t __pyx_v_slot, __Pyx_memviewslice __pyx_v_frontier_slots); /* proto*/
+static CYTHON_INLINE void __pyx_f_15monitor_kernels_19NumericMonitorState__append_status(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_slots, Py_ssize_t __pyx_v_slot); /* proto*/
+static CYTHON_INLINE void __pyx_f_15monitor_kernels_19NumericMonitorState__append_anomaly(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, int64_t __pyx_v_s1, int64_t __pyx_v_s2, int64_t __pyx_v_lag, int64_t __pyx_v_time_value, int64_t __pyx_v_marker); /* proto*/
 static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, __Pyx_memviewslice __pyx_v_rows, __Pyx_memviewslice __pyx_v_corrs, int __pyx_v_window_step, int __pyx_v_save_status, int __pyx_v_save_anomalies, int __pyx_skip_dispatch); /* proto*/
 static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_finalize(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, int __pyx_skip_dispatch, struct __pyx_opt_args_15monitor_kernels_19NumericMonitorState_finalize *__pyx_optional_args); /* proto*/
 static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_pending_status_count(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, int __pyx_skip_dispatch); /* proto*/
@@ -3321,6 +3363,7 @@ static CYTHON_INLINE int __pyx_f_5numpy_import_array(void); /*proto*/
 /* Module declarations from "libc.stdint" */
 
 /* Module declarations from "monitor_kernels" */
+static int64_t __pyx_v_15monitor_kernels_MON_INT32_LIMIT;
 static PyObject *__pyx_collections_abc_Sequence = 0;
 static PyObject *generic = 0;
 static PyObject *strided = 0;
@@ -3366,10 +3409,11 @@ static void __pyx_memoryview_slice_assign_scalar(__Pyx_memviewslice *, int, size
 static void __pyx_memoryview__slice_assign_scalar(char *, Py_ssize_t *, Py_ssize_t *, int, size_t, void *); /*proto*/
 static PyObject *__pyx_unpickle_Enum__set_state(struct __pyx_MemviewEnum_obj *, PyObject *); /*proto*/
 /* #### Code section: typeinfo ### */
+static __Pyx_TypeInfo __Pyx_TypeInfo_nn___pyx_t_5numpy_uint8_t = { "uint8_t", NULL, sizeof(__pyx_t_5numpy_uint8_t), { 0 }, 0, __PYX_IS_UNSIGNED(__pyx_t_5numpy_uint8_t) ? 'U' : 'I', __PYX_IS_UNSIGNED(__pyx_t_5numpy_uint8_t), 0 };
 static __Pyx_TypeInfo __Pyx_TypeInfo_long = { "long", NULL, sizeof(long), { 0 }, 0, __PYX_IS_UNSIGNED(long) ? 'U' : 'I', __PYX_IS_UNSIGNED(long), 0 };
 static __Pyx_TypeInfo __Pyx_TypeInfo_double = { "double", NULL, sizeof(double), { 0 }, 0, 'R', 0, 0 };
-static __Pyx_TypeInfo __Pyx_TypeInfo_nn_uint8_t = { "uint8_t", NULL, sizeof(uint8_t), { 0 }, 0, __PYX_IS_UNSIGNED(uint8_t) ? 'U' : 'I', __PYX_IS_UNSIGNED(uint8_t), 0 };
 static __Pyx_TypeInfo __Pyx_TypeInfo_nn_int64_t = { "int64_t", NULL, sizeof(int64_t), { 0 }, 0, __PYX_IS_UNSIGNED(int64_t) ? 'U' : 'I', __PYX_IS_UNSIGNED(int64_t), 0 };
+static __Pyx_TypeInfo __Pyx_TypeInfo_nn_uint8_t = { "uint8_t", NULL, sizeof(uint8_t), { 0 }, 0, __PYX_IS_UNSIGNED(uint8_t) ? 'U' : 'I', __PYX_IS_UNSIGNED(uint8_t), 0 };
 /* #### Code section: before_global_var ### */
 #define __Pyx_MODULE_NAME "monitor_kernels"
 extern int __pyx_module_is_main_monitor_kernels;
@@ -3378,9 +3422,9 @@ int __pyx_module_is_main_monitor_kernels = 0;
 /* Implementation of "monitor_kernels" */
 /* #### Code section: global_var ### */
 static PyObject *__pyx_builtin_range;
+static PyObject *__pyx_builtin_ValueError;
 static PyObject *__pyx_builtin_TypeError;
 static PyObject *__pyx_builtin___import__;
-static PyObject *__pyx_builtin_ValueError;
 static PyObject *__pyx_builtin_MemoryError;
 static PyObject *__pyx_builtin_enumerate;
 static PyObject *__pyx_builtin_AssertionError;
@@ -3408,7 +3452,6 @@ static const char __pyx_k_obj[] = "obj";
 static const char __pyx_k_sys[] = "sys";
 static const char __pyx_k_base[] = "base";
 static const char __pyx_k_dict[] = "__dict__";
-static const char __pyx_k_full[] = "full";
 static const char __pyx_k_main[] = "__main__";
 static const char __pyx_k_mode[] = "mode";
 static const char __pyx_k_name[] = "name";
@@ -3492,6 +3535,7 @@ static const char __pyx_k_stringsource[] = "<stringsource>";
 static const char __pyx_k_update_batch[] = "update_batch";
 static const char __pyx_k_version_info[] = "version_info";
 static const char __pyx_k_class_getitem[] = "__class_getitem__";
+static const char __pyx_k_prefetch_dist[] = "prefetch_dist";
 static const char __pyx_k_reduce_cython[] = "__reduce_cython__";
 static const char __pyx_k_AssertionError[] = "AssertionError";
 static const char __pyx_k_SkipAheadState[] = "SkipAheadState";
@@ -3564,6 +3608,7 @@ static const char __pyx_k_NumericMonitorState_pending_anom[] = "NumericMonitorSt
 static const char __pyx_k_NumericMonitorState_pending_stat[] = "NumericMonitorState.pending_status_count";
 static const char __pyx_k_NumericMonitorState_profile_snap[] = "NumericMonitorState.profile_snapshot";
 static const char __pyx_k_NumericMonitorState_row_branch_s[] = "NumericMonitorState.row_branch_snapshot";
+static const char __pyx_k_NumericMonitorState_series_id_ti[] = "NumericMonitorState: series id / time index / window size / step count must stay below 2**30 (got %d)";
 static const char __pyx_k_NumericMonitorState_take_anomaly[] = "NumericMonitorState.take_anomaly_rows";
 static const char __pyx_k_Out_of_bounds_on_buffer_access_a[] = "Out of bounds on buffer access (axis ";
 static const char __pyx_k_SkipAheadState___setstate_cython[] = "SkipAheadState.__setstate_cython__";
@@ -3614,7 +3659,7 @@ static void __pyx_memoryviewslice___pyx_pf_15View_dot_MemoryView_16_memoryviewsl
 static PyObject *__pyx_pf___pyx_memoryviewslice___reduce_cython__(CYTHON_UNUSED struct __pyx_memoryviewslice_obj *__pyx_v_self); /* proto */
 static PyObject *__pyx_pf___pyx_memoryviewslice_2__setstate_cython__(CYTHON_UNUSED struct __pyx_memoryviewslice_obj *__pyx_v_self, CYTHON_UNUSED PyObject *__pyx_v___pyx_state); /* proto */
 static PyObject *__pyx_pf_15View_dot_MemoryView___pyx_unpickle_Enum(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v___pyx_type, long __pyx_v___pyx_checksum, PyObject *__pyx_v___pyx_state); /* proto */
-static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_initial_capacity, Py_ssize_t __pyx_v_output_capacity); /* proto */
+static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_initial_capacity, Py_ssize_t __pyx_v_output_capacity, Py_ssize_t __pyx_v_prefetch_dist); /* proto */
 static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_2reset(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self); /* proto */
 static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_4update(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, __Pyx_memviewslice __pyx_v_rows, __Pyx_memviewslice __pyx_v_corrs, int __pyx_v_window_step, int __pyx_v_save_status, int __pyx_v_save_anomalies); /* proto */
 static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_6finalize(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, int __pyx_v_save_status); /* proto */
@@ -3757,6 +3802,7 @@ typedef struct {
   PyObject *__pyx_n_s_NumericMonitorState_profile_snap;
   PyObject *__pyx_n_s_NumericMonitorState_reset;
   PyObject *__pyx_n_s_NumericMonitorState_row_branch_s;
+  PyObject *__pyx_kp_u_NumericMonitorState_series_id_ti;
   PyObject *__pyx_n_s_NumericMonitorState_take_anomaly;
   PyObject *__pyx_n_s_NumericMonitorState_take_status;
   PyObject *__pyx_n_s_NumericMonitorState_update;
@@ -3816,7 +3862,6 @@ typedef struct {
   PyObject *__pyx_n_s_format;
   PyObject *__pyx_n_s_fortran;
   PyObject *__pyx_n_u_fortran;
-  PyObject *__pyx_n_s_full;
   PyObject *__pyx_kp_u_gc;
   PyObject *__pyx_n_s_getstate;
   PyObject *__pyx_kp_u_got;
@@ -3857,6 +3902,7 @@ typedef struct {
   PyObject *__pyx_n_s_pending_status_count;
   PyObject *__pyx_n_s_perf_counter;
   PyObject *__pyx_n_s_pickle;
+  PyObject *__pyx_n_s_prefetch_dist;
   PyObject *__pyx_n_s_profile_snapshot;
   PyObject *__pyx_n_s_prune_mask;
   PyObject *__pyx_n_s_pyx_PickleError;
@@ -4069,6 +4115,7 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_NumericMonitorState_profile_snap);
   Py_CLEAR(clear_module_state->__pyx_n_s_NumericMonitorState_reset);
   Py_CLEAR(clear_module_state->__pyx_n_s_NumericMonitorState_row_branch_s);
+  Py_CLEAR(clear_module_state->__pyx_kp_u_NumericMonitorState_series_id_ti);
   Py_CLEAR(clear_module_state->__pyx_n_s_NumericMonitorState_take_anomaly);
   Py_CLEAR(clear_module_state->__pyx_n_s_NumericMonitorState_take_status);
   Py_CLEAR(clear_module_state->__pyx_n_s_NumericMonitorState_update);
@@ -4128,7 +4175,6 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_format);
   Py_CLEAR(clear_module_state->__pyx_n_s_fortran);
   Py_CLEAR(clear_module_state->__pyx_n_u_fortran);
-  Py_CLEAR(clear_module_state->__pyx_n_s_full);
   Py_CLEAR(clear_module_state->__pyx_kp_u_gc);
   Py_CLEAR(clear_module_state->__pyx_n_s_getstate);
   Py_CLEAR(clear_module_state->__pyx_kp_u_got);
@@ -4169,6 +4215,7 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_pending_status_count);
   Py_CLEAR(clear_module_state->__pyx_n_s_perf_counter);
   Py_CLEAR(clear_module_state->__pyx_n_s_pickle);
+  Py_CLEAR(clear_module_state->__pyx_n_s_prefetch_dist);
   Py_CLEAR(clear_module_state->__pyx_n_s_profile_snapshot);
   Py_CLEAR(clear_module_state->__pyx_n_s_prune_mask);
   Py_CLEAR(clear_module_state->__pyx_n_s_pyx_PickleError);
@@ -4359,6 +4406,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_NumericMonitorState_profile_snap);
   Py_VISIT(traverse_module_state->__pyx_n_s_NumericMonitorState_reset);
   Py_VISIT(traverse_module_state->__pyx_n_s_NumericMonitorState_row_branch_s);
+  Py_VISIT(traverse_module_state->__pyx_kp_u_NumericMonitorState_series_id_ti);
   Py_VISIT(traverse_module_state->__pyx_n_s_NumericMonitorState_take_anomaly);
   Py_VISIT(traverse_module_state->__pyx_n_s_NumericMonitorState_take_status);
   Py_VISIT(traverse_module_state->__pyx_n_s_NumericMonitorState_update);
@@ -4418,7 +4466,6 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_format);
   Py_VISIT(traverse_module_state->__pyx_n_s_fortran);
   Py_VISIT(traverse_module_state->__pyx_n_u_fortran);
-  Py_VISIT(traverse_module_state->__pyx_n_s_full);
   Py_VISIT(traverse_module_state->__pyx_kp_u_gc);
   Py_VISIT(traverse_module_state->__pyx_n_s_getstate);
   Py_VISIT(traverse_module_state->__pyx_kp_u_got);
@@ -4459,6 +4506,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_pending_status_count);
   Py_VISIT(traverse_module_state->__pyx_n_s_perf_counter);
   Py_VISIT(traverse_module_state->__pyx_n_s_pickle);
+  Py_VISIT(traverse_module_state->__pyx_n_s_prefetch_dist);
   Py_VISIT(traverse_module_state->__pyx_n_s_profile_snapshot);
   Py_VISIT(traverse_module_state->__pyx_n_s_prune_mask);
   Py_VISIT(traverse_module_state->__pyx_n_s_pyx_PickleError);
@@ -4679,6 +4727,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_NumericMonitorState_profile_snap __pyx_mstate_global->__pyx_n_s_NumericMonitorState_profile_snap
 #define __pyx_n_s_NumericMonitorState_reset __pyx_mstate_global->__pyx_n_s_NumericMonitorState_reset
 #define __pyx_n_s_NumericMonitorState_row_branch_s __pyx_mstate_global->__pyx_n_s_NumericMonitorState_row_branch_s
+#define __pyx_kp_u_NumericMonitorState_series_id_ti __pyx_mstate_global->__pyx_kp_u_NumericMonitorState_series_id_ti
 #define __pyx_n_s_NumericMonitorState_take_anomaly __pyx_mstate_global->__pyx_n_s_NumericMonitorState_take_anomaly
 #define __pyx_n_s_NumericMonitorState_take_status __pyx_mstate_global->__pyx_n_s_NumericMonitorState_take_status
 #define __pyx_n_s_NumericMonitorState_update __pyx_mstate_global->__pyx_n_s_NumericMonitorState_update
@@ -4738,7 +4787,6 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_format __pyx_mstate_global->__pyx_n_s_format
 #define __pyx_n_s_fortran __pyx_mstate_global->__pyx_n_s_fortran
 #define __pyx_n_u_fortran __pyx_mstate_global->__pyx_n_u_fortran
-#define __pyx_n_s_full __pyx_mstate_global->__pyx_n_s_full
 #define __pyx_kp_u_gc __pyx_mstate_global->__pyx_kp_u_gc
 #define __pyx_n_s_getstate __pyx_mstate_global->__pyx_n_s_getstate
 #define __pyx_kp_u_got __pyx_mstate_global->__pyx_kp_u_got
@@ -4779,6 +4827,7 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_pending_status_count __pyx_mstate_global->__pyx_n_s_pending_status_count
 #define __pyx_n_s_perf_counter __pyx_mstate_global->__pyx_n_s_perf_counter
 #define __pyx_n_s_pickle __pyx_mstate_global->__pyx_n_s_pickle
+#define __pyx_n_s_prefetch_dist __pyx_mstate_global->__pyx_n_s_prefetch_dist
 #define __pyx_n_s_profile_snapshot __pyx_mstate_global->__pyx_n_s_profile_snapshot
 #define __pyx_n_s_prune_mask __pyx_mstate_global->__pyx_n_s_prune_mask
 #define __pyx_n_s_pyx_PickleError __pyx_mstate_global->__pyx_n_s_pyx_PickleError
@@ -19965,12 +20014,12 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_15monitor_kernels__monitor_next_power2(P
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":81
+/* "monitor_kernels.pyx":116
  *     cdef Py_ssize_t _rows_transition
  * 
- *     def __cinit__(self, Py_ssize_t initial_capacity=1024, Py_ssize_t output_capacity=1024):             # <<<<<<<<<<<<<<
+ *     def __cinit__(self, Py_ssize_t initial_capacity=1024, Py_ssize_t output_capacity=1024,             # <<<<<<<<<<<<<<
+ *                   Py_ssize_t prefetch_dist=16):
  *         if initial_capacity < 16:
- *             initial_capacity = 16
  */
 
 /* Python wrapper */
@@ -19978,9 +20027,10 @@ static int __pyx_pw_15monitor_kernels_19NumericMonitorState_1__cinit__(PyObject 
 static int __pyx_pw_15monitor_kernels_19NumericMonitorState_1__cinit__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
   Py_ssize_t __pyx_v_initial_capacity;
   Py_ssize_t __pyx_v_output_capacity;
+  Py_ssize_t __pyx_v_prefetch_dist;
   CYTHON_UNUSED Py_ssize_t __pyx_nargs;
   CYTHON_UNUSED PyObject *const *__pyx_kwvalues;
-  PyObject* values[2] = {0,0};
+  PyObject* values[3] = {0,0,0};
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
@@ -19994,10 +20044,12 @@ static int __pyx_pw_15monitor_kernels_19NumericMonitorState_1__cinit__(PyObject 
   #endif
   __pyx_kwvalues = __Pyx_KwValues_VARARGS(__pyx_args, __pyx_nargs);
   {
-    PyObject **__pyx_pyargnames[] = {&__pyx_n_s_initial_capacity,&__pyx_n_s_output_capacity,0};
+    PyObject **__pyx_pyargnames[] = {&__pyx_n_s_initial_capacity,&__pyx_n_s_output_capacity,&__pyx_n_s_prefetch_dist,0};
     if (__pyx_kwds) {
       Py_ssize_t kw_args;
       switch (__pyx_nargs) {
+        case  3: values[2] = __Pyx_Arg_VARARGS(__pyx_args, 2);
+        CYTHON_FALLTHROUGH;
         case  2: values[1] = __Pyx_Arg_VARARGS(__pyx_args, 1);
         CYTHON_FALLTHROUGH;
         case  1: values[0] = __Pyx_Arg_VARARGS(__pyx_args, 0);
@@ -20011,22 +20063,31 @@ static int __pyx_pw_15monitor_kernels_19NumericMonitorState_1__cinit__(PyObject 
         if (kw_args > 0) {
           PyObject* value = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_initial_capacity);
           if (value) { values[0] = __Pyx_Arg_NewRef_VARARGS(value); kw_args--; }
-          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 81, __pyx_L3_error)
+          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 116, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  1:
         if (kw_args > 0) {
           PyObject* value = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_output_capacity);
           if (value) { values[1] = __Pyx_Arg_NewRef_VARARGS(value); kw_args--; }
-          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 81, __pyx_L3_error)
+          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 116, __pyx_L3_error)
+        }
+        CYTHON_FALLTHROUGH;
+        case  2:
+        if (kw_args > 0) {
+          PyObject* value = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_prefetch_dist);
+          if (value) { values[2] = __Pyx_Arg_NewRef_VARARGS(value); kw_args--; }
+          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 116, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
         const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "__cinit__") < 0)) __PYX_ERR(0, 81, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "__cinit__") < 0)) __PYX_ERR(0, 116, __pyx_L3_error)
       }
     } else {
       switch (__pyx_nargs) {
+        case  3: values[2] = __Pyx_Arg_VARARGS(__pyx_args, 2);
+        CYTHON_FALLTHROUGH;
         case  2: values[1] = __Pyx_Arg_VARARGS(__pyx_args, 1);
         CYTHON_FALLTHROUGH;
         case  1: values[0] = __Pyx_Arg_VARARGS(__pyx_args, 0);
@@ -20036,19 +20097,24 @@ static int __pyx_pw_15monitor_kernels_19NumericMonitorState_1__cinit__(PyObject 
       }
     }
     if (values[0]) {
-      __pyx_v_initial_capacity = __Pyx_PyIndex_AsSsize_t(values[0]); if (unlikely((__pyx_v_initial_capacity == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 81, __pyx_L3_error)
+      __pyx_v_initial_capacity = __Pyx_PyIndex_AsSsize_t(values[0]); if (unlikely((__pyx_v_initial_capacity == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 116, __pyx_L3_error)
     } else {
       __pyx_v_initial_capacity = ((Py_ssize_t)0x400);
     }
     if (values[1]) {
-      __pyx_v_output_capacity = __Pyx_PyIndex_AsSsize_t(values[1]); if (unlikely((__pyx_v_output_capacity == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 81, __pyx_L3_error)
+      __pyx_v_output_capacity = __Pyx_PyIndex_AsSsize_t(values[1]); if (unlikely((__pyx_v_output_capacity == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 116, __pyx_L3_error)
     } else {
       __pyx_v_output_capacity = ((Py_ssize_t)0x400);
+    }
+    if (values[2]) {
+      __pyx_v_prefetch_dist = __Pyx_PyIndex_AsSsize_t(values[2]); if (unlikely((__pyx_v_prefetch_dist == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 117, __pyx_L3_error)
+    } else {
+      __pyx_v_prefetch_dist = ((Py_ssize_t)16);
     }
   }
   goto __pyx_L6_skip;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("__cinit__", 0, 0, 2, __pyx_nargs); __PYX_ERR(0, 81, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("__cinit__", 0, 0, 3, __pyx_nargs); __PYX_ERR(0, 116, __pyx_L3_error)
   __pyx_L6_skip:;
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
@@ -20062,7 +20128,7 @@ static int __pyx_pw_15monitor_kernels_19NumericMonitorState_1__cinit__(PyObject 
   __Pyx_RefNannyFinishContext();
   return -1;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(((struct __pyx_obj_15monitor_kernels_NumericMonitorState *)__pyx_v_self), __pyx_v_initial_capacity, __pyx_v_output_capacity);
+  __pyx_r = __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(((struct __pyx_obj_15monitor_kernels_NumericMonitorState *)__pyx_v_self), __pyx_v_initial_capacity, __pyx_v_output_capacity, __pyx_v_prefetch_dist);
 
   /* function exit code */
   {
@@ -20075,7 +20141,7 @@ static int __pyx_pw_15monitor_kernels_19NumericMonitorState_1__cinit__(PyObject 
   return __pyx_r;
 }
 
-static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_initial_capacity, Py_ssize_t __pyx_v_output_capacity) {
+static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_initial_capacity, Py_ssize_t __pyx_v_output_capacity, Py_ssize_t __pyx_v_prefetch_dist) {
   int __pyx_r;
   __Pyx_RefNannyDeclarations
   int __pyx_t_1;
@@ -20084,14 +20150,15 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
   PyObject *__pyx_t_4 = NULL;
   PyObject *__pyx_t_5 = NULL;
   PyObject *__pyx_t_6 = NULL;
+  char *__pyx_t_7;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__cinit__", 1);
 
-  /* "monitor_kernels.pyx":82
- * 
- *     def __cinit__(self, Py_ssize_t initial_capacity=1024, Py_ssize_t output_capacity=1024):
+  /* "monitor_kernels.pyx":118
+ *     def __cinit__(self, Py_ssize_t initial_capacity=1024, Py_ssize_t output_capacity=1024,
+ *                   Py_ssize_t prefetch_dist=16):
  *         if initial_capacity < 16:             # <<<<<<<<<<<<<<
  *             initial_capacity = 16
  *         if output_capacity < 16:
@@ -20099,8 +20166,8 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
   __pyx_t_1 = (__pyx_v_initial_capacity < 16);
   if (__pyx_t_1) {
 
-    /* "monitor_kernels.pyx":83
- *     def __cinit__(self, Py_ssize_t initial_capacity=1024, Py_ssize_t output_capacity=1024):
+    /* "monitor_kernels.pyx":119
+ *                   Py_ssize_t prefetch_dist=16):
  *         if initial_capacity < 16:
  *             initial_capacity = 16             # <<<<<<<<<<<<<<
  *         if output_capacity < 16:
@@ -20108,16 +20175,16 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
     __pyx_v_initial_capacity = 16;
 
-    /* "monitor_kernels.pyx":82
- * 
- *     def __cinit__(self, Py_ssize_t initial_capacity=1024, Py_ssize_t output_capacity=1024):
+    /* "monitor_kernels.pyx":118
+ *     def __cinit__(self, Py_ssize_t initial_capacity=1024, Py_ssize_t output_capacity=1024,
+ *                   Py_ssize_t prefetch_dist=16):
  *         if initial_capacity < 16:             # <<<<<<<<<<<<<<
  *             initial_capacity = 16
  *         if output_capacity < 16:
  */
   }
 
-  /* "monitor_kernels.pyx":84
+  /* "monitor_kernels.pyx":120
  *         if initial_capacity < 16:
  *             initial_capacity = 16
  *         if output_capacity < 16:             # <<<<<<<<<<<<<<
@@ -20127,7 +20194,7 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
   __pyx_t_1 = (__pyx_v_output_capacity < 16);
   if (__pyx_t_1) {
 
-    /* "monitor_kernels.pyx":85
+    /* "monitor_kernels.pyx":121
  *             initial_capacity = 16
  *         if output_capacity < 16:
  *             output_capacity = 16             # <<<<<<<<<<<<<<
@@ -20136,7 +20203,7 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
     __pyx_v_output_capacity = 16;
 
-    /* "monitor_kernels.pyx":84
+    /* "monitor_kernels.pyx":120
  *         if initial_capacity < 16:
  *             initial_capacity = 16
  *         if output_capacity < 16:             # <<<<<<<<<<<<<<
@@ -20145,7 +20212,7 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
   }
 
-  /* "monitor_kernels.pyx":86
+  /* "monitor_kernels.pyx":122
  *         if output_capacity < 16:
  *             output_capacity = 16
  *         self._capacity = _monitor_next_power2(initial_capacity)             # <<<<<<<<<<<<<<
@@ -20154,7 +20221,7 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
   __pyx_v_self->_capacity = __pyx_f_15monitor_kernels__monitor_next_power2(__pyx_v_initial_capacity);
 
-  /* "monitor_kernels.pyx":87
+  /* "monitor_kernels.pyx":123
  *             output_capacity = 16
  *         self._capacity = _monitor_next_power2(initial_capacity)
  *         self._size = 0             # <<<<<<<<<<<<<<
@@ -20163,7 +20230,7 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
   __pyx_v_self->_size = 0;
 
-  /* "monitor_kernels.pyx":88
+  /* "monitor_kernels.pyx":124
  *         self._capacity = _monitor_next_power2(initial_capacity)
  *         self._size = 0
  *         self._active_count = 0             # <<<<<<<<<<<<<<
@@ -20172,7 +20239,7 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
   __pyx_v_self->_active_count = 0;
 
-  /* "monitor_kernels.pyx":89
+  /* "monitor_kernels.pyx":125
  *         self._size = 0
  *         self._active_count = 0
  *         self._frontier_count = 0             # <<<<<<<<<<<<<<
@@ -20181,7 +20248,7 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
   __pyx_v_self->_frontier_count = 0;
 
-  /* "monitor_kernels.pyx":90
+  /* "monitor_kernels.pyx":126
  *         self._active_count = 0
  *         self._frontier_count = 0
  *         self._next_frontier_count = 0             # <<<<<<<<<<<<<<
@@ -20190,7 +20257,7 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
   __pyx_v_self->_next_frontier_count = 0;
 
-  /* "monitor_kernels.pyx":91
+  /* "monitor_kernels.pyx":127
  *         self._frontier_count = 0
  *         self._next_frontier_count = 0
  *         self._status_capacity = output_capacity             # <<<<<<<<<<<<<<
@@ -20199,7 +20266,7 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
   __pyx_v_self->_status_capacity = __pyx_v_output_capacity;
 
-  /* "monitor_kernels.pyx":92
+  /* "monitor_kernels.pyx":128
  *         self._next_frontier_count = 0
  *         self._status_capacity = output_capacity
  *         self._status_count = 0             # <<<<<<<<<<<<<<
@@ -20208,7 +20275,7 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
   __pyx_v_self->_status_count = 0;
 
-  /* "monitor_kernels.pyx":93
+  /* "monitor_kernels.pyx":129
  *         self._status_capacity = output_capacity
  *         self._status_count = 0
  *         self._anomaly_capacity = output_capacity             # <<<<<<<<<<<<<<
@@ -20217,35 +20284,44 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
   __pyx_v_self->_anomaly_capacity = __pyx_v_output_capacity;
 
-  /* "monitor_kernels.pyx":94
+  /* "monitor_kernels.pyx":130
  *         self._status_count = 0
  *         self._anomaly_capacity = output_capacity
  *         self._anomaly_count = 0             # <<<<<<<<<<<<<<
  *         self._step_id = 0
- *         self._t_capacity = 0.0
+ *         self._prefetch_dist = prefetch_dist
  */
   __pyx_v_self->_anomaly_count = 0;
 
-  /* "monitor_kernels.pyx":95
+  /* "monitor_kernels.pyx":131
  *         self._anomaly_capacity = output_capacity
  *         self._anomaly_count = 0
  *         self._step_id = 0             # <<<<<<<<<<<<<<
+ *         self._prefetch_dist = prefetch_dist
  *         self._t_capacity = 0.0
- *         self._t_row_loop = 0.0
  */
   __pyx_v_self->_step_id = 0;
 
-  /* "monitor_kernels.pyx":96
+  /* "monitor_kernels.pyx":132
  *         self._anomaly_count = 0
  *         self._step_id = 0
+ *         self._prefetch_dist = prefetch_dist             # <<<<<<<<<<<<<<
+ *         self._t_capacity = 0.0
+ *         self._t_row_loop = 0.0
+ */
+  __pyx_v_self->_prefetch_dist = __pyx_v_prefetch_dist;
+
+  /* "monitor_kernels.pyx":133
+ *         self._step_id = 0
+ *         self._prefetch_dist = prefetch_dist
  *         self._t_capacity = 0.0             # <<<<<<<<<<<<<<
  *         self._t_row_loop = 0.0
  *         self._t_closeout = 0.0
  */
   __pyx_v_self->_t_capacity = 0.0;
 
-  /* "monitor_kernels.pyx":97
- *         self._step_id = 0
+  /* "monitor_kernels.pyx":134
+ *         self._prefetch_dist = prefetch_dist
  *         self._t_capacity = 0.0
  *         self._t_row_loop = 0.0             # <<<<<<<<<<<<<<
  *         self._t_closeout = 0.0
@@ -20253,7 +20329,7 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
   __pyx_v_self->_t_row_loop = 0.0;
 
-  /* "monitor_kernels.pyx":98
+  /* "monitor_kernels.pyx":135
  *         self._t_capacity = 0.0
  *         self._t_row_loop = 0.0
  *         self._t_closeout = 0.0             # <<<<<<<<<<<<<<
@@ -20262,7 +20338,7 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
   __pyx_v_self->_t_closeout = 0.0;
 
-  /* "monitor_kernels.pyx":99
+  /* "monitor_kernels.pyx":136
  *         self._t_row_loop = 0.0
  *         self._t_closeout = 0.0
  *         self._t_swap = 0.0             # <<<<<<<<<<<<<<
@@ -20271,7 +20347,7 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
   __pyx_v_self->_t_swap = 0.0;
 
-  /* "monitor_kernels.pyx":100
+  /* "monitor_kernels.pyx":137
  *         self._t_closeout = 0.0
  *         self._t_swap = 0.0
  *         self._profile_calls = 0             # <<<<<<<<<<<<<<
@@ -20280,7 +20356,7 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
   __pyx_v_self->_profile_calls = 0;
 
-  /* "monitor_kernels.pyx":101
+  /* "monitor_kernels.pyx":138
  *         self._t_swap = 0.0
  *         self._profile_calls = 0
  *         self._rows_new_activation = 0             # <<<<<<<<<<<<<<
@@ -20289,7 +20365,7 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
   __pyx_v_self->_rows_new_activation = 0;
 
-  /* "monitor_kernels.pyx":102
+  /* "monitor_kernels.pyx":139
  *         self._profile_calls = 0
  *         self._rows_new_activation = 0
  *         self._rows_early_unchanged = 0             # <<<<<<<<<<<<<<
@@ -20298,293 +20374,140 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
  */
   __pyx_v_self->_rows_early_unchanged = 0;
 
-  /* "monitor_kernels.pyx":103
+  /* "monitor_kernels.pyx":140
  *         self._rows_new_activation = 0
  *         self._rows_early_unchanged = 0
  *         self._rows_extend = 0             # <<<<<<<<<<<<<<
  *         self._rows_transition = 0
- *         self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)
+ *         self._alloc_slots(self._capacity)
  */
   __pyx_v_self->_rows_extend = 0;
 
-  /* "monitor_kernels.pyx":104
+  /* "monitor_kernels.pyx":141
  *         self._rows_early_unchanged = 0
  *         self._rows_extend = 0
  *         self._rows_transition = 0             # <<<<<<<<<<<<<<
- *         self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)
- *         self._active_arr = np.zeros(self._capacity, dtype=np.uint8)
+ *         self._alloc_slots(self._capacity)
+ *         self._active_slots_arr = np.empty(self._capacity, dtype=np.int64)
  */
   __pyx_v_self->_rows_transition = 0;
 
-  /* "monitor_kernels.pyx":105
+  /* "monitor_kernels.pyx":142
  *         self._rows_extend = 0
  *         self._rows_transition = 0
- *         self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)             # <<<<<<<<<<<<<<
- *         self._active_arr = np.zeros(self._capacity, dtype=np.uint8)
+ *         self._alloc_slots(self._capacity)             # <<<<<<<<<<<<<<
  *         self._active_slots_arr = np.empty(self._capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 105, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_zeros); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 105, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 105, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 105, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 105, __pyx_L1_error);
-  __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 105, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 105, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_uint8); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 105, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 105, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 105, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_GIVEREF(__pyx_t_6);
-  __Pyx_GOTREF(__pyx_v_self->_occupied_arr);
-  __Pyx_DECREF(__pyx_v_self->_occupied_arr);
-  __pyx_v_self->_occupied_arr = __pyx_t_6;
-  __pyx_t_6 = 0;
-
-  /* "monitor_kernels.pyx":106
- *         self._rows_transition = 0
- *         self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)
- *         self._active_arr = np.zeros(self._capacity, dtype=np.uint8)             # <<<<<<<<<<<<<<
- *         self._active_slots_arr = np.empty(self._capacity, dtype=np.int64)
- *         self._active_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 106, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_zeros); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 106, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 106, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 106, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_6);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_6)) __PYX_ERR(0, 106, __pyx_L1_error);
-  __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 106, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 106, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_uint8); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 106, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  if (PyDict_SetItem(__pyx_t_6, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 106, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_4, __pyx_t_6); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 106, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_GIVEREF(__pyx_t_5);
-  __Pyx_GOTREF(__pyx_v_self->_active_arr);
-  __Pyx_DECREF(__pyx_v_self->_active_arr);
-  __pyx_v_self->_active_arr = __pyx_t_5;
-  __pyx_t_5 = 0;
-
-  /* "monitor_kernels.pyx":107
- *         self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)
- *         self._active_arr = np.zeros(self._capacity, dtype=np.uint8)
- *         self._active_slots_arr = np.empty(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._active_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
  *         self._frontier_slots_arr = np.empty(self._capacity, dtype=np.int64)
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 107, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_empty); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 107, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 107, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 107, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_5)) __PYX_ERR(0, 107, __pyx_L1_error);
-  __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 107, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 107, __pyx_L1_error)
+  ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_alloc_slots(__pyx_v_self, __pyx_v_self->_capacity); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 142, __pyx_L1_error)
+
+  /* "monitor_kernels.pyx":143
+ *         self._rows_transition = 0
+ *         self._alloc_slots(self._capacity)
+ *         self._active_slots_arr = np.empty(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
+ *         self._frontier_slots_arr = np.empty(self._capacity, dtype=np.int64)
+ *         self._next_frontier_slots_arr = np.empty(self._capacity, dtype=np.int64)
+ */
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 143, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_int64); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 107, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_empty); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 143, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_3) < 0) __PYX_ERR(0, 107, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_4, __pyx_t_5); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 107, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 143, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 143, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __Pyx_GIVEREF(__pyx_t_2);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 143, __pyx_L1_error);
+  __pyx_t_2 = 0;
+  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 143, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 143, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_int64); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 143, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_GIVEREF(__pyx_t_3);
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 143, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 143, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  __Pyx_GIVEREF(__pyx_t_6);
   __Pyx_GOTREF(__pyx_v_self->_active_slots_arr);
   __Pyx_DECREF(__pyx_v_self->_active_slots_arr);
-  __pyx_v_self->_active_slots_arr = __pyx_t_3;
-  __pyx_t_3 = 0;
+  __pyx_v_self->_active_slots_arr = __pyx_t_6;
+  __pyx_t_6 = 0;
 
-  /* "monitor_kernels.pyx":108
- *         self._active_arr = np.zeros(self._capacity, dtype=np.uint8)
+  /* "monitor_kernels.pyx":144
+ *         self._alloc_slots(self._capacity)
  *         self._active_slots_arr = np.empty(self._capacity, dtype=np.int64)
- *         self._active_pos_arr = np.full(self._capacity, -1, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._frontier_slots_arr = np.empty(self._capacity, dtype=np.int64)
- *         self._frontier_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 108, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_full); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 108, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 108, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 108, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_3);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_3)) __PYX_ERR(0, 108, __pyx_L1_error);
-  __Pyx_INCREF(__pyx_int_neg_1);
-  __Pyx_GIVEREF(__pyx_int_neg_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_int_neg_1)) __PYX_ERR(0, 108, __pyx_L1_error);
-  __pyx_t_3 = 0;
-  __pyx_t_3 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 108, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 108, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_int64); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 108, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (PyDict_SetItem(__pyx_t_3, __pyx_n_s_dtype, __pyx_t_2) < 0) __PYX_ERR(0, 108, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_5, __pyx_t_4, __pyx_t_3); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 108, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __Pyx_GIVEREF(__pyx_t_2);
-  __Pyx_GOTREF(__pyx_v_self->_active_pos_arr);
-  __Pyx_DECREF(__pyx_v_self->_active_pos_arr);
-  __pyx_v_self->_active_pos_arr = __pyx_t_2;
-  __pyx_t_2 = 0;
-
-  /* "monitor_kernels.pyx":109
- *         self._active_slots_arr = np.empty(self._capacity, dtype=np.int64)
- *         self._active_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
  *         self._frontier_slots_arr = np.empty(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._frontier_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
  *         self._next_frontier_slots_arr = np.empty(self._capacity, dtype=np.int64)
+ *         self._status_rows_arr = np.empty((self._status_capacity, 7), dtype=np.int64)
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 109, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_empty); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 109, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 109, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 109, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 109, __pyx_L1_error);
-  __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 109, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 109, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_int64); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 109, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 144, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 109, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_empty); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 144, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 109, __pyx_L1_error)
+  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 144, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 144, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_6);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_6)) __PYX_ERR(0, 144, __pyx_L1_error);
+  __pyx_t_6 = 0;
+  __pyx_t_6 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 144, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 144, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 144, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  if (PyDict_SetItem(__pyx_t_6, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 144, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_4, __pyx_t_6); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 144, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+  __Pyx_GIVEREF(__pyx_t_5);
   __Pyx_GOTREF(__pyx_v_self->_frontier_slots_arr);
   __Pyx_DECREF(__pyx_v_self->_frontier_slots_arr);
-  __pyx_v_self->_frontier_slots_arr = __pyx_t_6;
-  __pyx_t_6 = 0;
-
-  /* "monitor_kernels.pyx":110
- *         self._active_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
- *         self._frontier_slots_arr = np.empty(self._capacity, dtype=np.int64)
- *         self._frontier_pos_arr = np.full(self._capacity, -1, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._next_frontier_slots_arr = np.empty(self._capacity, dtype=np.int64)
- *         self._queued_step_arr = np.zeros(self._capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 110, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_full); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 110, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 110, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 110, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_6);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_6)) __PYX_ERR(0, 110, __pyx_L1_error);
-  __Pyx_INCREF(__pyx_int_neg_1);
-  __Pyx_GIVEREF(__pyx_int_neg_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_int_neg_1)) __PYX_ERR(0, 110, __pyx_L1_error);
-  __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 110, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 110, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 110, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  if (PyDict_SetItem(__pyx_t_6, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 110, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_4, __pyx_t_6); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 110, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_GIVEREF(__pyx_t_5);
-  __Pyx_GOTREF(__pyx_v_self->_frontier_pos_arr);
-  __Pyx_DECREF(__pyx_v_self->_frontier_pos_arr);
-  __pyx_v_self->_frontier_pos_arr = __pyx_t_5;
+  __pyx_v_self->_frontier_slots_arr = __pyx_t_5;
   __pyx_t_5 = 0;
 
-  /* "monitor_kernels.pyx":111
+  /* "monitor_kernels.pyx":145
+ *         self._active_slots_arr = np.empty(self._capacity, dtype=np.int64)
  *         self._frontier_slots_arr = np.empty(self._capacity, dtype=np.int64)
- *         self._frontier_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
  *         self._next_frontier_slots_arr = np.empty(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._queued_step_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._key_s1_arr = np.zeros(self._capacity, dtype=np.int64)
+ *         self._status_rows_arr = np.empty((self._status_capacity, 7), dtype=np.int64)
+ *         self._anomaly_rows_arr = np.empty((self._anomaly_capacity, 5), dtype=np.int64)
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 111, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 145, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_empty); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 111, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_empty); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 145, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 111, __pyx_L1_error)
+  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 145, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 111, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 145, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_5)) __PYX_ERR(0, 111, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_5)) __PYX_ERR(0, 145, __pyx_L1_error);
   __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 111, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 145, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 111, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 145, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_int64); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 111, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_int64); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 145, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_3) < 0) __PYX_ERR(0, 111, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_3) < 0) __PYX_ERR(0, 145, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_4, __pyx_t_5); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 111, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_4, __pyx_t_5); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 145, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
@@ -20595,496 +20518,132 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
   __pyx_v_self->_next_frontier_slots_arr = __pyx_t_3;
   __pyx_t_3 = 0;
 
-  /* "monitor_kernels.pyx":112
- *         self._frontier_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
+  /* "monitor_kernels.pyx":146
+ *         self._frontier_slots_arr = np.empty(self._capacity, dtype=np.int64)
  *         self._next_frontier_slots_arr = np.empty(self._capacity, dtype=np.int64)
- *         self._queued_step_arr = np.zeros(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._key_s1_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._key_s2_arr = np.zeros(self._capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 112, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_zeros); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 112, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 112, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 112, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_3);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_3)) __PYX_ERR(0, 112, __pyx_L1_error);
-  __pyx_t_3 = 0;
-  __pyx_t_3 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 112, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 112, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_int64); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 112, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (PyDict_SetItem(__pyx_t_3, __pyx_n_s_dtype, __pyx_t_2) < 0) __PYX_ERR(0, 112, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_5, __pyx_t_4, __pyx_t_3); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 112, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __Pyx_GIVEREF(__pyx_t_2);
-  __Pyx_GOTREF(__pyx_v_self->_queued_step_arr);
-  __Pyx_DECREF(__pyx_v_self->_queued_step_arr);
-  __pyx_v_self->_queued_step_arr = __pyx_t_2;
-  __pyx_t_2 = 0;
-
-  /* "monitor_kernels.pyx":113
- *         self._next_frontier_slots_arr = np.empty(self._capacity, dtype=np.int64)
- *         self._queued_step_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._key_s1_arr = np.zeros(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._key_s2_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._key_lag_arr = np.zeros(self._capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 113, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_zeros); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 113, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 113, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 113, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 113, __pyx_L1_error);
-  __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 113, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 113, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_int64); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 113, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 113, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 113, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_GIVEREF(__pyx_t_6);
-  __Pyx_GOTREF(__pyx_v_self->_key_s1_arr);
-  __Pyx_DECREF(__pyx_v_self->_key_s1_arr);
-  __pyx_v_self->_key_s1_arr = __pyx_t_6;
-  __pyx_t_6 = 0;
-
-  /* "monitor_kernels.pyx":114
- *         self._queued_step_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._key_s1_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._key_s2_arr = np.zeros(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._key_lag_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._t1_arr = np.zeros(self._capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 114, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_zeros); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 114, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 114, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 114, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_6);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_6)) __PYX_ERR(0, 114, __pyx_L1_error);
-  __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 114, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 114, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 114, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  if (PyDict_SetItem(__pyx_t_6, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 114, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_4, __pyx_t_6); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 114, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_GIVEREF(__pyx_t_5);
-  __Pyx_GOTREF(__pyx_v_self->_key_s2_arr);
-  __Pyx_DECREF(__pyx_v_self->_key_s2_arr);
-  __pyx_v_self->_key_s2_arr = __pyx_t_5;
-  __pyx_t_5 = 0;
-
-  /* "monitor_kernels.pyx":115
- *         self._key_s1_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._key_s2_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._key_lag_arr = np.zeros(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._t1_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._t2_arr = np.zeros(self._capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 115, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_zeros); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 115, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 115, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 115, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_5)) __PYX_ERR(0, 115, __pyx_L1_error);
-  __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 115, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 115, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_int64); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 115, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_3) < 0) __PYX_ERR(0, 115, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_4, __pyx_t_5); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 115, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_GIVEREF(__pyx_t_3);
-  __Pyx_GOTREF(__pyx_v_self->_key_lag_arr);
-  __Pyx_DECREF(__pyx_v_self->_key_lag_arr);
-  __pyx_v_self->_key_lag_arr = __pyx_t_3;
-  __pyx_t_3 = 0;
-
-  /* "monitor_kernels.pyx":116
- *         self._key_s2_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._key_lag_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._t1_arr = np.zeros(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._t2_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._window_arr = np.zeros(self._capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 116, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_zeros); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 116, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 116, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 116, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_3);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_3)) __PYX_ERR(0, 116, __pyx_L1_error);
-  __pyx_t_3 = 0;
-  __pyx_t_3 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 116, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 116, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_int64); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 116, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (PyDict_SetItem(__pyx_t_3, __pyx_n_s_dtype, __pyx_t_2) < 0) __PYX_ERR(0, 116, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_5, __pyx_t_4, __pyx_t_3); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 116, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __Pyx_GIVEREF(__pyx_t_2);
-  __Pyx_GOTREF(__pyx_v_self->_t1_arr);
-  __Pyx_DECREF(__pyx_v_self->_t1_arr);
-  __pyx_v_self->_t1_arr = __pyx_t_2;
-  __pyx_t_2 = 0;
-
-  /* "monitor_kernels.pyx":117
- *         self._key_lag_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._t1_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._t2_arr = np.zeros(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._window_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._length_arr = np.zeros(self._capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 117, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_zeros); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 117, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 117, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 117, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 117, __pyx_L1_error);
-  __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 117, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 117, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_int64); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 117, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 117, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 117, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_GIVEREF(__pyx_t_6);
-  __Pyx_GOTREF(__pyx_v_self->_t2_arr);
-  __Pyx_DECREF(__pyx_v_self->_t2_arr);
-  __pyx_v_self->_t2_arr = __pyx_t_6;
-  __pyx_t_6 = 0;
-
-  /* "monitor_kernels.pyx":118
- *         self._t1_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._t2_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._window_arr = np.zeros(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._length_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._sign_arr = np.zeros(self._capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_zeros); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_6);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_6)) __PYX_ERR(0, 118, __pyx_L1_error);
-  __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  if (PyDict_SetItem(__pyx_t_6, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_4, __pyx_t_6); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 118, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_GIVEREF(__pyx_t_5);
-  __Pyx_GOTREF(__pyx_v_self->_window_arr);
-  __Pyx_DECREF(__pyx_v_self->_window_arr);
-  __pyx_v_self->_window_arr = __pyx_t_5;
-  __pyx_t_5 = 0;
-
-  /* "monitor_kernels.pyx":119
- *         self._t2_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._window_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._length_arr = np.zeros(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._sign_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._seen_step_arr = np.zeros(self._capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 119, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_zeros); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 119, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 119, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 119, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_5)) __PYX_ERR(0, 119, __pyx_L1_error);
-  __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 119, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 119, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_int64); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 119, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_3) < 0) __PYX_ERR(0, 119, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_4, __pyx_t_5); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 119, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_GIVEREF(__pyx_t_3);
-  __Pyx_GOTREF(__pyx_v_self->_length_arr);
-  __Pyx_DECREF(__pyx_v_self->_length_arr);
-  __pyx_v_self->_length_arr = __pyx_t_3;
-  __pyx_t_3 = 0;
-
-  /* "monitor_kernels.pyx":120
- *         self._window_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._length_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._sign_arr = np.zeros(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._seen_step_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._status_rows_arr = np.empty((self._status_capacity, 7), dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 120, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_zeros); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 120, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 120, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 120, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_3);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_3)) __PYX_ERR(0, 120, __pyx_L1_error);
-  __pyx_t_3 = 0;
-  __pyx_t_3 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 120, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 120, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_int64); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 120, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (PyDict_SetItem(__pyx_t_3, __pyx_n_s_dtype, __pyx_t_2) < 0) __PYX_ERR(0, 120, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_5, __pyx_t_4, __pyx_t_3); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 120, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __Pyx_GIVEREF(__pyx_t_2);
-  __Pyx_GOTREF(__pyx_v_self->_sign_arr);
-  __Pyx_DECREF(__pyx_v_self->_sign_arr);
-  __pyx_v_self->_sign_arr = __pyx_t_2;
-  __pyx_t_2 = 0;
-
-  /* "monitor_kernels.pyx":121
- *         self._length_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._sign_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._seen_step_arr = np.zeros(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._status_rows_arr = np.empty((self._status_capacity, 7), dtype=np.int64)
- *         self._anomaly_rows_arr = np.empty((self._anomaly_capacity, 5), dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 121, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_zeros); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 121, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 121, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 121, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 121, __pyx_L1_error);
-  __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 121, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 121, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_int64); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 121, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 121, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 121, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_GIVEREF(__pyx_t_6);
-  __Pyx_GOTREF(__pyx_v_self->_seen_step_arr);
-  __Pyx_DECREF(__pyx_v_self->_seen_step_arr);
-  __pyx_v_self->_seen_step_arr = __pyx_t_6;
-  __pyx_t_6 = 0;
-
-  /* "monitor_kernels.pyx":122
- *         self._sign_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._seen_step_arr = np.zeros(self._capacity, dtype=np.int64)
  *         self._status_rows_arr = np.empty((self._status_capacity, 7), dtype=np.int64)             # <<<<<<<<<<<<<<
  *         self._anomaly_rows_arr = np.empty((self._anomaly_capacity, 5), dtype=np.int64)
- * 
+ *         self._status_ptr = <int64_t*>(<np.ndarray>self._status_rows_arr).data
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 122, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_empty); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 122, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_self->_status_capacity); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 122, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 122, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 146, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_empty); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 146, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_self->_status_capacity); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 146, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 146, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GIVEREF(__pyx_t_6);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_6)) __PYX_ERR(0, 122, __pyx_L1_error);
+  __Pyx_GIVEREF(__pyx_t_3);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_3)) __PYX_ERR(0, 146, __pyx_L1_error);
   __Pyx_INCREF(__pyx_int_7);
   __Pyx_GIVEREF(__pyx_int_7);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_int_7)) __PYX_ERR(0, 122, __pyx_L1_error);
-  __pyx_t_6 = 0;
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 122, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_4);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_4)) __PYX_ERR(0, 122, __pyx_L1_error);
-  __pyx_t_4 = 0;
-  __pyx_t_4 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 122, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 122, __pyx_L1_error)
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_int_7)) __PYX_ERR(0, 146, __pyx_L1_error);
+  __pyx_t_3 = 0;
+  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 146, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 122, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  if (PyDict_SetItem(__pyx_t_4, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 122, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_6, __pyx_t_4); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 122, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  __Pyx_GIVEREF(__pyx_t_4);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_4)) __PYX_ERR(0, 146, __pyx_L1_error);
+  __pyx_t_4 = 0;
+  __pyx_t_4 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 146, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 146, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_int64); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 146, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+  if (PyDict_SetItem(__pyx_t_4, __pyx_n_s_dtype, __pyx_t_2) < 0) __PYX_ERR(0, 146, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_5, __pyx_t_3, __pyx_t_4); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 146, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_GIVEREF(__pyx_t_5);
+  __Pyx_GIVEREF(__pyx_t_2);
   __Pyx_GOTREF(__pyx_v_self->_status_rows_arr);
   __Pyx_DECREF(__pyx_v_self->_status_rows_arr);
-  __pyx_v_self->_status_rows_arr = __pyx_t_5;
-  __pyx_t_5 = 0;
+  __pyx_v_self->_status_rows_arr = __pyx_t_2;
+  __pyx_t_2 = 0;
 
-  /* "monitor_kernels.pyx":123
- *         self._seen_step_arr = np.zeros(self._capacity, dtype=np.int64)
+  /* "monitor_kernels.pyx":147
+ *         self._next_frontier_slots_arr = np.empty(self._capacity, dtype=np.int64)
  *         self._status_rows_arr = np.empty((self._status_capacity, 7), dtype=np.int64)
  *         self._anomaly_rows_arr = np.empty((self._anomaly_capacity, 5), dtype=np.int64)             # <<<<<<<<<<<<<<
- * 
- *     cpdef reset(self):
+ *         self._status_ptr = <int64_t*>(<np.ndarray>self._status_rows_arr).data
+ *         self._anomaly_ptr = <int64_t*>(<np.ndarray>self._anomaly_rows_arr).data
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 123, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 123, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 147, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 147, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_self->_anomaly_capacity); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 123, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = PyTuple_New(2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 123, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_5)) __PYX_ERR(0, 123, __pyx_L1_error);
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_self->_anomaly_capacity); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 147, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __pyx_t_3 = PyTuple_New(2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 147, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __Pyx_GIVEREF(__pyx_t_2);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_2)) __PYX_ERR(0, 147, __pyx_L1_error);
   __Pyx_INCREF(__pyx_int_5);
   __Pyx_GIVEREF(__pyx_int_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 1, __pyx_int_5)) __PYX_ERR(0, 123, __pyx_L1_error);
-  __pyx_t_5 = 0;
-  __pyx_t_5 = PyTuple_New(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 123, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_GIVEREF(__pyx_t_6);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_6)) __PYX_ERR(0, 123, __pyx_L1_error);
-  __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 123, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 123, __pyx_L1_error)
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 1, __pyx_int_5)) __PYX_ERR(0, 147, __pyx_L1_error);
+  __pyx_t_2 = 0;
+  __pyx_t_2 = PyTuple_New(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 147, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_int64); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 123, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  if (PyDict_SetItem(__pyx_t_6, __pyx_n_s_dtype, __pyx_t_3) < 0) __PYX_ERR(0, 123, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_5, __pyx_t_6); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 123, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
   __Pyx_GIVEREF(__pyx_t_3);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 0, __pyx_t_3)) __PYX_ERR(0, 147, __pyx_L1_error);
+  __pyx_t_3 = 0;
+  __pyx_t_3 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 147, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 147, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_int64); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 147, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  if (PyDict_SetItem(__pyx_t_3, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 147, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_2, __pyx_t_3); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 147, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  __Pyx_GIVEREF(__pyx_t_6);
   __Pyx_GOTREF(__pyx_v_self->_anomaly_rows_arr);
   __Pyx_DECREF(__pyx_v_self->_anomaly_rows_arr);
-  __pyx_v_self->_anomaly_rows_arr = __pyx_t_3;
-  __pyx_t_3 = 0;
+  __pyx_v_self->_anomaly_rows_arr = __pyx_t_6;
+  __pyx_t_6 = 0;
 
-  /* "monitor_kernels.pyx":81
+  /* "monitor_kernels.pyx":148
+ *         self._status_rows_arr = np.empty((self._status_capacity, 7), dtype=np.int64)
+ *         self._anomaly_rows_arr = np.empty((self._anomaly_capacity, 5), dtype=np.int64)
+ *         self._status_ptr = <int64_t*>(<np.ndarray>self._status_rows_arr).data             # <<<<<<<<<<<<<<
+ *         self._anomaly_ptr = <int64_t*>(<np.ndarray>self._anomaly_rows_arr).data
+ * 
+ */
+  __pyx_t_6 = __pyx_v_self->_status_rows_arr;
+  __Pyx_INCREF(__pyx_t_6);
+  __pyx_t_7 = __pyx_f_5numpy_7ndarray_4data_data(((PyArrayObject *)__pyx_t_6)); if (unlikely(__pyx_t_7 == ((char *)NULL) && PyErr_Occurred())) __PYX_ERR(0, 148, __pyx_L1_error)
+  __pyx_v_self->_status_ptr = ((int64_t *)__pyx_t_7);
+  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+
+  /* "monitor_kernels.pyx":149
+ *         self._anomaly_rows_arr = np.empty((self._anomaly_capacity, 5), dtype=np.int64)
+ *         self._status_ptr = <int64_t*>(<np.ndarray>self._status_rows_arr).data
+ *         self._anomaly_ptr = <int64_t*>(<np.ndarray>self._anomaly_rows_arr).data             # <<<<<<<<<<<<<<
+ * 
+ *     cdef void _alloc_slots(self, Py_ssize_t capacity):
+ */
+  __pyx_t_6 = __pyx_v_self->_anomaly_rows_arr;
+  __Pyx_INCREF(__pyx_t_6);
+  __pyx_t_7 = __pyx_f_5numpy_7ndarray_4data_data(((PyArrayObject *)__pyx_t_6)); if (unlikely(__pyx_t_7 == ((char *)NULL) && PyErr_Occurred())) __PYX_ERR(0, 149, __pyx_L1_error)
+  __pyx_v_self->_anomaly_ptr = ((int64_t *)__pyx_t_7);
+  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+
+  /* "monitor_kernels.pyx":116
  *     cdef Py_ssize_t _rows_transition
  * 
- *     def __cinit__(self, Py_ssize_t initial_capacity=1024, Py_ssize_t output_capacity=1024):             # <<<<<<<<<<<<<<
+ *     def __cinit__(self, Py_ssize_t initial_capacity=1024, Py_ssize_t output_capacity=1024,             # <<<<<<<<<<<<<<
+ *                   Py_ssize_t prefetch_dist=16):
  *         if initial_capacity < 16:
- *             initial_capacity = 16
  */
 
   /* function exit code */
@@ -21103,12 +20662,196 @@ static int __pyx_pf_15monitor_kernels_19NumericMonitorState___cinit__(struct __p
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":125
- *         self._anomaly_rows_arr = np.empty((self._anomaly_capacity, 5), dtype=np.int64)
+/* "monitor_kernels.pyx":151
+ *         self._anomaly_ptr = <int64_t*>(<np.ndarray>self._anomaly_rows_arr).data
+ * 
+ *     cdef void _alloc_slots(self, Py_ssize_t capacity):             # <<<<<<<<<<<<<<
+ *         """Zeroed slot table (occupied=0, active=0, queued_step=0, seen=0) with
+ *         active_pos/frontier_pos set to -1, matching the SoA np.full(-1) init."""
+ */
+
+static void __pyx_f_15monitor_kernels_19NumericMonitorState__alloc_slots(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_capacity) {
+  Py_ssize_t __pyx_v_i;
+  uintptr_t __pyx_v_base;
+  PyArrayObject *__pyx_v_buf = 0;
+  __Pyx_LocalBuf_ND __pyx_pybuffernd_buf;
+  __Pyx_Buffer __pyx_pybuffer_buf;
+  __Pyx_RefNannyDeclarations
+  PyObject *__pyx_t_1 = NULL;
+  PyObject *__pyx_t_2 = NULL;
+  PyObject *__pyx_t_3 = NULL;
+  PyObject *__pyx_t_4 = NULL;
+  PyObject *__pyx_t_5 = NULL;
+  PyArrayObject *__pyx_t_6 = NULL;
+  char *__pyx_t_7;
+  Py_ssize_t __pyx_t_8;
+  Py_ssize_t __pyx_t_9;
+  Py_ssize_t __pyx_t_10;
+  int __pyx_lineno = 0;
+  const char *__pyx_filename = NULL;
+  int __pyx_clineno = 0;
+  __Pyx_RefNannySetupContext("_alloc_slots", 1);
+  __pyx_pybuffer_buf.pybuffer.buf = NULL;
+  __pyx_pybuffer_buf.refcount = 0;
+  __pyx_pybuffernd_buf.data = NULL;
+  __pyx_pybuffernd_buf.rcbuffer = &__pyx_pybuffer_buf;
+
+  /* "monitor_kernels.pyx":156
+ *         cdef Py_ssize_t i
+ *         cdef uintptr_t base
+ *         cdef np.ndarray[np.uint8_t, ndim=1] buf = np.zeros(capacity * sizeof(MonitorSlot) + 64, dtype=np.uint8)             # <<<<<<<<<<<<<<
+ *         self._slots_buf = buf
+ *         base = <uintptr_t>buf.data
+ */
+  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 156, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_zeros); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 156, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+  __pyx_t_1 = __Pyx_PyInt_FromSize_t(((__pyx_v_capacity * (sizeof(struct __pyx_t_15monitor_kernels_MonitorSlot))) + 64)); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 156, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 156, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __Pyx_GIVEREF(__pyx_t_1);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_1)) __PYX_ERR(0, 156, __pyx_L1_error);
+  __pyx_t_1 = 0;
+  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 156, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 156, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_uint8); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 156, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 156, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_3, __pyx_t_1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 156, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+  if (!(likely(((__pyx_t_5) == Py_None) || likely(__Pyx_TypeTest(__pyx_t_5, __pyx_ptype_5numpy_ndarray))))) __PYX_ERR(0, 156, __pyx_L1_error)
+  __pyx_t_6 = ((PyArrayObject *)__pyx_t_5);
+  {
+    __Pyx_BufFmt_StackElem __pyx_stack[1];
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_buf.rcbuffer->pybuffer, (PyObject*)__pyx_t_6, &__Pyx_TypeInfo_nn___pyx_t_5numpy_uint8_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) {
+      __pyx_v_buf = ((PyArrayObject *)Py_None); __Pyx_INCREF(Py_None); __pyx_pybuffernd_buf.rcbuffer->pybuffer.buf = NULL;
+      __PYX_ERR(0, 156, __pyx_L1_error)
+    } else {__pyx_pybuffernd_buf.diminfo[0].strides = __pyx_pybuffernd_buf.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_buf.diminfo[0].shape = __pyx_pybuffernd_buf.rcbuffer->pybuffer.shape[0];
+    }
+  }
+  __pyx_t_6 = 0;
+  __pyx_v_buf = ((PyArrayObject *)__pyx_t_5);
+  __pyx_t_5 = 0;
+
+  /* "monitor_kernels.pyx":157
+ *         cdef uintptr_t base
+ *         cdef np.ndarray[np.uint8_t, ndim=1] buf = np.zeros(capacity * sizeof(MonitorSlot) + 64, dtype=np.uint8)
+ *         self._slots_buf = buf             # <<<<<<<<<<<<<<
+ *         base = <uintptr_t>buf.data
+ *         base = (base + 63) & ~<uintptr_t>63
+ */
+  __Pyx_INCREF((PyObject *)__pyx_v_buf);
+  __Pyx_GIVEREF((PyObject *)__pyx_v_buf);
+  __Pyx_GOTREF(__pyx_v_self->_slots_buf);
+  __Pyx_DECREF(__pyx_v_self->_slots_buf);
+  __pyx_v_self->_slots_buf = ((PyObject *)__pyx_v_buf);
+
+  /* "monitor_kernels.pyx":158
+ *         cdef np.ndarray[np.uint8_t, ndim=1] buf = np.zeros(capacity * sizeof(MonitorSlot) + 64, dtype=np.uint8)
+ *         self._slots_buf = buf
+ *         base = <uintptr_t>buf.data             # <<<<<<<<<<<<<<
+ *         base = (base + 63) & ~<uintptr_t>63
+ *         self._slots = <MonitorSlot*>base
+ */
+  __pyx_t_7 = __pyx_f_5numpy_7ndarray_4data_data(((PyArrayObject *)__pyx_v_buf)); if (unlikely(__pyx_t_7 == ((char *)NULL) && PyErr_Occurred())) __PYX_ERR(0, 158, __pyx_L1_error)
+  __pyx_v_base = ((uintptr_t)__pyx_t_7);
+
+  /* "monitor_kernels.pyx":159
+ *         self._slots_buf = buf
+ *         base = <uintptr_t>buf.data
+ *         base = (base + 63) & ~<uintptr_t>63             # <<<<<<<<<<<<<<
+ *         self._slots = <MonitorSlot*>base
+ *         for i in range(capacity):
+ */
+  __pyx_v_base = ((__pyx_v_base + 63) & (~((uintptr_t)63)));
+
+  /* "monitor_kernels.pyx":160
+ *         base = <uintptr_t>buf.data
+ *         base = (base + 63) & ~<uintptr_t>63
+ *         self._slots = <MonitorSlot*>base             # <<<<<<<<<<<<<<
+ *         for i in range(capacity):
+ *             self._slots[i].active_pos = -1
+ */
+  __pyx_v_self->_slots = ((struct __pyx_t_15monitor_kernels_MonitorSlot *)__pyx_v_base);
+
+  /* "monitor_kernels.pyx":161
+ *         base = (base + 63) & ~<uintptr_t>63
+ *         self._slots = <MonitorSlot*>base
+ *         for i in range(capacity):             # <<<<<<<<<<<<<<
+ *             self._slots[i].active_pos = -1
+ *             self._slots[i].frontier_pos = -1
+ */
+  __pyx_t_8 = __pyx_v_capacity;
+  __pyx_t_9 = __pyx_t_8;
+  for (__pyx_t_10 = 0; __pyx_t_10 < __pyx_t_9; __pyx_t_10+=1) {
+    __pyx_v_i = __pyx_t_10;
+
+    /* "monitor_kernels.pyx":162
+ *         self._slots = <MonitorSlot*>base
+ *         for i in range(capacity):
+ *             self._slots[i].active_pos = -1             # <<<<<<<<<<<<<<
+ *             self._slots[i].frontier_pos = -1
+ * 
+ */
+    (__pyx_v_self->_slots[__pyx_v_i]).active_pos = -1;
+
+    /* "monitor_kernels.pyx":163
+ *         for i in range(capacity):
+ *             self._slots[i].active_pos = -1
+ *             self._slots[i].frontier_pos = -1             # <<<<<<<<<<<<<<
+ * 
+ *     cpdef reset(self):
+ */
+    (__pyx_v_self->_slots[__pyx_v_i]).frontier_pos = -1;
+  }
+
+  /* "monitor_kernels.pyx":151
+ *         self._anomaly_ptr = <int64_t*>(<np.ndarray>self._anomaly_rows_arr).data
+ * 
+ *     cdef void _alloc_slots(self, Py_ssize_t capacity):             # <<<<<<<<<<<<<<
+ *         """Zeroed slot table (occupied=0, active=0, queued_step=0, seen=0) with
+ *         active_pos/frontier_pos set to -1, matching the SoA np.full(-1) init."""
+ */
+
+  /* function exit code */
+  goto __pyx_L0;
+  __pyx_L1_error:;
+  __Pyx_XDECREF(__pyx_t_1);
+  __Pyx_XDECREF(__pyx_t_2);
+  __Pyx_XDECREF(__pyx_t_3);
+  __Pyx_XDECREF(__pyx_t_4);
+  __Pyx_XDECREF(__pyx_t_5);
+  { PyObject *__pyx_type, *__pyx_value, *__pyx_tb;
+    __Pyx_PyThreadState_declare
+    __Pyx_PyThreadState_assign
+    __Pyx_ErrFetch(&__pyx_type, &__pyx_value, &__pyx_tb);
+    __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_buf.rcbuffer->pybuffer);
+  __Pyx_ErrRestore(__pyx_type, __pyx_value, __pyx_tb);}
+  __Pyx_AddTraceback("monitor_kernels.NumericMonitorState._alloc_slots", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  goto __pyx_L2;
+  __pyx_L0:;
+  __Pyx_SafeReleaseBuffer(&__pyx_pybuffernd_buf.rcbuffer->pybuffer);
+  __pyx_L2:;
+  __Pyx_XDECREF((PyObject *)__pyx_v_buf);
+  __Pyx_RefNannyFinishContext();
+}
+
+/* "monitor_kernels.pyx":165
+ *             self._slots[i].frontier_pos = -1
  * 
  *     cpdef reset(self):             # <<<<<<<<<<<<<<
- *         self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)
- *         self._active_arr = np.zeros(self._capacity, dtype=np.uint8)
+ *         self._alloc_slots(self._capacity)
+ *         self._size = 0
  */
 
 static PyObject *__pyx_pw_15monitor_kernels_19NumericMonitorState_3reset(PyObject *__pyx_v_self, 
@@ -21126,7 +20869,6 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_reset(struct __
   PyObject *__pyx_t_3 = NULL;
   PyObject *__pyx_t_4 = NULL;
   int __pyx_t_5;
-  PyObject *__pyx_t_6 = NULL;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
@@ -21140,7 +20882,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_reset(struct __
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_reset); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 125, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_reset); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 165, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_19NumericMonitorState_3reset)) {
         __Pyx_XDECREF(__pyx_r);
@@ -21163,7 +20905,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_reset(struct __
           PyObject *__pyx_callargs[2] = {__pyx_t_4, NULL};
           __pyx_t_2 = __Pyx_PyObject_FastCall(__pyx_t_3, __pyx_callargs+1-__pyx_t_5, 0+__pyx_t_5);
           __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 125, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 165, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         }
@@ -21185,218 +20927,26 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_reset(struct __
     #endif
   }
 
-  /* "monitor_kernels.pyx":126
+  /* "monitor_kernels.pyx":166
  * 
  *     cpdef reset(self):
- *         self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)             # <<<<<<<<<<<<<<
- *         self._active_arr = np.zeros(self._capacity, dtype=np.uint8)
- *         self._active_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 126, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_zeros); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 126, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 126, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 126, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_GIVEREF(__pyx_t_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_1)) __PYX_ERR(0, 126, __pyx_L1_error);
-  __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 126, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 126, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_uint8); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 126, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 126, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_3, __pyx_t_1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 126, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __Pyx_GIVEREF(__pyx_t_6);
-  __Pyx_GOTREF(__pyx_v_self->_occupied_arr);
-  __Pyx_DECREF(__pyx_v_self->_occupied_arr);
-  __pyx_v_self->_occupied_arr = __pyx_t_6;
-  __pyx_t_6 = 0;
-
-  /* "monitor_kernels.pyx":127
- *     cpdef reset(self):
- *         self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)
- *         self._active_arr = np.zeros(self._capacity, dtype=np.uint8)             # <<<<<<<<<<<<<<
- *         self._active_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
- *         self._frontier_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 127, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_zeros); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 127, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 127, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 127, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_GIVEREF(__pyx_t_6);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_6)) __PYX_ERR(0, 127, __pyx_L1_error);
-  __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 127, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 127, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_uint8); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 127, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  if (PyDict_SetItem(__pyx_t_6, __pyx_n_s_dtype, __pyx_t_4) < 0) __PYX_ERR(0, 127, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_3, __pyx_t_6); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 127, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_GIVEREF(__pyx_t_4);
-  __Pyx_GOTREF(__pyx_v_self->_active_arr);
-  __Pyx_DECREF(__pyx_v_self->_active_arr);
-  __pyx_v_self->_active_arr = __pyx_t_4;
-  __pyx_t_4 = 0;
-
-  /* "monitor_kernels.pyx":128
- *         self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)
- *         self._active_arr = np.zeros(self._capacity, dtype=np.uint8)
- *         self._active_pos_arr = np.full(self._capacity, -1, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._frontier_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
- *         self._queued_step_arr = np.zeros(self._capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 128, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_full); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 128, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 128, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_3 = PyTuple_New(2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 128, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_GIVEREF(__pyx_t_4);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_4)) __PYX_ERR(0, 128, __pyx_L1_error);
-  __Pyx_INCREF(__pyx_int_neg_1);
-  __Pyx_GIVEREF(__pyx_int_neg_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 1, __pyx_int_neg_1)) __PYX_ERR(0, 128, __pyx_L1_error);
-  __pyx_t_4 = 0;
-  __pyx_t_4 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 128, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 128, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_int64); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 128, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  if (PyDict_SetItem(__pyx_t_4, __pyx_n_s_dtype, __pyx_t_2) < 0) __PYX_ERR(0, 128, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_3, __pyx_t_4); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 128, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_GIVEREF(__pyx_t_2);
-  __Pyx_GOTREF(__pyx_v_self->_active_pos_arr);
-  __Pyx_DECREF(__pyx_v_self->_active_pos_arr);
-  __pyx_v_self->_active_pos_arr = __pyx_t_2;
-  __pyx_t_2 = 0;
-
-  /* "monitor_kernels.pyx":129
- *         self._active_arr = np.zeros(self._capacity, dtype=np.uint8)
- *         self._active_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
- *         self._frontier_pos_arr = np.full(self._capacity, -1, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._queued_step_arr = np.zeros(self._capacity, dtype=np.int64)
- *         self._size = 0
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 129, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_full); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 129, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 129, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = PyTuple_New(2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 129, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_2)) __PYX_ERR(0, 129, __pyx_L1_error);
-  __Pyx_INCREF(__pyx_int_neg_1);
-  __Pyx_GIVEREF(__pyx_int_neg_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 1, __pyx_int_neg_1)) __PYX_ERR(0, 129, __pyx_L1_error);
-  __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 129, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 129, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_int64); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 129, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_1) < 0) __PYX_ERR(0, 129, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_3, __pyx_t_2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 129, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_GIVEREF(__pyx_t_1);
-  __Pyx_GOTREF(__pyx_v_self->_frontier_pos_arr);
-  __Pyx_DECREF(__pyx_v_self->_frontier_pos_arr);
-  __pyx_v_self->_frontier_pos_arr = __pyx_t_1;
-  __pyx_t_1 = 0;
-
-  /* "monitor_kernels.pyx":130
- *         self._active_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
- *         self._frontier_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
- *         self._queued_step_arr = np.zeros(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
+ *         self._alloc_slots(self._capacity)             # <<<<<<<<<<<<<<
  *         self._size = 0
  *         self._active_count = 0
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 130, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_zeros); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 130, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 130, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 130, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_GIVEREF(__pyx_t_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_1)) __PYX_ERR(0, 130, __pyx_L1_error);
-  __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 130, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 130, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_int64); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 130, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 130, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_3, __pyx_t_1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 130, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __Pyx_GIVEREF(__pyx_t_6);
-  __Pyx_GOTREF(__pyx_v_self->_queued_step_arr);
-  __Pyx_DECREF(__pyx_v_self->_queued_step_arr);
-  __pyx_v_self->_queued_step_arr = __pyx_t_6;
-  __pyx_t_6 = 0;
+  ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_alloc_slots(__pyx_v_self, __pyx_v_self->_capacity); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 166, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":131
- *         self._frontier_pos_arr = np.full(self._capacity, -1, dtype=np.int64)
- *         self._queued_step_arr = np.zeros(self._capacity, dtype=np.int64)
+  /* "monitor_kernels.pyx":167
+ *     cpdef reset(self):
+ *         self._alloc_slots(self._capacity)
  *         self._size = 0             # <<<<<<<<<<<<<<
  *         self._active_count = 0
  *         self._frontier_count = 0
  */
   __pyx_v_self->_size = 0;
 
-  /* "monitor_kernels.pyx":132
- *         self._queued_step_arr = np.zeros(self._capacity, dtype=np.int64)
+  /* "monitor_kernels.pyx":168
+ *         self._alloc_slots(self._capacity)
  *         self._size = 0
  *         self._active_count = 0             # <<<<<<<<<<<<<<
  *         self._frontier_count = 0
@@ -21404,7 +20954,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_reset(struct __
  */
   __pyx_v_self->_active_count = 0;
 
-  /* "monitor_kernels.pyx":133
+  /* "monitor_kernels.pyx":169
  *         self._size = 0
  *         self._active_count = 0
  *         self._frontier_count = 0             # <<<<<<<<<<<<<<
@@ -21413,7 +20963,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_reset(struct __
  */
   __pyx_v_self->_frontier_count = 0;
 
-  /* "monitor_kernels.pyx":134
+  /* "monitor_kernels.pyx":170
  *         self._active_count = 0
  *         self._frontier_count = 0
  *         self._next_frontier_count = 0             # <<<<<<<<<<<<<<
@@ -21422,7 +20972,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_reset(struct __
  */
   __pyx_v_self->_next_frontier_count = 0;
 
-  /* "monitor_kernels.pyx":135
+  /* "monitor_kernels.pyx":171
  *         self._frontier_count = 0
  *         self._next_frontier_count = 0
  *         self._status_count = 0             # <<<<<<<<<<<<<<
@@ -21431,7 +20981,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_reset(struct __
  */
   __pyx_v_self->_status_count = 0;
 
-  /* "monitor_kernels.pyx":136
+  /* "monitor_kernels.pyx":172
  *         self._next_frontier_count = 0
  *         self._status_count = 0
  *         self._anomaly_count = 0             # <<<<<<<<<<<<<<
@@ -21440,21 +20990,21 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_reset(struct __
  */
   __pyx_v_self->_anomaly_count = 0;
 
-  /* "monitor_kernels.pyx":137
+  /* "monitor_kernels.pyx":173
  *         self._status_count = 0
  *         self._anomaly_count = 0
  *         self._step_id = 0             # <<<<<<<<<<<<<<
  * 
- *     cdef Py_ssize_t _find_slot(self, int64_t s1, int64_t s2, int64_t lag):
+ *     cdef inline Py_ssize_t _find_slot(self, MonitorSlot* slots, int64_t s1, int64_t s2,
  */
   __pyx_v_self->_step_id = 0;
 
-  /* "monitor_kernels.pyx":125
- *         self._anomaly_rows_arr = np.empty((self._anomaly_capacity, 5), dtype=np.int64)
+  /* "monitor_kernels.pyx":165
+ *             self._slots[i].frontier_pos = -1
  * 
  *     cpdef reset(self):             # <<<<<<<<<<<<<<
- *         self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)
- *         self._active_arr = np.zeros(self._capacity, dtype=np.uint8)
+ *         self._alloc_slots(self._capacity)
+ *         self._size = 0
  */
 
   /* function exit code */
@@ -21465,7 +21015,6 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_reset(struct __
   __Pyx_XDECREF(__pyx_t_2);
   __Pyx_XDECREF(__pyx_t_3);
   __Pyx_XDECREF(__pyx_t_4);
-  __Pyx_XDECREF(__pyx_t_6);
   __Pyx_AddTraceback("monitor_kernels.NumericMonitorState.reset", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = 0;
   __pyx_L0:;
@@ -21524,7 +21073,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_2reset(struct 
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("reset", 1);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_reset(__pyx_v_self, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 125, __pyx_L1_error)
+  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_reset(__pyx_v_self, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 165, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
@@ -21541,139 +21090,77 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_2reset(struct 
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":139
+/* "monitor_kernels.pyx":175
  *         self._step_id = 0
  * 
- *     cdef Py_ssize_t _find_slot(self, int64_t s1, int64_t s2, int64_t lag):             # <<<<<<<<<<<<<<
- *         cdef uint8_t[:] occupied = self._occupied_arr
- *         cdef int64_t[:] key_s1 = self._key_s1_arr
+ *     cdef inline Py_ssize_t _find_slot(self, MonitorSlot* slots, int64_t s1, int64_t s2,             # <<<<<<<<<<<<<<
+ *                                       int64_t lag) noexcept nogil:
+ *         cdef Py_ssize_t mask = self._capacity - 1
  */
 
-static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState__find_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, int64_t __pyx_v_s1, int64_t __pyx_v_s2, int64_t __pyx_v_lag) {
-  __Pyx_memviewslice __pyx_v_occupied = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_key_s1 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_key_s2 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_key_lag = { 0, 0, { 0 }, { 0 }, { 0 } };
+static CYTHON_INLINE Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState__find_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_slots, int64_t __pyx_v_s1, int64_t __pyx_v_s2, int64_t __pyx_v_lag) {
   Py_ssize_t __pyx_v_mask;
   Py_ssize_t __pyx_v_idx;
   Py_ssize_t __pyx_r;
-  __Pyx_memviewslice __pyx_t_1 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_t_2 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  Py_ssize_t __pyx_t_3;
-  int __pyx_t_4;
-  int __pyx_t_5;
-  int __pyx_lineno = 0;
-  const char *__pyx_filename = NULL;
-  int __pyx_clineno = 0;
+  int __pyx_t_1;
+  int __pyx_t_2;
 
-  /* "monitor_kernels.pyx":140
- * 
- *     cdef Py_ssize_t _find_slot(self, int64_t s1, int64_t s2, int64_t lag):
- *         cdef uint8_t[:] occupied = self._occupied_arr             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] key_s1 = self._key_s1_arr
- *         cdef int64_t[:] key_s2 = self._key_s2_arr
- */
-  __pyx_t_1 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_self->_occupied_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_1.memview)) __PYX_ERR(0, 140, __pyx_L1_error)
-  __pyx_v_occupied = __pyx_t_1;
-  __pyx_t_1.memview = NULL;
-  __pyx_t_1.data = NULL;
-
-  /* "monitor_kernels.pyx":141
- *     cdef Py_ssize_t _find_slot(self, int64_t s1, int64_t s2, int64_t lag):
- *         cdef uint8_t[:] occupied = self._occupied_arr
- *         cdef int64_t[:] key_s1 = self._key_s1_arr             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] key_s2 = self._key_s2_arr
- *         cdef int64_t[:] key_lag = self._key_lag_arr
- */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s1_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 141, __pyx_L1_error)
-  __pyx_v_key_s1 = __pyx_t_2;
-  __pyx_t_2.memview = NULL;
-  __pyx_t_2.data = NULL;
-
-  /* "monitor_kernels.pyx":142
- *         cdef uint8_t[:] occupied = self._occupied_arr
- *         cdef int64_t[:] key_s1 = self._key_s1_arr
- *         cdef int64_t[:] key_s2 = self._key_s2_arr             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] key_lag = self._key_lag_arr
- *         cdef Py_ssize_t mask = self._capacity - 1
- */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s2_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 142, __pyx_L1_error)
-  __pyx_v_key_s2 = __pyx_t_2;
-  __pyx_t_2.memview = NULL;
-  __pyx_t_2.data = NULL;
-
-  /* "monitor_kernels.pyx":143
- *         cdef int64_t[:] key_s1 = self._key_s1_arr
- *         cdef int64_t[:] key_s2 = self._key_s2_arr
- *         cdef int64_t[:] key_lag = self._key_lag_arr             # <<<<<<<<<<<<<<
- *         cdef Py_ssize_t mask = self._capacity - 1
- *         cdef Py_ssize_t idx = <Py_ssize_t>(_monitor_hash_key(s1, s2, lag) & <uint64_t>mask)
- */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_lag_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 143, __pyx_L1_error)
-  __pyx_v_key_lag = __pyx_t_2;
-  __pyx_t_2.memview = NULL;
-  __pyx_t_2.data = NULL;
-
-  /* "monitor_kernels.pyx":144
- *         cdef int64_t[:] key_s2 = self._key_s2_arr
- *         cdef int64_t[:] key_lag = self._key_lag_arr
+  /* "monitor_kernels.pyx":177
+ *     cdef inline Py_ssize_t _find_slot(self, MonitorSlot* slots, int64_t s1, int64_t s2,
+ *                                       int64_t lag) noexcept nogil:
  *         cdef Py_ssize_t mask = self._capacity - 1             # <<<<<<<<<<<<<<
  *         cdef Py_ssize_t idx = <Py_ssize_t>(_monitor_hash_key(s1, s2, lag) & <uint64_t>mask)
- *         while occupied[idx] != 0:
+ *         while slots[idx].occupied != 0:
  */
   __pyx_v_mask = (__pyx_v_self->_capacity - 1);
 
-  /* "monitor_kernels.pyx":145
- *         cdef int64_t[:] key_lag = self._key_lag_arr
+  /* "monitor_kernels.pyx":178
+ *                                       int64_t lag) noexcept nogil:
  *         cdef Py_ssize_t mask = self._capacity - 1
  *         cdef Py_ssize_t idx = <Py_ssize_t>(_monitor_hash_key(s1, s2, lag) & <uint64_t>mask)             # <<<<<<<<<<<<<<
- *         while occupied[idx] != 0:
- *             if key_s1[idx] == s1 and key_s2[idx] == s2 and key_lag[idx] == lag:
+ *         while slots[idx].occupied != 0:
+ *             if slots[idx].s1 == s1 and slots[idx].s2 == s2 and slots[idx].lag == lag:
  */
   __pyx_v_idx = ((Py_ssize_t)(__pyx_f_15monitor_kernels__monitor_hash_key(__pyx_v_s1, __pyx_v_s2, __pyx_v_lag) & ((uint64_t)__pyx_v_mask)));
 
-  /* "monitor_kernels.pyx":146
+  /* "monitor_kernels.pyx":179
  *         cdef Py_ssize_t mask = self._capacity - 1
  *         cdef Py_ssize_t idx = <Py_ssize_t>(_monitor_hash_key(s1, s2, lag) & <uint64_t>mask)
- *         while occupied[idx] != 0:             # <<<<<<<<<<<<<<
- *             if key_s1[idx] == s1 and key_s2[idx] == s2 and key_lag[idx] == lag:
+ *         while slots[idx].occupied != 0:             # <<<<<<<<<<<<<<
+ *             if slots[idx].s1 == s1 and slots[idx].s2 == s2 and slots[idx].lag == lag:
  *                 return idx
  */
   while (1) {
-    __pyx_t_3 = __pyx_v_idx;
-    __pyx_t_4 = ((*((uint8_t *) ( /* dim=0 */ (__pyx_v_occupied.data + __pyx_t_3 * __pyx_v_occupied.strides[0]) ))) != 0);
-    if (!__pyx_t_4) break;
+    __pyx_t_1 = ((__pyx_v_slots[__pyx_v_idx]).occupied != 0);
+    if (!__pyx_t_1) break;
 
-    /* "monitor_kernels.pyx":147
+    /* "monitor_kernels.pyx":180
  *         cdef Py_ssize_t idx = <Py_ssize_t>(_monitor_hash_key(s1, s2, lag) & <uint64_t>mask)
- *         while occupied[idx] != 0:
- *             if key_s1[idx] == s1 and key_s2[idx] == s2 and key_lag[idx] == lag:             # <<<<<<<<<<<<<<
+ *         while slots[idx].occupied != 0:
+ *             if slots[idx].s1 == s1 and slots[idx].s2 == s2 and slots[idx].lag == lag:             # <<<<<<<<<<<<<<
  *                 return idx
  *             idx = (idx + 1) & mask
  */
-    __pyx_t_3 = __pyx_v_idx;
-    __pyx_t_5 = ((*((int64_t *) ( /* dim=0 */ (__pyx_v_key_s1.data + __pyx_t_3 * __pyx_v_key_s1.strides[0]) ))) == __pyx_v_s1);
-    if (__pyx_t_5) {
+    __pyx_t_2 = ((__pyx_v_slots[__pyx_v_idx]).s1 == __pyx_v_s1);
+    if (__pyx_t_2) {
     } else {
-      __pyx_t_4 = __pyx_t_5;
+      __pyx_t_1 = __pyx_t_2;
       goto __pyx_L6_bool_binop_done;
     }
-    __pyx_t_3 = __pyx_v_idx;
-    __pyx_t_5 = ((*((int64_t *) ( /* dim=0 */ (__pyx_v_key_s2.data + __pyx_t_3 * __pyx_v_key_s2.strides[0]) ))) == __pyx_v_s2);
-    if (__pyx_t_5) {
+    __pyx_t_2 = ((__pyx_v_slots[__pyx_v_idx]).s2 == __pyx_v_s2);
+    if (__pyx_t_2) {
     } else {
-      __pyx_t_4 = __pyx_t_5;
+      __pyx_t_1 = __pyx_t_2;
       goto __pyx_L6_bool_binop_done;
     }
-    __pyx_t_3 = __pyx_v_idx;
-    __pyx_t_5 = ((*((int64_t *) ( /* dim=0 */ (__pyx_v_key_lag.data + __pyx_t_3 * __pyx_v_key_lag.strides[0]) ))) == __pyx_v_lag);
-    __pyx_t_4 = __pyx_t_5;
+    __pyx_t_2 = ((__pyx_v_slots[__pyx_v_idx]).lag == __pyx_v_lag);
+    __pyx_t_1 = __pyx_t_2;
     __pyx_L6_bool_binop_done:;
-    if (__pyx_t_4) {
+    if (__pyx_t_1) {
 
-      /* "monitor_kernels.pyx":148
- *         while occupied[idx] != 0:
- *             if key_s1[idx] == s1 and key_s2[idx] == s2 and key_lag[idx] == lag:
+      /* "monitor_kernels.pyx":181
+ *         while slots[idx].occupied != 0:
+ *             if slots[idx].s1 == s1 and slots[idx].s2 == s2 and slots[idx].lag == lag:
  *                 return idx             # <<<<<<<<<<<<<<
  *             idx = (idx + 1) & mask
  *         return idx
@@ -21681,17 +21168,17 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState__find_slot(str
       __pyx_r = __pyx_v_idx;
       goto __pyx_L0;
 
-      /* "monitor_kernels.pyx":147
+      /* "monitor_kernels.pyx":180
  *         cdef Py_ssize_t idx = <Py_ssize_t>(_monitor_hash_key(s1, s2, lag) & <uint64_t>mask)
- *         while occupied[idx] != 0:
- *             if key_s1[idx] == s1 and key_s2[idx] == s2 and key_lag[idx] == lag:             # <<<<<<<<<<<<<<
+ *         while slots[idx].occupied != 0:
+ *             if slots[idx].s1 == s1 and slots[idx].s2 == s2 and slots[idx].lag == lag:             # <<<<<<<<<<<<<<
  *                 return idx
  *             idx = (idx + 1) & mask
  */
     }
 
-    /* "monitor_kernels.pyx":149
- *             if key_s1[idx] == s1 and key_s2[idx] == s2 and key_lag[idx] == lag:
+    /* "monitor_kernels.pyx":182
+ *             if slots[idx].s1 == s1 and slots[idx].s2 == s2 and slots[idx].lag == lag:
  *                 return idx
  *             idx = (idx + 1) & mask             # <<<<<<<<<<<<<<
  *         return idx
@@ -21700,7 +21187,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState__find_slot(str
     __pyx_v_idx = ((__pyx_v_idx + 1) & __pyx_v_mask);
   }
 
-  /* "monitor_kernels.pyx":150
+  /* "monitor_kernels.pyx":183
  *                 return idx
  *             idx = (idx + 1) & mask
  *         return idx             # <<<<<<<<<<<<<<
@@ -21710,61 +21197,32 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState__find_slot(str
   __pyx_r = __pyx_v_idx;
   goto __pyx_L0;
 
-  /* "monitor_kernels.pyx":139
+  /* "monitor_kernels.pyx":175
  *         self._step_id = 0
  * 
- *     cdef Py_ssize_t _find_slot(self, int64_t s1, int64_t s2, int64_t lag):             # <<<<<<<<<<<<<<
- *         cdef uint8_t[:] occupied = self._occupied_arr
- *         cdef int64_t[:] key_s1 = self._key_s1_arr
+ *     cdef inline Py_ssize_t _find_slot(self, MonitorSlot* slots, int64_t s1, int64_t s2,             # <<<<<<<<<<<<<<
+ *                                       int64_t lag) noexcept nogil:
+ *         cdef Py_ssize_t mask = self._capacity - 1
  */
 
   /* function exit code */
-  __pyx_L1_error:;
-  __PYX_XCLEAR_MEMVIEW(&__pyx_t_1, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_t_2, 1);
-  __Pyx_AddTraceback("monitor_kernels.NumericMonitorState._find_slot", __pyx_clineno, __pyx_lineno, __pyx_filename);
-  __pyx_r = 0;
   __pyx_L0:;
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_occupied, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_key_s1, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_key_s2, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_key_lag, 1);
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":152
+/* "monitor_kernels.pyx":185
  *         return idx
  * 
  *     cdef void _rehash(self, Py_ssize_t new_capacity, bint keep_inactive):             # <<<<<<<<<<<<<<
- *         cdef object old_occupied_obj = self._occupied_arr
- *         cdef object old_active_obj = self._active_arr
+ *         cdef object old_buf = self._slots_buf
+ *         cdef MonitorSlot* old = self._slots
  */
 
 static void __pyx_f_15monitor_kernels_19NumericMonitorState__rehash(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_new_capacity, int __pyx_v_keep_inactive) {
-  PyObject *__pyx_v_old_occupied_obj = 0;
-  PyObject *__pyx_v_old_active_obj = 0;
+  CYTHON_UNUSED PyObject *__pyx_v_old_buf = 0;
+  struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_old;
   PyObject *__pyx_v_old_frontier_obj = 0;
-  PyObject *__pyx_v_old_s1_obj = 0;
-  PyObject *__pyx_v_old_s2_obj = 0;
-  PyObject *__pyx_v_old_lag_obj = 0;
-  PyObject *__pyx_v_old_t1_obj = 0;
-  PyObject *__pyx_v_old_t2_obj = 0;
-  PyObject *__pyx_v_old_window_obj = 0;
-  PyObject *__pyx_v_old_length_obj = 0;
-  PyObject *__pyx_v_old_sign_obj = 0;
-  PyObject *__pyx_v_old_seen_obj = 0;
-  __Pyx_memviewslice __pyx_v_old_occupied = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_old_active = { 0, 0, { 0 }, { 0 }, { 0 } };
   __Pyx_memviewslice __pyx_v_old_frontier = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_old_s1 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_old_s2 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_old_lag = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_old_t1 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_old_t2 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_old_window = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_old_length = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_old_sign = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_old_seen = { 0, 0, { 0 }, { 0 }, { 0 } };
   Py_ssize_t __pyx_v_old_capacity;
   Py_ssize_t __pyx_v_old_frontier_count;
   Py_ssize_t __pyx_v_old_i;
@@ -21772,24 +21230,12 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__rehash(struct __pyx
   Py_ssize_t __pyx_v_idx;
   Py_ssize_t __pyx_v_mask;
   Py_ssize_t __pyx_v_pos;
-  __Pyx_memviewslice __pyx_v_occupied = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_active = { 0, 0, { 0 }, { 0 }, { 0 } };
+  struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_slots;
   __Pyx_memviewslice __pyx_v_active_slots = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_active_pos = { 0, 0, { 0 }, { 0 }, { 0 } };
   __Pyx_memviewslice __pyx_v_frontier_slots = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_frontier_pos = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_key_s1 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_key_s2 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_key_lag = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_t1_arr = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_t2_arr = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_window_arr = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_length_arr = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_sign_arr = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_seen_arr = { 0, 0, { 0 }, { 0 }, { 0 } };
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
-  __Pyx_memviewslice __pyx_t_2 = { 0, 0, { 0 }, { 0 }, { 0 } };
+  struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_t_2;
   __Pyx_memviewslice __pyx_t_3 = { 0, 0, { 0 }, { 0 }, { 0 } };
   Py_ssize_t __pyx_t_4;
   PyObject *__pyx_t_5 = NULL;
@@ -21798,308 +21244,66 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__rehash(struct __pyx
   PyObject *__pyx_t_8 = NULL;
   Py_ssize_t __pyx_t_9;
   Py_ssize_t __pyx_t_10;
-  Py_ssize_t __pyx_t_11;
+  int __pyx_t_11;
   int __pyx_t_12;
-  int __pyx_t_13;
-  Py_ssize_t __pyx_t_14;
-  Py_ssize_t __pyx_t_15;
+  int32_t __pyx_t_13;
+  int64_t __pyx_t_14;
+  int8_t __pyx_t_15;
   Py_ssize_t __pyx_t_16;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("_rehash", 1);
 
-  /* "monitor_kernels.pyx":153
+  /* "monitor_kernels.pyx":186
  * 
  *     cdef void _rehash(self, Py_ssize_t new_capacity, bint keep_inactive):
- *         cdef object old_occupied_obj = self._occupied_arr             # <<<<<<<<<<<<<<
- *         cdef object old_active_obj = self._active_arr
+ *         cdef object old_buf = self._slots_buf             # <<<<<<<<<<<<<<
+ *         cdef MonitorSlot* old = self._slots
  *         cdef object old_frontier_obj = self._frontier_slots_arr
  */
-  __pyx_t_1 = __pyx_v_self->_occupied_arr;
+  __pyx_t_1 = __pyx_v_self->_slots_buf;
   __Pyx_INCREF(__pyx_t_1);
-  __pyx_v_old_occupied_obj = __pyx_t_1;
+  __pyx_v_old_buf = __pyx_t_1;
   __pyx_t_1 = 0;
 
-  /* "monitor_kernels.pyx":154
+  /* "monitor_kernels.pyx":187
  *     cdef void _rehash(self, Py_ssize_t new_capacity, bint keep_inactive):
- *         cdef object old_occupied_obj = self._occupied_arr
- *         cdef object old_active_obj = self._active_arr             # <<<<<<<<<<<<<<
+ *         cdef object old_buf = self._slots_buf
+ *         cdef MonitorSlot* old = self._slots             # <<<<<<<<<<<<<<
  *         cdef object old_frontier_obj = self._frontier_slots_arr
- *         cdef object old_s1_obj = self._key_s1_arr
+ *         cdef int64_t[:] old_frontier = old_frontier_obj
  */
-  __pyx_t_1 = __pyx_v_self->_active_arr;
-  __Pyx_INCREF(__pyx_t_1);
-  __pyx_v_old_active_obj = __pyx_t_1;
-  __pyx_t_1 = 0;
+  __pyx_t_2 = __pyx_v_self->_slots;
+  __pyx_v_old = __pyx_t_2;
 
-  /* "monitor_kernels.pyx":155
- *         cdef object old_occupied_obj = self._occupied_arr
- *         cdef object old_active_obj = self._active_arr
+  /* "monitor_kernels.pyx":188
+ *         cdef object old_buf = self._slots_buf
+ *         cdef MonitorSlot* old = self._slots
  *         cdef object old_frontier_obj = self._frontier_slots_arr             # <<<<<<<<<<<<<<
- *         cdef object old_s1_obj = self._key_s1_arr
- *         cdef object old_s2_obj = self._key_s2_arr
+ *         cdef int64_t[:] old_frontier = old_frontier_obj
+ *         cdef Py_ssize_t old_capacity = self._capacity
  */
   __pyx_t_1 = __pyx_v_self->_frontier_slots_arr;
   __Pyx_INCREF(__pyx_t_1);
   __pyx_v_old_frontier_obj = __pyx_t_1;
   __pyx_t_1 = 0;
 
-  /* "monitor_kernels.pyx":156
- *         cdef object old_active_obj = self._active_arr
+  /* "monitor_kernels.pyx":189
+ *         cdef MonitorSlot* old = self._slots
  *         cdef object old_frontier_obj = self._frontier_slots_arr
- *         cdef object old_s1_obj = self._key_s1_arr             # <<<<<<<<<<<<<<
- *         cdef object old_s2_obj = self._key_s2_arr
- *         cdef object old_lag_obj = self._key_lag_arr
- */
-  __pyx_t_1 = __pyx_v_self->_key_s1_arr;
-  __Pyx_INCREF(__pyx_t_1);
-  __pyx_v_old_s1_obj = __pyx_t_1;
-  __pyx_t_1 = 0;
-
-  /* "monitor_kernels.pyx":157
- *         cdef object old_frontier_obj = self._frontier_slots_arr
- *         cdef object old_s1_obj = self._key_s1_arr
- *         cdef object old_s2_obj = self._key_s2_arr             # <<<<<<<<<<<<<<
- *         cdef object old_lag_obj = self._key_lag_arr
- *         cdef object old_t1_obj = self._t1_arr
- */
-  __pyx_t_1 = __pyx_v_self->_key_s2_arr;
-  __Pyx_INCREF(__pyx_t_1);
-  __pyx_v_old_s2_obj = __pyx_t_1;
-  __pyx_t_1 = 0;
-
-  /* "monitor_kernels.pyx":158
- *         cdef object old_s1_obj = self._key_s1_arr
- *         cdef object old_s2_obj = self._key_s2_arr
- *         cdef object old_lag_obj = self._key_lag_arr             # <<<<<<<<<<<<<<
- *         cdef object old_t1_obj = self._t1_arr
- *         cdef object old_t2_obj = self._t2_arr
- */
-  __pyx_t_1 = __pyx_v_self->_key_lag_arr;
-  __Pyx_INCREF(__pyx_t_1);
-  __pyx_v_old_lag_obj = __pyx_t_1;
-  __pyx_t_1 = 0;
-
-  /* "monitor_kernels.pyx":159
- *         cdef object old_s2_obj = self._key_s2_arr
- *         cdef object old_lag_obj = self._key_lag_arr
- *         cdef object old_t1_obj = self._t1_arr             # <<<<<<<<<<<<<<
- *         cdef object old_t2_obj = self._t2_arr
- *         cdef object old_window_obj = self._window_arr
- */
-  __pyx_t_1 = __pyx_v_self->_t1_arr;
-  __Pyx_INCREF(__pyx_t_1);
-  __pyx_v_old_t1_obj = __pyx_t_1;
-  __pyx_t_1 = 0;
-
-  /* "monitor_kernels.pyx":160
- *         cdef object old_lag_obj = self._key_lag_arr
- *         cdef object old_t1_obj = self._t1_arr
- *         cdef object old_t2_obj = self._t2_arr             # <<<<<<<<<<<<<<
- *         cdef object old_window_obj = self._window_arr
- *         cdef object old_length_obj = self._length_arr
- */
-  __pyx_t_1 = __pyx_v_self->_t2_arr;
-  __Pyx_INCREF(__pyx_t_1);
-  __pyx_v_old_t2_obj = __pyx_t_1;
-  __pyx_t_1 = 0;
-
-  /* "monitor_kernels.pyx":161
- *         cdef object old_t1_obj = self._t1_arr
- *         cdef object old_t2_obj = self._t2_arr
- *         cdef object old_window_obj = self._window_arr             # <<<<<<<<<<<<<<
- *         cdef object old_length_obj = self._length_arr
- *         cdef object old_sign_obj = self._sign_arr
- */
-  __pyx_t_1 = __pyx_v_self->_window_arr;
-  __Pyx_INCREF(__pyx_t_1);
-  __pyx_v_old_window_obj = __pyx_t_1;
-  __pyx_t_1 = 0;
-
-  /* "monitor_kernels.pyx":162
- *         cdef object old_t2_obj = self._t2_arr
- *         cdef object old_window_obj = self._window_arr
- *         cdef object old_length_obj = self._length_arr             # <<<<<<<<<<<<<<
- *         cdef object old_sign_obj = self._sign_arr
- *         cdef object old_seen_obj = self._seen_step_arr
- */
-  __pyx_t_1 = __pyx_v_self->_length_arr;
-  __Pyx_INCREF(__pyx_t_1);
-  __pyx_v_old_length_obj = __pyx_t_1;
-  __pyx_t_1 = 0;
-
-  /* "monitor_kernels.pyx":163
- *         cdef object old_window_obj = self._window_arr
- *         cdef object old_length_obj = self._length_arr
- *         cdef object old_sign_obj = self._sign_arr             # <<<<<<<<<<<<<<
- *         cdef object old_seen_obj = self._seen_step_arr
- *         cdef uint8_t[:] old_occupied = old_occupied_obj
- */
-  __pyx_t_1 = __pyx_v_self->_sign_arr;
-  __Pyx_INCREF(__pyx_t_1);
-  __pyx_v_old_sign_obj = __pyx_t_1;
-  __pyx_t_1 = 0;
-
-  /* "monitor_kernels.pyx":164
- *         cdef object old_length_obj = self._length_arr
- *         cdef object old_sign_obj = self._sign_arr
- *         cdef object old_seen_obj = self._seen_step_arr             # <<<<<<<<<<<<<<
- *         cdef uint8_t[:] old_occupied = old_occupied_obj
- *         cdef uint8_t[:] old_active = old_active_obj
- */
-  __pyx_t_1 = __pyx_v_self->_seen_step_arr;
-  __Pyx_INCREF(__pyx_t_1);
-  __pyx_v_old_seen_obj = __pyx_t_1;
-  __pyx_t_1 = 0;
-
-  /* "monitor_kernels.pyx":165
- *         cdef object old_sign_obj = self._sign_arr
- *         cdef object old_seen_obj = self._seen_step_arr
- *         cdef uint8_t[:] old_occupied = old_occupied_obj             # <<<<<<<<<<<<<<
- *         cdef uint8_t[:] old_active = old_active_obj
- *         cdef int64_t[:] old_frontier = old_frontier_obj
- */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_old_occupied_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 165, __pyx_L1_error)
-  __pyx_v_old_occupied = __pyx_t_2;
-  __pyx_t_2.memview = NULL;
-  __pyx_t_2.data = NULL;
-
-  /* "monitor_kernels.pyx":166
- *         cdef object old_seen_obj = self._seen_step_arr
- *         cdef uint8_t[:] old_occupied = old_occupied_obj
- *         cdef uint8_t[:] old_active = old_active_obj             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] old_frontier = old_frontier_obj
- *         cdef int64_t[:] old_s1 = old_s1_obj
- */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_old_active_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 166, __pyx_L1_error)
-  __pyx_v_old_active = __pyx_t_2;
-  __pyx_t_2.memview = NULL;
-  __pyx_t_2.data = NULL;
-
-  /* "monitor_kernels.pyx":167
- *         cdef uint8_t[:] old_occupied = old_occupied_obj
- *         cdef uint8_t[:] old_active = old_active_obj
  *         cdef int64_t[:] old_frontier = old_frontier_obj             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] old_s1 = old_s1_obj
- *         cdef int64_t[:] old_s2 = old_s2_obj
+ *         cdef Py_ssize_t old_capacity = self._capacity
+ *         cdef Py_ssize_t old_frontier_count = self._frontier_count
  */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_frontier_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 167, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_frontier_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 189, __pyx_L1_error)
   __pyx_v_old_frontier = __pyx_t_3;
   __pyx_t_3.memview = NULL;
   __pyx_t_3.data = NULL;
 
-  /* "monitor_kernels.pyx":168
- *         cdef uint8_t[:] old_active = old_active_obj
+  /* "monitor_kernels.pyx":190
+ *         cdef object old_frontier_obj = self._frontier_slots_arr
  *         cdef int64_t[:] old_frontier = old_frontier_obj
- *         cdef int64_t[:] old_s1 = old_s1_obj             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] old_s2 = old_s2_obj
- *         cdef int64_t[:] old_lag = old_lag_obj
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_s1_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 168, __pyx_L1_error)
-  __pyx_v_old_s1 = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":169
- *         cdef int64_t[:] old_frontier = old_frontier_obj
- *         cdef int64_t[:] old_s1 = old_s1_obj
- *         cdef int64_t[:] old_s2 = old_s2_obj             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] old_lag = old_lag_obj
- *         cdef int64_t[:] old_t1 = old_t1_obj
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_s2_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 169, __pyx_L1_error)
-  __pyx_v_old_s2 = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":170
- *         cdef int64_t[:] old_s1 = old_s1_obj
- *         cdef int64_t[:] old_s2 = old_s2_obj
- *         cdef int64_t[:] old_lag = old_lag_obj             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] old_t1 = old_t1_obj
- *         cdef int64_t[:] old_t2 = old_t2_obj
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_lag_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 170, __pyx_L1_error)
-  __pyx_v_old_lag = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":171
- *         cdef int64_t[:] old_s2 = old_s2_obj
- *         cdef int64_t[:] old_lag = old_lag_obj
- *         cdef int64_t[:] old_t1 = old_t1_obj             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] old_t2 = old_t2_obj
- *         cdef int64_t[:] old_window = old_window_obj
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_t1_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 171, __pyx_L1_error)
-  __pyx_v_old_t1 = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":172
- *         cdef int64_t[:] old_lag = old_lag_obj
- *         cdef int64_t[:] old_t1 = old_t1_obj
- *         cdef int64_t[:] old_t2 = old_t2_obj             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] old_window = old_window_obj
- *         cdef int64_t[:] old_length = old_length_obj
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_t2_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 172, __pyx_L1_error)
-  __pyx_v_old_t2 = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":173
- *         cdef int64_t[:] old_t1 = old_t1_obj
- *         cdef int64_t[:] old_t2 = old_t2_obj
- *         cdef int64_t[:] old_window = old_window_obj             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] old_length = old_length_obj
- *         cdef int64_t[:] old_sign = old_sign_obj
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_window_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 173, __pyx_L1_error)
-  __pyx_v_old_window = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":174
- *         cdef int64_t[:] old_t2 = old_t2_obj
- *         cdef int64_t[:] old_window = old_window_obj
- *         cdef int64_t[:] old_length = old_length_obj             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] old_sign = old_sign_obj
- *         cdef int64_t[:] old_seen = old_seen_obj
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_length_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 174, __pyx_L1_error)
-  __pyx_v_old_length = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":175
- *         cdef int64_t[:] old_window = old_window_obj
- *         cdef int64_t[:] old_length = old_length_obj
- *         cdef int64_t[:] old_sign = old_sign_obj             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] old_seen = old_seen_obj
- *         cdef Py_ssize_t old_capacity = self._capacity
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_sign_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 175, __pyx_L1_error)
-  __pyx_v_old_sign = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":176
- *         cdef int64_t[:] old_length = old_length_obj
- *         cdef int64_t[:] old_sign = old_sign_obj
- *         cdef int64_t[:] old_seen = old_seen_obj             # <<<<<<<<<<<<<<
- *         cdef Py_ssize_t old_capacity = self._capacity
- *         cdef Py_ssize_t old_frontier_count = self._frontier_count
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_seen_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 176, __pyx_L1_error)
-  __pyx_v_old_seen = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":177
- *         cdef int64_t[:] old_sign = old_sign_obj
- *         cdef int64_t[:] old_seen = old_seen_obj
  *         cdef Py_ssize_t old_capacity = self._capacity             # <<<<<<<<<<<<<<
  *         cdef Py_ssize_t old_frontier_count = self._frontier_count
  *         cdef Py_ssize_t old_i, old_slot, idx, mask, pos
@@ -22107,303 +21311,160 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__rehash(struct __pyx
   __pyx_t_4 = __pyx_v_self->_capacity;
   __pyx_v_old_capacity = __pyx_t_4;
 
-  /* "monitor_kernels.pyx":178
- *         cdef int64_t[:] old_seen = old_seen_obj
+  /* "monitor_kernels.pyx":191
+ *         cdef int64_t[:] old_frontier = old_frontier_obj
  *         cdef Py_ssize_t old_capacity = self._capacity
  *         cdef Py_ssize_t old_frontier_count = self._frontier_count             # <<<<<<<<<<<<<<
  *         cdef Py_ssize_t old_i, old_slot, idx, mask, pos
- *         cdef uint8_t[:] occupied
+ *         cdef MonitorSlot* slots
  */
   __pyx_t_4 = __pyx_v_self->_frontier_count;
   __pyx_v_old_frontier_count = __pyx_t_4;
 
-  /* "monitor_kernels.pyx":196
- *         cdef int64_t[:] seen_arr
+  /* "monitor_kernels.pyx":197
+ *         cdef int64_t[:] frontier_slots
  * 
  *         new_capacity = _monitor_next_power2(new_capacity)             # <<<<<<<<<<<<<<
  *         self._capacity = new_capacity
- *         self._occupied_arr = np.zeros(new_capacity, dtype=np.uint8)
+ *         self._alloc_slots(new_capacity)
  */
   __pyx_v_new_capacity = __pyx_f_15monitor_kernels__monitor_next_power2(__pyx_v_new_capacity);
 
-  /* "monitor_kernels.pyx":197
+  /* "monitor_kernels.pyx":198
  * 
  *         new_capacity = _monitor_next_power2(new_capacity)
  *         self._capacity = new_capacity             # <<<<<<<<<<<<<<
- *         self._occupied_arr = np.zeros(new_capacity, dtype=np.uint8)
- *         self._active_arr = np.zeros(new_capacity, dtype=np.uint8)
+ *         self._alloc_slots(new_capacity)
+ *         slots = self._slots
  */
   __pyx_v_self->_capacity = __pyx_v_new_capacity;
 
-  /* "monitor_kernels.pyx":198
+  /* "monitor_kernels.pyx":199
  *         new_capacity = _monitor_next_power2(new_capacity)
  *         self._capacity = new_capacity
- *         self._occupied_arr = np.zeros(new_capacity, dtype=np.uint8)             # <<<<<<<<<<<<<<
- *         self._active_arr = np.zeros(new_capacity, dtype=np.uint8)
+ *         self._alloc_slots(new_capacity)             # <<<<<<<<<<<<<<
+ *         slots = self._slots
  *         self._active_slots_arr = np.empty(new_capacity, dtype=np.int64)
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 198, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_zeros); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 198, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 198, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 198, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_1)) __PYX_ERR(0, 198, __pyx_L1_error);
-  __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 198, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_n_s_np); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 198, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_7, __pyx_n_s_uint8); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 198, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_8) < 0) __PYX_ERR(0, 198, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = __Pyx_PyObject_Call(__pyx_t_5, __pyx_t_6, __pyx_t_1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 198, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __Pyx_GIVEREF(__pyx_t_8);
-  __Pyx_GOTREF(__pyx_v_self->_occupied_arr);
-  __Pyx_DECREF(__pyx_v_self->_occupied_arr);
-  __pyx_v_self->_occupied_arr = __pyx_t_8;
-  __pyx_t_8 = 0;
-
-  /* "monitor_kernels.pyx":199
- *         self._capacity = new_capacity
- *         self._occupied_arr = np.zeros(new_capacity, dtype=np.uint8)
- *         self._active_arr = np.zeros(new_capacity, dtype=np.uint8)             # <<<<<<<<<<<<<<
- *         self._active_slots_arr = np.empty(new_capacity, dtype=np.int64)
- *         self._active_pos_arr = np.full(new_capacity, -1, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_n_s_np); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 199, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_zeros); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 199, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 199, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 199, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_8);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_8)) __PYX_ERR(0, 199, __pyx_L1_error);
-  __pyx_t_8 = 0;
-  __pyx_t_8 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 199, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 199, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_uint8); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 199, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_t_8, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 199, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_6, __pyx_t_8); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 199, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __Pyx_GIVEREF(__pyx_t_7);
-  __Pyx_GOTREF(__pyx_v_self->_active_arr);
-  __Pyx_DECREF(__pyx_v_self->_active_arr);
-  __pyx_v_self->_active_arr = __pyx_t_7;
-  __pyx_t_7 = 0;
+  ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_alloc_slots(__pyx_v_self, __pyx_v_new_capacity); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 199, __pyx_L1_error)
 
   /* "monitor_kernels.pyx":200
- *         self._occupied_arr = np.zeros(new_capacity, dtype=np.uint8)
- *         self._active_arr = np.zeros(new_capacity, dtype=np.uint8)
- *         self._active_slots_arr = np.empty(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._active_pos_arr = np.full(new_capacity, -1, dtype=np.int64)
+ *         self._capacity = new_capacity
+ *         self._alloc_slots(new_capacity)
+ *         slots = self._slots             # <<<<<<<<<<<<<<
+ *         self._active_slots_arr = np.empty(new_capacity, dtype=np.int64)
  *         self._frontier_slots_arr = np.empty(new_capacity, dtype=np.int64)
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_n_s_np); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 200, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_7, __pyx_n_s_empty); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 200, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 200, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 200, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_7);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_7)) __PYX_ERR(0, 200, __pyx_L1_error);
-  __pyx_t_7 = 0;
-  __pyx_t_7 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 200, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 200, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_int64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 200, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  if (PyDict_SetItem(__pyx_t_7, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 200, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_8, __pyx_t_6, __pyx_t_7); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 200, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __Pyx_GIVEREF(__pyx_t_5);
-  __Pyx_GOTREF(__pyx_v_self->_active_slots_arr);
-  __Pyx_DECREF(__pyx_v_self->_active_slots_arr);
-  __pyx_v_self->_active_slots_arr = __pyx_t_5;
-  __pyx_t_5 = 0;
+  __pyx_t_2 = __pyx_v_self->_slots;
+  __pyx_v_slots = __pyx_t_2;
 
   /* "monitor_kernels.pyx":201
- *         self._active_arr = np.zeros(new_capacity, dtype=np.uint8)
- *         self._active_slots_arr = np.empty(new_capacity, dtype=np.int64)
- *         self._active_pos_arr = np.full(new_capacity, -1, dtype=np.int64)             # <<<<<<<<<<<<<<
+ *         self._alloc_slots(new_capacity)
+ *         slots = self._slots
+ *         self._active_slots_arr = np.empty(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
  *         self._frontier_slots_arr = np.empty(new_capacity, dtype=np.int64)
- *         self._frontier_pos_arr = np.full(new_capacity, -1, dtype=np.int64)
+ *         self._next_frontier_slots_arr = np.empty(new_capacity, dtype=np.int64)
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 201, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_full); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 201, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 201, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = PyTuple_New(2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 201, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_5)) __PYX_ERR(0, 201, __pyx_L1_error);
-  __Pyx_INCREF(__pyx_int_neg_1);
-  __Pyx_GIVEREF(__pyx_int_neg_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 1, __pyx_int_neg_1)) __PYX_ERR(0, 201, __pyx_L1_error);
-  __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 201, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_n_s_np); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 201, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_int64); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 201, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 201, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_1) < 0) __PYX_ERR(0, 201, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_empty); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 201, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_7, __pyx_t_6, __pyx_t_5); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 201, __pyx_L1_error)
+  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 201, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 201, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
   __Pyx_GIVEREF(__pyx_t_1);
-  __Pyx_GOTREF(__pyx_v_self->_active_pos_arr);
-  __Pyx_DECREF(__pyx_v_self->_active_pos_arr);
-  __pyx_v_self->_active_pos_arr = __pyx_t_1;
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_1)) __PYX_ERR(0, 201, __pyx_L1_error);
   __pyx_t_1 = 0;
+  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 201, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_n_s_np); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 201, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_7, __pyx_n_s_int64); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 201, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_8);
+  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_8) < 0) __PYX_ERR(0, 201, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+  __pyx_t_8 = __Pyx_PyObject_Call(__pyx_t_5, __pyx_t_6, __pyx_t_1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 201, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_8);
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+  __Pyx_GIVEREF(__pyx_t_8);
+  __Pyx_GOTREF(__pyx_v_self->_active_slots_arr);
+  __Pyx_DECREF(__pyx_v_self->_active_slots_arr);
+  __pyx_v_self->_active_slots_arr = __pyx_t_8;
+  __pyx_t_8 = 0;
 
   /* "monitor_kernels.pyx":202
+ *         slots = self._slots
  *         self._active_slots_arr = np.empty(new_capacity, dtype=np.int64)
- *         self._active_pos_arr = np.full(new_capacity, -1, dtype=np.int64)
  *         self._frontier_slots_arr = np.empty(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._frontier_pos_arr = np.full(new_capacity, -1, dtype=np.int64)
  *         self._next_frontier_slots_arr = np.empty(new_capacity, dtype=np.int64)
+ *         active_slots = self._active_slots_arr
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 202, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_n_s_np); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 202, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_8);
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_empty); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 202, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_empty); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 202, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 202, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
+  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+  __pyx_t_8 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 202, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_8);
   __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 202, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_1)) __PYX_ERR(0, 202, __pyx_L1_error);
-  __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 202, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_n_s_np); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 202, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_7, __pyx_n_s_int64); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 202, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_8) < 0) __PYX_ERR(0, 202, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = __Pyx_PyObject_Call(__pyx_t_5, __pyx_t_6, __pyx_t_1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 202, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __Pyx_GIVEREF(__pyx_t_8);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_8)) __PYX_ERR(0, 202, __pyx_L1_error);
+  __pyx_t_8 = 0;
+  __pyx_t_8 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 202, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_8);
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 202, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_int64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 202, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+  if (PyDict_SetItem(__pyx_t_8, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 202, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_6, __pyx_t_8); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 202, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_7);
+  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+  __Pyx_GIVEREF(__pyx_t_7);
   __Pyx_GOTREF(__pyx_v_self->_frontier_slots_arr);
   __Pyx_DECREF(__pyx_v_self->_frontier_slots_arr);
-  __pyx_v_self->_frontier_slots_arr = __pyx_t_8;
-  __pyx_t_8 = 0;
+  __pyx_v_self->_frontier_slots_arr = __pyx_t_7;
+  __pyx_t_7 = 0;
 
   /* "monitor_kernels.pyx":203
- *         self._active_pos_arr = np.full(new_capacity, -1, dtype=np.int64)
+ *         self._active_slots_arr = np.empty(new_capacity, dtype=np.int64)
  *         self._frontier_slots_arr = np.empty(new_capacity, dtype=np.int64)
- *         self._frontier_pos_arr = np.full(new_capacity, -1, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._next_frontier_slots_arr = np.empty(new_capacity, dtype=np.int64)
- *         self._queued_step_arr = np.zeros(new_capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_n_s_np); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 203, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_full); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 203, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 203, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_6 = PyTuple_New(2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 203, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_8);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_8)) __PYX_ERR(0, 203, __pyx_L1_error);
-  __Pyx_INCREF(__pyx_int_neg_1);
-  __Pyx_GIVEREF(__pyx_int_neg_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 1, __pyx_int_neg_1)) __PYX_ERR(0, 203, __pyx_L1_error);
-  __pyx_t_8 = 0;
-  __pyx_t_8 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 203, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 203, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_int64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 203, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_t_8, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 203, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_6, __pyx_t_8); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 203, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __Pyx_GIVEREF(__pyx_t_7);
-  __Pyx_GOTREF(__pyx_v_self->_frontier_pos_arr);
-  __Pyx_DECREF(__pyx_v_self->_frontier_pos_arr);
-  __pyx_v_self->_frontier_pos_arr = __pyx_t_7;
-  __pyx_t_7 = 0;
-
-  /* "monitor_kernels.pyx":204
- *         self._frontier_slots_arr = np.empty(new_capacity, dtype=np.int64)
- *         self._frontier_pos_arr = np.full(new_capacity, -1, dtype=np.int64)
  *         self._next_frontier_slots_arr = np.empty(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._queued_step_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._key_s1_arr = np.zeros(new_capacity, dtype=np.int64)
+ *         active_slots = self._active_slots_arr
+ *         frontier_slots = self._frontier_slots_arr
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_n_s_np); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 204, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_n_s_np); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 203, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_7, __pyx_n_s_empty); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 204, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_7, __pyx_n_s_empty); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 203, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 204, __pyx_L1_error)
+  __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 203, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 204, __pyx_L1_error)
+  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 203, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_GIVEREF(__pyx_t_7);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_7)) __PYX_ERR(0, 204, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_7)) __PYX_ERR(0, 203, __pyx_L1_error);
   __pyx_t_7 = 0;
-  __pyx_t_7 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 204, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 203, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 204, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 203, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_int64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 204, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_int64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 203, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  if (PyDict_SetItem(__pyx_t_7, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 204, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_7, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 203, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_8, __pyx_t_6, __pyx_t_7); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 204, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_8, __pyx_t_6, __pyx_t_7); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 203, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
@@ -22414,587 +21475,41 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__rehash(struct __pyx
   __pyx_v_self->_next_frontier_slots_arr = __pyx_t_5;
   __pyx_t_5 = 0;
 
-  /* "monitor_kernels.pyx":205
- *         self._frontier_pos_arr = np.full(new_capacity, -1, dtype=np.int64)
+  /* "monitor_kernels.pyx":204
+ *         self._frontier_slots_arr = np.empty(new_capacity, dtype=np.int64)
  *         self._next_frontier_slots_arr = np.empty(new_capacity, dtype=np.int64)
- *         self._queued_step_arr = np.zeros(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._key_s1_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._key_s2_arr = np.zeros(new_capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 205, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_zeros); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 205, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 205, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 205, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_5)) __PYX_ERR(0, 205, __pyx_L1_error);
-  __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 205, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_n_s_np); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 205, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_int64); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 205, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_1) < 0) __PYX_ERR(0, 205, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_7, __pyx_t_6, __pyx_t_5); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 205, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_GIVEREF(__pyx_t_1);
-  __Pyx_GOTREF(__pyx_v_self->_queued_step_arr);
-  __Pyx_DECREF(__pyx_v_self->_queued_step_arr);
-  __pyx_v_self->_queued_step_arr = __pyx_t_1;
-  __pyx_t_1 = 0;
-
-  /* "monitor_kernels.pyx":206
- *         self._next_frontier_slots_arr = np.empty(new_capacity, dtype=np.int64)
- *         self._queued_step_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._key_s1_arr = np.zeros(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._key_s2_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._key_lag_arr = np.zeros(new_capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 206, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_zeros); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 206, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 206, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 206, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_1)) __PYX_ERR(0, 206, __pyx_L1_error);
-  __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 206, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_n_s_np); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 206, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_7, __pyx_n_s_int64); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 206, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_8) < 0) __PYX_ERR(0, 206, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = __Pyx_PyObject_Call(__pyx_t_5, __pyx_t_6, __pyx_t_1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 206, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __Pyx_GIVEREF(__pyx_t_8);
-  __Pyx_GOTREF(__pyx_v_self->_key_s1_arr);
-  __Pyx_DECREF(__pyx_v_self->_key_s1_arr);
-  __pyx_v_self->_key_s1_arr = __pyx_t_8;
-  __pyx_t_8 = 0;
-
-  /* "monitor_kernels.pyx":207
- *         self._queued_step_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._key_s1_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._key_s2_arr = np.zeros(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._key_lag_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._t1_arr = np.zeros(new_capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_n_s_np); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 207, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_zeros); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 207, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 207, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 207, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_8);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_8)) __PYX_ERR(0, 207, __pyx_L1_error);
-  __pyx_t_8 = 0;
-  __pyx_t_8 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 207, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 207, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_int64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 207, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_t_8, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 207, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_6, __pyx_t_8); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 207, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __Pyx_GIVEREF(__pyx_t_7);
-  __Pyx_GOTREF(__pyx_v_self->_key_s2_arr);
-  __Pyx_DECREF(__pyx_v_self->_key_s2_arr);
-  __pyx_v_self->_key_s2_arr = __pyx_t_7;
-  __pyx_t_7 = 0;
-
-  /* "monitor_kernels.pyx":208
- *         self._key_s1_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._key_s2_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._key_lag_arr = np.zeros(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._t1_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._t2_arr = np.zeros(new_capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_n_s_np); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 208, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_7, __pyx_n_s_zeros); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 208, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 208, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 208, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_7);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_7)) __PYX_ERR(0, 208, __pyx_L1_error);
-  __pyx_t_7 = 0;
-  __pyx_t_7 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 208, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 208, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_int64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 208, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  if (PyDict_SetItem(__pyx_t_7, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 208, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_8, __pyx_t_6, __pyx_t_7); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 208, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __Pyx_GIVEREF(__pyx_t_5);
-  __Pyx_GOTREF(__pyx_v_self->_key_lag_arr);
-  __Pyx_DECREF(__pyx_v_self->_key_lag_arr);
-  __pyx_v_self->_key_lag_arr = __pyx_t_5;
-  __pyx_t_5 = 0;
-
-  /* "monitor_kernels.pyx":209
- *         self._key_s2_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._key_lag_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._t1_arr = np.zeros(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._t2_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._window_arr = np.zeros(new_capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 209, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_zeros); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 209, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 209, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 209, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_5)) __PYX_ERR(0, 209, __pyx_L1_error);
-  __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 209, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_n_s_np); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 209, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_int64); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 209, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_1) < 0) __PYX_ERR(0, 209, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_7, __pyx_t_6, __pyx_t_5); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 209, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_GIVEREF(__pyx_t_1);
-  __Pyx_GOTREF(__pyx_v_self->_t1_arr);
-  __Pyx_DECREF(__pyx_v_self->_t1_arr);
-  __pyx_v_self->_t1_arr = __pyx_t_1;
-  __pyx_t_1 = 0;
-
-  /* "monitor_kernels.pyx":210
- *         self._key_lag_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._t1_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._t2_arr = np.zeros(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._window_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._length_arr = np.zeros(new_capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 210, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_zeros); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 210, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 210, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 210, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_1)) __PYX_ERR(0, 210, __pyx_L1_error);
-  __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 210, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_n_s_np); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 210, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_7, __pyx_n_s_int64); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 210, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_8) < 0) __PYX_ERR(0, 210, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = __Pyx_PyObject_Call(__pyx_t_5, __pyx_t_6, __pyx_t_1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 210, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __Pyx_GIVEREF(__pyx_t_8);
-  __Pyx_GOTREF(__pyx_v_self->_t2_arr);
-  __Pyx_DECREF(__pyx_v_self->_t2_arr);
-  __pyx_v_self->_t2_arr = __pyx_t_8;
-  __pyx_t_8 = 0;
-
-  /* "monitor_kernels.pyx":211
- *         self._t1_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._t2_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._window_arr = np.zeros(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._length_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._sign_arr = np.zeros(new_capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_n_s_np); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 211, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_zeros); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 211, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 211, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 211, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_8);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_8)) __PYX_ERR(0, 211, __pyx_L1_error);
-  __pyx_t_8 = 0;
-  __pyx_t_8 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 211, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 211, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_int64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 211, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_t_8, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 211, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_6, __pyx_t_8); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 211, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __Pyx_GIVEREF(__pyx_t_7);
-  __Pyx_GOTREF(__pyx_v_self->_window_arr);
-  __Pyx_DECREF(__pyx_v_self->_window_arr);
-  __pyx_v_self->_window_arr = __pyx_t_7;
-  __pyx_t_7 = 0;
-
-  /* "monitor_kernels.pyx":212
- *         self._t2_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._window_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._length_arr = np.zeros(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._sign_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._seen_step_arr = np.zeros(new_capacity, dtype=np.int64)
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_n_s_np); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 212, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_7, __pyx_n_s_zeros); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 212, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 212, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 212, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_7);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_7)) __PYX_ERR(0, 212, __pyx_L1_error);
-  __pyx_t_7 = 0;
-  __pyx_t_7 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 212, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 212, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_int64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 212, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  if (PyDict_SetItem(__pyx_t_7, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 212, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_8, __pyx_t_6, __pyx_t_7); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 212, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __Pyx_GIVEREF(__pyx_t_5);
-  __Pyx_GOTREF(__pyx_v_self->_length_arr);
-  __Pyx_DECREF(__pyx_v_self->_length_arr);
-  __pyx_v_self->_length_arr = __pyx_t_5;
-  __pyx_t_5 = 0;
-
-  /* "monitor_kernels.pyx":213
- *         self._window_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._length_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._sign_arr = np.zeros(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- *         self._seen_step_arr = np.zeros(new_capacity, dtype=np.int64)
- * 
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 213, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_zeros); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 213, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 213, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 213, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_5)) __PYX_ERR(0, 213, __pyx_L1_error);
-  __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 213, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_n_s_np); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 213, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_int64); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 213, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_1) < 0) __PYX_ERR(0, 213, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_7, __pyx_t_6, __pyx_t_5); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 213, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_GIVEREF(__pyx_t_1);
-  __Pyx_GOTREF(__pyx_v_self->_sign_arr);
-  __Pyx_DECREF(__pyx_v_self->_sign_arr);
-  __pyx_v_self->_sign_arr = __pyx_t_1;
-  __pyx_t_1 = 0;
-
-  /* "monitor_kernels.pyx":214
- *         self._length_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._sign_arr = np.zeros(new_capacity, dtype=np.int64)
- *         self._seen_step_arr = np.zeros(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
- * 
- *         occupied = self._occupied_arr
- */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 214, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_zeros); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 214, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 214, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_6 = PyTuple_New(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 214, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GIVEREF(__pyx_t_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_1)) __PYX_ERR(0, 214, __pyx_L1_error);
-  __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 214, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_n_s_np); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 214, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_7, __pyx_n_s_int64); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 214, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_8) < 0) __PYX_ERR(0, 214, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = __Pyx_PyObject_Call(__pyx_t_5, __pyx_t_6, __pyx_t_1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 214, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __Pyx_GIVEREF(__pyx_t_8);
-  __Pyx_GOTREF(__pyx_v_self->_seen_step_arr);
-  __Pyx_DECREF(__pyx_v_self->_seen_step_arr);
-  __pyx_v_self->_seen_step_arr = __pyx_t_8;
-  __pyx_t_8 = 0;
-
-  /* "monitor_kernels.pyx":216
- *         self._seen_step_arr = np.zeros(new_capacity, dtype=np.int64)
- * 
- *         occupied = self._occupied_arr             # <<<<<<<<<<<<<<
- *         active = self._active_arr
- *         active_slots = self._active_slots_arr
- */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_self->_occupied_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 216, __pyx_L1_error)
-  __pyx_v_occupied = __pyx_t_2;
-  __pyx_t_2.memview = NULL;
-  __pyx_t_2.data = NULL;
-
-  /* "monitor_kernels.pyx":217
- * 
- *         occupied = self._occupied_arr
- *         active = self._active_arr             # <<<<<<<<<<<<<<
- *         active_slots = self._active_slots_arr
- *         active_pos = self._active_pos_arr
- */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_self->_active_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 217, __pyx_L1_error)
-  __pyx_v_active = __pyx_t_2;
-  __pyx_t_2.memview = NULL;
-  __pyx_t_2.data = NULL;
-
-  /* "monitor_kernels.pyx":218
- *         occupied = self._occupied_arr
- *         active = self._active_arr
  *         active_slots = self._active_slots_arr             # <<<<<<<<<<<<<<
- *         active_pos = self._active_pos_arr
  *         frontier_slots = self._frontier_slots_arr
+ *         mask = new_capacity - 1
  */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_active_slots_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 218, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_active_slots_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 204, __pyx_L1_error)
   __pyx_v_active_slots = __pyx_t_3;
   __pyx_t_3.memview = NULL;
   __pyx_t_3.data = NULL;
 
-  /* "monitor_kernels.pyx":219
- *         active = self._active_arr
+  /* "monitor_kernels.pyx":205
+ *         self._next_frontier_slots_arr = np.empty(new_capacity, dtype=np.int64)
  *         active_slots = self._active_slots_arr
- *         active_pos = self._active_pos_arr             # <<<<<<<<<<<<<<
- *         frontier_slots = self._frontier_slots_arr
- *         frontier_pos = self._frontier_pos_arr
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_active_pos_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 219, __pyx_L1_error)
-  __pyx_v_active_pos = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":220
- *         active_slots = self._active_slots_arr
- *         active_pos = self._active_pos_arr
  *         frontier_slots = self._frontier_slots_arr             # <<<<<<<<<<<<<<
- *         frontier_pos = self._frontier_pos_arr
- *         key_s1 = self._key_s1_arr
+ *         mask = new_capacity - 1
+ *         self._size = 0
  */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_frontier_slots_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 220, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_frontier_slots_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 205, __pyx_L1_error)
   __pyx_v_frontier_slots = __pyx_t_3;
   __pyx_t_3.memview = NULL;
   __pyx_t_3.data = NULL;
 
-  /* "monitor_kernels.pyx":221
- *         active_pos = self._active_pos_arr
+  /* "monitor_kernels.pyx":206
+ *         active_slots = self._active_slots_arr
  *         frontier_slots = self._frontier_slots_arr
- *         frontier_pos = self._frontier_pos_arr             # <<<<<<<<<<<<<<
- *         key_s1 = self._key_s1_arr
- *         key_s2 = self._key_s2_arr
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_frontier_pos_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 221, __pyx_L1_error)
-  __pyx_v_frontier_pos = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":222
- *         frontier_slots = self._frontier_slots_arr
- *         frontier_pos = self._frontier_pos_arr
- *         key_s1 = self._key_s1_arr             # <<<<<<<<<<<<<<
- *         key_s2 = self._key_s2_arr
- *         key_lag = self._key_lag_arr
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s1_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 222, __pyx_L1_error)
-  __pyx_v_key_s1 = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":223
- *         frontier_pos = self._frontier_pos_arr
- *         key_s1 = self._key_s1_arr
- *         key_s2 = self._key_s2_arr             # <<<<<<<<<<<<<<
- *         key_lag = self._key_lag_arr
- *         t1_arr = self._t1_arr
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s2_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 223, __pyx_L1_error)
-  __pyx_v_key_s2 = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":224
- *         key_s1 = self._key_s1_arr
- *         key_s2 = self._key_s2_arr
- *         key_lag = self._key_lag_arr             # <<<<<<<<<<<<<<
- *         t1_arr = self._t1_arr
- *         t2_arr = self._t2_arr
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_lag_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 224, __pyx_L1_error)
-  __pyx_v_key_lag = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":225
- *         key_s2 = self._key_s2_arr
- *         key_lag = self._key_lag_arr
- *         t1_arr = self._t1_arr             # <<<<<<<<<<<<<<
- *         t2_arr = self._t2_arr
- *         window_arr = self._window_arr
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_t1_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 225, __pyx_L1_error)
-  __pyx_v_t1_arr = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":226
- *         key_lag = self._key_lag_arr
- *         t1_arr = self._t1_arr
- *         t2_arr = self._t2_arr             # <<<<<<<<<<<<<<
- *         window_arr = self._window_arr
- *         length_arr = self._length_arr
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_t2_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 226, __pyx_L1_error)
-  __pyx_v_t2_arr = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":227
- *         t1_arr = self._t1_arr
- *         t2_arr = self._t2_arr
- *         window_arr = self._window_arr             # <<<<<<<<<<<<<<
- *         length_arr = self._length_arr
- *         sign_arr = self._sign_arr
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_window_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 227, __pyx_L1_error)
-  __pyx_v_window_arr = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":228
- *         t2_arr = self._t2_arr
- *         window_arr = self._window_arr
- *         length_arr = self._length_arr             # <<<<<<<<<<<<<<
- *         sign_arr = self._sign_arr
- *         seen_arr = self._seen_step_arr
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_length_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 228, __pyx_L1_error)
-  __pyx_v_length_arr = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":229
- *         window_arr = self._window_arr
- *         length_arr = self._length_arr
- *         sign_arr = self._sign_arr             # <<<<<<<<<<<<<<
- *         seen_arr = self._seen_step_arr
- *         mask = new_capacity - 1
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_sign_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 229, __pyx_L1_error)
-  __pyx_v_sign_arr = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":230
- *         length_arr = self._length_arr
- *         sign_arr = self._sign_arr
- *         seen_arr = self._seen_step_arr             # <<<<<<<<<<<<<<
- *         mask = new_capacity - 1
- *         self._size = 0
- */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_seen_step_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 230, __pyx_L1_error)
-  __pyx_v_seen_arr = __pyx_t_3;
-  __pyx_t_3.memview = NULL;
-  __pyx_t_3.data = NULL;
-
-  /* "monitor_kernels.pyx":231
- *         sign_arr = self._sign_arr
- *         seen_arr = self._seen_step_arr
  *         mask = new_capacity - 1             # <<<<<<<<<<<<<<
  *         self._size = 0
  *         self._active_count = 0
  */
   __pyx_v_mask = (__pyx_v_new_capacity - 1);
 
-  /* "monitor_kernels.pyx":232
- *         seen_arr = self._seen_step_arr
+  /* "monitor_kernels.pyx":207
+ *         frontier_slots = self._frontier_slots_arr
  *         mask = new_capacity - 1
  *         self._size = 0             # <<<<<<<<<<<<<<
  *         self._active_count = 0
@@ -23002,7 +21517,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__rehash(struct __pyx
  */
   __pyx_v_self->_size = 0;
 
-  /* "monitor_kernels.pyx":233
+  /* "monitor_kernels.pyx":208
  *         mask = new_capacity - 1
  *         self._size = 0
  *         self._active_count = 0             # <<<<<<<<<<<<<<
@@ -23011,7 +21526,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__rehash(struct __pyx
  */
   __pyx_v_self->_active_count = 0;
 
-  /* "monitor_kernels.pyx":234
+  /* "monitor_kernels.pyx":209
  *         self._size = 0
  *         self._active_count = 0
  *         self._frontier_count = 0             # <<<<<<<<<<<<<<
@@ -23020,20 +21535,20 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__rehash(struct __pyx
  */
   __pyx_v_self->_frontier_count = 0;
 
-  /* "monitor_kernels.pyx":235
+  /* "monitor_kernels.pyx":210
  *         self._active_count = 0
  *         self._frontier_count = 0
  *         self._next_frontier_count = 0             # <<<<<<<<<<<<<<
  *         for old_i in range(old_capacity):
- *             if old_occupied[old_i] == 0:
+ *             if old[old_i].occupied == 0:
  */
   __pyx_v_self->_next_frontier_count = 0;
 
-  /* "monitor_kernels.pyx":236
+  /* "monitor_kernels.pyx":211
  *         self._frontier_count = 0
  *         self._next_frontier_count = 0
  *         for old_i in range(old_capacity):             # <<<<<<<<<<<<<<
- *             if old_occupied[old_i] == 0:
+ *             if old[old_i].occupied == 0:
  *                 continue
  */
   __pyx_t_4 = __pyx_v_old_capacity;
@@ -23041,407 +21556,381 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__rehash(struct __pyx
   for (__pyx_t_10 = 0; __pyx_t_10 < __pyx_t_9; __pyx_t_10+=1) {
     __pyx_v_old_i = __pyx_t_10;
 
-    /* "monitor_kernels.pyx":237
+    /* "monitor_kernels.pyx":212
  *         self._next_frontier_count = 0
  *         for old_i in range(old_capacity):
- *             if old_occupied[old_i] == 0:             # <<<<<<<<<<<<<<
+ *             if old[old_i].occupied == 0:             # <<<<<<<<<<<<<<
  *                 continue
- *             if not keep_inactive and old_active[old_i] == 0:
+ *             if not keep_inactive and old[old_i].active == 0:
  */
-    __pyx_t_11 = __pyx_v_old_i;
-    __pyx_t_12 = ((*((uint8_t *) ( /* dim=0 */ (__pyx_v_old_occupied.data + __pyx_t_11 * __pyx_v_old_occupied.strides[0]) ))) == 0);
-    if (__pyx_t_12) {
+    __pyx_t_11 = ((__pyx_v_old[__pyx_v_old_i]).occupied == 0);
+    if (__pyx_t_11) {
 
-      /* "monitor_kernels.pyx":238
+      /* "monitor_kernels.pyx":213
  *         for old_i in range(old_capacity):
- *             if old_occupied[old_i] == 0:
+ *             if old[old_i].occupied == 0:
  *                 continue             # <<<<<<<<<<<<<<
- *             if not keep_inactive and old_active[old_i] == 0:
+ *             if not keep_inactive and old[old_i].active == 0:
  *                 continue
  */
       goto __pyx_L3_continue;
 
-      /* "monitor_kernels.pyx":237
+      /* "monitor_kernels.pyx":212
  *         self._next_frontier_count = 0
  *         for old_i in range(old_capacity):
- *             if old_occupied[old_i] == 0:             # <<<<<<<<<<<<<<
+ *             if old[old_i].occupied == 0:             # <<<<<<<<<<<<<<
  *                 continue
- *             if not keep_inactive and old_active[old_i] == 0:
+ *             if not keep_inactive and old[old_i].active == 0:
  */
     }
 
-    /* "monitor_kernels.pyx":239
- *             if old_occupied[old_i] == 0:
+    /* "monitor_kernels.pyx":214
+ *             if old[old_i].occupied == 0:
  *                 continue
- *             if not keep_inactive and old_active[old_i] == 0:             # <<<<<<<<<<<<<<
+ *             if not keep_inactive and old[old_i].active == 0:             # <<<<<<<<<<<<<<
  *                 continue
- *             idx = <Py_ssize_t>(_monitor_hash_key(old_s1[old_i], old_s2[old_i], old_lag[old_i]) & <uint64_t>mask)
+ *             idx = <Py_ssize_t>(_monitor_hash_key(old[old_i].s1, old[old_i].s2, old[old_i].lag) & <uint64_t>mask)
  */
-    __pyx_t_13 = (!__pyx_v_keep_inactive);
-    if (__pyx_t_13) {
+    __pyx_t_12 = (!__pyx_v_keep_inactive);
+    if (__pyx_t_12) {
     } else {
-      __pyx_t_12 = __pyx_t_13;
+      __pyx_t_11 = __pyx_t_12;
       goto __pyx_L7_bool_binop_done;
     }
-    __pyx_t_11 = __pyx_v_old_i;
-    __pyx_t_13 = ((*((uint8_t *) ( /* dim=0 */ (__pyx_v_old_active.data + __pyx_t_11 * __pyx_v_old_active.strides[0]) ))) == 0);
-    __pyx_t_12 = __pyx_t_13;
+    __pyx_t_12 = ((__pyx_v_old[__pyx_v_old_i]).active == 0);
+    __pyx_t_11 = __pyx_t_12;
     __pyx_L7_bool_binop_done:;
-    if (__pyx_t_12) {
+    if (__pyx_t_11) {
 
-      /* "monitor_kernels.pyx":240
+      /* "monitor_kernels.pyx":215
  *                 continue
- *             if not keep_inactive and old_active[old_i] == 0:
+ *             if not keep_inactive and old[old_i].active == 0:
  *                 continue             # <<<<<<<<<<<<<<
- *             idx = <Py_ssize_t>(_monitor_hash_key(old_s1[old_i], old_s2[old_i], old_lag[old_i]) & <uint64_t>mask)
- *             while occupied[idx] != 0:
+ *             idx = <Py_ssize_t>(_monitor_hash_key(old[old_i].s1, old[old_i].s2, old[old_i].lag) & <uint64_t>mask)
+ *             while slots[idx].occupied != 0:
  */
       goto __pyx_L3_continue;
 
-      /* "monitor_kernels.pyx":239
- *             if old_occupied[old_i] == 0:
+      /* "monitor_kernels.pyx":214
+ *             if old[old_i].occupied == 0:
  *                 continue
- *             if not keep_inactive and old_active[old_i] == 0:             # <<<<<<<<<<<<<<
+ *             if not keep_inactive and old[old_i].active == 0:             # <<<<<<<<<<<<<<
  *                 continue
- *             idx = <Py_ssize_t>(_monitor_hash_key(old_s1[old_i], old_s2[old_i], old_lag[old_i]) & <uint64_t>mask)
+ *             idx = <Py_ssize_t>(_monitor_hash_key(old[old_i].s1, old[old_i].s2, old[old_i].lag) & <uint64_t>mask)
  */
     }
 
-    /* "monitor_kernels.pyx":241
- *             if not keep_inactive and old_active[old_i] == 0:
+    /* "monitor_kernels.pyx":216
+ *             if not keep_inactive and old[old_i].active == 0:
  *                 continue
- *             idx = <Py_ssize_t>(_monitor_hash_key(old_s1[old_i], old_s2[old_i], old_lag[old_i]) & <uint64_t>mask)             # <<<<<<<<<<<<<<
- *             while occupied[idx] != 0:
+ *             idx = <Py_ssize_t>(_monitor_hash_key(old[old_i].s1, old[old_i].s2, old[old_i].lag) & <uint64_t>mask)             # <<<<<<<<<<<<<<
+ *             while slots[idx].occupied != 0:
  *                 idx = (idx + 1) & mask
  */
-    __pyx_t_11 = __pyx_v_old_i;
-    __pyx_t_14 = __pyx_v_old_i;
-    __pyx_t_15 = __pyx_v_old_i;
-    __pyx_v_idx = ((Py_ssize_t)(__pyx_f_15monitor_kernels__monitor_hash_key((*((int64_t *) ( /* dim=0 */ (__pyx_v_old_s1.data + __pyx_t_11 * __pyx_v_old_s1.strides[0]) ))), (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_s2.data + __pyx_t_14 * __pyx_v_old_s2.strides[0]) ))), (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_lag.data + __pyx_t_15 * __pyx_v_old_lag.strides[0]) )))) & ((uint64_t)__pyx_v_mask)));
+    __pyx_v_idx = ((Py_ssize_t)(__pyx_f_15monitor_kernels__monitor_hash_key((__pyx_v_old[__pyx_v_old_i]).s1, (__pyx_v_old[__pyx_v_old_i]).s2, (__pyx_v_old[__pyx_v_old_i]).lag) & ((uint64_t)__pyx_v_mask)));
 
-    /* "monitor_kernels.pyx":242
+    /* "monitor_kernels.pyx":217
  *                 continue
- *             idx = <Py_ssize_t>(_monitor_hash_key(old_s1[old_i], old_s2[old_i], old_lag[old_i]) & <uint64_t>mask)
- *             while occupied[idx] != 0:             # <<<<<<<<<<<<<<
+ *             idx = <Py_ssize_t>(_monitor_hash_key(old[old_i].s1, old[old_i].s2, old[old_i].lag) & <uint64_t>mask)
+ *             while slots[idx].occupied != 0:             # <<<<<<<<<<<<<<
  *                 idx = (idx + 1) & mask
- *             occupied[idx] = <uint8_t>1
+ *             slots[idx].occupied = <uint8_t>1
  */
     while (1) {
-      __pyx_t_15 = __pyx_v_idx;
-      __pyx_t_12 = ((*((uint8_t *) ( /* dim=0 */ (__pyx_v_occupied.data + __pyx_t_15 * __pyx_v_occupied.strides[0]) ))) != 0);
-      if (!__pyx_t_12) break;
+      __pyx_t_11 = ((__pyx_v_slots[__pyx_v_idx]).occupied != 0);
+      if (!__pyx_t_11) break;
 
-      /* "monitor_kernels.pyx":243
- *             idx = <Py_ssize_t>(_monitor_hash_key(old_s1[old_i], old_s2[old_i], old_lag[old_i]) & <uint64_t>mask)
- *             while occupied[idx] != 0:
+      /* "monitor_kernels.pyx":218
+ *             idx = <Py_ssize_t>(_monitor_hash_key(old[old_i].s1, old[old_i].s2, old[old_i].lag) & <uint64_t>mask)
+ *             while slots[idx].occupied != 0:
  *                 idx = (idx + 1) & mask             # <<<<<<<<<<<<<<
- *             occupied[idx] = <uint8_t>1
- *             key_s1[idx] = old_s1[old_i]
+ *             slots[idx].occupied = <uint8_t>1
+ *             slots[idx].s1 = old[old_i].s1
  */
       __pyx_v_idx = ((__pyx_v_idx + 1) & __pyx_v_mask);
     }
 
-    /* "monitor_kernels.pyx":244
- *             while occupied[idx] != 0:
+    /* "monitor_kernels.pyx":219
+ *             while slots[idx].occupied != 0:
  *                 idx = (idx + 1) & mask
- *             occupied[idx] = <uint8_t>1             # <<<<<<<<<<<<<<
- *             key_s1[idx] = old_s1[old_i]
- *             key_s2[idx] = old_s2[old_i]
+ *             slots[idx].occupied = <uint8_t>1             # <<<<<<<<<<<<<<
+ *             slots[idx].s1 = old[old_i].s1
+ *             slots[idx].s2 = old[old_i].s2
  */
-    __pyx_t_15 = __pyx_v_idx;
-    *((uint8_t *) ( /* dim=0 */ (__pyx_v_occupied.data + __pyx_t_15 * __pyx_v_occupied.strides[0]) )) = ((uint8_t)1);
+    (__pyx_v_slots[__pyx_v_idx]).occupied = ((uint8_t)1);
 
-    /* "monitor_kernels.pyx":245
+    /* "monitor_kernels.pyx":220
  *                 idx = (idx + 1) & mask
- *             occupied[idx] = <uint8_t>1
- *             key_s1[idx] = old_s1[old_i]             # <<<<<<<<<<<<<<
- *             key_s2[idx] = old_s2[old_i]
- *             key_lag[idx] = old_lag[old_i]
+ *             slots[idx].occupied = <uint8_t>1
+ *             slots[idx].s1 = old[old_i].s1             # <<<<<<<<<<<<<<
+ *             slots[idx].s2 = old[old_i].s2
+ *             slots[idx].lag = old[old_i].lag
  */
-    __pyx_t_15 = __pyx_v_old_i;
-    __pyx_t_14 = __pyx_v_idx;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_key_s1.data + __pyx_t_14 * __pyx_v_key_s1.strides[0]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_s1.data + __pyx_t_15 * __pyx_v_old_s1.strides[0]) )));
+    __pyx_t_13 = (__pyx_v_old[__pyx_v_old_i]).s1;
+    (__pyx_v_slots[__pyx_v_idx]).s1 = __pyx_t_13;
 
-    /* "monitor_kernels.pyx":246
- *             occupied[idx] = <uint8_t>1
- *             key_s1[idx] = old_s1[old_i]
- *             key_s2[idx] = old_s2[old_i]             # <<<<<<<<<<<<<<
- *             key_lag[idx] = old_lag[old_i]
- *             t1_arr[idx] = old_t1[old_i]
+    /* "monitor_kernels.pyx":221
+ *             slots[idx].occupied = <uint8_t>1
+ *             slots[idx].s1 = old[old_i].s1
+ *             slots[idx].s2 = old[old_i].s2             # <<<<<<<<<<<<<<
+ *             slots[idx].lag = old[old_i].lag
+ *             slots[idx].t1 = old[old_i].t1
  */
-    __pyx_t_15 = __pyx_v_old_i;
-    __pyx_t_14 = __pyx_v_idx;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_key_s2.data + __pyx_t_14 * __pyx_v_key_s2.strides[0]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_s2.data + __pyx_t_15 * __pyx_v_old_s2.strides[0]) )));
+    __pyx_t_13 = (__pyx_v_old[__pyx_v_old_i]).s2;
+    (__pyx_v_slots[__pyx_v_idx]).s2 = __pyx_t_13;
 
-    /* "monitor_kernels.pyx":247
- *             key_s1[idx] = old_s1[old_i]
- *             key_s2[idx] = old_s2[old_i]
- *             key_lag[idx] = old_lag[old_i]             # <<<<<<<<<<<<<<
- *             t1_arr[idx] = old_t1[old_i]
- *             t2_arr[idx] = old_t2[old_i]
+    /* "monitor_kernels.pyx":222
+ *             slots[idx].s1 = old[old_i].s1
+ *             slots[idx].s2 = old[old_i].s2
+ *             slots[idx].lag = old[old_i].lag             # <<<<<<<<<<<<<<
+ *             slots[idx].t1 = old[old_i].t1
+ *             slots[idx].t2 = old[old_i].t2
  */
-    __pyx_t_15 = __pyx_v_old_i;
-    __pyx_t_14 = __pyx_v_idx;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_key_lag.data + __pyx_t_14 * __pyx_v_key_lag.strides[0]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_lag.data + __pyx_t_15 * __pyx_v_old_lag.strides[0]) )));
+    __pyx_t_13 = (__pyx_v_old[__pyx_v_old_i]).lag;
+    (__pyx_v_slots[__pyx_v_idx]).lag = __pyx_t_13;
 
-    /* "monitor_kernels.pyx":248
- *             key_s2[idx] = old_s2[old_i]
- *             key_lag[idx] = old_lag[old_i]
- *             t1_arr[idx] = old_t1[old_i]             # <<<<<<<<<<<<<<
- *             t2_arr[idx] = old_t2[old_i]
- *             window_arr[idx] = old_window[old_i]
+    /* "monitor_kernels.pyx":223
+ *             slots[idx].s2 = old[old_i].s2
+ *             slots[idx].lag = old[old_i].lag
+ *             slots[idx].t1 = old[old_i].t1             # <<<<<<<<<<<<<<
+ *             slots[idx].t2 = old[old_i].t2
+ *             slots[idx].window = old[old_i].window
  */
-    __pyx_t_15 = __pyx_v_old_i;
-    __pyx_t_14 = __pyx_v_idx;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_t1_arr.data + __pyx_t_14 * __pyx_v_t1_arr.strides[0]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_t1.data + __pyx_t_15 * __pyx_v_old_t1.strides[0]) )));
+    __pyx_t_14 = (__pyx_v_old[__pyx_v_old_i]).t1;
+    (__pyx_v_slots[__pyx_v_idx]).t1 = __pyx_t_14;
 
-    /* "monitor_kernels.pyx":249
- *             key_lag[idx] = old_lag[old_i]
- *             t1_arr[idx] = old_t1[old_i]
- *             t2_arr[idx] = old_t2[old_i]             # <<<<<<<<<<<<<<
- *             window_arr[idx] = old_window[old_i]
- *             length_arr[idx] = old_length[old_i]
+    /* "monitor_kernels.pyx":224
+ *             slots[idx].lag = old[old_i].lag
+ *             slots[idx].t1 = old[old_i].t1
+ *             slots[idx].t2 = old[old_i].t2             # <<<<<<<<<<<<<<
+ *             slots[idx].window = old[old_i].window
+ *             slots[idx].length = old[old_i].length
  */
-    __pyx_t_15 = __pyx_v_old_i;
-    __pyx_t_14 = __pyx_v_idx;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_t2_arr.data + __pyx_t_14 * __pyx_v_t2_arr.strides[0]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_t2.data + __pyx_t_15 * __pyx_v_old_t2.strides[0]) )));
+    __pyx_t_14 = (__pyx_v_old[__pyx_v_old_i]).t2;
+    (__pyx_v_slots[__pyx_v_idx]).t2 = __pyx_t_14;
 
-    /* "monitor_kernels.pyx":250
- *             t1_arr[idx] = old_t1[old_i]
- *             t2_arr[idx] = old_t2[old_i]
- *             window_arr[idx] = old_window[old_i]             # <<<<<<<<<<<<<<
- *             length_arr[idx] = old_length[old_i]
- *             sign_arr[idx] = old_sign[old_i]
+    /* "monitor_kernels.pyx":225
+ *             slots[idx].t1 = old[old_i].t1
+ *             slots[idx].t2 = old[old_i].t2
+ *             slots[idx].window = old[old_i].window             # <<<<<<<<<<<<<<
+ *             slots[idx].length = old[old_i].length
+ *             slots[idx].sign = old[old_i].sign
  */
-    __pyx_t_15 = __pyx_v_old_i;
-    __pyx_t_14 = __pyx_v_idx;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_window_arr.data + __pyx_t_14 * __pyx_v_window_arr.strides[0]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_window.data + __pyx_t_15 * __pyx_v_old_window.strides[0]) )));
+    __pyx_t_13 = (__pyx_v_old[__pyx_v_old_i]).window;
+    (__pyx_v_slots[__pyx_v_idx]).window = __pyx_t_13;
 
-    /* "monitor_kernels.pyx":251
- *             t2_arr[idx] = old_t2[old_i]
- *             window_arr[idx] = old_window[old_i]
- *             length_arr[idx] = old_length[old_i]             # <<<<<<<<<<<<<<
- *             sign_arr[idx] = old_sign[old_i]
- *             seen_arr[idx] = old_seen[old_i]
+    /* "monitor_kernels.pyx":226
+ *             slots[idx].t2 = old[old_i].t2
+ *             slots[idx].window = old[old_i].window
+ *             slots[idx].length = old[old_i].length             # <<<<<<<<<<<<<<
+ *             slots[idx].sign = old[old_i].sign
+ *             slots[idx].seen = old[old_i].seen
  */
-    __pyx_t_15 = __pyx_v_old_i;
-    __pyx_t_14 = __pyx_v_idx;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_length_arr.data + __pyx_t_14 * __pyx_v_length_arr.strides[0]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_length.data + __pyx_t_15 * __pyx_v_old_length.strides[0]) )));
+    __pyx_t_13 = (__pyx_v_old[__pyx_v_old_i]).length;
+    (__pyx_v_slots[__pyx_v_idx]).length = __pyx_t_13;
 
-    /* "monitor_kernels.pyx":252
- *             window_arr[idx] = old_window[old_i]
- *             length_arr[idx] = old_length[old_i]
- *             sign_arr[idx] = old_sign[old_i]             # <<<<<<<<<<<<<<
- *             seen_arr[idx] = old_seen[old_i]
+    /* "monitor_kernels.pyx":227
+ *             slots[idx].window = old[old_i].window
+ *             slots[idx].length = old[old_i].length
+ *             slots[idx].sign = old[old_i].sign             # <<<<<<<<<<<<<<
+ *             slots[idx].seen = old[old_i].seen
  *             self._size += 1
  */
-    __pyx_t_15 = __pyx_v_old_i;
-    __pyx_t_14 = __pyx_v_idx;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_sign_arr.data + __pyx_t_14 * __pyx_v_sign_arr.strides[0]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_sign.data + __pyx_t_15 * __pyx_v_old_sign.strides[0]) )));
+    __pyx_t_15 = (__pyx_v_old[__pyx_v_old_i]).sign;
+    (__pyx_v_slots[__pyx_v_idx]).sign = __pyx_t_15;
 
-    /* "monitor_kernels.pyx":253
- *             length_arr[idx] = old_length[old_i]
- *             sign_arr[idx] = old_sign[old_i]
- *             seen_arr[idx] = old_seen[old_i]             # <<<<<<<<<<<<<<
+    /* "monitor_kernels.pyx":228
+ *             slots[idx].length = old[old_i].length
+ *             slots[idx].sign = old[old_i].sign
+ *             slots[idx].seen = old[old_i].seen             # <<<<<<<<<<<<<<
  *             self._size += 1
- *             if old_active[old_i] != 0:
+ *             if old[old_i].active != 0:
  */
-    __pyx_t_15 = __pyx_v_old_i;
-    __pyx_t_14 = __pyx_v_idx;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_seen_arr.data + __pyx_t_14 * __pyx_v_seen_arr.strides[0]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_seen.data + __pyx_t_15 * __pyx_v_old_seen.strides[0]) )));
+    __pyx_t_13 = (__pyx_v_old[__pyx_v_old_i]).seen;
+    (__pyx_v_slots[__pyx_v_idx]).seen = __pyx_t_13;
 
-    /* "monitor_kernels.pyx":254
- *             sign_arr[idx] = old_sign[old_i]
- *             seen_arr[idx] = old_seen[old_i]
+    /* "monitor_kernels.pyx":229
+ *             slots[idx].sign = old[old_i].sign
+ *             slots[idx].seen = old[old_i].seen
  *             self._size += 1             # <<<<<<<<<<<<<<
- *             if old_active[old_i] != 0:
- *                 active[idx] = <uint8_t>1
+ *             if old[old_i].active != 0:
+ *                 slots[idx].active = <uint8_t>1
  */
     __pyx_v_self->_size = (__pyx_v_self->_size + 1);
 
-    /* "monitor_kernels.pyx":255
- *             seen_arr[idx] = old_seen[old_i]
+    /* "monitor_kernels.pyx":230
+ *             slots[idx].seen = old[old_i].seen
  *             self._size += 1
- *             if old_active[old_i] != 0:             # <<<<<<<<<<<<<<
- *                 active[idx] = <uint8_t>1
+ *             if old[old_i].active != 0:             # <<<<<<<<<<<<<<
+ *                 slots[idx].active = <uint8_t>1
  *                 active_slots[self._active_count] = <int64_t>idx
  */
-    __pyx_t_15 = __pyx_v_old_i;
-    __pyx_t_12 = ((*((uint8_t *) ( /* dim=0 */ (__pyx_v_old_active.data + __pyx_t_15 * __pyx_v_old_active.strides[0]) ))) != 0);
-    if (__pyx_t_12) {
+    __pyx_t_11 = ((__pyx_v_old[__pyx_v_old_i]).active != 0);
+    if (__pyx_t_11) {
 
-      /* "monitor_kernels.pyx":256
+      /* "monitor_kernels.pyx":231
  *             self._size += 1
- *             if old_active[old_i] != 0:
- *                 active[idx] = <uint8_t>1             # <<<<<<<<<<<<<<
+ *             if old[old_i].active != 0:
+ *                 slots[idx].active = <uint8_t>1             # <<<<<<<<<<<<<<
  *                 active_slots[self._active_count] = <int64_t>idx
- *                 active_pos[idx] = <int64_t>self._active_count
+ *                 slots[idx].active_pos = <int32_t>self._active_count
  */
-      __pyx_t_15 = __pyx_v_idx;
-      *((uint8_t *) ( /* dim=0 */ (__pyx_v_active.data + __pyx_t_15 * __pyx_v_active.strides[0]) )) = ((uint8_t)1);
+      (__pyx_v_slots[__pyx_v_idx]).active = ((uint8_t)1);
 
-      /* "monitor_kernels.pyx":257
- *             if old_active[old_i] != 0:
- *                 active[idx] = <uint8_t>1
+      /* "monitor_kernels.pyx":232
+ *             if old[old_i].active != 0:
+ *                 slots[idx].active = <uint8_t>1
  *                 active_slots[self._active_count] = <int64_t>idx             # <<<<<<<<<<<<<<
- *                 active_pos[idx] = <int64_t>self._active_count
+ *                 slots[idx].active_pos = <int32_t>self._active_count
  *                 self._active_count += 1
  */
-      __pyx_t_15 = __pyx_v_self->_active_count;
-      *((int64_t *) ( /* dim=0 */ (__pyx_v_active_slots.data + __pyx_t_15 * __pyx_v_active_slots.strides[0]) )) = ((int64_t)__pyx_v_idx);
+      __pyx_t_16 = __pyx_v_self->_active_count;
+      *((int64_t *) ( /* dim=0 */ (__pyx_v_active_slots.data + __pyx_t_16 * __pyx_v_active_slots.strides[0]) )) = ((int64_t)__pyx_v_idx);
 
-      /* "monitor_kernels.pyx":258
- *                 active[idx] = <uint8_t>1
+      /* "monitor_kernels.pyx":233
+ *                 slots[idx].active = <uint8_t>1
  *                 active_slots[self._active_count] = <int64_t>idx
- *                 active_pos[idx] = <int64_t>self._active_count             # <<<<<<<<<<<<<<
+ *                 slots[idx].active_pos = <int32_t>self._active_count             # <<<<<<<<<<<<<<
  *                 self._active_count += 1
  * 
  */
-      __pyx_t_15 = __pyx_v_idx;
-      *((int64_t *) ( /* dim=0 */ (__pyx_v_active_pos.data + __pyx_t_15 * __pyx_v_active_pos.strides[0]) )) = ((int64_t)__pyx_v_self->_active_count);
+      (__pyx_v_slots[__pyx_v_idx]).active_pos = ((int32_t)__pyx_v_self->_active_count);
 
-      /* "monitor_kernels.pyx":259
+      /* "monitor_kernels.pyx":234
  *                 active_slots[self._active_count] = <int64_t>idx
- *                 active_pos[idx] = <int64_t>self._active_count
+ *                 slots[idx].active_pos = <int32_t>self._active_count
  *                 self._active_count += 1             # <<<<<<<<<<<<<<
  * 
  *         for pos in range(old_frontier_count):
  */
       __pyx_v_self->_active_count = (__pyx_v_self->_active_count + 1);
 
-      /* "monitor_kernels.pyx":255
- *             seen_arr[idx] = old_seen[old_i]
+      /* "monitor_kernels.pyx":230
+ *             slots[idx].seen = old[old_i].seen
  *             self._size += 1
- *             if old_active[old_i] != 0:             # <<<<<<<<<<<<<<
- *                 active[idx] = <uint8_t>1
+ *             if old[old_i].active != 0:             # <<<<<<<<<<<<<<
+ *                 slots[idx].active = <uint8_t>1
  *                 active_slots[self._active_count] = <int64_t>idx
  */
     }
     __pyx_L3_continue:;
   }
 
-  /* "monitor_kernels.pyx":261
+  /* "monitor_kernels.pyx":236
  *                 self._active_count += 1
  * 
  *         for pos in range(old_frontier_count):             # <<<<<<<<<<<<<<
  *             old_slot = <Py_ssize_t>old_frontier[pos]
- *             if old_slot < 0 or old_slot >= old_capacity or old_active[old_slot] == 0:
+ *             if old_slot < 0 or old_slot >= old_capacity or old[old_slot].active == 0:
  */
   __pyx_t_4 = __pyx_v_old_frontier_count;
   __pyx_t_9 = __pyx_t_4;
   for (__pyx_t_10 = 0; __pyx_t_10 < __pyx_t_9; __pyx_t_10+=1) {
     __pyx_v_pos = __pyx_t_10;
 
-    /* "monitor_kernels.pyx":262
+    /* "monitor_kernels.pyx":237
  * 
  *         for pos in range(old_frontier_count):
  *             old_slot = <Py_ssize_t>old_frontier[pos]             # <<<<<<<<<<<<<<
- *             if old_slot < 0 or old_slot >= old_capacity or old_active[old_slot] == 0:
+ *             if old_slot < 0 or old_slot >= old_capacity or old[old_slot].active == 0:
  *                 continue
  */
-    __pyx_t_15 = __pyx_v_pos;
-    __pyx_v_old_slot = ((Py_ssize_t)(*((int64_t *) ( /* dim=0 */ (__pyx_v_old_frontier.data + __pyx_t_15 * __pyx_v_old_frontier.strides[0]) ))));
+    __pyx_t_16 = __pyx_v_pos;
+    __pyx_v_old_slot = ((Py_ssize_t)(*((int64_t *) ( /* dim=0 */ (__pyx_v_old_frontier.data + __pyx_t_16 * __pyx_v_old_frontier.strides[0]) ))));
 
-    /* "monitor_kernels.pyx":263
+    /* "monitor_kernels.pyx":238
  *         for pos in range(old_frontier_count):
  *             old_slot = <Py_ssize_t>old_frontier[pos]
- *             if old_slot < 0 or old_slot >= old_capacity or old_active[old_slot] == 0:             # <<<<<<<<<<<<<<
+ *             if old_slot < 0 or old_slot >= old_capacity or old[old_slot].active == 0:             # <<<<<<<<<<<<<<
  *                 continue
- *             idx = self._find_slot(old_s1[old_slot], old_s2[old_slot], old_lag[old_slot])
+ *             idx = self._find_slot(slots, old[old_slot].s1, old[old_slot].s2, old[old_slot].lag)
  */
-    __pyx_t_13 = (__pyx_v_old_slot < 0);
-    if (!__pyx_t_13) {
+    __pyx_t_12 = (__pyx_v_old_slot < 0);
+    if (!__pyx_t_12) {
     } else {
-      __pyx_t_12 = __pyx_t_13;
+      __pyx_t_11 = __pyx_t_12;
       goto __pyx_L15_bool_binop_done;
     }
-    __pyx_t_13 = (__pyx_v_old_slot >= __pyx_v_old_capacity);
-    if (!__pyx_t_13) {
+    __pyx_t_12 = (__pyx_v_old_slot >= __pyx_v_old_capacity);
+    if (!__pyx_t_12) {
     } else {
-      __pyx_t_12 = __pyx_t_13;
+      __pyx_t_11 = __pyx_t_12;
       goto __pyx_L15_bool_binop_done;
     }
-    __pyx_t_15 = __pyx_v_old_slot;
-    __pyx_t_13 = ((*((uint8_t *) ( /* dim=0 */ (__pyx_v_old_active.data + __pyx_t_15 * __pyx_v_old_active.strides[0]) ))) == 0);
-    __pyx_t_12 = __pyx_t_13;
+    __pyx_t_12 = ((__pyx_v_old[__pyx_v_old_slot]).active == 0);
+    __pyx_t_11 = __pyx_t_12;
     __pyx_L15_bool_binop_done:;
-    if (__pyx_t_12) {
+    if (__pyx_t_11) {
 
-      /* "monitor_kernels.pyx":264
+      /* "monitor_kernels.pyx":239
  *             old_slot = <Py_ssize_t>old_frontier[pos]
- *             if old_slot < 0 or old_slot >= old_capacity or old_active[old_slot] == 0:
+ *             if old_slot < 0 or old_slot >= old_capacity or old[old_slot].active == 0:
  *                 continue             # <<<<<<<<<<<<<<
- *             idx = self._find_slot(old_s1[old_slot], old_s2[old_slot], old_lag[old_slot])
+ *             idx = self._find_slot(slots, old[old_slot].s1, old[old_slot].s2, old[old_slot].lag)
  *             frontier_slots[self._frontier_count] = <int64_t>idx
  */
       goto __pyx_L12_continue;
 
-      /* "monitor_kernels.pyx":263
+      /* "monitor_kernels.pyx":238
  *         for pos in range(old_frontier_count):
  *             old_slot = <Py_ssize_t>old_frontier[pos]
- *             if old_slot < 0 or old_slot >= old_capacity or old_active[old_slot] == 0:             # <<<<<<<<<<<<<<
+ *             if old_slot < 0 or old_slot >= old_capacity or old[old_slot].active == 0:             # <<<<<<<<<<<<<<
  *                 continue
- *             idx = self._find_slot(old_s1[old_slot], old_s2[old_slot], old_lag[old_slot])
+ *             idx = self._find_slot(slots, old[old_slot].s1, old[old_slot].s2, old[old_slot].lag)
  */
     }
 
-    /* "monitor_kernels.pyx":265
- *             if old_slot < 0 or old_slot >= old_capacity or old_active[old_slot] == 0:
+    /* "monitor_kernels.pyx":240
+ *             if old_slot < 0 or old_slot >= old_capacity or old[old_slot].active == 0:
  *                 continue
- *             idx = self._find_slot(old_s1[old_slot], old_s2[old_slot], old_lag[old_slot])             # <<<<<<<<<<<<<<
+ *             idx = self._find_slot(slots, old[old_slot].s1, old[old_slot].s2, old[old_slot].lag)             # <<<<<<<<<<<<<<
  *             frontier_slots[self._frontier_count] = <int64_t>idx
- *             frontier_pos[idx] = <int64_t>self._frontier_count
+ *             slots[idx].frontier_pos = <int32_t>self._frontier_count
  */
-    __pyx_t_15 = __pyx_v_old_slot;
-    __pyx_t_14 = __pyx_v_old_slot;
-    __pyx_t_11 = __pyx_v_old_slot;
-    __pyx_t_16 = ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_find_slot(__pyx_v_self, (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_s1.data + __pyx_t_15 * __pyx_v_old_s1.strides[0]) ))), (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_s2.data + __pyx_t_14 * __pyx_v_old_s2.strides[0]) ))), (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_lag.data + __pyx_t_11 * __pyx_v_old_lag.strides[0]) )))); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 265, __pyx_L1_error)
-    __pyx_v_idx = __pyx_t_16;
+    __pyx_v_idx = __pyx_f_15monitor_kernels_19NumericMonitorState__find_slot(__pyx_v_self, __pyx_v_slots, (__pyx_v_old[__pyx_v_old_slot]).s1, (__pyx_v_old[__pyx_v_old_slot]).s2, (__pyx_v_old[__pyx_v_old_slot]).lag);
 
-    /* "monitor_kernels.pyx":266
+    /* "monitor_kernels.pyx":241
  *                 continue
- *             idx = self._find_slot(old_s1[old_slot], old_s2[old_slot], old_lag[old_slot])
+ *             idx = self._find_slot(slots, old[old_slot].s1, old[old_slot].s2, old[old_slot].lag)
  *             frontier_slots[self._frontier_count] = <int64_t>idx             # <<<<<<<<<<<<<<
- *             frontier_pos[idx] = <int64_t>self._frontier_count
+ *             slots[idx].frontier_pos = <int32_t>self._frontier_count
  *             self._frontier_count += 1
  */
-    __pyx_t_11 = __pyx_v_self->_frontier_count;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_slots.data + __pyx_t_11 * __pyx_v_frontier_slots.strides[0]) )) = ((int64_t)__pyx_v_idx);
+    __pyx_t_16 = __pyx_v_self->_frontier_count;
+    *((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_slots.data + __pyx_t_16 * __pyx_v_frontier_slots.strides[0]) )) = ((int64_t)__pyx_v_idx);
 
-    /* "monitor_kernels.pyx":267
- *             idx = self._find_slot(old_s1[old_slot], old_s2[old_slot], old_lag[old_slot])
+    /* "monitor_kernels.pyx":242
+ *             idx = self._find_slot(slots, old[old_slot].s1, old[old_slot].s2, old[old_slot].lag)
  *             frontier_slots[self._frontier_count] = <int64_t>idx
- *             frontier_pos[idx] = <int64_t>self._frontier_count             # <<<<<<<<<<<<<<
+ *             slots[idx].frontier_pos = <int32_t>self._frontier_count             # <<<<<<<<<<<<<<
  *             self._frontier_count += 1
- * 
+ *         # old_buf is released when this frame returns
  */
-    __pyx_t_11 = __pyx_v_idx;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_pos.data + __pyx_t_11 * __pyx_v_frontier_pos.strides[0]) )) = ((int64_t)__pyx_v_self->_frontier_count);
+    (__pyx_v_slots[__pyx_v_idx]).frontier_pos = ((int32_t)__pyx_v_self->_frontier_count);
 
-    /* "monitor_kernels.pyx":268
+    /* "monitor_kernels.pyx":243
  *             frontier_slots[self._frontier_count] = <int64_t>idx
- *             frontier_pos[idx] = <int64_t>self._frontier_count
+ *             slots[idx].frontier_pos = <int32_t>self._frontier_count
  *             self._frontier_count += 1             # <<<<<<<<<<<<<<
+ *         # old_buf is released when this frame returns
  * 
- *     cdef void _ensure_hash_capacity(self, Py_ssize_t need):
  */
     __pyx_v_self->_frontier_count = (__pyx_v_self->_frontier_count + 1);
     __pyx_L12_continue:;
   }
 
-  /* "monitor_kernels.pyx":152
+  /* "monitor_kernels.pyx":185
  *         return idx
  * 
  *     cdef void _rehash(self, Py_ssize_t new_capacity, bint keep_inactive):             # <<<<<<<<<<<<<<
- *         cdef object old_occupied_obj = self._occupied_arr
- *         cdef object old_active_obj = self._active_arr
+ *         cdef object old_buf = self._slots_buf
+ *         cdef MonitorSlot* old = self._slots
  */
 
   /* function exit code */
   goto __pyx_L0;
   __pyx_L1_error:;
   __Pyx_XDECREF(__pyx_t_1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_t_2, 1);
   __PYX_XCLEAR_MEMVIEW(&__pyx_t_3, 1);
   __Pyx_XDECREF(__pyx_t_5);
   __Pyx_XDECREF(__pyx_t_6);
@@ -23449,50 +21938,16 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__rehash(struct __pyx
   __Pyx_XDECREF(__pyx_t_8);
   __Pyx_AddTraceback("monitor_kernels.NumericMonitorState._rehash", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_L0:;
-  __Pyx_XDECREF(__pyx_v_old_occupied_obj);
-  __Pyx_XDECREF(__pyx_v_old_active_obj);
+  __Pyx_XDECREF(__pyx_v_old_buf);
   __Pyx_XDECREF(__pyx_v_old_frontier_obj);
-  __Pyx_XDECREF(__pyx_v_old_s1_obj);
-  __Pyx_XDECREF(__pyx_v_old_s2_obj);
-  __Pyx_XDECREF(__pyx_v_old_lag_obj);
-  __Pyx_XDECREF(__pyx_v_old_t1_obj);
-  __Pyx_XDECREF(__pyx_v_old_t2_obj);
-  __Pyx_XDECREF(__pyx_v_old_window_obj);
-  __Pyx_XDECREF(__pyx_v_old_length_obj);
-  __Pyx_XDECREF(__pyx_v_old_sign_obj);
-  __Pyx_XDECREF(__pyx_v_old_seen_obj);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_old_occupied, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_old_active, 1);
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_old_frontier, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_old_s1, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_old_s2, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_old_lag, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_old_t1, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_old_t2, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_old_window, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_old_length, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_old_sign, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_old_seen, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_occupied, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_active, 1);
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_active_slots, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_active_pos, 1);
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_frontier_slots, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_frontier_pos, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_key_s1, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_key_s2, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_key_lag, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_t1_arr, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_t2_arr, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_window_arr, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_length_arr, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_sign_arr, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_seen_arr, 1);
   __Pyx_RefNannyFinishContext();
 }
 
-/* "monitor_kernels.pyx":270
- *             self._frontier_count += 1
+/* "monitor_kernels.pyx":246
+ *         # old_buf is released when this frame returns
  * 
  *     cdef void _ensure_hash_capacity(self, Py_ssize_t need):             # <<<<<<<<<<<<<<
  *         while need * 2 >= self._capacity:
@@ -23505,7 +21960,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_hash_capacit
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
 
-  /* "monitor_kernels.pyx":271
+  /* "monitor_kernels.pyx":247
  * 
  *     cdef void _ensure_hash_capacity(self, Py_ssize_t need):
  *         while need * 2 >= self._capacity:             # <<<<<<<<<<<<<<
@@ -23516,18 +21971,18 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_hash_capacit
     __pyx_t_1 = ((__pyx_v_need * 2) >= __pyx_v_self->_capacity);
     if (!__pyx_t_1) break;
 
-    /* "monitor_kernels.pyx":272
+    /* "monitor_kernels.pyx":248
  *     cdef void _ensure_hash_capacity(self, Py_ssize_t need):
  *         while need * 2 >= self._capacity:
  *             self._rehash(self._capacity * 2, True)             # <<<<<<<<<<<<<<
  * 
  *     # Periodic compaction (2026-07-03): _occupied_arr never shrinks on its
  */
-    ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_rehash(__pyx_v_self, (__pyx_v_self->_capacity * 2), 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 272, __pyx_L1_error)
+    ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_rehash(__pyx_v_self, (__pyx_v_self->_capacity * 2), 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 248, __pyx_L1_error)
   }
 
-  /* "monitor_kernels.pyx":270
- *             self._frontier_count += 1
+  /* "monitor_kernels.pyx":246
+ *         # old_buf is released when this frame returns
  * 
  *     cdef void _ensure_hash_capacity(self, Py_ssize_t need):             # <<<<<<<<<<<<<<
  *         while need * 2 >= self._capacity:
@@ -23541,7 +21996,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_hash_capacit
   __pyx_L0:;
 }
 
-/* "monitor_kernels.pyx":305
+/* "monitor_kernels.pyx":281
  *     # original ~5-6s Python baseline -- most of that gap remains unexplained;
  *     # see the implementation_log for what has been ruled out so far.
  *     cdef void _maybe_compact(self):             # <<<<<<<<<<<<<<
@@ -23559,7 +22014,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__maybe_compact(struc
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
 
-  /* "monitor_kernels.pyx":307
+  /* "monitor_kernels.pyx":283
  *     cdef void _maybe_compact(self):
  *         cdef Py_ssize_t new_capacity
  *         if self._size <= 256:             # <<<<<<<<<<<<<<
@@ -23569,7 +22024,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__maybe_compact(struc
   __pyx_t_1 = (__pyx_v_self->_size <= 0x100);
   if (__pyx_t_1) {
 
-    /* "monitor_kernels.pyx":308
+    /* "monitor_kernels.pyx":284
  *         cdef Py_ssize_t new_capacity
  *         if self._size <= 256:
  *             return             # <<<<<<<<<<<<<<
@@ -23578,7 +22033,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__maybe_compact(struc
  */
     goto __pyx_L0;
 
-    /* "monitor_kernels.pyx":307
+    /* "monitor_kernels.pyx":283
  *     cdef void _maybe_compact(self):
  *         cdef Py_ssize_t new_capacity
  *         if self._size <= 256:             # <<<<<<<<<<<<<<
@@ -23587,7 +22042,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__maybe_compact(struc
  */
   }
 
-  /* "monitor_kernels.pyx":309
+  /* "monitor_kernels.pyx":285
  *         if self._size <= 256:
  *             return
  *         if self._size <= self._active_count * 8:             # <<<<<<<<<<<<<<
@@ -23597,7 +22052,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__maybe_compact(struc
   __pyx_t_1 = (__pyx_v_self->_size <= (__pyx_v_self->_active_count * 8));
   if (__pyx_t_1) {
 
-    /* "monitor_kernels.pyx":310
+    /* "monitor_kernels.pyx":286
  *             return
  *         if self._size <= self._active_count * 8:
  *             return             # <<<<<<<<<<<<<<
@@ -23606,7 +22061,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__maybe_compact(struc
  */
     goto __pyx_L0;
 
-    /* "monitor_kernels.pyx":309
+    /* "monitor_kernels.pyx":285
  *         if self._size <= 256:
  *             return
  *         if self._size <= self._active_count * 8:             # <<<<<<<<<<<<<<
@@ -23615,7 +22070,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__maybe_compact(struc
  */
   }
 
-  /* "monitor_kernels.pyx":311
+  /* "monitor_kernels.pyx":287
  *         if self._size <= self._active_count * 8:
  *             return
  *         new_capacity = _monitor_next_power2(max(<Py_ssize_t>16, self._active_count * 4))             # <<<<<<<<<<<<<<
@@ -23632,16 +22087,16 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__maybe_compact(struc
   }
   __pyx_v_new_capacity = __pyx_f_15monitor_kernels__monitor_next_power2(__pyx_t_4);
 
-  /* "monitor_kernels.pyx":312
+  /* "monitor_kernels.pyx":288
  *             return
  *         new_capacity = _monitor_next_power2(max(<Py_ssize_t>16, self._active_count * 4))
  *         self._rehash(new_capacity, False)             # <<<<<<<<<<<<<<
  *     # The keep_inactive parameter on _rehash() is kept (harmless, always
  *     # called with True from the one live call site above) so this can be
  */
-  ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_rehash(__pyx_v_self, __pyx_v_new_capacity, 0); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 312, __pyx_L1_error)
+  ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_rehash(__pyx_v_self, __pyx_v_new_capacity, 0); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 288, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":305
+  /* "monitor_kernels.pyx":281
  *     # original ~5-6s Python baseline -- most of that gap remains unexplained;
  *     # see the implementation_log for what has been ruled out so far.
  *     cdef void _maybe_compact(self):             # <<<<<<<<<<<<<<
@@ -23656,7 +22111,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__maybe_compact(struc
   __pyx_L0:;
 }
 
-/* "monitor_kernels.pyx":317
+/* "monitor_kernels.pyx":293
  *     # revisited without re-deriving the compaction-loop plumbing from scratch.
  * 
  *     cdef void _ensure_status_capacity(self, Py_ssize_t need):             # <<<<<<<<<<<<<<
@@ -23675,12 +22130,13 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_status_capac
   PyObject *__pyx_t_5 = NULL;
   PyObject *__pyx_t_6 = NULL;
   PyObject *__pyx_t_7 = NULL;
+  char *__pyx_t_8;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("_ensure_status_capacity", 1);
 
-  /* "monitor_kernels.pyx":320
+  /* "monitor_kernels.pyx":296
  *         cdef Py_ssize_t new_cap
  *         cdef object new_rows
  *         if need <= self._status_capacity:             # <<<<<<<<<<<<<<
@@ -23690,7 +22146,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_status_capac
   __pyx_t_1 = (__pyx_v_need <= __pyx_v_self->_status_capacity);
   if (__pyx_t_1) {
 
-    /* "monitor_kernels.pyx":321
+    /* "monitor_kernels.pyx":297
  *         cdef object new_rows
  *         if need <= self._status_capacity:
  *             return             # <<<<<<<<<<<<<<
@@ -23699,7 +22155,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_status_capac
  */
     goto __pyx_L0;
 
-    /* "monitor_kernels.pyx":320
+    /* "monitor_kernels.pyx":296
  *         cdef Py_ssize_t new_cap
  *         cdef object new_rows
  *         if need <= self._status_capacity:             # <<<<<<<<<<<<<<
@@ -23708,7 +22164,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_status_capac
  */
   }
 
-  /* "monitor_kernels.pyx":322
+  /* "monitor_kernels.pyx":298
  *         if need <= self._status_capacity:
  *             return
  *         new_cap = self._status_capacity             # <<<<<<<<<<<<<<
@@ -23718,7 +22174,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_status_capac
   __pyx_t_2 = __pyx_v_self->_status_capacity;
   __pyx_v_new_cap = __pyx_t_2;
 
-  /* "monitor_kernels.pyx":323
+  /* "monitor_kernels.pyx":299
  *             return
  *         new_cap = self._status_capacity
  *         while new_cap < need:             # <<<<<<<<<<<<<<
@@ -23729,7 +22185,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_status_capac
     __pyx_t_1 = (__pyx_v_new_cap < __pyx_v_need);
     if (!__pyx_t_1) break;
 
-    /* "monitor_kernels.pyx":324
+    /* "monitor_kernels.pyx":300
  *         new_cap = self._status_capacity
  *         while new_cap < need:
  *             new_cap *= 2             # <<<<<<<<<<<<<<
@@ -23739,43 +22195,43 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_status_capac
     __pyx_v_new_cap = (__pyx_v_new_cap * 2);
   }
 
-  /* "monitor_kernels.pyx":325
+  /* "monitor_kernels.pyx":301
  *         while new_cap < need:
  *             new_cap *= 2
  *         new_rows = np.empty((new_cap, 7), dtype=np.int64)             # <<<<<<<<<<<<<<
  *         if self._status_count > 0:
  *             new_rows[:self._status_count, :] = self._status_rows_arr[:self._status_count, :]
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 325, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 325, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_new_cap); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 325, __pyx_L1_error)
+  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_new_cap); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_5 = PyTuple_New(2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 325, __pyx_L1_error)
+  __pyx_t_5 = PyTuple_New(2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_GIVEREF(__pyx_t_3);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_3)) __PYX_ERR(0, 325, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_3)) __PYX_ERR(0, 301, __pyx_L1_error);
   __Pyx_INCREF(__pyx_int_7);
   __Pyx_GIVEREF(__pyx_int_7);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 1, __pyx_int_7)) __PYX_ERR(0, 325, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 1, __pyx_int_7)) __PYX_ERR(0, 301, __pyx_L1_error);
   __pyx_t_3 = 0;
-  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 325, __pyx_L1_error)
+  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_5)) __PYX_ERR(0, 325, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_5)) __PYX_ERR(0, 301, __pyx_L1_error);
   __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 325, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 325, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_int64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 325, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_int64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 325, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_3, __pyx_t_5); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 325, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_3, __pyx_t_5); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -23783,7 +22239,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_status_capac
   __pyx_v_new_rows = __pyx_t_7;
   __pyx_t_7 = 0;
 
-  /* "monitor_kernels.pyx":326
+  /* "monitor_kernels.pyx":302
  *             new_cap *= 2
  *         new_rows = np.empty((new_cap, 7), dtype=np.int64)
  *         if self._status_count > 0:             # <<<<<<<<<<<<<<
@@ -23793,47 +22249,47 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_status_capac
   __pyx_t_1 = (__pyx_v_self->_status_count > 0);
   if (__pyx_t_1) {
 
-    /* "monitor_kernels.pyx":327
+    /* "monitor_kernels.pyx":303
  *         new_rows = np.empty((new_cap, 7), dtype=np.int64)
  *         if self._status_count > 0:
  *             new_rows[:self._status_count, :] = self._status_rows_arr[:self._status_count, :]             # <<<<<<<<<<<<<<
  *         self._status_rows_arr = new_rows
- *         self._status_capacity = new_cap
+ *         self._status_ptr = <int64_t*>(<np.ndarray>new_rows).data
  */
-    __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_self->_status_count); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 327, __pyx_L1_error)
+    __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_self->_status_count); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 303, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_7);
-    __pyx_t_5 = PySlice_New(Py_None, __pyx_t_7, Py_None); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 327, __pyx_L1_error)
+    __pyx_t_5 = PySlice_New(Py_None, __pyx_t_7, Py_None); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 303, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_5);
     __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-    __pyx_t_7 = PyTuple_New(2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 327, __pyx_L1_error)
+    __pyx_t_7 = PyTuple_New(2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 303, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_7);
     __Pyx_GIVEREF(__pyx_t_5);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_5)) __PYX_ERR(0, 327, __pyx_L1_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_5)) __PYX_ERR(0, 303, __pyx_L1_error);
     __Pyx_INCREF(__pyx_slice__5);
     __Pyx_GIVEREF(__pyx_slice__5);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 1, __pyx_slice__5)) __PYX_ERR(0, 327, __pyx_L1_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 1, __pyx_slice__5)) __PYX_ERR(0, 303, __pyx_L1_error);
     __pyx_t_5 = 0;
-    __pyx_t_5 = __Pyx_PyObject_GetItem(__pyx_v_self->_status_rows_arr, __pyx_t_7); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 327, __pyx_L1_error)
+    __pyx_t_5 = __Pyx_PyObject_GetItem(__pyx_v_self->_status_rows_arr, __pyx_t_7); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 303, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_5);
     __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-    __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_self->_status_count); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 327, __pyx_L1_error)
+    __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_self->_status_count); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 303, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_7);
-    __pyx_t_3 = PySlice_New(Py_None, __pyx_t_7, Py_None); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 327, __pyx_L1_error)
+    __pyx_t_3 = PySlice_New(Py_None, __pyx_t_7, Py_None); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 303, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
     __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-    __pyx_t_7 = PyTuple_New(2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 327, __pyx_L1_error)
+    __pyx_t_7 = PyTuple_New(2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 303, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_7);
     __Pyx_GIVEREF(__pyx_t_3);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_3)) __PYX_ERR(0, 327, __pyx_L1_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_3)) __PYX_ERR(0, 303, __pyx_L1_error);
     __Pyx_INCREF(__pyx_slice__5);
     __Pyx_GIVEREF(__pyx_slice__5);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 1, __pyx_slice__5)) __PYX_ERR(0, 327, __pyx_L1_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 1, __pyx_slice__5)) __PYX_ERR(0, 303, __pyx_L1_error);
     __pyx_t_3 = 0;
-    if (unlikely((PyObject_SetItem(__pyx_v_new_rows, __pyx_t_7, __pyx_t_5) < 0))) __PYX_ERR(0, 327, __pyx_L1_error)
+    if (unlikely((PyObject_SetItem(__pyx_v_new_rows, __pyx_t_7, __pyx_t_5) < 0))) __PYX_ERR(0, 303, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
     __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
 
-    /* "monitor_kernels.pyx":326
+    /* "monitor_kernels.pyx":302
  *             new_cap *= 2
  *         new_rows = np.empty((new_cap, 7), dtype=np.int64)
  *         if self._status_count > 0:             # <<<<<<<<<<<<<<
@@ -23842,12 +22298,12 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_status_capac
  */
   }
 
-  /* "monitor_kernels.pyx":328
+  /* "monitor_kernels.pyx":304
  *         if self._status_count > 0:
  *             new_rows[:self._status_count, :] = self._status_rows_arr[:self._status_count, :]
  *         self._status_rows_arr = new_rows             # <<<<<<<<<<<<<<
+ *         self._status_ptr = <int64_t*>(<np.ndarray>new_rows).data
  *         self._status_capacity = new_cap
- * 
  */
   __Pyx_INCREF(__pyx_v_new_rows);
   __Pyx_GIVEREF(__pyx_v_new_rows);
@@ -23855,16 +22311,26 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_status_capac
   __Pyx_DECREF(__pyx_v_self->_status_rows_arr);
   __pyx_v_self->_status_rows_arr = __pyx_v_new_rows;
 
-  /* "monitor_kernels.pyx":329
+  /* "monitor_kernels.pyx":305
  *             new_rows[:self._status_count, :] = self._status_rows_arr[:self._status_count, :]
  *         self._status_rows_arr = new_rows
+ *         self._status_ptr = <int64_t*>(<np.ndarray>new_rows).data             # <<<<<<<<<<<<<<
+ *         self._status_capacity = new_cap
+ * 
+ */
+  __pyx_t_8 = __pyx_f_5numpy_7ndarray_4data_data(((PyArrayObject *)__pyx_v_new_rows)); if (unlikely(__pyx_t_8 == ((char *)NULL) && PyErr_Occurred())) __PYX_ERR(0, 305, __pyx_L1_error)
+  __pyx_v_self->_status_ptr = ((int64_t *)__pyx_t_8);
+
+  /* "monitor_kernels.pyx":306
+ *         self._status_rows_arr = new_rows
+ *         self._status_ptr = <int64_t*>(<np.ndarray>new_rows).data
  *         self._status_capacity = new_cap             # <<<<<<<<<<<<<<
  * 
  *     cdef void _ensure_anomaly_capacity(self, Py_ssize_t need):
  */
   __pyx_v_self->_status_capacity = __pyx_v_new_cap;
 
-  /* "monitor_kernels.pyx":317
+  /* "monitor_kernels.pyx":293
  *     # revisited without re-deriving the compaction-loop plumbing from scratch.
  * 
  *     cdef void _ensure_status_capacity(self, Py_ssize_t need):             # <<<<<<<<<<<<<<
@@ -23886,7 +22352,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_status_capac
   __Pyx_RefNannyFinishContext();
 }
 
-/* "monitor_kernels.pyx":331
+/* "monitor_kernels.pyx":308
  *         self._status_capacity = new_cap
  * 
  *     cdef void _ensure_anomaly_capacity(self, Py_ssize_t need):             # <<<<<<<<<<<<<<
@@ -23905,12 +22371,13 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_anomaly_capa
   PyObject *__pyx_t_5 = NULL;
   PyObject *__pyx_t_6 = NULL;
   PyObject *__pyx_t_7 = NULL;
+  char *__pyx_t_8;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("_ensure_anomaly_capacity", 1);
 
-  /* "monitor_kernels.pyx":334
+  /* "monitor_kernels.pyx":311
  *         cdef Py_ssize_t new_cap
  *         cdef object new_rows
  *         if need <= self._anomaly_capacity:             # <<<<<<<<<<<<<<
@@ -23920,7 +22387,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_anomaly_capa
   __pyx_t_1 = (__pyx_v_need <= __pyx_v_self->_anomaly_capacity);
   if (__pyx_t_1) {
 
-    /* "monitor_kernels.pyx":335
+    /* "monitor_kernels.pyx":312
  *         cdef object new_rows
  *         if need <= self._anomaly_capacity:
  *             return             # <<<<<<<<<<<<<<
@@ -23929,7 +22396,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_anomaly_capa
  */
     goto __pyx_L0;
 
-    /* "monitor_kernels.pyx":334
+    /* "monitor_kernels.pyx":311
  *         cdef Py_ssize_t new_cap
  *         cdef object new_rows
  *         if need <= self._anomaly_capacity:             # <<<<<<<<<<<<<<
@@ -23938,7 +22405,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_anomaly_capa
  */
   }
 
-  /* "monitor_kernels.pyx":336
+  /* "monitor_kernels.pyx":313
  *         if need <= self._anomaly_capacity:
  *             return
  *         new_cap = self._anomaly_capacity             # <<<<<<<<<<<<<<
@@ -23948,7 +22415,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_anomaly_capa
   __pyx_t_2 = __pyx_v_self->_anomaly_capacity;
   __pyx_v_new_cap = __pyx_t_2;
 
-  /* "monitor_kernels.pyx":337
+  /* "monitor_kernels.pyx":314
  *             return
  *         new_cap = self._anomaly_capacity
  *         while new_cap < need:             # <<<<<<<<<<<<<<
@@ -23959,7 +22426,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_anomaly_capa
     __pyx_t_1 = (__pyx_v_new_cap < __pyx_v_need);
     if (!__pyx_t_1) break;
 
-    /* "monitor_kernels.pyx":338
+    /* "monitor_kernels.pyx":315
  *         new_cap = self._anomaly_capacity
  *         while new_cap < need:
  *             new_cap *= 2             # <<<<<<<<<<<<<<
@@ -23969,43 +22436,43 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_anomaly_capa
     __pyx_v_new_cap = (__pyx_v_new_cap * 2);
   }
 
-  /* "monitor_kernels.pyx":339
+  /* "monitor_kernels.pyx":316
  *         while new_cap < need:
  *             new_cap *= 2
  *         new_rows = np.empty((new_cap, 5), dtype=np.int64)             # <<<<<<<<<<<<<<
  *         if self._anomaly_count > 0:
  *             new_rows[:self._anomaly_count, :] = self._anomaly_rows_arr[:self._anomaly_count, :]
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 339, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 316, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 339, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 316, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_new_cap); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 339, __pyx_L1_error)
+  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_new_cap); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 316, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_5 = PyTuple_New(2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 339, __pyx_L1_error)
+  __pyx_t_5 = PyTuple_New(2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 316, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_GIVEREF(__pyx_t_3);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_3)) __PYX_ERR(0, 339, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 0, __pyx_t_3)) __PYX_ERR(0, 316, __pyx_L1_error);
   __Pyx_INCREF(__pyx_int_5);
   __Pyx_GIVEREF(__pyx_int_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 1, __pyx_int_5)) __PYX_ERR(0, 339, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_5, 1, __pyx_int_5)) __PYX_ERR(0, 316, __pyx_L1_error);
   __pyx_t_3 = 0;
-  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 339, __pyx_L1_error)
+  __pyx_t_3 = PyTuple_New(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 316, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_5)) __PYX_ERR(0, 339, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_5)) __PYX_ERR(0, 316, __pyx_L1_error);
   __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 339, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 316, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 339, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 316, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_int64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 339, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_int64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 316, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 339, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 316, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_3, __pyx_t_5); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 339, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_4, __pyx_t_3, __pyx_t_5); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 316, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -24013,7 +22480,7 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_anomaly_capa
   __pyx_v_new_rows = __pyx_t_7;
   __pyx_t_7 = 0;
 
-  /* "monitor_kernels.pyx":340
+  /* "monitor_kernels.pyx":317
  *             new_cap *= 2
  *         new_rows = np.empty((new_cap, 5), dtype=np.int64)
  *         if self._anomaly_count > 0:             # <<<<<<<<<<<<<<
@@ -24023,47 +22490,47 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_anomaly_capa
   __pyx_t_1 = (__pyx_v_self->_anomaly_count > 0);
   if (__pyx_t_1) {
 
-    /* "monitor_kernels.pyx":341
+    /* "monitor_kernels.pyx":318
  *         new_rows = np.empty((new_cap, 5), dtype=np.int64)
  *         if self._anomaly_count > 0:
  *             new_rows[:self._anomaly_count, :] = self._anomaly_rows_arr[:self._anomaly_count, :]             # <<<<<<<<<<<<<<
  *         self._anomaly_rows_arr = new_rows
- *         self._anomaly_capacity = new_cap
+ *         self._anomaly_ptr = <int64_t*>(<np.ndarray>new_rows).data
  */
-    __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_self->_anomaly_count); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 341, __pyx_L1_error)
+    __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_self->_anomaly_count); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 318, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_7);
-    __pyx_t_5 = PySlice_New(Py_None, __pyx_t_7, Py_None); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 341, __pyx_L1_error)
+    __pyx_t_5 = PySlice_New(Py_None, __pyx_t_7, Py_None); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 318, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_5);
     __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-    __pyx_t_7 = PyTuple_New(2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 341, __pyx_L1_error)
+    __pyx_t_7 = PyTuple_New(2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 318, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_7);
     __Pyx_GIVEREF(__pyx_t_5);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_5)) __PYX_ERR(0, 341, __pyx_L1_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_5)) __PYX_ERR(0, 318, __pyx_L1_error);
     __Pyx_INCREF(__pyx_slice__5);
     __Pyx_GIVEREF(__pyx_slice__5);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 1, __pyx_slice__5)) __PYX_ERR(0, 341, __pyx_L1_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 1, __pyx_slice__5)) __PYX_ERR(0, 318, __pyx_L1_error);
     __pyx_t_5 = 0;
-    __pyx_t_5 = __Pyx_PyObject_GetItem(__pyx_v_self->_anomaly_rows_arr, __pyx_t_7); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 341, __pyx_L1_error)
+    __pyx_t_5 = __Pyx_PyObject_GetItem(__pyx_v_self->_anomaly_rows_arr, __pyx_t_7); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 318, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_5);
     __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-    __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_self->_anomaly_count); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 341, __pyx_L1_error)
+    __pyx_t_7 = PyInt_FromSsize_t(__pyx_v_self->_anomaly_count); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 318, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_7);
-    __pyx_t_3 = PySlice_New(Py_None, __pyx_t_7, Py_None); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 341, __pyx_L1_error)
+    __pyx_t_3 = PySlice_New(Py_None, __pyx_t_7, Py_None); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 318, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
     __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-    __pyx_t_7 = PyTuple_New(2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 341, __pyx_L1_error)
+    __pyx_t_7 = PyTuple_New(2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 318, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_7);
     __Pyx_GIVEREF(__pyx_t_3);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_3)) __PYX_ERR(0, 341, __pyx_L1_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_3)) __PYX_ERR(0, 318, __pyx_L1_error);
     __Pyx_INCREF(__pyx_slice__5);
     __Pyx_GIVEREF(__pyx_slice__5);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 1, __pyx_slice__5)) __PYX_ERR(0, 341, __pyx_L1_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 1, __pyx_slice__5)) __PYX_ERR(0, 318, __pyx_L1_error);
     __pyx_t_3 = 0;
-    if (unlikely((PyObject_SetItem(__pyx_v_new_rows, __pyx_t_7, __pyx_t_5) < 0))) __PYX_ERR(0, 341, __pyx_L1_error)
+    if (unlikely((PyObject_SetItem(__pyx_v_new_rows, __pyx_t_7, __pyx_t_5) < 0))) __PYX_ERR(0, 318, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
     __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
 
-    /* "monitor_kernels.pyx":340
+    /* "monitor_kernels.pyx":317
  *             new_cap *= 2
  *         new_rows = np.empty((new_cap, 5), dtype=np.int64)
  *         if self._anomaly_count > 0:             # <<<<<<<<<<<<<<
@@ -24072,12 +22539,12 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_anomaly_capa
  */
   }
 
-  /* "monitor_kernels.pyx":342
+  /* "monitor_kernels.pyx":319
  *         if self._anomaly_count > 0:
  *             new_rows[:self._anomaly_count, :] = self._anomaly_rows_arr[:self._anomaly_count, :]
  *         self._anomaly_rows_arr = new_rows             # <<<<<<<<<<<<<<
+ *         self._anomaly_ptr = <int64_t*>(<np.ndarray>new_rows).data
  *         self._anomaly_capacity = new_cap
- * 
  */
   __Pyx_INCREF(__pyx_v_new_rows);
   __Pyx_GIVEREF(__pyx_v_new_rows);
@@ -24085,16 +22552,26 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_anomaly_capa
   __Pyx_DECREF(__pyx_v_self->_anomaly_rows_arr);
   __pyx_v_self->_anomaly_rows_arr = __pyx_v_new_rows;
 
-  /* "monitor_kernels.pyx":343
+  /* "monitor_kernels.pyx":320
  *             new_rows[:self._anomaly_count, :] = self._anomaly_rows_arr[:self._anomaly_count, :]
  *         self._anomaly_rows_arr = new_rows
+ *         self._anomaly_ptr = <int64_t*>(<np.ndarray>new_rows).data             # <<<<<<<<<<<<<<
+ *         self._anomaly_capacity = new_cap
+ * 
+ */
+  __pyx_t_8 = __pyx_f_5numpy_7ndarray_4data_data(((PyArrayObject *)__pyx_v_new_rows)); if (unlikely(__pyx_t_8 == ((char *)NULL) && PyErr_Occurred())) __PYX_ERR(0, 320, __pyx_L1_error)
+  __pyx_v_self->_anomaly_ptr = ((int64_t *)__pyx_t_8);
+
+  /* "monitor_kernels.pyx":321
+ *         self._anomaly_rows_arr = new_rows
+ *         self._anomaly_ptr = <int64_t*>(<np.ndarray>new_rows).data
  *         self._anomaly_capacity = new_cap             # <<<<<<<<<<<<<<
  * 
- *     # (2026-07-03) These four helpers now take their arrays as memoryview
+ *     cdef inline void _activate_slot(self, MonitorSlot* slots, Py_ssize_t slot,
  */
   __pyx_v_self->_anomaly_capacity = __pyx_v_new_cap;
 
-  /* "monitor_kernels.pyx":331
+  /* "monitor_kernels.pyx":308
  *         self._status_capacity = new_cap
  * 
  *     cdef void _ensure_anomaly_capacity(self, Py_ssize_t need):             # <<<<<<<<<<<<<<
@@ -24116,244 +22593,236 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__ensure_anomaly_capa
   __Pyx_RefNannyFinishContext();
 }
 
-/* "monitor_kernels.pyx":355
- *     # finalize() (not hot -- runs once per active pair at the very end of a
- *     # run) fetch the views locally right before use, same as before.
- *     cdef void _activate_slot(self, Py_ssize_t slot, uint8_t[:] active,             # <<<<<<<<<<<<<<
- *                               int64_t[:] active_slots, int64_t[:] active_pos):
- *         if active[slot] != 0:
+/* "monitor_kernels.pyx":323
+ *         self._anomaly_capacity = new_cap
+ * 
+ *     cdef inline void _activate_slot(self, MonitorSlot* slots, Py_ssize_t slot,             # <<<<<<<<<<<<<<
+ *                                     int64_t[:] active_slots) noexcept nogil:
+ *         if slots[slot].active != 0:
  */
 
-static void __pyx_f_15monitor_kernels_19NumericMonitorState__activate_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_slot, __Pyx_memviewslice __pyx_v_active, __Pyx_memviewslice __pyx_v_active_slots, __Pyx_memviewslice __pyx_v_active_pos) {
-  Py_ssize_t __pyx_t_1;
-  int __pyx_t_2;
+static CYTHON_INLINE void __pyx_f_15monitor_kernels_19NumericMonitorState__activate_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_slots, Py_ssize_t __pyx_v_slot, __Pyx_memviewslice __pyx_v_active_slots) {
+  int __pyx_t_1;
+  Py_ssize_t __pyx_t_2;
 
-  /* "monitor_kernels.pyx":357
- *     cdef void _activate_slot(self, Py_ssize_t slot, uint8_t[:] active,
- *                               int64_t[:] active_slots, int64_t[:] active_pos):
- *         if active[slot] != 0:             # <<<<<<<<<<<<<<
+  /* "monitor_kernels.pyx":325
+ *     cdef inline void _activate_slot(self, MonitorSlot* slots, Py_ssize_t slot,
+ *                                     int64_t[:] active_slots) noexcept nogil:
+ *         if slots[slot].active != 0:             # <<<<<<<<<<<<<<
  *             return
- *         active[slot] = <uint8_t>1
+ *         slots[slot].active = <uint8_t>1
  */
-  __pyx_t_1 = __pyx_v_slot;
-  __pyx_t_2 = ((*((uint8_t *) ( /* dim=0 */ (__pyx_v_active.data + __pyx_t_1 * __pyx_v_active.strides[0]) ))) != 0);
-  if (__pyx_t_2) {
+  __pyx_t_1 = ((__pyx_v_slots[__pyx_v_slot]).active != 0);
+  if (__pyx_t_1) {
 
-    /* "monitor_kernels.pyx":358
- *                               int64_t[:] active_slots, int64_t[:] active_pos):
- *         if active[slot] != 0:
+    /* "monitor_kernels.pyx":326
+ *                                     int64_t[:] active_slots) noexcept nogil:
+ *         if slots[slot].active != 0:
  *             return             # <<<<<<<<<<<<<<
- *         active[slot] = <uint8_t>1
+ *         slots[slot].active = <uint8_t>1
  *         active_slots[self._active_count] = <int64_t>slot
  */
     goto __pyx_L0;
 
-    /* "monitor_kernels.pyx":357
- *     cdef void _activate_slot(self, Py_ssize_t slot, uint8_t[:] active,
- *                               int64_t[:] active_slots, int64_t[:] active_pos):
- *         if active[slot] != 0:             # <<<<<<<<<<<<<<
+    /* "monitor_kernels.pyx":325
+ *     cdef inline void _activate_slot(self, MonitorSlot* slots, Py_ssize_t slot,
+ *                                     int64_t[:] active_slots) noexcept nogil:
+ *         if slots[slot].active != 0:             # <<<<<<<<<<<<<<
  *             return
- *         active[slot] = <uint8_t>1
+ *         slots[slot].active = <uint8_t>1
  */
   }
 
-  /* "monitor_kernels.pyx":359
- *         if active[slot] != 0:
+  /* "monitor_kernels.pyx":327
+ *         if slots[slot].active != 0:
  *             return
- *         active[slot] = <uint8_t>1             # <<<<<<<<<<<<<<
+ *         slots[slot].active = <uint8_t>1             # <<<<<<<<<<<<<<
  *         active_slots[self._active_count] = <int64_t>slot
- *         active_pos[slot] = <int64_t>self._active_count
+ *         slots[slot].active_pos = <int32_t>self._active_count
  */
-  __pyx_t_1 = __pyx_v_slot;
-  *((uint8_t *) ( /* dim=0 */ (__pyx_v_active.data + __pyx_t_1 * __pyx_v_active.strides[0]) )) = ((uint8_t)1);
+  (__pyx_v_slots[__pyx_v_slot]).active = ((uint8_t)1);
 
-  /* "monitor_kernels.pyx":360
+  /* "monitor_kernels.pyx":328
  *             return
- *         active[slot] = <uint8_t>1
+ *         slots[slot].active = <uint8_t>1
  *         active_slots[self._active_count] = <int64_t>slot             # <<<<<<<<<<<<<<
- *         active_pos[slot] = <int64_t>self._active_count
+ *         slots[slot].active_pos = <int32_t>self._active_count
  *         self._active_count += 1
  */
-  __pyx_t_1 = __pyx_v_self->_active_count;
-  *((int64_t *) ( /* dim=0 */ (__pyx_v_active_slots.data + __pyx_t_1 * __pyx_v_active_slots.strides[0]) )) = ((int64_t)__pyx_v_slot);
+  __pyx_t_2 = __pyx_v_self->_active_count;
+  *((int64_t *) ( /* dim=0 */ (__pyx_v_active_slots.data + __pyx_t_2 * __pyx_v_active_slots.strides[0]) )) = ((int64_t)__pyx_v_slot);
 
-  /* "monitor_kernels.pyx":361
- *         active[slot] = <uint8_t>1
+  /* "monitor_kernels.pyx":329
+ *         slots[slot].active = <uint8_t>1
  *         active_slots[self._active_count] = <int64_t>slot
- *         active_pos[slot] = <int64_t>self._active_count             # <<<<<<<<<<<<<<
+ *         slots[slot].active_pos = <int32_t>self._active_count             # <<<<<<<<<<<<<<
  *         self._active_count += 1
  * 
  */
-  __pyx_t_1 = __pyx_v_slot;
-  *((int64_t *) ( /* dim=0 */ (__pyx_v_active_pos.data + __pyx_t_1 * __pyx_v_active_pos.strides[0]) )) = ((int64_t)__pyx_v_self->_active_count);
+  (__pyx_v_slots[__pyx_v_slot]).active_pos = ((int32_t)__pyx_v_self->_active_count);
 
-  /* "monitor_kernels.pyx":362
+  /* "monitor_kernels.pyx":330
  *         active_slots[self._active_count] = <int64_t>slot
- *         active_pos[slot] = <int64_t>self._active_count
+ *         slots[slot].active_pos = <int32_t>self._active_count
  *         self._active_count += 1             # <<<<<<<<<<<<<<
  * 
- *     cdef void _deactivate_slot(self, Py_ssize_t slot, uint8_t[:] active,
+ *     cdef inline void _deactivate_slot(self, MonitorSlot* slots, Py_ssize_t slot,
  */
   __pyx_v_self->_active_count = (__pyx_v_self->_active_count + 1);
 
-  /* "monitor_kernels.pyx":355
- *     # finalize() (not hot -- runs once per active pair at the very end of a
- *     # run) fetch the views locally right before use, same as before.
- *     cdef void _activate_slot(self, Py_ssize_t slot, uint8_t[:] active,             # <<<<<<<<<<<<<<
- *                               int64_t[:] active_slots, int64_t[:] active_pos):
- *         if active[slot] != 0:
+  /* "monitor_kernels.pyx":323
+ *         self._anomaly_capacity = new_cap
+ * 
+ *     cdef inline void _activate_slot(self, MonitorSlot* slots, Py_ssize_t slot,             # <<<<<<<<<<<<<<
+ *                                     int64_t[:] active_slots) noexcept nogil:
+ *         if slots[slot].active != 0:
  */
 
   /* function exit code */
   __pyx_L0:;
 }
 
-/* "monitor_kernels.pyx":364
+/* "monitor_kernels.pyx":332
  *         self._active_count += 1
  * 
- *     cdef void _deactivate_slot(self, Py_ssize_t slot, uint8_t[:] active,             # <<<<<<<<<<<<<<
- *                                 int64_t[:] active_slots, int64_t[:] active_pos):
+ *     cdef inline void _deactivate_slot(self, MonitorSlot* slots, Py_ssize_t slot,             # <<<<<<<<<<<<<<
+ *                                       int64_t[:] active_slots) noexcept nogil:
  *         cdef Py_ssize_t pos
  */
 
-static void __pyx_f_15monitor_kernels_19NumericMonitorState__deactivate_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_slot, __Pyx_memviewslice __pyx_v_active, __Pyx_memviewslice __pyx_v_active_slots, __Pyx_memviewslice __pyx_v_active_pos) {
+static CYTHON_INLINE void __pyx_f_15monitor_kernels_19NumericMonitorState__deactivate_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_slots, Py_ssize_t __pyx_v_slot, __Pyx_memviewslice __pyx_v_active_slots) {
   Py_ssize_t __pyx_v_pos;
   Py_ssize_t __pyx_v_last_pos;
   Py_ssize_t __pyx_v_last_slot;
-  Py_ssize_t __pyx_t_1;
-  int __pyx_t_2;
+  int __pyx_t_1;
+  Py_ssize_t __pyx_t_2;
 
-  /* "monitor_kernels.pyx":369
+  /* "monitor_kernels.pyx":337
  *         cdef Py_ssize_t last_pos
  *         cdef Py_ssize_t last_slot
- *         if active[slot] == 0:             # <<<<<<<<<<<<<<
+ *         if slots[slot].active == 0:             # <<<<<<<<<<<<<<
  *             return
- *         pos = <Py_ssize_t>active_pos[slot]
+ *         pos = <Py_ssize_t>slots[slot].active_pos
  */
-  __pyx_t_1 = __pyx_v_slot;
-  __pyx_t_2 = ((*((uint8_t *) ( /* dim=0 */ (__pyx_v_active.data + __pyx_t_1 * __pyx_v_active.strides[0]) ))) == 0);
-  if (__pyx_t_2) {
+  __pyx_t_1 = ((__pyx_v_slots[__pyx_v_slot]).active == 0);
+  if (__pyx_t_1) {
 
-    /* "monitor_kernels.pyx":370
+    /* "monitor_kernels.pyx":338
  *         cdef Py_ssize_t last_slot
- *         if active[slot] == 0:
+ *         if slots[slot].active == 0:
  *             return             # <<<<<<<<<<<<<<
- *         pos = <Py_ssize_t>active_pos[slot]
+ *         pos = <Py_ssize_t>slots[slot].active_pos
  *         last_pos = self._active_count - 1
  */
     goto __pyx_L0;
 
-    /* "monitor_kernels.pyx":369
+    /* "monitor_kernels.pyx":337
  *         cdef Py_ssize_t last_pos
  *         cdef Py_ssize_t last_slot
- *         if active[slot] == 0:             # <<<<<<<<<<<<<<
+ *         if slots[slot].active == 0:             # <<<<<<<<<<<<<<
  *             return
- *         pos = <Py_ssize_t>active_pos[slot]
+ *         pos = <Py_ssize_t>slots[slot].active_pos
  */
   }
 
-  /* "monitor_kernels.pyx":371
- *         if active[slot] == 0:
+  /* "monitor_kernels.pyx":339
+ *         if slots[slot].active == 0:
  *             return
- *         pos = <Py_ssize_t>active_pos[slot]             # <<<<<<<<<<<<<<
+ *         pos = <Py_ssize_t>slots[slot].active_pos             # <<<<<<<<<<<<<<
  *         last_pos = self._active_count - 1
  *         last_slot = <Py_ssize_t>active_slots[last_pos]
  */
-  __pyx_t_1 = __pyx_v_slot;
-  __pyx_v_pos = ((Py_ssize_t)(*((int64_t *) ( /* dim=0 */ (__pyx_v_active_pos.data + __pyx_t_1 * __pyx_v_active_pos.strides[0]) ))));
+  __pyx_v_pos = ((Py_ssize_t)(__pyx_v_slots[__pyx_v_slot]).active_pos);
 
-  /* "monitor_kernels.pyx":372
+  /* "monitor_kernels.pyx":340
  *             return
- *         pos = <Py_ssize_t>active_pos[slot]
+ *         pos = <Py_ssize_t>slots[slot].active_pos
  *         last_pos = self._active_count - 1             # <<<<<<<<<<<<<<
  *         last_slot = <Py_ssize_t>active_slots[last_pos]
  *         if pos != last_pos:
  */
   __pyx_v_last_pos = (__pyx_v_self->_active_count - 1);
 
-  /* "monitor_kernels.pyx":373
- *         pos = <Py_ssize_t>active_pos[slot]
+  /* "monitor_kernels.pyx":341
+ *         pos = <Py_ssize_t>slots[slot].active_pos
  *         last_pos = self._active_count - 1
  *         last_slot = <Py_ssize_t>active_slots[last_pos]             # <<<<<<<<<<<<<<
  *         if pos != last_pos:
  *             active_slots[pos] = <int64_t>last_slot
  */
-  __pyx_t_1 = __pyx_v_last_pos;
-  __pyx_v_last_slot = ((Py_ssize_t)(*((int64_t *) ( /* dim=0 */ (__pyx_v_active_slots.data + __pyx_t_1 * __pyx_v_active_slots.strides[0]) ))));
+  __pyx_t_2 = __pyx_v_last_pos;
+  __pyx_v_last_slot = ((Py_ssize_t)(*((int64_t *) ( /* dim=0 */ (__pyx_v_active_slots.data + __pyx_t_2 * __pyx_v_active_slots.strides[0]) ))));
 
-  /* "monitor_kernels.pyx":374
+  /* "monitor_kernels.pyx":342
  *         last_pos = self._active_count - 1
  *         last_slot = <Py_ssize_t>active_slots[last_pos]
  *         if pos != last_pos:             # <<<<<<<<<<<<<<
  *             active_slots[pos] = <int64_t>last_slot
- *             active_pos[last_slot] = <int64_t>pos
+ *             slots[last_slot].active_pos = <int32_t>pos
  */
-  __pyx_t_2 = (__pyx_v_pos != __pyx_v_last_pos);
-  if (__pyx_t_2) {
+  __pyx_t_1 = (__pyx_v_pos != __pyx_v_last_pos);
+  if (__pyx_t_1) {
 
-    /* "monitor_kernels.pyx":375
+    /* "monitor_kernels.pyx":343
  *         last_slot = <Py_ssize_t>active_slots[last_pos]
  *         if pos != last_pos:
  *             active_slots[pos] = <int64_t>last_slot             # <<<<<<<<<<<<<<
- *             active_pos[last_slot] = <int64_t>pos
- *         active_pos[slot] = <int64_t>-1
+ *             slots[last_slot].active_pos = <int32_t>pos
+ *         slots[slot].active_pos = -1
  */
-    __pyx_t_1 = __pyx_v_pos;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_active_slots.data + __pyx_t_1 * __pyx_v_active_slots.strides[0]) )) = ((int64_t)__pyx_v_last_slot);
+    __pyx_t_2 = __pyx_v_pos;
+    *((int64_t *) ( /* dim=0 */ (__pyx_v_active_slots.data + __pyx_t_2 * __pyx_v_active_slots.strides[0]) )) = ((int64_t)__pyx_v_last_slot);
 
-    /* "monitor_kernels.pyx":376
+    /* "monitor_kernels.pyx":344
  *         if pos != last_pos:
  *             active_slots[pos] = <int64_t>last_slot
- *             active_pos[last_slot] = <int64_t>pos             # <<<<<<<<<<<<<<
- *         active_pos[slot] = <int64_t>-1
- *         active[slot] = <uint8_t>0
+ *             slots[last_slot].active_pos = <int32_t>pos             # <<<<<<<<<<<<<<
+ *         slots[slot].active_pos = -1
+ *         slots[slot].active = <uint8_t>0
  */
-    __pyx_t_1 = __pyx_v_last_slot;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_active_pos.data + __pyx_t_1 * __pyx_v_active_pos.strides[0]) )) = ((int64_t)__pyx_v_pos);
+    (__pyx_v_slots[__pyx_v_last_slot]).active_pos = ((int32_t)__pyx_v_pos);
 
-    /* "monitor_kernels.pyx":374
+    /* "monitor_kernels.pyx":342
  *         last_pos = self._active_count - 1
  *         last_slot = <Py_ssize_t>active_slots[last_pos]
  *         if pos != last_pos:             # <<<<<<<<<<<<<<
  *             active_slots[pos] = <int64_t>last_slot
- *             active_pos[last_slot] = <int64_t>pos
+ *             slots[last_slot].active_pos = <int32_t>pos
  */
   }
 
-  /* "monitor_kernels.pyx":377
+  /* "monitor_kernels.pyx":345
  *             active_slots[pos] = <int64_t>last_slot
- *             active_pos[last_slot] = <int64_t>pos
- *         active_pos[slot] = <int64_t>-1             # <<<<<<<<<<<<<<
- *         active[slot] = <uint8_t>0
+ *             slots[last_slot].active_pos = <int32_t>pos
+ *         slots[slot].active_pos = -1             # <<<<<<<<<<<<<<
+ *         slots[slot].active = <uint8_t>0
  *         self._active_count -= 1
  */
-  __pyx_t_1 = __pyx_v_slot;
-  *((int64_t *) ( /* dim=0 */ (__pyx_v_active_pos.data + __pyx_t_1 * __pyx_v_active_pos.strides[0]) )) = ((int64_t)-1L);
+  (__pyx_v_slots[__pyx_v_slot]).active_pos = -1;
 
-  /* "monitor_kernels.pyx":378
- *             active_pos[last_slot] = <int64_t>pos
- *         active_pos[slot] = <int64_t>-1
- *         active[slot] = <uint8_t>0             # <<<<<<<<<<<<<<
+  /* "monitor_kernels.pyx":346
+ *             slots[last_slot].active_pos = <int32_t>pos
+ *         slots[slot].active_pos = -1
+ *         slots[slot].active = <uint8_t>0             # <<<<<<<<<<<<<<
  *         self._active_count -= 1
  * 
  */
-  __pyx_t_1 = __pyx_v_slot;
-  *((uint8_t *) ( /* dim=0 */ (__pyx_v_active.data + __pyx_t_1 * __pyx_v_active.strides[0]) )) = ((uint8_t)0);
+  (__pyx_v_slots[__pyx_v_slot]).active = ((uint8_t)0);
 
-  /* "monitor_kernels.pyx":379
- *         active_pos[slot] = <int64_t>-1
- *         active[slot] = <uint8_t>0
+  /* "monitor_kernels.pyx":347
+ *         slots[slot].active_pos = -1
+ *         slots[slot].active = <uint8_t>0
  *         self._active_count -= 1             # <<<<<<<<<<<<<<
  * 
- *     cdef void _mark_current_frontier(self, Py_ssize_t slot, int64_t[:] queued_step,
+ *     cdef inline void _mark_current_frontier(self, MonitorSlot* slots, Py_ssize_t slot,
  */
   __pyx_v_self->_active_count = (__pyx_v_self->_active_count - 1);
 
-  /* "monitor_kernels.pyx":364
+  /* "monitor_kernels.pyx":332
  *         self._active_count += 1
  * 
- *     cdef void _deactivate_slot(self, Py_ssize_t slot, uint8_t[:] active,             # <<<<<<<<<<<<<<
- *                                 int64_t[:] active_slots, int64_t[:] active_pos):
+ *     cdef inline void _deactivate_slot(self, MonitorSlot* slots, Py_ssize_t slot,             # <<<<<<<<<<<<<<
+ *                                       int64_t[:] active_slots) noexcept nogil:
  *         cdef Py_ssize_t pos
  */
 
@@ -24361,238 +22830,230 @@ static void __pyx_f_15monitor_kernels_19NumericMonitorState__deactivate_slot(str
   __pyx_L0:;
 }
 
-/* "monitor_kernels.pyx":381
+/* "monitor_kernels.pyx":349
  *         self._active_count -= 1
  * 
- *     cdef void _mark_current_frontier(self, Py_ssize_t slot, int64_t[:] queued_step,             # <<<<<<<<<<<<<<
- *                                       int64_t[:] next_frontier):
- *         if queued_step[slot] == self._step_id:
+ *     cdef inline void _mark_current_frontier(self, MonitorSlot* slots, Py_ssize_t slot,             # <<<<<<<<<<<<<<
+ *                                             int64_t[:] next_frontier) noexcept nogil:
+ *         if slots[slot].queued_step == <int32_t>self._step_id:
  */
 
-static void __pyx_f_15monitor_kernels_19NumericMonitorState__mark_current_frontier(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_slot, __Pyx_memviewslice __pyx_v_queued_step, __Pyx_memviewslice __pyx_v_next_frontier) {
-  Py_ssize_t __pyx_t_1;
-  int __pyx_t_2;
-  int64_t __pyx_t_3;
+static CYTHON_INLINE void __pyx_f_15monitor_kernels_19NumericMonitorState__mark_current_frontier(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_slots, Py_ssize_t __pyx_v_slot, __Pyx_memviewslice __pyx_v_next_frontier) {
+  int __pyx_t_1;
+  Py_ssize_t __pyx_t_2;
 
-  /* "monitor_kernels.pyx":383
- *     cdef void _mark_current_frontier(self, Py_ssize_t slot, int64_t[:] queued_step,
- *                                       int64_t[:] next_frontier):
- *         if queued_step[slot] == self._step_id:             # <<<<<<<<<<<<<<
+  /* "monitor_kernels.pyx":351
+ *     cdef inline void _mark_current_frontier(self, MonitorSlot* slots, Py_ssize_t slot,
+ *                                             int64_t[:] next_frontier) noexcept nogil:
+ *         if slots[slot].queued_step == <int32_t>self._step_id:             # <<<<<<<<<<<<<<
  *             return
- *         queued_step[slot] = self._step_id
+ *         slots[slot].queued_step = <int32_t>self._step_id
  */
-  __pyx_t_1 = __pyx_v_slot;
-  __pyx_t_2 = ((*((int64_t *) ( /* dim=0 */ (__pyx_v_queued_step.data + __pyx_t_1 * __pyx_v_queued_step.strides[0]) ))) == __pyx_v_self->_step_id);
-  if (__pyx_t_2) {
+  __pyx_t_1 = ((__pyx_v_slots[__pyx_v_slot]).queued_step == ((int32_t)__pyx_v_self->_step_id));
+  if (__pyx_t_1) {
 
-    /* "monitor_kernels.pyx":384
- *                                       int64_t[:] next_frontier):
- *         if queued_step[slot] == self._step_id:
+    /* "monitor_kernels.pyx":352
+ *                                             int64_t[:] next_frontier) noexcept nogil:
+ *         if slots[slot].queued_step == <int32_t>self._step_id:
  *             return             # <<<<<<<<<<<<<<
- *         queued_step[slot] = self._step_id
+ *         slots[slot].queued_step = <int32_t>self._step_id
  *         next_frontier[self._next_frontier_count] = <int64_t>slot
  */
     goto __pyx_L0;
 
-    /* "monitor_kernels.pyx":383
- *     cdef void _mark_current_frontier(self, Py_ssize_t slot, int64_t[:] queued_step,
- *                                       int64_t[:] next_frontier):
- *         if queued_step[slot] == self._step_id:             # <<<<<<<<<<<<<<
+    /* "monitor_kernels.pyx":351
+ *     cdef inline void _mark_current_frontier(self, MonitorSlot* slots, Py_ssize_t slot,
+ *                                             int64_t[:] next_frontier) noexcept nogil:
+ *         if slots[slot].queued_step == <int32_t>self._step_id:             # <<<<<<<<<<<<<<
  *             return
- *         queued_step[slot] = self._step_id
+ *         slots[slot].queued_step = <int32_t>self._step_id
  */
   }
 
-  /* "monitor_kernels.pyx":385
- *         if queued_step[slot] == self._step_id:
+  /* "monitor_kernels.pyx":353
+ *         if slots[slot].queued_step == <int32_t>self._step_id:
  *             return
- *         queued_step[slot] = self._step_id             # <<<<<<<<<<<<<<
+ *         slots[slot].queued_step = <int32_t>self._step_id             # <<<<<<<<<<<<<<
  *         next_frontier[self._next_frontier_count] = <int64_t>slot
  *         self._next_frontier_count += 1
  */
-  __pyx_t_3 = __pyx_v_self->_step_id;
-  __pyx_t_1 = __pyx_v_slot;
-  *((int64_t *) ( /* dim=0 */ (__pyx_v_queued_step.data + __pyx_t_1 * __pyx_v_queued_step.strides[0]) )) = __pyx_t_3;
+  (__pyx_v_slots[__pyx_v_slot]).queued_step = ((int32_t)__pyx_v_self->_step_id);
 
-  /* "monitor_kernels.pyx":386
+  /* "monitor_kernels.pyx":354
  *             return
- *         queued_step[slot] = self._step_id
+ *         slots[slot].queued_step = <int32_t>self._step_id
  *         next_frontier[self._next_frontier_count] = <int64_t>slot             # <<<<<<<<<<<<<<
  *         self._next_frontier_count += 1
  * 
  */
-  __pyx_t_1 = __pyx_v_self->_next_frontier_count;
-  *((int64_t *) ( /* dim=0 */ (__pyx_v_next_frontier.data + __pyx_t_1 * __pyx_v_next_frontier.strides[0]) )) = ((int64_t)__pyx_v_slot);
+  __pyx_t_2 = __pyx_v_self->_next_frontier_count;
+  *((int64_t *) ( /* dim=0 */ (__pyx_v_next_frontier.data + __pyx_t_2 * __pyx_v_next_frontier.strides[0]) )) = ((int64_t)__pyx_v_slot);
 
-  /* "monitor_kernels.pyx":387
- *         queued_step[slot] = self._step_id
+  /* "monitor_kernels.pyx":355
+ *         slots[slot].queued_step = <int32_t>self._step_id
  *         next_frontier[self._next_frontier_count] = <int64_t>slot
  *         self._next_frontier_count += 1             # <<<<<<<<<<<<<<
  * 
- *     cdef bint _remove_previous_frontier_slot(self, Py_ssize_t slot, int64_t[:] frontier_slots,
+ *     cdef inline bint _remove_previous_frontier_slot(self, MonitorSlot* slots, Py_ssize_t slot,
  */
   __pyx_v_self->_next_frontier_count = (__pyx_v_self->_next_frontier_count + 1);
 
-  /* "monitor_kernels.pyx":381
+  /* "monitor_kernels.pyx":349
  *         self._active_count -= 1
  * 
- *     cdef void _mark_current_frontier(self, Py_ssize_t slot, int64_t[:] queued_step,             # <<<<<<<<<<<<<<
- *                                       int64_t[:] next_frontier):
- *         if queued_step[slot] == self._step_id:
+ *     cdef inline void _mark_current_frontier(self, MonitorSlot* slots, Py_ssize_t slot,             # <<<<<<<<<<<<<<
+ *                                             int64_t[:] next_frontier) noexcept nogil:
+ *         if slots[slot].queued_step == <int32_t>self._step_id:
  */
 
   /* function exit code */
   __pyx_L0:;
 }
 
-/* "monitor_kernels.pyx":389
+/* "monitor_kernels.pyx":357
  *         self._next_frontier_count += 1
  * 
- *     cdef bint _remove_previous_frontier_slot(self, Py_ssize_t slot, int64_t[:] frontier_slots,             # <<<<<<<<<<<<<<
- *                                               int64_t[:] frontier_pos):
+ *     cdef inline bint _remove_previous_frontier_slot(self, MonitorSlot* slots, Py_ssize_t slot,             # <<<<<<<<<<<<<<
+ *                                                     int64_t[:] frontier_slots) noexcept nogil:
  *         cdef Py_ssize_t pos
  */
 
-static int __pyx_f_15monitor_kernels_19NumericMonitorState__remove_previous_frontier_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, Py_ssize_t __pyx_v_slot, __Pyx_memviewslice __pyx_v_frontier_slots, __Pyx_memviewslice __pyx_v_frontier_pos) {
+static CYTHON_INLINE int __pyx_f_15monitor_kernels_19NumericMonitorState__remove_previous_frontier_slot(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_slots, Py_ssize_t __pyx_v_slot, __Pyx_memviewslice __pyx_v_frontier_slots) {
   Py_ssize_t __pyx_v_pos;
   Py_ssize_t __pyx_v_last_pos;
   Py_ssize_t __pyx_v_last_slot;
   int __pyx_r;
-  Py_ssize_t __pyx_t_1;
-  int __pyx_t_2;
+  int __pyx_t_1;
+  Py_ssize_t __pyx_t_2;
 
-  /* "monitor_kernels.pyx":394
+  /* "monitor_kernels.pyx":362
  *         cdef Py_ssize_t last_pos
  *         cdef Py_ssize_t last_slot
- *         if frontier_pos[slot] < 0:             # <<<<<<<<<<<<<<
+ *         if slots[slot].frontier_pos < 0:             # <<<<<<<<<<<<<<
  *             return False
- *         pos = <Py_ssize_t>frontier_pos[slot]
+ *         pos = <Py_ssize_t>slots[slot].frontier_pos
  */
-  __pyx_t_1 = __pyx_v_slot;
-  __pyx_t_2 = ((*((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_pos.data + __pyx_t_1 * __pyx_v_frontier_pos.strides[0]) ))) < 0);
-  if (__pyx_t_2) {
+  __pyx_t_1 = ((__pyx_v_slots[__pyx_v_slot]).frontier_pos < 0);
+  if (__pyx_t_1) {
 
-    /* "monitor_kernels.pyx":395
+    /* "monitor_kernels.pyx":363
  *         cdef Py_ssize_t last_slot
- *         if frontier_pos[slot] < 0:
+ *         if slots[slot].frontier_pos < 0:
  *             return False             # <<<<<<<<<<<<<<
- *         pos = <Py_ssize_t>frontier_pos[slot]
+ *         pos = <Py_ssize_t>slots[slot].frontier_pos
  *         last_pos = self._frontier_count - 1
  */
     __pyx_r = 0;
     goto __pyx_L0;
 
-    /* "monitor_kernels.pyx":394
+    /* "monitor_kernels.pyx":362
  *         cdef Py_ssize_t last_pos
  *         cdef Py_ssize_t last_slot
- *         if frontier_pos[slot] < 0:             # <<<<<<<<<<<<<<
+ *         if slots[slot].frontier_pos < 0:             # <<<<<<<<<<<<<<
  *             return False
- *         pos = <Py_ssize_t>frontier_pos[slot]
+ *         pos = <Py_ssize_t>slots[slot].frontier_pos
  */
   }
 
-  /* "monitor_kernels.pyx":396
- *         if frontier_pos[slot] < 0:
+  /* "monitor_kernels.pyx":364
+ *         if slots[slot].frontier_pos < 0:
  *             return False
- *         pos = <Py_ssize_t>frontier_pos[slot]             # <<<<<<<<<<<<<<
+ *         pos = <Py_ssize_t>slots[slot].frontier_pos             # <<<<<<<<<<<<<<
  *         last_pos = self._frontier_count - 1
  *         last_slot = <Py_ssize_t>frontier_slots[last_pos]
  */
-  __pyx_t_1 = __pyx_v_slot;
-  __pyx_v_pos = ((Py_ssize_t)(*((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_pos.data + __pyx_t_1 * __pyx_v_frontier_pos.strides[0]) ))));
+  __pyx_v_pos = ((Py_ssize_t)(__pyx_v_slots[__pyx_v_slot]).frontier_pos);
 
-  /* "monitor_kernels.pyx":397
+  /* "monitor_kernels.pyx":365
  *             return False
- *         pos = <Py_ssize_t>frontier_pos[slot]
+ *         pos = <Py_ssize_t>slots[slot].frontier_pos
  *         last_pos = self._frontier_count - 1             # <<<<<<<<<<<<<<
  *         last_slot = <Py_ssize_t>frontier_slots[last_pos]
  *         if pos != last_pos:
  */
   __pyx_v_last_pos = (__pyx_v_self->_frontier_count - 1);
 
-  /* "monitor_kernels.pyx":398
- *         pos = <Py_ssize_t>frontier_pos[slot]
+  /* "monitor_kernels.pyx":366
+ *         pos = <Py_ssize_t>slots[slot].frontier_pos
  *         last_pos = self._frontier_count - 1
  *         last_slot = <Py_ssize_t>frontier_slots[last_pos]             # <<<<<<<<<<<<<<
  *         if pos != last_pos:
  *             frontier_slots[pos] = <int64_t>last_slot
  */
-  __pyx_t_1 = __pyx_v_last_pos;
-  __pyx_v_last_slot = ((Py_ssize_t)(*((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_slots.data + __pyx_t_1 * __pyx_v_frontier_slots.strides[0]) ))));
+  __pyx_t_2 = __pyx_v_last_pos;
+  __pyx_v_last_slot = ((Py_ssize_t)(*((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_slots.data + __pyx_t_2 * __pyx_v_frontier_slots.strides[0]) ))));
 
-  /* "monitor_kernels.pyx":399
+  /* "monitor_kernels.pyx":367
  *         last_pos = self._frontier_count - 1
  *         last_slot = <Py_ssize_t>frontier_slots[last_pos]
  *         if pos != last_pos:             # <<<<<<<<<<<<<<
  *             frontier_slots[pos] = <int64_t>last_slot
- *             frontier_pos[last_slot] = <int64_t>pos
+ *             slots[last_slot].frontier_pos = <int32_t>pos
  */
-  __pyx_t_2 = (__pyx_v_pos != __pyx_v_last_pos);
-  if (__pyx_t_2) {
+  __pyx_t_1 = (__pyx_v_pos != __pyx_v_last_pos);
+  if (__pyx_t_1) {
 
-    /* "monitor_kernels.pyx":400
+    /* "monitor_kernels.pyx":368
  *         last_slot = <Py_ssize_t>frontier_slots[last_pos]
  *         if pos != last_pos:
  *             frontier_slots[pos] = <int64_t>last_slot             # <<<<<<<<<<<<<<
- *             frontier_pos[last_slot] = <int64_t>pos
- *         frontier_pos[slot] = <int64_t>-1
+ *             slots[last_slot].frontier_pos = <int32_t>pos
+ *         slots[slot].frontier_pos = -1
  */
-    __pyx_t_1 = __pyx_v_pos;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_slots.data + __pyx_t_1 * __pyx_v_frontier_slots.strides[0]) )) = ((int64_t)__pyx_v_last_slot);
+    __pyx_t_2 = __pyx_v_pos;
+    *((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_slots.data + __pyx_t_2 * __pyx_v_frontier_slots.strides[0]) )) = ((int64_t)__pyx_v_last_slot);
 
-    /* "monitor_kernels.pyx":401
+    /* "monitor_kernels.pyx":369
  *         if pos != last_pos:
  *             frontier_slots[pos] = <int64_t>last_slot
- *             frontier_pos[last_slot] = <int64_t>pos             # <<<<<<<<<<<<<<
- *         frontier_pos[slot] = <int64_t>-1
+ *             slots[last_slot].frontier_pos = <int32_t>pos             # <<<<<<<<<<<<<<
+ *         slots[slot].frontier_pos = -1
  *         self._frontier_count -= 1
  */
-    __pyx_t_1 = __pyx_v_last_slot;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_pos.data + __pyx_t_1 * __pyx_v_frontier_pos.strides[0]) )) = ((int64_t)__pyx_v_pos);
+    (__pyx_v_slots[__pyx_v_last_slot]).frontier_pos = ((int32_t)__pyx_v_pos);
 
-    /* "monitor_kernels.pyx":399
+    /* "monitor_kernels.pyx":367
  *         last_pos = self._frontier_count - 1
  *         last_slot = <Py_ssize_t>frontier_slots[last_pos]
  *         if pos != last_pos:             # <<<<<<<<<<<<<<
  *             frontier_slots[pos] = <int64_t>last_slot
- *             frontier_pos[last_slot] = <int64_t>pos
+ *             slots[last_slot].frontier_pos = <int32_t>pos
  */
   }
 
-  /* "monitor_kernels.pyx":402
+  /* "monitor_kernels.pyx":370
  *             frontier_slots[pos] = <int64_t>last_slot
- *             frontier_pos[last_slot] = <int64_t>pos
- *         frontier_pos[slot] = <int64_t>-1             # <<<<<<<<<<<<<<
+ *             slots[last_slot].frontier_pos = <int32_t>pos
+ *         slots[slot].frontier_pos = -1             # <<<<<<<<<<<<<<
  *         self._frontier_count -= 1
  *         return True
  */
-  __pyx_t_1 = __pyx_v_slot;
-  *((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_pos.data + __pyx_t_1 * __pyx_v_frontier_pos.strides[0]) )) = ((int64_t)-1L);
+  (__pyx_v_slots[__pyx_v_slot]).frontier_pos = -1;
 
-  /* "monitor_kernels.pyx":403
- *             frontier_pos[last_slot] = <int64_t>pos
- *         frontier_pos[slot] = <int64_t>-1
+  /* "monitor_kernels.pyx":371
+ *             slots[last_slot].frontier_pos = <int32_t>pos
+ *         slots[slot].frontier_pos = -1
  *         self._frontier_count -= 1             # <<<<<<<<<<<<<<
  *         return True
  * 
  */
   __pyx_v_self->_frontier_count = (__pyx_v_self->_frontier_count - 1);
 
-  /* "monitor_kernels.pyx":404
- *         frontier_pos[slot] = <int64_t>-1
+  /* "monitor_kernels.pyx":372
+ *         slots[slot].frontier_pos = -1
  *         self._frontier_count -= 1
  *         return True             # <<<<<<<<<<<<<<
  * 
- *     cdef void _append_status(self, int64_t slot):
+ *     cdef inline void _append_status(self, MonitorSlot* slots, Py_ssize_t slot):
  */
   __pyx_r = 1;
   goto __pyx_L0;
 
-  /* "monitor_kernels.pyx":389
+  /* "monitor_kernels.pyx":357
  *         self._next_frontier_count += 1
  * 
- *     cdef bint _remove_previous_frontier_slot(self, Py_ssize_t slot, int64_t[:] frontier_slots,             # <<<<<<<<<<<<<<
- *                                               int64_t[:] frontier_pos):
+ *     cdef inline bint _remove_previous_frontier_slot(self, MonitorSlot* slots, Py_ssize_t slot,             # <<<<<<<<<<<<<<
+ *                                                     int64_t[:] frontier_slots) noexcept nogil:
  *         cdef Py_ssize_t pos
  */
 
@@ -24601,445 +23062,305 @@ static int __pyx_f_15monitor_kernels_19NumericMonitorState__remove_previous_fron
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":406
+/* "monitor_kernels.pyx":374
  *         return True
  * 
- *     cdef void _append_status(self, int64_t slot):             # <<<<<<<<<<<<<<
- *         cdef int64_t[:, :] rows
- *         cdef uint8_t[:] active = self._active_arr
+ *     cdef inline void _append_status(self, MonitorSlot* slots, Py_ssize_t slot):             # <<<<<<<<<<<<<<
+ *         cdef int64_t* row
+ *         if slots[slot].active == 0:
  */
 
-static void __pyx_f_15monitor_kernels_19NumericMonitorState__append_status(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, int64_t __pyx_v_slot) {
-  __Pyx_memviewslice __pyx_v_rows = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_active = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_key_s1 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_key_s2 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_key_lag = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_t1_arr = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_t2_arr = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_length_arr = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_sign_arr = { 0, 0, { 0 }, { 0 }, { 0 } };
-  Py_ssize_t __pyx_v_pos;
-  __Pyx_memviewslice __pyx_t_1 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_t_2 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  Py_ssize_t __pyx_t_3;
-  int __pyx_t_4;
-  __Pyx_memviewslice __pyx_t_5 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  Py_ssize_t __pyx_t_6;
-  Py_ssize_t __pyx_t_7;
-  Py_ssize_t __pyx_t_8;
+static CYTHON_INLINE void __pyx_f_15monitor_kernels_19NumericMonitorState__append_status(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_slots, Py_ssize_t __pyx_v_slot) {
+  int64_t *__pyx_v_row;
+  int __pyx_t_1;
+  int32_t __pyx_t_2;
+  int64_t __pyx_t_3;
+  int8_t __pyx_t_4;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
 
-  /* "monitor_kernels.pyx":408
- *     cdef void _append_status(self, int64_t slot):
- *         cdef int64_t[:, :] rows
- *         cdef uint8_t[:] active = self._active_arr             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] key_s1 = self._key_s1_arr
- *         cdef int64_t[:] key_s2 = self._key_s2_arr
- */
-  __pyx_t_1 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_self->_active_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_1.memview)) __PYX_ERR(0, 408, __pyx_L1_error)
-  __pyx_v_active = __pyx_t_1;
-  __pyx_t_1.memview = NULL;
-  __pyx_t_1.data = NULL;
-
-  /* "monitor_kernels.pyx":409
- *         cdef int64_t[:, :] rows
- *         cdef uint8_t[:] active = self._active_arr
- *         cdef int64_t[:] key_s1 = self._key_s1_arr             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] key_s2 = self._key_s2_arr
- *         cdef int64_t[:] key_lag = self._key_lag_arr
- */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s1_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 409, __pyx_L1_error)
-  __pyx_v_key_s1 = __pyx_t_2;
-  __pyx_t_2.memview = NULL;
-  __pyx_t_2.data = NULL;
-
-  /* "monitor_kernels.pyx":410
- *         cdef uint8_t[:] active = self._active_arr
- *         cdef int64_t[:] key_s1 = self._key_s1_arr
- *         cdef int64_t[:] key_s2 = self._key_s2_arr             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] key_lag = self._key_lag_arr
- *         cdef int64_t[:] t1_arr = self._t1_arr
- */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s2_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 410, __pyx_L1_error)
-  __pyx_v_key_s2 = __pyx_t_2;
-  __pyx_t_2.memview = NULL;
-  __pyx_t_2.data = NULL;
-
-  /* "monitor_kernels.pyx":411
- *         cdef int64_t[:] key_s1 = self._key_s1_arr
- *         cdef int64_t[:] key_s2 = self._key_s2_arr
- *         cdef int64_t[:] key_lag = self._key_lag_arr             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] t1_arr = self._t1_arr
- *         cdef int64_t[:] t2_arr = self._t2_arr
- */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_lag_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 411, __pyx_L1_error)
-  __pyx_v_key_lag = __pyx_t_2;
-  __pyx_t_2.memview = NULL;
-  __pyx_t_2.data = NULL;
-
-  /* "monitor_kernels.pyx":412
- *         cdef int64_t[:] key_s2 = self._key_s2_arr
- *         cdef int64_t[:] key_lag = self._key_lag_arr
- *         cdef int64_t[:] t1_arr = self._t1_arr             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] t2_arr = self._t2_arr
- *         cdef int64_t[:] length_arr = self._length_arr
- */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_t1_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 412, __pyx_L1_error)
-  __pyx_v_t1_arr = __pyx_t_2;
-  __pyx_t_2.memview = NULL;
-  __pyx_t_2.data = NULL;
-
-  /* "monitor_kernels.pyx":413
- *         cdef int64_t[:] key_lag = self._key_lag_arr
- *         cdef int64_t[:] t1_arr = self._t1_arr
- *         cdef int64_t[:] t2_arr = self._t2_arr             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] length_arr = self._length_arr
- *         cdef int64_t[:] sign_arr = self._sign_arr
- */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_t2_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 413, __pyx_L1_error)
-  __pyx_v_t2_arr = __pyx_t_2;
-  __pyx_t_2.memview = NULL;
-  __pyx_t_2.data = NULL;
-
-  /* "monitor_kernels.pyx":414
- *         cdef int64_t[:] t1_arr = self._t1_arr
- *         cdef int64_t[:] t2_arr = self._t2_arr
- *         cdef int64_t[:] length_arr = self._length_arr             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] sign_arr = self._sign_arr
- *         cdef Py_ssize_t pos
- */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_length_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 414, __pyx_L1_error)
-  __pyx_v_length_arr = __pyx_t_2;
-  __pyx_t_2.memview = NULL;
-  __pyx_t_2.data = NULL;
-
-  /* "monitor_kernels.pyx":415
- *         cdef int64_t[:] t2_arr = self._t2_arr
- *         cdef int64_t[:] length_arr = self._length_arr
- *         cdef int64_t[:] sign_arr = self._sign_arr             # <<<<<<<<<<<<<<
- *         cdef Py_ssize_t pos
- *         if active[slot] == 0:
- */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_sign_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 415, __pyx_L1_error)
-  __pyx_v_sign_arr = __pyx_t_2;
-  __pyx_t_2.memview = NULL;
-  __pyx_t_2.data = NULL;
-
-  /* "monitor_kernels.pyx":417
- *         cdef int64_t[:] sign_arr = self._sign_arr
- *         cdef Py_ssize_t pos
- *         if active[slot] == 0:             # <<<<<<<<<<<<<<
+  /* "monitor_kernels.pyx":376
+ *     cdef inline void _append_status(self, MonitorSlot* slots, Py_ssize_t slot):
+ *         cdef int64_t* row
+ *         if slots[slot].active == 0:             # <<<<<<<<<<<<<<
  *             return
- *         self._ensure_status_capacity(self._status_count + 1)
+ *         if self._status_count + 1 > self._status_capacity:
  */
-  __pyx_t_3 = __pyx_v_slot;
-  __pyx_t_4 = ((*((uint8_t *) ( /* dim=0 */ (__pyx_v_active.data + __pyx_t_3 * __pyx_v_active.strides[0]) ))) == 0);
-  if (__pyx_t_4) {
+  __pyx_t_1 = ((__pyx_v_slots[__pyx_v_slot]).active == 0);
+  if (__pyx_t_1) {
 
-    /* "monitor_kernels.pyx":418
- *         cdef Py_ssize_t pos
- *         if active[slot] == 0:
+    /* "monitor_kernels.pyx":377
+ *         cdef int64_t* row
+ *         if slots[slot].active == 0:
  *             return             # <<<<<<<<<<<<<<
- *         self._ensure_status_capacity(self._status_count + 1)
- *         rows = self._status_rows_arr
+ *         if self._status_count + 1 > self._status_capacity:
+ *             self._ensure_status_capacity(self._status_count + 1)
  */
     goto __pyx_L0;
 
-    /* "monitor_kernels.pyx":417
- *         cdef int64_t[:] sign_arr = self._sign_arr
- *         cdef Py_ssize_t pos
- *         if active[slot] == 0:             # <<<<<<<<<<<<<<
+    /* "monitor_kernels.pyx":376
+ *     cdef inline void _append_status(self, MonitorSlot* slots, Py_ssize_t slot):
+ *         cdef int64_t* row
+ *         if slots[slot].active == 0:             # <<<<<<<<<<<<<<
  *             return
- *         self._ensure_status_capacity(self._status_count + 1)
+ *         if self._status_count + 1 > self._status_capacity:
  */
   }
 
-  /* "monitor_kernels.pyx":419
- *         if active[slot] == 0:
+  /* "monitor_kernels.pyx":378
+ *         if slots[slot].active == 0:
  *             return
- *         self._ensure_status_capacity(self._status_count + 1)             # <<<<<<<<<<<<<<
- *         rows = self._status_rows_arr
- *         pos = self._status_count
+ *         if self._status_count + 1 > self._status_capacity:             # <<<<<<<<<<<<<<
+ *             self._ensure_status_capacity(self._status_count + 1)
+ *         row = self._status_ptr + self._status_count * 7
  */
-  ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_ensure_status_capacity(__pyx_v_self, (__pyx_v_self->_status_count + 1)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 419, __pyx_L1_error)
+  __pyx_t_1 = ((__pyx_v_self->_status_count + 1) > __pyx_v_self->_status_capacity);
+  if (__pyx_t_1) {
 
-  /* "monitor_kernels.pyx":420
+    /* "monitor_kernels.pyx":379
  *             return
- *         self._ensure_status_capacity(self._status_count + 1)
- *         rows = self._status_rows_arr             # <<<<<<<<<<<<<<
- *         pos = self._status_count
- *         rows[pos, 0] = key_s1[slot]
+ *         if self._status_count + 1 > self._status_capacity:
+ *             self._ensure_status_capacity(self._status_count + 1)             # <<<<<<<<<<<<<<
+ *         row = self._status_ptr + self._status_count * 7
+ *         row[0] = slots[slot].s1
  */
-  __pyx_t_5 = __Pyx_PyObject_to_MemoryviewSlice_dsds_nn_int64_t(__pyx_v_self->_status_rows_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_5.memview)) __PYX_ERR(0, 420, __pyx_L1_error)
-  __pyx_v_rows = __pyx_t_5;
-  __pyx_t_5.memview = NULL;
-  __pyx_t_5.data = NULL;
+    ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_ensure_status_capacity(__pyx_v_self, (__pyx_v_self->_status_count + 1)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 379, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":421
- *         self._ensure_status_capacity(self._status_count + 1)
- *         rows = self._status_rows_arr
- *         pos = self._status_count             # <<<<<<<<<<<<<<
- *         rows[pos, 0] = key_s1[slot]
- *         rows[pos, 1] = key_s2[slot]
+    /* "monitor_kernels.pyx":378
+ *         if slots[slot].active == 0:
+ *             return
+ *         if self._status_count + 1 > self._status_capacity:             # <<<<<<<<<<<<<<
+ *             self._ensure_status_capacity(self._status_count + 1)
+ *         row = self._status_ptr + self._status_count * 7
  */
-  __pyx_t_6 = __pyx_v_self->_status_count;
-  __pyx_v_pos = __pyx_t_6;
+  }
 
-  /* "monitor_kernels.pyx":422
- *         rows = self._status_rows_arr
- *         pos = self._status_count
- *         rows[pos, 0] = key_s1[slot]             # <<<<<<<<<<<<<<
- *         rows[pos, 1] = key_s2[slot]
- *         rows[pos, 2] = key_lag[slot]
+  /* "monitor_kernels.pyx":380
+ *         if self._status_count + 1 > self._status_capacity:
+ *             self._ensure_status_capacity(self._status_count + 1)
+ *         row = self._status_ptr + self._status_count * 7             # <<<<<<<<<<<<<<
+ *         row[0] = slots[slot].s1
+ *         row[1] = slots[slot].s2
  */
-  __pyx_t_3 = __pyx_v_slot;
-  __pyx_t_7 = __pyx_v_pos;
-  __pyx_t_8 = 0;
-  *((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_7 * __pyx_v_rows.strides[0]) ) + __pyx_t_8 * __pyx_v_rows.strides[1]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_key_s1.data + __pyx_t_3 * __pyx_v_key_s1.strides[0]) )));
+  __pyx_v_row = (__pyx_v_self->_status_ptr + (__pyx_v_self->_status_count * 7));
 
-  /* "monitor_kernels.pyx":423
- *         pos = self._status_count
- *         rows[pos, 0] = key_s1[slot]
- *         rows[pos, 1] = key_s2[slot]             # <<<<<<<<<<<<<<
- *         rows[pos, 2] = key_lag[slot]
- *         rows[pos, 3] = t1_arr[slot]
+  /* "monitor_kernels.pyx":381
+ *             self._ensure_status_capacity(self._status_count + 1)
+ *         row = self._status_ptr + self._status_count * 7
+ *         row[0] = slots[slot].s1             # <<<<<<<<<<<<<<
+ *         row[1] = slots[slot].s2
+ *         row[2] = slots[slot].lag
  */
-  __pyx_t_3 = __pyx_v_slot;
-  __pyx_t_8 = __pyx_v_pos;
-  __pyx_t_7 = 1;
-  *((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_8 * __pyx_v_rows.strides[0]) ) + __pyx_t_7 * __pyx_v_rows.strides[1]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_key_s2.data + __pyx_t_3 * __pyx_v_key_s2.strides[0]) )));
+  __pyx_t_2 = (__pyx_v_slots[__pyx_v_slot]).s1;
+  (__pyx_v_row[0]) = __pyx_t_2;
 
-  /* "monitor_kernels.pyx":424
- *         rows[pos, 0] = key_s1[slot]
- *         rows[pos, 1] = key_s2[slot]
- *         rows[pos, 2] = key_lag[slot]             # <<<<<<<<<<<<<<
- *         rows[pos, 3] = t1_arr[slot]
- *         rows[pos, 4] = t2_arr[slot]
+  /* "monitor_kernels.pyx":382
+ *         row = self._status_ptr + self._status_count * 7
+ *         row[0] = slots[slot].s1
+ *         row[1] = slots[slot].s2             # <<<<<<<<<<<<<<
+ *         row[2] = slots[slot].lag
+ *         row[3] = slots[slot].t1
  */
-  __pyx_t_3 = __pyx_v_slot;
-  __pyx_t_7 = __pyx_v_pos;
-  __pyx_t_8 = 2;
-  *((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_7 * __pyx_v_rows.strides[0]) ) + __pyx_t_8 * __pyx_v_rows.strides[1]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_key_lag.data + __pyx_t_3 * __pyx_v_key_lag.strides[0]) )));
+  __pyx_t_2 = (__pyx_v_slots[__pyx_v_slot]).s2;
+  (__pyx_v_row[1]) = __pyx_t_2;
 
-  /* "monitor_kernels.pyx":425
- *         rows[pos, 1] = key_s2[slot]
- *         rows[pos, 2] = key_lag[slot]
- *         rows[pos, 3] = t1_arr[slot]             # <<<<<<<<<<<<<<
- *         rows[pos, 4] = t2_arr[slot]
- *         rows[pos, 5] = length_arr[slot]
+  /* "monitor_kernels.pyx":383
+ *         row[0] = slots[slot].s1
+ *         row[1] = slots[slot].s2
+ *         row[2] = slots[slot].lag             # <<<<<<<<<<<<<<
+ *         row[3] = slots[slot].t1
+ *         row[4] = slots[slot].t2
  */
-  __pyx_t_3 = __pyx_v_slot;
-  __pyx_t_8 = __pyx_v_pos;
-  __pyx_t_7 = 3;
-  *((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_8 * __pyx_v_rows.strides[0]) ) + __pyx_t_7 * __pyx_v_rows.strides[1]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_t1_arr.data + __pyx_t_3 * __pyx_v_t1_arr.strides[0]) )));
+  __pyx_t_2 = (__pyx_v_slots[__pyx_v_slot]).lag;
+  (__pyx_v_row[2]) = __pyx_t_2;
 
-  /* "monitor_kernels.pyx":426
- *         rows[pos, 2] = key_lag[slot]
- *         rows[pos, 3] = t1_arr[slot]
- *         rows[pos, 4] = t2_arr[slot]             # <<<<<<<<<<<<<<
- *         rows[pos, 5] = length_arr[slot]
- *         rows[pos, 6] = sign_arr[slot]
+  /* "monitor_kernels.pyx":384
+ *         row[1] = slots[slot].s2
+ *         row[2] = slots[slot].lag
+ *         row[3] = slots[slot].t1             # <<<<<<<<<<<<<<
+ *         row[4] = slots[slot].t2
+ *         row[5] = slots[slot].length
  */
-  __pyx_t_3 = __pyx_v_slot;
-  __pyx_t_7 = __pyx_v_pos;
-  __pyx_t_8 = 4;
-  *((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_7 * __pyx_v_rows.strides[0]) ) + __pyx_t_8 * __pyx_v_rows.strides[1]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_t2_arr.data + __pyx_t_3 * __pyx_v_t2_arr.strides[0]) )));
+  __pyx_t_3 = (__pyx_v_slots[__pyx_v_slot]).t1;
+  (__pyx_v_row[3]) = __pyx_t_3;
 
-  /* "monitor_kernels.pyx":427
- *         rows[pos, 3] = t1_arr[slot]
- *         rows[pos, 4] = t2_arr[slot]
- *         rows[pos, 5] = length_arr[slot]             # <<<<<<<<<<<<<<
- *         rows[pos, 6] = sign_arr[slot]
+  /* "monitor_kernels.pyx":385
+ *         row[2] = slots[slot].lag
+ *         row[3] = slots[slot].t1
+ *         row[4] = slots[slot].t2             # <<<<<<<<<<<<<<
+ *         row[5] = slots[slot].length
+ *         row[6] = slots[slot].sign
+ */
+  __pyx_t_3 = (__pyx_v_slots[__pyx_v_slot]).t2;
+  (__pyx_v_row[4]) = __pyx_t_3;
+
+  /* "monitor_kernels.pyx":386
+ *         row[3] = slots[slot].t1
+ *         row[4] = slots[slot].t2
+ *         row[5] = slots[slot].length             # <<<<<<<<<<<<<<
+ *         row[6] = slots[slot].sign
  *         self._status_count += 1
  */
-  __pyx_t_3 = __pyx_v_slot;
-  __pyx_t_8 = __pyx_v_pos;
-  __pyx_t_7 = 5;
-  *((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_8 * __pyx_v_rows.strides[0]) ) + __pyx_t_7 * __pyx_v_rows.strides[1]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_length_arr.data + __pyx_t_3 * __pyx_v_length_arr.strides[0]) )));
+  __pyx_t_2 = (__pyx_v_slots[__pyx_v_slot]).length;
+  (__pyx_v_row[5]) = __pyx_t_2;
 
-  /* "monitor_kernels.pyx":428
- *         rows[pos, 4] = t2_arr[slot]
- *         rows[pos, 5] = length_arr[slot]
- *         rows[pos, 6] = sign_arr[slot]             # <<<<<<<<<<<<<<
+  /* "monitor_kernels.pyx":387
+ *         row[4] = slots[slot].t2
+ *         row[5] = slots[slot].length
+ *         row[6] = slots[slot].sign             # <<<<<<<<<<<<<<
  *         self._status_count += 1
  * 
  */
-  __pyx_t_3 = __pyx_v_slot;
-  __pyx_t_7 = __pyx_v_pos;
-  __pyx_t_8 = 6;
-  *((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_7 * __pyx_v_rows.strides[0]) ) + __pyx_t_8 * __pyx_v_rows.strides[1]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_sign_arr.data + __pyx_t_3 * __pyx_v_sign_arr.strides[0]) )));
+  __pyx_t_4 = (__pyx_v_slots[__pyx_v_slot]).sign;
+  (__pyx_v_row[6]) = __pyx_t_4;
 
-  /* "monitor_kernels.pyx":429
- *         rows[pos, 5] = length_arr[slot]
- *         rows[pos, 6] = sign_arr[slot]
+  /* "monitor_kernels.pyx":388
+ *         row[5] = slots[slot].length
+ *         row[6] = slots[slot].sign
  *         self._status_count += 1             # <<<<<<<<<<<<<<
  * 
- *     cdef void _append_anomaly(self, int64_t s1, int64_t s2, int64_t lag, int64_t time_value, int64_t marker):
+ *     cdef inline void _append_anomaly(self, int64_t s1, int64_t s2, int64_t lag, int64_t time_value, int64_t marker):
  */
   __pyx_v_self->_status_count = (__pyx_v_self->_status_count + 1);
 
-  /* "monitor_kernels.pyx":406
+  /* "monitor_kernels.pyx":374
  *         return True
  * 
- *     cdef void _append_status(self, int64_t slot):             # <<<<<<<<<<<<<<
- *         cdef int64_t[:, :] rows
- *         cdef uint8_t[:] active = self._active_arr
+ *     cdef inline void _append_status(self, MonitorSlot* slots, Py_ssize_t slot):             # <<<<<<<<<<<<<<
+ *         cdef int64_t* row
+ *         if slots[slot].active == 0:
  */
 
   /* function exit code */
   goto __pyx_L0;
   __pyx_L1_error:;
-  __PYX_XCLEAR_MEMVIEW(&__pyx_t_1, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_t_2, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_t_5, 1);
   __Pyx_AddTraceback("monitor_kernels.NumericMonitorState._append_status", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_L0:;
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_rows, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_active, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_key_s1, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_key_s2, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_key_lag, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_t1_arr, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_t2_arr, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_length_arr, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_sign_arr, 1);
 }
 
-/* "monitor_kernels.pyx":431
+/* "monitor_kernels.pyx":390
  *         self._status_count += 1
  * 
- *     cdef void _append_anomaly(self, int64_t s1, int64_t s2, int64_t lag, int64_t time_value, int64_t marker):             # <<<<<<<<<<<<<<
- *         cdef int64_t[:, :] rows
- *         cdef Py_ssize_t pos
+ *     cdef inline void _append_anomaly(self, int64_t s1, int64_t s2, int64_t lag, int64_t time_value, int64_t marker):             # <<<<<<<<<<<<<<
+ *         cdef int64_t* row
+ *         if self._anomaly_count + 1 > self._anomaly_capacity:
  */
 
-static void __pyx_f_15monitor_kernels_19NumericMonitorState__append_anomaly(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, int64_t __pyx_v_s1, int64_t __pyx_v_s2, int64_t __pyx_v_lag, int64_t __pyx_v_time_value, int64_t __pyx_v_marker) {
-  __Pyx_memviewslice __pyx_v_rows = { 0, 0, { 0 }, { 0 }, { 0 } };
-  Py_ssize_t __pyx_v_pos;
-  __Pyx_memviewslice __pyx_t_1 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  Py_ssize_t __pyx_t_2;
-  Py_ssize_t __pyx_t_3;
-  Py_ssize_t __pyx_t_4;
+static CYTHON_INLINE void __pyx_f_15monitor_kernels_19NumericMonitorState__append_anomaly(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, int64_t __pyx_v_s1, int64_t __pyx_v_s2, int64_t __pyx_v_lag, int64_t __pyx_v_time_value, int64_t __pyx_v_marker) {
+  int64_t *__pyx_v_row;
+  int __pyx_t_1;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
 
-  /* "monitor_kernels.pyx":434
- *         cdef int64_t[:, :] rows
- *         cdef Py_ssize_t pos
- *         self._ensure_anomaly_capacity(self._anomaly_count + 1)             # <<<<<<<<<<<<<<
- *         rows = self._anomaly_rows_arr
- *         pos = self._anomaly_count
+  /* "monitor_kernels.pyx":392
+ *     cdef inline void _append_anomaly(self, int64_t s1, int64_t s2, int64_t lag, int64_t time_value, int64_t marker):
+ *         cdef int64_t* row
+ *         if self._anomaly_count + 1 > self._anomaly_capacity:             # <<<<<<<<<<<<<<
+ *             self._ensure_anomaly_capacity(self._anomaly_count + 1)
+ *         row = self._anomaly_ptr + self._anomaly_count * 5
  */
-  ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_ensure_anomaly_capacity(__pyx_v_self, (__pyx_v_self->_anomaly_count + 1)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 434, __pyx_L1_error)
+  __pyx_t_1 = ((__pyx_v_self->_anomaly_count + 1) > __pyx_v_self->_anomaly_capacity);
+  if (__pyx_t_1) {
 
-  /* "monitor_kernels.pyx":435
- *         cdef Py_ssize_t pos
- *         self._ensure_anomaly_capacity(self._anomaly_count + 1)
- *         rows = self._anomaly_rows_arr             # <<<<<<<<<<<<<<
- *         pos = self._anomaly_count
- *         rows[pos, 0] = s1
+    /* "monitor_kernels.pyx":393
+ *         cdef int64_t* row
+ *         if self._anomaly_count + 1 > self._anomaly_capacity:
+ *             self._ensure_anomaly_capacity(self._anomaly_count + 1)             # <<<<<<<<<<<<<<
+ *         row = self._anomaly_ptr + self._anomaly_count * 5
+ *         row[0] = s1
  */
-  __pyx_t_1 = __Pyx_PyObject_to_MemoryviewSlice_dsds_nn_int64_t(__pyx_v_self->_anomaly_rows_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_1.memview)) __PYX_ERR(0, 435, __pyx_L1_error)
-  __pyx_v_rows = __pyx_t_1;
-  __pyx_t_1.memview = NULL;
-  __pyx_t_1.data = NULL;
+    ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_ensure_anomaly_capacity(__pyx_v_self, (__pyx_v_self->_anomaly_count + 1)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 393, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":436
- *         self._ensure_anomaly_capacity(self._anomaly_count + 1)
- *         rows = self._anomaly_rows_arr
- *         pos = self._anomaly_count             # <<<<<<<<<<<<<<
- *         rows[pos, 0] = s1
- *         rows[pos, 1] = s2
+    /* "monitor_kernels.pyx":392
+ *     cdef inline void _append_anomaly(self, int64_t s1, int64_t s2, int64_t lag, int64_t time_value, int64_t marker):
+ *         cdef int64_t* row
+ *         if self._anomaly_count + 1 > self._anomaly_capacity:             # <<<<<<<<<<<<<<
+ *             self._ensure_anomaly_capacity(self._anomaly_count + 1)
+ *         row = self._anomaly_ptr + self._anomaly_count * 5
  */
-  __pyx_t_2 = __pyx_v_self->_anomaly_count;
-  __pyx_v_pos = __pyx_t_2;
+  }
 
-  /* "monitor_kernels.pyx":437
- *         rows = self._anomaly_rows_arr
- *         pos = self._anomaly_count
- *         rows[pos, 0] = s1             # <<<<<<<<<<<<<<
- *         rows[pos, 1] = s2
- *         rows[pos, 2] = lag
+  /* "monitor_kernels.pyx":394
+ *         if self._anomaly_count + 1 > self._anomaly_capacity:
+ *             self._ensure_anomaly_capacity(self._anomaly_count + 1)
+ *         row = self._anomaly_ptr + self._anomaly_count * 5             # <<<<<<<<<<<<<<
+ *         row[0] = s1
+ *         row[1] = s2
  */
-  __pyx_t_3 = __pyx_v_pos;
-  __pyx_t_4 = 0;
-  *((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_3 * __pyx_v_rows.strides[0]) ) + __pyx_t_4 * __pyx_v_rows.strides[1]) )) = __pyx_v_s1;
+  __pyx_v_row = (__pyx_v_self->_anomaly_ptr + (__pyx_v_self->_anomaly_count * 5));
 
-  /* "monitor_kernels.pyx":438
- *         pos = self._anomaly_count
- *         rows[pos, 0] = s1
- *         rows[pos, 1] = s2             # <<<<<<<<<<<<<<
- *         rows[pos, 2] = lag
- *         rows[pos, 3] = time_value
+  /* "monitor_kernels.pyx":395
+ *             self._ensure_anomaly_capacity(self._anomaly_count + 1)
+ *         row = self._anomaly_ptr + self._anomaly_count * 5
+ *         row[0] = s1             # <<<<<<<<<<<<<<
+ *         row[1] = s2
+ *         row[2] = lag
  */
-  __pyx_t_4 = __pyx_v_pos;
-  __pyx_t_3 = 1;
-  *((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_4 * __pyx_v_rows.strides[0]) ) + __pyx_t_3 * __pyx_v_rows.strides[1]) )) = __pyx_v_s2;
+  (__pyx_v_row[0]) = __pyx_v_s1;
 
-  /* "monitor_kernels.pyx":439
- *         rows[pos, 0] = s1
- *         rows[pos, 1] = s2
- *         rows[pos, 2] = lag             # <<<<<<<<<<<<<<
- *         rows[pos, 3] = time_value
- *         rows[pos, 4] = marker
+  /* "monitor_kernels.pyx":396
+ *         row = self._anomaly_ptr + self._anomaly_count * 5
+ *         row[0] = s1
+ *         row[1] = s2             # <<<<<<<<<<<<<<
+ *         row[2] = lag
+ *         row[3] = time_value
  */
-  __pyx_t_3 = __pyx_v_pos;
-  __pyx_t_4 = 2;
-  *((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_3 * __pyx_v_rows.strides[0]) ) + __pyx_t_4 * __pyx_v_rows.strides[1]) )) = __pyx_v_lag;
+  (__pyx_v_row[1]) = __pyx_v_s2;
 
-  /* "monitor_kernels.pyx":440
- *         rows[pos, 1] = s2
- *         rows[pos, 2] = lag
- *         rows[pos, 3] = time_value             # <<<<<<<<<<<<<<
- *         rows[pos, 4] = marker
+  /* "monitor_kernels.pyx":397
+ *         row[0] = s1
+ *         row[1] = s2
+ *         row[2] = lag             # <<<<<<<<<<<<<<
+ *         row[3] = time_value
+ *         row[4] = marker
+ */
+  (__pyx_v_row[2]) = __pyx_v_lag;
+
+  /* "monitor_kernels.pyx":398
+ *         row[1] = s2
+ *         row[2] = lag
+ *         row[3] = time_value             # <<<<<<<<<<<<<<
+ *         row[4] = marker
  *         self._anomaly_count += 1
  */
-  __pyx_t_4 = __pyx_v_pos;
-  __pyx_t_3 = 3;
-  *((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_4 * __pyx_v_rows.strides[0]) ) + __pyx_t_3 * __pyx_v_rows.strides[1]) )) = __pyx_v_time_value;
+  (__pyx_v_row[3]) = __pyx_v_time_value;
 
-  /* "monitor_kernels.pyx":441
- *         rows[pos, 2] = lag
- *         rows[pos, 3] = time_value
- *         rows[pos, 4] = marker             # <<<<<<<<<<<<<<
+  /* "monitor_kernels.pyx":399
+ *         row[2] = lag
+ *         row[3] = time_value
+ *         row[4] = marker             # <<<<<<<<<<<<<<
  *         self._anomaly_count += 1
  * 
  */
-  __pyx_t_3 = __pyx_v_pos;
-  __pyx_t_4 = 4;
-  *((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_3 * __pyx_v_rows.strides[0]) ) + __pyx_t_4 * __pyx_v_rows.strides[1]) )) = __pyx_v_marker;
+  (__pyx_v_row[4]) = __pyx_v_marker;
 
-  /* "monitor_kernels.pyx":442
- *         rows[pos, 3] = time_value
- *         rows[pos, 4] = marker
+  /* "monitor_kernels.pyx":400
+ *         row[3] = time_value
+ *         row[4] = marker
  *         self._anomaly_count += 1             # <<<<<<<<<<<<<<
  * 
  *     cpdef update(self,
  */
   __pyx_v_self->_anomaly_count = (__pyx_v_self->_anomaly_count + 1);
 
-  /* "monitor_kernels.pyx":431
+  /* "monitor_kernels.pyx":390
  *         self._status_count += 1
  * 
- *     cdef void _append_anomaly(self, int64_t s1, int64_t s2, int64_t lag, int64_t time_value, int64_t marker):             # <<<<<<<<<<<<<<
- *         cdef int64_t[:, :] rows
- *         cdef Py_ssize_t pos
+ *     cdef inline void _append_anomaly(self, int64_t s1, int64_t s2, int64_t lag, int64_t time_value, int64_t marker):             # <<<<<<<<<<<<<<
+ *         cdef int64_t* row
+ *         if self._anomaly_count + 1 > self._anomaly_capacity:
  */
 
   /* function exit code */
   goto __pyx_L0;
   __pyx_L1_error:;
-  __PYX_XCLEAR_MEMVIEW(&__pyx_t_1, 1);
   __Pyx_AddTraceback("monitor_kernels.NumericMonitorState._append_anomaly", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_L0:;
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_rows, 1);
 }
 
-/* "monitor_kernels.pyx":444
+/* "monitor_kernels.pyx":402
  *         self._anomaly_count += 1
  * 
  *     cpdef update(self,             # <<<<<<<<<<<<<<
@@ -25058,7 +23379,10 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
   Py_ssize_t __pyx_v_n_rows;
   Py_ssize_t __pyx_v_n_corrs;
   Py_ssize_t __pyx_v_i;
+  Py_ssize_t __pyx_v_j;
   Py_ssize_t __pyx_v_slot_i;
+  Py_ssize_t __pyx_v_pf;
+  Py_ssize_t __pyx_v_mask;
   int64_t __pyx_v_sid1;
   int64_t __pyx_v_sid2;
   int64_t __pyx_v_key_s1;
@@ -25080,23 +23404,13 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
   int64_t __pyx_v_curr_time;
   int64_t __pyx_v_next_corr_time;
   int64_t __pyx_v_out_time;
+  int64_t __pyx_v_vmax;
+  int64_t __pyx_v_v;
   double __pyx_v_corr;
-  __Pyx_memviewslice __pyx_v_occupied = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_active = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_arr_s1 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_arr_s2 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_arr_lag = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_arr_t1 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_arr_t2 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_arr_window = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_arr_length = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_arr_sign = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_arr_seen = { 0, 0, { 0 }, { 0 }, { 0 } };
+  struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_slots;
+  struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_sp;
   __Pyx_memviewslice __pyx_v_frontier_slots = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_frontier_pos = { 0, 0, { 0 }, { 0 }, { 0 } };
   __Pyx_memviewslice __pyx_v_active_slots = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_active_pos = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_queued_step = { 0, 0, { 0 }, { 0 }, { 0 } };
   __Pyx_memviewslice __pyx_v_next_frontier = { 0, 0, { 0 }, { 0 }, { 0 } };
   PyObject *__pyx_v_swap_obj = 0;
   Py_ssize_t __pyx_v_scan_pos;
@@ -25113,19 +23427,22 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
   PyObject *__pyx_t_8 = NULL;
   PyObject *__pyx_t_9 = NULL;
   int __pyx_t_10;
-  double __pyx_t_11;
-  __Pyx_memviewslice __pyx_t_12 = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_t_13 = { 0, 0, { 0 }, { 0 }, { 0 } };
+  Py_ssize_t __pyx_t_11;
+  Py_ssize_t __pyx_t_12;
+  Py_ssize_t __pyx_t_13;
   Py_ssize_t __pyx_t_14;
   Py_ssize_t __pyx_t_15;
   Py_ssize_t __pyx_t_16;
-  Py_ssize_t __pyx_t_17;
-  Py_ssize_t __pyx_t_18;
-  int __pyx_t_19;
-  int __pyx_t_20;
+  int __pyx_t_17;
+  int __pyx_t_18;
+  int64_t __pyx_t_19;
+  int64_t __pyx_t_20;
   int64_t __pyx_t_21;
-  Py_ssize_t __pyx_t_22;
-  Py_ssize_t __pyx_t_23;
+  double __pyx_t_22;
+  struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_t_23;
+  __Pyx_memviewslice __pyx_t_24 = { 0, 0, { 0 }, { 0 }, { 0 } };
+  int32_t __pyx_t_25;
+  int8_t __pyx_t_26;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
@@ -25139,21 +23456,21 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_update); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 444, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_update); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 402, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_19NumericMonitorState_5update)) {
         __Pyx_XDECREF(__pyx_r);
-        if (unlikely(!__pyx_v_rows.memview)) { __Pyx_RaiseUnboundLocalError("rows"); __PYX_ERR(0, 444, __pyx_L1_error) }
-        __pyx_t_3 = __pyx_memoryview_fromslice(__pyx_v_rows, 2, (PyObject *(*)(char *)) __pyx_memview_get_long, (int (*)(char *, PyObject *)) __pyx_memview_set_long, 0);; if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 444, __pyx_L1_error)
+        if (unlikely(!__pyx_v_rows.memview)) { __Pyx_RaiseUnboundLocalError("rows"); __PYX_ERR(0, 402, __pyx_L1_error) }
+        __pyx_t_3 = __pyx_memoryview_fromslice(__pyx_v_rows, 2, (PyObject *(*)(char *)) __pyx_memview_get_long, (int (*)(char *, PyObject *)) __pyx_memview_set_long, 0);; if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 402, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_3);
-        if (unlikely(!__pyx_v_corrs.memview)) { __Pyx_RaiseUnboundLocalError("corrs"); __PYX_ERR(0, 444, __pyx_L1_error) }
-        __pyx_t_4 = __pyx_memoryview_fromslice(__pyx_v_corrs, 1, (PyObject *(*)(char *)) __pyx_memview_get_double, (int (*)(char *, PyObject *)) __pyx_memview_set_double, 0);; if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 444, __pyx_L1_error)
+        if (unlikely(!__pyx_v_corrs.memview)) { __Pyx_RaiseUnboundLocalError("corrs"); __PYX_ERR(0, 402, __pyx_L1_error) }
+        __pyx_t_4 = __pyx_memoryview_fromslice(__pyx_v_corrs, 1, (PyObject *(*)(char *)) __pyx_memview_get_double, (int (*)(char *, PyObject *)) __pyx_memview_set_double, 0);; if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 402, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_4);
-        __pyx_t_5 = __Pyx_PyInt_From_int(__pyx_v_window_step); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 444, __pyx_L1_error)
+        __pyx_t_5 = __Pyx_PyInt_From_int(__pyx_v_window_step); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 402, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_5);
-        __pyx_t_6 = __Pyx_PyBool_FromLong(__pyx_v_save_status); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 444, __pyx_L1_error)
+        __pyx_t_6 = __Pyx_PyBool_FromLong(__pyx_v_save_status); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 402, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_6);
-        __pyx_t_7 = __Pyx_PyBool_FromLong(__pyx_v_save_anomalies); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 444, __pyx_L1_error)
+        __pyx_t_7 = __Pyx_PyBool_FromLong(__pyx_v_save_anomalies); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 402, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_7);
         __Pyx_INCREF(__pyx_t_1);
         __pyx_t_8 = __pyx_t_1; __pyx_t_9 = NULL;
@@ -25179,7 +23496,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
           __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
           __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
           __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 444, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 402, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
         }
@@ -25201,34 +23518,204 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
     #endif
   }
 
-  /* "monitor_kernels.pyx":450
+  /* "monitor_kernels.pyx":408
  *                  bint save_status,
  *                  bint save_anomalies):
  *         cdef Py_ssize_t n_rows = rows.shape[0]             # <<<<<<<<<<<<<<
  *         cdef Py_ssize_t n_corrs = corrs.shape[0]
- *         cdef Py_ssize_t i, slot_i
+ *         cdef Py_ssize_t i, j, slot_i, pf, mask
  */
   __pyx_v_n_rows = (__pyx_v_rows.shape[0]);
 
-  /* "monitor_kernels.pyx":451
+  /* "monitor_kernels.pyx":409
  *                  bint save_anomalies):
  *         cdef Py_ssize_t n_rows = rows.shape[0]
  *         cdef Py_ssize_t n_corrs = corrs.shape[0]             # <<<<<<<<<<<<<<
- *         cdef Py_ssize_t i, slot_i
+ *         cdef Py_ssize_t i, j, slot_i, pf, mask
  *         cdef int64_t sid1, sid2, key_s1, key_s2
  */
   __pyx_v_n_corrs = (__pyx_v_corrs.shape[0]);
 
-  /* "monitor_kernels.pyx":480
- *         cdef double _tp0
+  /* "monitor_kernels.pyx":428
+ * 
+ *         # int32 range guard (sequential scan of the input, ~5 loads/row).
+ *         vmax = 0             # <<<<<<<<<<<<<<
+ *         with nogil:
+ *             for i in range(n_rows):
+ */
+  __pyx_v_vmax = 0;
+
+  /* "monitor_kernels.pyx":429
+ *         # int32 range guard (sequential scan of the input, ~5 loads/row).
+ *         vmax = 0
+ *         with nogil:             # <<<<<<<<<<<<<<
+ *             for i in range(n_rows):
+ *                 for j in range(5):
+ */
+  {
+      #ifdef WITH_THREAD
+      PyThreadState *_save;
+      _save = NULL;
+      Py_UNBLOCK_THREADS
+      __Pyx_FastGIL_Remember();
+      #endif
+      /*try:*/ {
+
+        /* "monitor_kernels.pyx":430
+ *         vmax = 0
+ *         with nogil:
+ *             for i in range(n_rows):             # <<<<<<<<<<<<<<
+ *                 for j in range(5):
+ *                     v = <int64_t>rows[i, j]
+ */
+        __pyx_t_11 = __pyx_v_n_rows;
+        __pyx_t_12 = __pyx_t_11;
+        for (__pyx_t_13 = 0; __pyx_t_13 < __pyx_t_12; __pyx_t_13+=1) {
+          __pyx_v_i = __pyx_t_13;
+
+          /* "monitor_kernels.pyx":431
+ *         with nogil:
+ *             for i in range(n_rows):
+ *                 for j in range(5):             # <<<<<<<<<<<<<<
+ *                     v = <int64_t>rows[i, j]
+ *                     if v > vmax:
+ */
+          for (__pyx_t_14 = 0; __pyx_t_14 < 5; __pyx_t_14+=1) {
+            __pyx_v_j = __pyx_t_14;
+
+            /* "monitor_kernels.pyx":432
+ *             for i in range(n_rows):
+ *                 for j in range(5):
+ *                     v = <int64_t>rows[i, j]             # <<<<<<<<<<<<<<
+ *                     if v > vmax:
+ *                         vmax = v
+ */
+            __pyx_t_15 = __pyx_v_i;
+            __pyx_t_16 = __pyx_v_j;
+            __pyx_v_v = ((int64_t)(*((long *) ( /* dim=1 */ ((char *) (((long *) ( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_15 * __pyx_v_rows.strides[0]) )) + __pyx_t_16)) ))));
+
+            /* "monitor_kernels.pyx":433
+ *                 for j in range(5):
+ *                     v = <int64_t>rows[i, j]
+ *                     if v > vmax:             # <<<<<<<<<<<<<<
+ *                         vmax = v
+ *         if vmax >= MON_INT32_LIMIT or self._step_id + 1 >= MON_INT32_LIMIT:
+ */
+            __pyx_t_17 = (__pyx_v_v > __pyx_v_vmax);
+            if (__pyx_t_17) {
+
+              /* "monitor_kernels.pyx":434
+ *                     v = <int64_t>rows[i, j]
+ *                     if v > vmax:
+ *                         vmax = v             # <<<<<<<<<<<<<<
+ *         if vmax >= MON_INT32_LIMIT or self._step_id + 1 >= MON_INT32_LIMIT:
+ *             raise ValueError("NumericMonitorState: series id / time index / window size / step "
+ */
+              __pyx_v_vmax = __pyx_v_v;
+
+              /* "monitor_kernels.pyx":433
+ *                 for j in range(5):
+ *                     v = <int64_t>rows[i, j]
+ *                     if v > vmax:             # <<<<<<<<<<<<<<
+ *                         vmax = v
+ *         if vmax >= MON_INT32_LIMIT or self._step_id + 1 >= MON_INT32_LIMIT:
+ */
+            }
+          }
+        }
+      }
+
+      /* "monitor_kernels.pyx":429
+ *         # int32 range guard (sequential scan of the input, ~5 loads/row).
+ *         vmax = 0
+ *         with nogil:             # <<<<<<<<<<<<<<
+ *             for i in range(n_rows):
+ *                 for j in range(5):
+ */
+      /*finally:*/ {
+        /*normal exit:*/{
+          #ifdef WITH_THREAD
+          __Pyx_FastGIL_Forget();
+          Py_BLOCK_THREADS
+          #endif
+          goto __pyx_L5;
+        }
+        __pyx_L5:;
+      }
+  }
+
+  /* "monitor_kernels.pyx":435
+ *                     if v > vmax:
+ *                         vmax = v
+ *         if vmax >= MON_INT32_LIMIT or self._step_id + 1 >= MON_INT32_LIMIT:             # <<<<<<<<<<<<<<
+ *             raise ValueError("NumericMonitorState: series id / time index / window size / step "
+ *                              "count must stay below 2**30 (got %d)" % max(vmax, self._step_id + 1))
+ */
+  __pyx_t_18 = (__pyx_v_vmax >= __pyx_v_15monitor_kernels_MON_INT32_LIMIT);
+  if (!__pyx_t_18) {
+  } else {
+    __pyx_t_17 = __pyx_t_18;
+    goto __pyx_L12_bool_binop_done;
+  }
+  __pyx_t_18 = ((__pyx_v_self->_step_id + 1) >= __pyx_v_15monitor_kernels_MON_INT32_LIMIT);
+  __pyx_t_17 = __pyx_t_18;
+  __pyx_L12_bool_binop_done:;
+  if (unlikely(__pyx_t_17)) {
+
+    /* "monitor_kernels.pyx":437
+ *         if vmax >= MON_INT32_LIMIT or self._step_id + 1 >= MON_INT32_LIMIT:
+ *             raise ValueError("NumericMonitorState: series id / time index / window size / step "
+ *                              "count must stay below 2**30 (got %d)" % max(vmax, self._step_id + 1))             # <<<<<<<<<<<<<<
+ * 
+ *         _tp0 = time.perf_counter()
+ */
+    __pyx_t_19 = (__pyx_v_self->_step_id + 1);
+    __pyx_t_20 = __pyx_v_vmax;
+    __pyx_t_17 = (__pyx_t_19 > __pyx_t_20);
+    if (__pyx_t_17) {
+      __pyx_t_21 = __pyx_t_19;
+    } else {
+      __pyx_t_21 = __pyx_t_20;
+    }
+    __pyx_t_1 = __Pyx_PyInt_From_int64_t(__pyx_t_21); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 437, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_1);
+    __pyx_t_2 = PyUnicode_Format(__pyx_kp_u_NumericMonitorState_series_id_ti, __pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 437, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_2);
+    __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+
+    /* "monitor_kernels.pyx":436
+ *                         vmax = v
+ *         if vmax >= MON_INT32_LIMIT or self._step_id + 1 >= MON_INT32_LIMIT:
+ *             raise ValueError("NumericMonitorState: series id / time index / window size / step "             # <<<<<<<<<<<<<<
+ *                              "count must stay below 2**30 (got %d)" % max(vmax, self._step_id + 1))
+ * 
+ */
+    __pyx_t_1 = __Pyx_PyObject_CallOneArg(__pyx_builtin_ValueError, __pyx_t_2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 436, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_1);
+    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+    __Pyx_Raise(__pyx_t_1, 0, 0, 0);
+    __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+    __PYX_ERR(0, 436, __pyx_L1_error)
+
+    /* "monitor_kernels.pyx":435
+ *                     if v > vmax:
+ *                         vmax = v
+ *         if vmax >= MON_INT32_LIMIT or self._step_id + 1 >= MON_INT32_LIMIT:             # <<<<<<<<<<<<<<
+ *             raise ValueError("NumericMonitorState: series id / time index / window size / step "
+ *                              "count must stay below 2**30 (got %d)" % max(vmax, self._step_id + 1))
+ */
+  }
+
+  /* "monitor_kernels.pyx":439
+ *                              "count must stay below 2**30 (got %d)" % max(vmax, self._step_id + 1))
  * 
  *         _tp0 = time.perf_counter()             # <<<<<<<<<<<<<<
  *         self._maybe_compact()
  *         self._ensure_hash_capacity(self._size + n_rows)
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 480, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 439, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_perf_counter); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 480, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_perf_counter); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 439, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __pyx_t_2 = NULL;
@@ -25249,44 +23736,44 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
     PyObject *__pyx_callargs[2] = {__pyx_t_2, NULL};
     __pyx_t_1 = __Pyx_PyObject_FastCall(__pyx_t_8, __pyx_callargs+1-__pyx_t_10, 0+__pyx_t_10);
     __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-    if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 480, __pyx_L1_error)
+    if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 439, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_1);
     __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
   }
-  __pyx_t_11 = __pyx_PyFloat_AsDouble(__pyx_t_1); if (unlikely((__pyx_t_11 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 480, __pyx_L1_error)
+  __pyx_t_22 = __pyx_PyFloat_AsDouble(__pyx_t_1); if (unlikely((__pyx_t_22 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 439, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_v__tp0 = __pyx_t_11;
+  __pyx_v__tp0 = __pyx_t_22;
 
-  /* "monitor_kernels.pyx":481
+  /* "monitor_kernels.pyx":440
  * 
  *         _tp0 = time.perf_counter()
  *         self._maybe_compact()             # <<<<<<<<<<<<<<
  *         self._ensure_hash_capacity(self._size + n_rows)
  *         self._t_capacity += time.perf_counter() - _tp0
  */
-  ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_maybe_compact(__pyx_v_self); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 481, __pyx_L1_error)
+  ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_maybe_compact(__pyx_v_self); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 440, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":482
+  /* "monitor_kernels.pyx":441
  *         _tp0 = time.perf_counter()
  *         self._maybe_compact()
  *         self._ensure_hash_capacity(self._size + n_rows)             # <<<<<<<<<<<<<<
  *         self._t_capacity += time.perf_counter() - _tp0
  *         self._step_id += 1
  */
-  ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_ensure_hash_capacity(__pyx_v_self, (__pyx_v_self->_size + __pyx_v_n_rows)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 482, __pyx_L1_error)
+  ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_ensure_hash_capacity(__pyx_v_self, (__pyx_v_self->_size + __pyx_v_n_rows)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 441, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":483
+  /* "monitor_kernels.pyx":442
  *         self._maybe_compact()
  *         self._ensure_hash_capacity(self._size + n_rows)
  *         self._t_capacity += time.perf_counter() - _tp0             # <<<<<<<<<<<<<<
  *         self._step_id += 1
  *         self._next_frontier_count = 0
  */
-  __pyx_t_1 = PyFloat_FromDouble(__pyx_v_self->_t_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 483, __pyx_L1_error)
+  __pyx_t_1 = PyFloat_FromDouble(__pyx_v_self->_t_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 442, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 483, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 442, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_perf_counter); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 483, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_perf_counter); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 442, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __pyx_t_2 = NULL;
@@ -25307,25 +23794,25 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
     PyObject *__pyx_callargs[2] = {__pyx_t_2, NULL};
     __pyx_t_8 = __Pyx_PyObject_FastCall(__pyx_t_7, __pyx_callargs+1-__pyx_t_10, 0+__pyx_t_10);
     __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-    if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 483, __pyx_L1_error)
+    if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 442, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_8);
     __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   }
-  __pyx_t_7 = PyFloat_FromDouble(__pyx_v__tp0); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 483, __pyx_L1_error)
+  __pyx_t_7 = PyFloat_FromDouble(__pyx_v__tp0); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 442, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_2 = PyNumber_Subtract(__pyx_t_8, __pyx_t_7); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 483, __pyx_L1_error)
+  __pyx_t_2 = PyNumber_Subtract(__pyx_t_8, __pyx_t_7); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 442, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = PyNumber_InPlaceAdd(__pyx_t_1, __pyx_t_2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 483, __pyx_L1_error)
+  __pyx_t_7 = PyNumber_InPlaceAdd(__pyx_t_1, __pyx_t_2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 442, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_11 = __pyx_PyFloat_AsDouble(__pyx_t_7); if (unlikely((__pyx_t_11 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 483, __pyx_L1_error)
+  __pyx_t_22 = __pyx_PyFloat_AsDouble(__pyx_t_7); if (unlikely((__pyx_t_22 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 442, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_v_self->_t_capacity = __pyx_t_11;
+  __pyx_v_self->_t_capacity = __pyx_t_22;
 
-  /* "monitor_kernels.pyx":484
+  /* "monitor_kernels.pyx":443
  *         self._ensure_hash_capacity(self._size + n_rows)
  *         self._t_capacity += time.perf_counter() - _tp0
  *         self._step_id += 1             # <<<<<<<<<<<<<<
@@ -25334,25 +23821,25 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
  */
   __pyx_v_self->_step_id = (__pyx_v_self->_step_id + 1);
 
-  /* "monitor_kernels.pyx":485
+  /* "monitor_kernels.pyx":444
  *         self._t_capacity += time.perf_counter() - _tp0
  *         self._step_id += 1
  *         self._next_frontier_count = 0             # <<<<<<<<<<<<<<
  *         _tp0 = time.perf_counter()
- *         # Hoisted out of the loop (2026-07-03): these memoryviews were
+ *         slots = self._slots
  */
   __pyx_v_self->_next_frontier_count = 0;
 
-  /* "monitor_kernels.pyx":486
+  /* "monitor_kernels.pyx":445
  *         self._step_id += 1
  *         self._next_frontier_count = 0
  *         _tp0 = time.perf_counter()             # <<<<<<<<<<<<<<
- *         # Hoisted out of the loop (2026-07-03): these memoryviews were
- *         # previously re-derived from self._xxx_arr on every single row, even
+ *         slots = self._slots
+ *         active_slots = self._active_slots_arr
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 486, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 445, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_perf_counter); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 486, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_perf_counter); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 445, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __pyx_t_2 = NULL;
@@ -25373,280 +23860,322 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
     PyObject *__pyx_callargs[2] = {__pyx_t_2, NULL};
     __pyx_t_7 = __Pyx_PyObject_FastCall(__pyx_t_1, __pyx_callargs+1-__pyx_t_10, 0+__pyx_t_10);
     __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-    if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 486, __pyx_L1_error)
+    if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 445, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_7);
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   }
-  __pyx_t_11 = __pyx_PyFloat_AsDouble(__pyx_t_7); if (unlikely((__pyx_t_11 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 486, __pyx_L1_error)
+  __pyx_t_22 = __pyx_PyFloat_AsDouble(__pyx_t_7); if (unlikely((__pyx_t_22 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 445, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_v__tp0 = __pyx_t_11;
+  __pyx_v__tp0 = __pyx_t_22;
 
-  /* "monitor_kernels.pyx":499
- *         # was a classic avoidable Cython hot-loop cost. See
- *         # docs/implementation_log.md for the measured effect.
- *         occupied = self._occupied_arr             # <<<<<<<<<<<<<<
- *         active = self._active_arr
- *         arr_s1 = self._key_s1_arr
- */
-  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_self->_occupied_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 499, __pyx_L1_error)
-  __pyx_v_occupied = __pyx_t_12;
-  __pyx_t_12.memview = NULL;
-  __pyx_t_12.data = NULL;
-
-  /* "monitor_kernels.pyx":500
- *         # docs/implementation_log.md for the measured effect.
- *         occupied = self._occupied_arr
- *         active = self._active_arr             # <<<<<<<<<<<<<<
- *         arr_s1 = self._key_s1_arr
- *         arr_s2 = self._key_s2_arr
- */
-  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_self->_active_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 500, __pyx_L1_error)
-  __pyx_v_active = __pyx_t_12;
-  __pyx_t_12.memview = NULL;
-  __pyx_t_12.data = NULL;
-
-  /* "monitor_kernels.pyx":501
- *         occupied = self._occupied_arr
- *         active = self._active_arr
- *         arr_s1 = self._key_s1_arr             # <<<<<<<<<<<<<<
- *         arr_s2 = self._key_s2_arr
- *         arr_lag = self._key_lag_arr
- */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s1_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 501, __pyx_L1_error)
-  __pyx_v_arr_s1 = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
-
-  /* "monitor_kernels.pyx":502
- *         active = self._active_arr
- *         arr_s1 = self._key_s1_arr
- *         arr_s2 = self._key_s2_arr             # <<<<<<<<<<<<<<
- *         arr_lag = self._key_lag_arr
- *         arr_t1 = self._t1_arr
- */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s2_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 502, __pyx_L1_error)
-  __pyx_v_arr_s2 = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
-
-  /* "monitor_kernels.pyx":503
- *         arr_s1 = self._key_s1_arr
- *         arr_s2 = self._key_s2_arr
- *         arr_lag = self._key_lag_arr             # <<<<<<<<<<<<<<
- *         arr_t1 = self._t1_arr
- *         arr_t2 = self._t2_arr
- */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_lag_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 503, __pyx_L1_error)
-  __pyx_v_arr_lag = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
-
-  /* "monitor_kernels.pyx":504
- *         arr_s2 = self._key_s2_arr
- *         arr_lag = self._key_lag_arr
- *         arr_t1 = self._t1_arr             # <<<<<<<<<<<<<<
- *         arr_t2 = self._t2_arr
- *         arr_window = self._window_arr
- */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_t1_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 504, __pyx_L1_error)
-  __pyx_v_arr_t1 = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
-
-  /* "monitor_kernels.pyx":505
- *         arr_lag = self._key_lag_arr
- *         arr_t1 = self._t1_arr
- *         arr_t2 = self._t2_arr             # <<<<<<<<<<<<<<
- *         arr_window = self._window_arr
- *         arr_length = self._length_arr
- */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_t2_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 505, __pyx_L1_error)
-  __pyx_v_arr_t2 = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
-
-  /* "monitor_kernels.pyx":506
- *         arr_t1 = self._t1_arr
- *         arr_t2 = self._t2_arr
- *         arr_window = self._window_arr             # <<<<<<<<<<<<<<
- *         arr_length = self._length_arr
- *         arr_sign = self._sign_arr
- */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_window_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 506, __pyx_L1_error)
-  __pyx_v_arr_window = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
-
-  /* "monitor_kernels.pyx":507
- *         arr_t2 = self._t2_arr
- *         arr_window = self._window_arr
- *         arr_length = self._length_arr             # <<<<<<<<<<<<<<
- *         arr_sign = self._sign_arr
- *         arr_seen = self._seen_step_arr
- */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_length_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 507, __pyx_L1_error)
-  __pyx_v_arr_length = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
-
-  /* "monitor_kernels.pyx":508
- *         arr_window = self._window_arr
- *         arr_length = self._length_arr
- *         arr_sign = self._sign_arr             # <<<<<<<<<<<<<<
- *         arr_seen = self._seen_step_arr
- *         # Same hoisting, extended (2026-07-03) to the arrays used by
- */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_sign_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 508, __pyx_L1_error)
-  __pyx_v_arr_sign = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
-
-  /* "monitor_kernels.pyx":509
- *         arr_length = self._length_arr
- *         arr_sign = self._sign_arr
- *         arr_seen = self._seen_step_arr             # <<<<<<<<<<<<<<
- *         # Same hoisting, extended (2026-07-03) to the arrays used by
- *         # _activate_slot/_deactivate_slot/_mark_current_frontier/
- */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_seen_step_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 509, __pyx_L1_error)
-  __pyx_v_arr_seen = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
-
-  /* "monitor_kernels.pyx":514
- *         # _remove_previous_frontier_slot, now passed in as parameters instead
- *         # of those helpers re-deriving them from self._xxx_arr on every call.
- *         active_slots = self._active_slots_arr             # <<<<<<<<<<<<<<
- *         active_pos = self._active_pos_arr
- *         queued_step = self._queued_step_arr
- */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_active_slots_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 514, __pyx_L1_error)
-  __pyx_v_active_slots = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
-
-  /* "monitor_kernels.pyx":515
- *         # of those helpers re-deriving them from self._xxx_arr on every call.
+  /* "monitor_kernels.pyx":446
+ *         self._next_frontier_count = 0
+ *         _tp0 = time.perf_counter()
+ *         slots = self._slots             # <<<<<<<<<<<<<<
  *         active_slots = self._active_slots_arr
- *         active_pos = self._active_pos_arr             # <<<<<<<<<<<<<<
- *         queued_step = self._queued_step_arr
  *         next_frontier = self._next_frontier_slots_arr
  */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_active_pos_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 515, __pyx_L1_error)
-  __pyx_v_active_pos = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
+  __pyx_t_23 = __pyx_v_self->_slots;
+  __pyx_v_slots = __pyx_t_23;
 
-  /* "monitor_kernels.pyx":516
- *         active_slots = self._active_slots_arr
- *         active_pos = self._active_pos_arr
- *         queued_step = self._queued_step_arr             # <<<<<<<<<<<<<<
+  /* "monitor_kernels.pyx":447
+ *         _tp0 = time.perf_counter()
+ *         slots = self._slots
+ *         active_slots = self._active_slots_arr             # <<<<<<<<<<<<<<
  *         next_frontier = self._next_frontier_slots_arr
  *         frontier_slots = self._frontier_slots_arr
  */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_queued_step_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 516, __pyx_L1_error)
-  __pyx_v_queued_step = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
+  __pyx_t_24 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_active_slots_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_24.memview)) __PYX_ERR(0, 447, __pyx_L1_error)
+  __pyx_v_active_slots = __pyx_t_24;
+  __pyx_t_24.memview = NULL;
+  __pyx_t_24.data = NULL;
 
-  /* "monitor_kernels.pyx":517
- *         active_pos = self._active_pos_arr
- *         queued_step = self._queued_step_arr
+  /* "monitor_kernels.pyx":448
+ *         slots = self._slots
+ *         active_slots = self._active_slots_arr
  *         next_frontier = self._next_frontier_slots_arr             # <<<<<<<<<<<<<<
  *         frontier_slots = self._frontier_slots_arr
- *         frontier_pos = self._frontier_pos_arr
+ *         pf = self._prefetch_dist
  */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_next_frontier_slots_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 517, __pyx_L1_error)
-  __pyx_v_next_frontier = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
+  __pyx_t_24 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_next_frontier_slots_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_24.memview)) __PYX_ERR(0, 448, __pyx_L1_error)
+  __pyx_v_next_frontier = __pyx_t_24;
+  __pyx_t_24.memview = NULL;
+  __pyx_t_24.data = NULL;
 
-  /* "monitor_kernels.pyx":518
- *         queued_step = self._queued_step_arr
+  /* "monitor_kernels.pyx":449
+ *         active_slots = self._active_slots_arr
  *         next_frontier = self._next_frontier_slots_arr
  *         frontier_slots = self._frontier_slots_arr             # <<<<<<<<<<<<<<
- *         frontier_pos = self._frontier_pos_arr
- *         for i in range(n_rows):
+ *         pf = self._prefetch_dist
+ *         mask = self._capacity - 1
  */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_frontier_slots_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 518, __pyx_L1_error)
-  __pyx_v_frontier_slots = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
+  __pyx_t_24 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_frontier_slots_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_24.memview)) __PYX_ERR(0, 449, __pyx_L1_error)
+  __pyx_v_frontier_slots = __pyx_t_24;
+  __pyx_t_24.memview = NULL;
+  __pyx_t_24.data = NULL;
 
-  /* "monitor_kernels.pyx":519
+  /* "monitor_kernels.pyx":450
  *         next_frontier = self._next_frontier_slots_arr
  *         frontier_slots = self._frontier_slots_arr
- *         frontier_pos = self._frontier_pos_arr             # <<<<<<<<<<<<<<
+ *         pf = self._prefetch_dist             # <<<<<<<<<<<<<<
+ *         mask = self._capacity - 1
  *         for i in range(n_rows):
+ */
+  __pyx_t_11 = __pyx_v_self->_prefetch_dist;
+  __pyx_v_pf = __pyx_t_11;
+
+  /* "monitor_kernels.pyx":451
+ *         frontier_slots = self._frontier_slots_arr
+ *         pf = self._prefetch_dist
+ *         mask = self._capacity - 1             # <<<<<<<<<<<<<<
+ *         for i in range(n_rows):
+ *             if pf > 0 and i + pf < n_rows:
+ */
+  __pyx_v_mask = (__pyx_v_self->_capacity - 1);
+
+  /* "monitor_kernels.pyx":452
+ *         pf = self._prefetch_dist
+ *         mask = self._capacity - 1
+ *         for i in range(n_rows):             # <<<<<<<<<<<<<<
+ *             if pf > 0 and i + pf < n_rows:
+ *                 sid1 = <int64_t>rows[i + pf, 0]
+ */
+  __pyx_t_11 = __pyx_v_n_rows;
+  __pyx_t_12 = __pyx_t_11;
+  for (__pyx_t_13 = 0; __pyx_t_13 < __pyx_t_12; __pyx_t_13+=1) {
+    __pyx_v_i = __pyx_t_13;
+
+    /* "monitor_kernels.pyx":453
+ *         mask = self._capacity - 1
+ *         for i in range(n_rows):
+ *             if pf > 0 and i + pf < n_rows:             # <<<<<<<<<<<<<<
+ *                 sid1 = <int64_t>rows[i + pf, 0]
+ *                 sid2 = <int64_t>rows[i + pf, 1]
+ */
+    __pyx_t_18 = (__pyx_v_pf > 0);
+    if (__pyx_t_18) {
+    } else {
+      __pyx_t_17 = __pyx_t_18;
+      goto __pyx_L17_bool_binop_done;
+    }
+    __pyx_t_18 = ((__pyx_v_i + __pyx_v_pf) < __pyx_v_n_rows);
+    __pyx_t_17 = __pyx_t_18;
+    __pyx_L17_bool_binop_done:;
+    if (__pyx_t_17) {
+
+      /* "monitor_kernels.pyx":454
+ *         for i in range(n_rows):
+ *             if pf > 0 and i + pf < n_rows:
+ *                 sid1 = <int64_t>rows[i + pf, 0]             # <<<<<<<<<<<<<<
+ *                 sid2 = <int64_t>rows[i + pf, 1]
+ *                 if sid1 >= 0 and sid2 >= 0:
+ */
+      __pyx_t_16 = (__pyx_v_i + __pyx_v_pf);
+      __pyx_t_15 = 0;
+      __pyx_v_sid1 = ((int64_t)(*((long *) ( /* dim=1 */ ((char *) (((long *) ( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_16 * __pyx_v_rows.strides[0]) )) + __pyx_t_15)) ))));
+
+      /* "monitor_kernels.pyx":455
+ *             if pf > 0 and i + pf < n_rows:
+ *                 sid1 = <int64_t>rows[i + pf, 0]
+ *                 sid2 = <int64_t>rows[i + pf, 1]             # <<<<<<<<<<<<<<
+ *                 if sid1 >= 0 and sid2 >= 0:
+ *                     t1 = <int64_t>rows[i + pf, 2]
+ */
+      __pyx_t_15 = (__pyx_v_i + __pyx_v_pf);
+      __pyx_t_16 = 1;
+      __pyx_v_sid2 = ((int64_t)(*((long *) ( /* dim=1 */ ((char *) (((long *) ( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_15 * __pyx_v_rows.strides[0]) )) + __pyx_t_16)) ))));
+
+      /* "monitor_kernels.pyx":456
+ *                 sid1 = <int64_t>rows[i + pf, 0]
+ *                 sid2 = <int64_t>rows[i + pf, 1]
+ *                 if sid1 >= 0 and sid2 >= 0:             # <<<<<<<<<<<<<<
+ *                     t1 = <int64_t>rows[i + pf, 2]
+ *                     t2 = <int64_t>rows[i + pf, 3]
+ */
+      __pyx_t_18 = (__pyx_v_sid1 >= 0);
+      if (__pyx_t_18) {
+      } else {
+        __pyx_t_17 = __pyx_t_18;
+        goto __pyx_L20_bool_binop_done;
+      }
+      __pyx_t_18 = (__pyx_v_sid2 >= 0);
+      __pyx_t_17 = __pyx_t_18;
+      __pyx_L20_bool_binop_done:;
+      if (__pyx_t_17) {
+
+        /* "monitor_kernels.pyx":457
+ *                 sid2 = <int64_t>rows[i + pf, 1]
+ *                 if sid1 >= 0 and sid2 >= 0:
+ *                     t1 = <int64_t>rows[i + pf, 2]             # <<<<<<<<<<<<<<
+ *                     t2 = <int64_t>rows[i + pf, 3]
+ *                     lag = t1 - t2 if t1 >= t2 else t2 - t1
+ */
+        __pyx_t_16 = (__pyx_v_i + __pyx_v_pf);
+        __pyx_t_15 = 2;
+        __pyx_v_t1 = ((int64_t)(*((long *) ( /* dim=1 */ ((char *) (((long *) ( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_16 * __pyx_v_rows.strides[0]) )) + __pyx_t_15)) ))));
+
+        /* "monitor_kernels.pyx":458
+ *                 if sid1 >= 0 and sid2 >= 0:
+ *                     t1 = <int64_t>rows[i + pf, 2]
+ *                     t2 = <int64_t>rows[i + pf, 3]             # <<<<<<<<<<<<<<
+ *                     lag = t1 - t2 if t1 >= t2 else t2 - t1
+ *                     if sid1 <= sid2:
+ */
+        __pyx_t_15 = (__pyx_v_i + __pyx_v_pf);
+        __pyx_t_16 = 3;
+        __pyx_v_t2 = ((int64_t)(*((long *) ( /* dim=1 */ ((char *) (((long *) ( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_15 * __pyx_v_rows.strides[0]) )) + __pyx_t_16)) ))));
+
+        /* "monitor_kernels.pyx":459
+ *                     t1 = <int64_t>rows[i + pf, 2]
+ *                     t2 = <int64_t>rows[i + pf, 3]
+ *                     lag = t1 - t2 if t1 >= t2 else t2 - t1             # <<<<<<<<<<<<<<
+ *                     if sid1 <= sid2:
+ *                         key_s1 = sid1
+ */
+        __pyx_t_17 = (__pyx_v_t1 >= __pyx_v_t2);
+        if (__pyx_t_17) {
+          __pyx_t_21 = (__pyx_v_t1 - __pyx_v_t2);
+        } else {
+          __pyx_t_21 = (__pyx_v_t2 - __pyx_v_t1);
+        }
+        __pyx_v_lag = __pyx_t_21;
+
+        /* "monitor_kernels.pyx":460
+ *                     t2 = <int64_t>rows[i + pf, 3]
+ *                     lag = t1 - t2 if t1 >= t2 else t2 - t1
+ *                     if sid1 <= sid2:             # <<<<<<<<<<<<<<
+ *                         key_s1 = sid1
+ *                         key_s2 = sid2
+ */
+        __pyx_t_17 = (__pyx_v_sid1 <= __pyx_v_sid2);
+        if (__pyx_t_17) {
+
+          /* "monitor_kernels.pyx":461
+ *                     lag = t1 - t2 if t1 >= t2 else t2 - t1
+ *                     if sid1 <= sid2:
+ *                         key_s1 = sid1             # <<<<<<<<<<<<<<
+ *                         key_s2 = sid2
+ *                     else:
+ */
+          __pyx_v_key_s1 = __pyx_v_sid1;
+
+          /* "monitor_kernels.pyx":462
+ *                     if sid1 <= sid2:
+ *                         key_s1 = sid1
+ *                         key_s2 = sid2             # <<<<<<<<<<<<<<
+ *                     else:
+ *                         key_s1 = sid2
+ */
+          __pyx_v_key_s2 = __pyx_v_sid2;
+
+          /* "monitor_kernels.pyx":460
+ *                     t2 = <int64_t>rows[i + pf, 3]
+ *                     lag = t1 - t2 if t1 >= t2 else t2 - t1
+ *                     if sid1 <= sid2:             # <<<<<<<<<<<<<<
+ *                         key_s1 = sid1
+ *                         key_s2 = sid2
+ */
+          goto __pyx_L22;
+        }
+
+        /* "monitor_kernels.pyx":464
+ *                         key_s2 = sid2
+ *                     else:
+ *                         key_s1 = sid2             # <<<<<<<<<<<<<<
+ *                         key_s2 = sid1
+ *                     MON_PREFETCH_W(&slots[<Py_ssize_t>(_monitor_hash_key(key_s1, key_s2, lag) & <uint64_t>mask)])
+ */
+        /*else*/ {
+          __pyx_v_key_s1 = __pyx_v_sid2;
+
+          /* "monitor_kernels.pyx":465
+ *                     else:
+ *                         key_s1 = sid2
+ *                         key_s2 = sid1             # <<<<<<<<<<<<<<
+ *                     MON_PREFETCH_W(&slots[<Py_ssize_t>(_monitor_hash_key(key_s1, key_s2, lag) & <uint64_t>mask)])
  *             sid1 = <int64_t>rows[i, 0]
  */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_frontier_pos_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 519, __pyx_L1_error)
-  __pyx_v_frontier_pos = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
+          __pyx_v_key_s2 = __pyx_v_sid1;
+        }
+        __pyx_L22:;
 
-  /* "monitor_kernels.pyx":520
- *         frontier_slots = self._frontier_slots_arr
- *         frontier_pos = self._frontier_pos_arr
- *         for i in range(n_rows):             # <<<<<<<<<<<<<<
+        /* "monitor_kernels.pyx":466
+ *                         key_s1 = sid2
+ *                         key_s2 = sid1
+ *                     MON_PREFETCH_W(&slots[<Py_ssize_t>(_monitor_hash_key(key_s1, key_s2, lag) & <uint64_t>mask)])             # <<<<<<<<<<<<<<
  *             sid1 = <int64_t>rows[i, 0]
  *             sid2 = <int64_t>rows[i, 1]
  */
-  __pyx_t_14 = __pyx_v_n_rows;
-  __pyx_t_15 = __pyx_t_14;
-  for (__pyx_t_16 = 0; __pyx_t_16 < __pyx_t_15; __pyx_t_16+=1) {
-    __pyx_v_i = __pyx_t_16;
+        MON_PREFETCH_W((&(__pyx_v_slots[((Py_ssize_t)(__pyx_f_15monitor_kernels__monitor_hash_key(__pyx_v_key_s1, __pyx_v_key_s2, __pyx_v_lag) & ((uint64_t)__pyx_v_mask)))])));
 
-    /* "monitor_kernels.pyx":521
- *         frontier_pos = self._frontier_pos_arr
+        /* "monitor_kernels.pyx":456
+ *                 sid1 = <int64_t>rows[i + pf, 0]
+ *                 sid2 = <int64_t>rows[i + pf, 1]
+ *                 if sid1 >= 0 and sid2 >= 0:             # <<<<<<<<<<<<<<
+ *                     t1 = <int64_t>rows[i + pf, 2]
+ *                     t2 = <int64_t>rows[i + pf, 3]
+ */
+      }
+
+      /* "monitor_kernels.pyx":453
+ *         mask = self._capacity - 1
  *         for i in range(n_rows):
+ *             if pf > 0 and i + pf < n_rows:             # <<<<<<<<<<<<<<
+ *                 sid1 = <int64_t>rows[i + pf, 0]
+ *                 sid2 = <int64_t>rows[i + pf, 1]
+ */
+    }
+
+    /* "monitor_kernels.pyx":467
+ *                         key_s2 = sid1
+ *                     MON_PREFETCH_W(&slots[<Py_ssize_t>(_monitor_hash_key(key_s1, key_s2, lag) & <uint64_t>mask)])
  *             sid1 = <int64_t>rows[i, 0]             # <<<<<<<<<<<<<<
  *             sid2 = <int64_t>rows[i, 1]
  *             if sid1 < 0 or sid2 < 0:
  */
-    __pyx_t_17 = __pyx_v_i;
-    __pyx_t_18 = 0;
-    __pyx_v_sid1 = ((int64_t)(*((long *) ( /* dim=1 */ ((char *) (((long *) ( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_17 * __pyx_v_rows.strides[0]) )) + __pyx_t_18)) ))));
+    __pyx_t_16 = __pyx_v_i;
+    __pyx_t_15 = 0;
+    __pyx_v_sid1 = ((int64_t)(*((long *) ( /* dim=1 */ ((char *) (((long *) ( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_16 * __pyx_v_rows.strides[0]) )) + __pyx_t_15)) ))));
 
-    /* "monitor_kernels.pyx":522
- *         for i in range(n_rows):
+    /* "monitor_kernels.pyx":468
+ *                     MON_PREFETCH_W(&slots[<Py_ssize_t>(_monitor_hash_key(key_s1, key_s2, lag) & <uint64_t>mask)])
  *             sid1 = <int64_t>rows[i, 0]
  *             sid2 = <int64_t>rows[i, 1]             # <<<<<<<<<<<<<<
  *             if sid1 < 0 or sid2 < 0:
  *                 continue
  */
-    __pyx_t_18 = __pyx_v_i;
-    __pyx_t_17 = 1;
-    __pyx_v_sid2 = ((int64_t)(*((long *) ( /* dim=1 */ ((char *) (((long *) ( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_18 * __pyx_v_rows.strides[0]) )) + __pyx_t_17)) ))));
+    __pyx_t_15 = __pyx_v_i;
+    __pyx_t_16 = 1;
+    __pyx_v_sid2 = ((int64_t)(*((long *) ( /* dim=1 */ ((char *) (((long *) ( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_15 * __pyx_v_rows.strides[0]) )) + __pyx_t_16)) ))));
 
-    /* "monitor_kernels.pyx":523
+    /* "monitor_kernels.pyx":469
  *             sid1 = <int64_t>rows[i, 0]
  *             sid2 = <int64_t>rows[i, 1]
  *             if sid1 < 0 or sid2 < 0:             # <<<<<<<<<<<<<<
  *                 continue
  *             t1 = <int64_t>rows[i, 2]
  */
-    __pyx_t_20 = (__pyx_v_sid1 < 0);
-    if (!__pyx_t_20) {
+    __pyx_t_18 = (__pyx_v_sid1 < 0);
+    if (!__pyx_t_18) {
     } else {
-      __pyx_t_19 = __pyx_t_20;
-      goto __pyx_L6_bool_binop_done;
+      __pyx_t_17 = __pyx_t_18;
+      goto __pyx_L24_bool_binop_done;
     }
-    __pyx_t_20 = (__pyx_v_sid2 < 0);
-    __pyx_t_19 = __pyx_t_20;
-    __pyx_L6_bool_binop_done:;
-    if (__pyx_t_19) {
+    __pyx_t_18 = (__pyx_v_sid2 < 0);
+    __pyx_t_17 = __pyx_t_18;
+    __pyx_L24_bool_binop_done:;
+    if (__pyx_t_17) {
 
-      /* "monitor_kernels.pyx":524
+      /* "monitor_kernels.pyx":470
  *             sid2 = <int64_t>rows[i, 1]
  *             if sid1 < 0 or sid2 < 0:
  *                 continue             # <<<<<<<<<<<<<<
  *             t1 = <int64_t>rows[i, 2]
  *             t2 = <int64_t>rows[i, 3]
  */
-      goto __pyx_L3_continue;
+      goto __pyx_L14_continue;
 
-      /* "monitor_kernels.pyx":523
+      /* "monitor_kernels.pyx":469
  *             sid1 = <int64_t>rows[i, 0]
  *             sid2 = <int64_t>rows[i, 1]
  *             if sid1 < 0 or sid2 < 0:             # <<<<<<<<<<<<<<
@@ -25655,70 +24184,70 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
  */
     }
 
-    /* "monitor_kernels.pyx":525
+    /* "monitor_kernels.pyx":471
  *             if sid1 < 0 or sid2 < 0:
  *                 continue
  *             t1 = <int64_t>rows[i, 2]             # <<<<<<<<<<<<<<
  *             t2 = <int64_t>rows[i, 3]
  *             window_size = <int64_t>rows[i, 4]
  */
-    __pyx_t_17 = __pyx_v_i;
-    __pyx_t_18 = 2;
-    __pyx_v_t1 = ((int64_t)(*((long *) ( /* dim=1 */ ((char *) (((long *) ( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_17 * __pyx_v_rows.strides[0]) )) + __pyx_t_18)) ))));
+    __pyx_t_16 = __pyx_v_i;
+    __pyx_t_15 = 2;
+    __pyx_v_t1 = ((int64_t)(*((long *) ( /* dim=1 */ ((char *) (((long *) ( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_16 * __pyx_v_rows.strides[0]) )) + __pyx_t_15)) ))));
 
-    /* "monitor_kernels.pyx":526
+    /* "monitor_kernels.pyx":472
  *                 continue
  *             t1 = <int64_t>rows[i, 2]
  *             t2 = <int64_t>rows[i, 3]             # <<<<<<<<<<<<<<
  *             window_size = <int64_t>rows[i, 4]
  *             min_time = t1 if t1 <= t2 else t2
  */
-    __pyx_t_18 = __pyx_v_i;
-    __pyx_t_17 = 3;
-    __pyx_v_t2 = ((int64_t)(*((long *) ( /* dim=1 */ ((char *) (((long *) ( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_18 * __pyx_v_rows.strides[0]) )) + __pyx_t_17)) ))));
+    __pyx_t_15 = __pyx_v_i;
+    __pyx_t_16 = 3;
+    __pyx_v_t2 = ((int64_t)(*((long *) ( /* dim=1 */ ((char *) (((long *) ( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_15 * __pyx_v_rows.strides[0]) )) + __pyx_t_16)) ))));
 
-    /* "monitor_kernels.pyx":527
+    /* "monitor_kernels.pyx":473
  *             t1 = <int64_t>rows[i, 2]
  *             t2 = <int64_t>rows[i, 3]
  *             window_size = <int64_t>rows[i, 4]             # <<<<<<<<<<<<<<
  *             min_time = t1 if t1 <= t2 else t2
  *             max_time = t1 if t1 >= t2 else t2
  */
-    __pyx_t_17 = __pyx_v_i;
-    __pyx_t_18 = 4;
-    __pyx_v_window_size = ((int64_t)(*((long *) ( /* dim=1 */ ((char *) (((long *) ( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_17 * __pyx_v_rows.strides[0]) )) + __pyx_t_18)) ))));
+    __pyx_t_16 = __pyx_v_i;
+    __pyx_t_15 = 4;
+    __pyx_v_window_size = ((int64_t)(*((long *) ( /* dim=1 */ ((char *) (((long *) ( /* dim=0 */ (__pyx_v_rows.data + __pyx_t_16 * __pyx_v_rows.strides[0]) )) + __pyx_t_15)) ))));
 
-    /* "monitor_kernels.pyx":528
+    /* "monitor_kernels.pyx":474
  *             t2 = <int64_t>rows[i, 3]
  *             window_size = <int64_t>rows[i, 4]
  *             min_time = t1 if t1 <= t2 else t2             # <<<<<<<<<<<<<<
  *             max_time = t1 if t1 >= t2 else t2
  *             lag = max_time - min_time
  */
-    __pyx_t_19 = (__pyx_v_t1 <= __pyx_v_t2);
-    if (__pyx_t_19) {
+    __pyx_t_17 = (__pyx_v_t1 <= __pyx_v_t2);
+    if (__pyx_t_17) {
       __pyx_t_21 = __pyx_v_t1;
     } else {
       __pyx_t_21 = __pyx_v_t2;
     }
     __pyx_v_min_time = __pyx_t_21;
 
-    /* "monitor_kernels.pyx":529
+    /* "monitor_kernels.pyx":475
  *             window_size = <int64_t>rows[i, 4]
  *             min_time = t1 if t1 <= t2 else t2
  *             max_time = t1 if t1 >= t2 else t2             # <<<<<<<<<<<<<<
  *             lag = max_time - min_time
  *             corr = corrs[i] if i < n_corrs else 1.0
  */
-    __pyx_t_19 = (__pyx_v_t1 >= __pyx_v_t2);
-    if (__pyx_t_19) {
+    __pyx_t_17 = (__pyx_v_t1 >= __pyx_v_t2);
+    if (__pyx_t_17) {
       __pyx_t_21 = __pyx_v_t1;
     } else {
       __pyx_t_21 = __pyx_v_t2;
     }
     __pyx_v_max_time = __pyx_t_21;
 
-    /* "monitor_kernels.pyx":530
+    /* "monitor_kernels.pyx":476
  *             min_time = t1 if t1 <= t2 else t2
  *             max_time = t1 if t1 >= t2 else t2
  *             lag = max_time - min_time             # <<<<<<<<<<<<<<
@@ -25727,48 +24256,48 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
  */
     __pyx_v_lag = (__pyx_v_max_time - __pyx_v_min_time);
 
-    /* "monitor_kernels.pyx":531
+    /* "monitor_kernels.pyx":477
  *             max_time = t1 if t1 >= t2 else t2
  *             lag = max_time - min_time
  *             corr = corrs[i] if i < n_corrs else 1.0             # <<<<<<<<<<<<<<
  *             corr_sign = 1 if corr >= 0.0 else -1
  *             if sid1 <= sid2:
  */
-    __pyx_t_19 = (__pyx_v_i < __pyx_v_n_corrs);
-    if (__pyx_t_19) {
-      __pyx_t_18 = __pyx_v_i;
-      __pyx_t_11 = (*((double *) ( /* dim=0 */ (__pyx_v_corrs.data + __pyx_t_18 * __pyx_v_corrs.strides[0]) )));
+    __pyx_t_17 = (__pyx_v_i < __pyx_v_n_corrs);
+    if (__pyx_t_17) {
+      __pyx_t_15 = __pyx_v_i;
+      __pyx_t_22 = (*((double *) ( /* dim=0 */ (__pyx_v_corrs.data + __pyx_t_15 * __pyx_v_corrs.strides[0]) )));
     } else {
-      __pyx_t_11 = 1.0;
+      __pyx_t_22 = 1.0;
     }
-    __pyx_v_corr = __pyx_t_11;
+    __pyx_v_corr = __pyx_t_22;
 
-    /* "monitor_kernels.pyx":532
+    /* "monitor_kernels.pyx":478
  *             lag = max_time - min_time
  *             corr = corrs[i] if i < n_corrs else 1.0
  *             corr_sign = 1 if corr >= 0.0 else -1             # <<<<<<<<<<<<<<
  *             if sid1 <= sid2:
  *                 key_s1 = sid1
  */
-    __pyx_t_19 = (__pyx_v_corr >= 0.0);
-    if (__pyx_t_19) {
+    __pyx_t_17 = (__pyx_v_corr >= 0.0);
+    if (__pyx_t_17) {
       __pyx_t_21 = 1;
     } else {
       __pyx_t_21 = -1L;
     }
     __pyx_v_corr_sign = __pyx_t_21;
 
-    /* "monitor_kernels.pyx":533
+    /* "monitor_kernels.pyx":479
  *             corr = corrs[i] if i < n_corrs else 1.0
  *             corr_sign = 1 if corr >= 0.0 else -1
  *             if sid1 <= sid2:             # <<<<<<<<<<<<<<
  *                 key_s1 = sid1
  *                 key_s2 = sid2
  */
-    __pyx_t_19 = (__pyx_v_sid1 <= __pyx_v_sid2);
-    if (__pyx_t_19) {
+    __pyx_t_17 = (__pyx_v_sid1 <= __pyx_v_sid2);
+    if (__pyx_t_17) {
 
-      /* "monitor_kernels.pyx":534
+      /* "monitor_kernels.pyx":480
  *             corr_sign = 1 if corr >= 0.0 else -1
  *             if sid1 <= sid2:
  *                 key_s1 = sid1             # <<<<<<<<<<<<<<
@@ -25777,7 +24306,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
  */
       __pyx_v_key_s1 = __pyx_v_sid1;
 
-      /* "monitor_kernels.pyx":535
+      /* "monitor_kernels.pyx":481
  *             if sid1 <= sid2:
  *                 key_s1 = sid1
  *                 key_s2 = sid2             # <<<<<<<<<<<<<<
@@ -25786,7 +24315,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
  */
       __pyx_v_key_s2 = __pyx_v_sid2;
 
-      /* "monitor_kernels.pyx":536
+      /* "monitor_kernels.pyx":482
  *                 key_s1 = sid1
  *                 key_s2 = sid2
  *                 key_t1 = t1             # <<<<<<<<<<<<<<
@@ -25795,7 +24324,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
  */
       __pyx_v_key_t1 = __pyx_v_t1;
 
-      /* "monitor_kernels.pyx":537
+      /* "monitor_kernels.pyx":483
  *                 key_s2 = sid2
  *                 key_t1 = t1
  *                 key_t2 = t2             # <<<<<<<<<<<<<<
@@ -25804,17 +24333,17 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
  */
       __pyx_v_key_t2 = __pyx_v_t2;
 
-      /* "monitor_kernels.pyx":533
+      /* "monitor_kernels.pyx":479
  *             corr = corrs[i] if i < n_corrs else 1.0
  *             corr_sign = 1 if corr >= 0.0 else -1
  *             if sid1 <= sid2:             # <<<<<<<<<<<<<<
  *                 key_s1 = sid1
  *                 key_s2 = sid2
  */
-      goto __pyx_L8;
+      goto __pyx_L26;
     }
 
-    /* "monitor_kernels.pyx":539
+    /* "monitor_kernels.pyx":485
  *                 key_t2 = t2
  *             else:
  *                 key_s1 = sid2             # <<<<<<<<<<<<<<
@@ -25824,7 +24353,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
     /*else*/ {
       __pyx_v_key_s1 = __pyx_v_sid2;
 
-      /* "monitor_kernels.pyx":540
+      /* "monitor_kernels.pyx":486
  *             else:
  *                 key_s1 = sid2
  *                 key_s2 = sid1             # <<<<<<<<<<<<<<
@@ -25833,7 +24362,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
  */
       __pyx_v_key_s2 = __pyx_v_sid1;
 
-      /* "monitor_kernels.pyx":541
+      /* "monitor_kernels.pyx":487
  *                 key_s1 = sid2
  *                 key_s2 = sid1
  *                 key_t1 = t2             # <<<<<<<<<<<<<<
@@ -25842,223 +24371,218 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
  */
       __pyx_v_key_t1 = __pyx_v_t2;
 
-      /* "monitor_kernels.pyx":542
+      /* "monitor_kernels.pyx":488
  *                 key_s2 = sid1
  *                 key_t1 = t2
  *                 key_t2 = t1             # <<<<<<<<<<<<<<
  * 
- *             slot_i = self._find_slot(key_s1, key_s2, lag)
+ *             slot_i = self._find_slot(slots, key_s1, key_s2, lag)
  */
       __pyx_v_key_t2 = __pyx_v_t1;
     }
-    __pyx_L8:;
+    __pyx_L26:;
 
-    /* "monitor_kernels.pyx":544
+    /* "monitor_kernels.pyx":490
  *                 key_t2 = t1
  * 
- *             slot_i = self._find_slot(key_s1, key_s2, lag)             # <<<<<<<<<<<<<<
+ *             slot_i = self._find_slot(slots, key_s1, key_s2, lag)             # <<<<<<<<<<<<<<
+ *             sp = &slots[slot_i]
  * 
- *             if occupied[slot_i] == 0:
  */
-    __pyx_t_22 = ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_find_slot(__pyx_v_self, __pyx_v_key_s1, __pyx_v_key_s2, __pyx_v_lag); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 544, __pyx_L1_error)
-    __pyx_v_slot_i = __pyx_t_22;
+    __pyx_v_slot_i = __pyx_f_15monitor_kernels_19NumericMonitorState__find_slot(__pyx_v_self, __pyx_v_slots, __pyx_v_key_s1, __pyx_v_key_s2, __pyx_v_lag);
 
-    /* "monitor_kernels.pyx":546
- *             slot_i = self._find_slot(key_s1, key_s2, lag)
+    /* "monitor_kernels.pyx":491
  * 
- *             if occupied[slot_i] == 0:             # <<<<<<<<<<<<<<
- *                 occupied[slot_i] = <uint8_t>1
- *                 arr_s1[slot_i] = key_s1
- */
-    __pyx_t_18 = __pyx_v_slot_i;
-    __pyx_t_19 = ((*((uint8_t *) ( /* dim=0 */ (__pyx_v_occupied.data + __pyx_t_18 * __pyx_v_occupied.strides[0]) ))) == 0);
-    if (__pyx_t_19) {
-
-      /* "monitor_kernels.pyx":547
+ *             slot_i = self._find_slot(slots, key_s1, key_s2, lag)
+ *             sp = &slots[slot_i]             # <<<<<<<<<<<<<<
  * 
- *             if occupied[slot_i] == 0:
- *                 occupied[slot_i] = <uint8_t>1             # <<<<<<<<<<<<<<
- *                 arr_s1[slot_i] = key_s1
- *                 arr_s2[slot_i] = key_s2
+ *             if sp.occupied == 0:
  */
-      __pyx_t_18 = __pyx_v_slot_i;
-      *((uint8_t *) ( /* dim=0 */ (__pyx_v_occupied.data + __pyx_t_18 * __pyx_v_occupied.strides[0]) )) = ((uint8_t)1);
+    __pyx_v_sp = (&(__pyx_v_slots[__pyx_v_slot_i]));
 
-      /* "monitor_kernels.pyx":548
- *             if occupied[slot_i] == 0:
- *                 occupied[slot_i] = <uint8_t>1
- *                 arr_s1[slot_i] = key_s1             # <<<<<<<<<<<<<<
- *                 arr_s2[slot_i] = key_s2
- *                 arr_lag[slot_i] = lag
+    /* "monitor_kernels.pyx":493
+ *             sp = &slots[slot_i]
+ * 
+ *             if sp.occupied == 0:             # <<<<<<<<<<<<<<
+ *                 sp.occupied = <uint8_t>1
+ *                 sp.s1 = <int32_t>key_s1
  */
-      __pyx_t_18 = __pyx_v_slot_i;
-      *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_s1.data + __pyx_t_18 * __pyx_v_arr_s1.strides[0]) )) = __pyx_v_key_s1;
+    __pyx_t_17 = (__pyx_v_sp->occupied == 0);
+    if (__pyx_t_17) {
 
-      /* "monitor_kernels.pyx":549
- *                 occupied[slot_i] = <uint8_t>1
- *                 arr_s1[slot_i] = key_s1
- *                 arr_s2[slot_i] = key_s2             # <<<<<<<<<<<<<<
- *                 arr_lag[slot_i] = lag
+      /* "monitor_kernels.pyx":494
+ * 
+ *             if sp.occupied == 0:
+ *                 sp.occupied = <uint8_t>1             # <<<<<<<<<<<<<<
+ *                 sp.s1 = <int32_t>key_s1
+ *                 sp.s2 = <int32_t>key_s2
+ */
+      __pyx_v_sp->occupied = ((uint8_t)1);
+
+      /* "monitor_kernels.pyx":495
+ *             if sp.occupied == 0:
+ *                 sp.occupied = <uint8_t>1
+ *                 sp.s1 = <int32_t>key_s1             # <<<<<<<<<<<<<<
+ *                 sp.s2 = <int32_t>key_s2
+ *                 sp.lag = <int32_t>lag
+ */
+      __pyx_v_sp->s1 = ((int32_t)__pyx_v_key_s1);
+
+      /* "monitor_kernels.pyx":496
+ *                 sp.occupied = <uint8_t>1
+ *                 sp.s1 = <int32_t>key_s1
+ *                 sp.s2 = <int32_t>key_s2             # <<<<<<<<<<<<<<
+ *                 sp.lag = <int32_t>lag
  *                 self._size += 1
  */
-      __pyx_t_18 = __pyx_v_slot_i;
-      *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_s2.data + __pyx_t_18 * __pyx_v_arr_s2.strides[0]) )) = __pyx_v_key_s2;
+      __pyx_v_sp->s2 = ((int32_t)__pyx_v_key_s2);
 
-      /* "monitor_kernels.pyx":550
- *                 arr_s1[slot_i] = key_s1
- *                 arr_s2[slot_i] = key_s2
- *                 arr_lag[slot_i] = lag             # <<<<<<<<<<<<<<
+      /* "monitor_kernels.pyx":497
+ *                 sp.s1 = <int32_t>key_s1
+ *                 sp.s2 = <int32_t>key_s2
+ *                 sp.lag = <int32_t>lag             # <<<<<<<<<<<<<<
  *                 self._size += 1
  * 
  */
-      __pyx_t_18 = __pyx_v_slot_i;
-      *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_lag.data + __pyx_t_18 * __pyx_v_arr_lag.strides[0]) )) = __pyx_v_lag;
+      __pyx_v_sp->lag = ((int32_t)__pyx_v_lag);
 
-      /* "monitor_kernels.pyx":551
- *                 arr_s2[slot_i] = key_s2
- *                 arr_lag[slot_i] = lag
+      /* "monitor_kernels.pyx":498
+ *                 sp.s2 = <int32_t>key_s2
+ *                 sp.lag = <int32_t>lag
  *                 self._size += 1             # <<<<<<<<<<<<<<
  * 
- *             self._remove_previous_frontier_slot(slot_i, frontier_slots, frontier_pos)
+ *             self._remove_previous_frontier_slot(slots, slot_i, frontier_slots)
  */
       __pyx_v_self->_size = (__pyx_v_self->_size + 1);
 
-      /* "monitor_kernels.pyx":546
- *             slot_i = self._find_slot(key_s1, key_s2, lag)
+      /* "monitor_kernels.pyx":493
+ *             sp = &slots[slot_i]
  * 
- *             if occupied[slot_i] == 0:             # <<<<<<<<<<<<<<
- *                 occupied[slot_i] = <uint8_t>1
- *                 arr_s1[slot_i] = key_s1
+ *             if sp.occupied == 0:             # <<<<<<<<<<<<<<
+ *                 sp.occupied = <uint8_t>1
+ *                 sp.s1 = <int32_t>key_s1
  */
     }
 
-    /* "monitor_kernels.pyx":553
+    /* "monitor_kernels.pyx":500
  *                 self._size += 1
  * 
- *             self._remove_previous_frontier_slot(slot_i, frontier_slots, frontier_pos)             # <<<<<<<<<<<<<<
- *             if active[slot_i] == 0:
- *                 self._activate_slot(slot_i, active, active_slots, active_pos)
+ *             self._remove_previous_frontier_slot(slots, slot_i, frontier_slots)             # <<<<<<<<<<<<<<
+ *             if sp.active == 0:
+ *                 self._activate_slot(slots, slot_i, active_slots)
  */
-    ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_remove_previous_frontier_slot(__pyx_v_self, __pyx_v_slot_i, __pyx_v_frontier_slots, __pyx_v_frontier_pos); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 553, __pyx_L1_error)
+    (void)(__pyx_f_15monitor_kernels_19NumericMonitorState__remove_previous_frontier_slot(__pyx_v_self, __pyx_v_slots, __pyx_v_slot_i, __pyx_v_frontier_slots));
 
-    /* "monitor_kernels.pyx":554
+    /* "monitor_kernels.pyx":501
  * 
- *             self._remove_previous_frontier_slot(slot_i, frontier_slots, frontier_pos)
- *             if active[slot_i] == 0:             # <<<<<<<<<<<<<<
- *                 self._activate_slot(slot_i, active, active_slots, active_pos)
- *                 arr_t1[slot_i] = key_t1
+ *             self._remove_previous_frontier_slot(slots, slot_i, frontier_slots)
+ *             if sp.active == 0:             # <<<<<<<<<<<<<<
+ *                 self._activate_slot(slots, slot_i, active_slots)
+ *                 sp.t1 = key_t1
  */
-    __pyx_t_18 = __pyx_v_slot_i;
-    __pyx_t_19 = ((*((uint8_t *) ( /* dim=0 */ (__pyx_v_active.data + __pyx_t_18 * __pyx_v_active.strides[0]) ))) == 0);
-    if (__pyx_t_19) {
+    __pyx_t_17 = (__pyx_v_sp->active == 0);
+    if (__pyx_t_17) {
 
-      /* "monitor_kernels.pyx":555
- *             self._remove_previous_frontier_slot(slot_i, frontier_slots, frontier_pos)
- *             if active[slot_i] == 0:
- *                 self._activate_slot(slot_i, active, active_slots, active_pos)             # <<<<<<<<<<<<<<
- *                 arr_t1[slot_i] = key_t1
- *                 arr_t2[slot_i] = key_t2
+      /* "monitor_kernels.pyx":502
+ *             self._remove_previous_frontier_slot(slots, slot_i, frontier_slots)
+ *             if sp.active == 0:
+ *                 self._activate_slot(slots, slot_i, active_slots)             # <<<<<<<<<<<<<<
+ *                 sp.t1 = key_t1
+ *                 sp.t2 = key_t2
  */
-      ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_activate_slot(__pyx_v_self, __pyx_v_slot_i, __pyx_v_active, __pyx_v_active_slots, __pyx_v_active_pos); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 555, __pyx_L1_error)
+      __pyx_f_15monitor_kernels_19NumericMonitorState__activate_slot(__pyx_v_self, __pyx_v_slots, __pyx_v_slot_i, __pyx_v_active_slots);
 
-      /* "monitor_kernels.pyx":556
- *             if active[slot_i] == 0:
- *                 self._activate_slot(slot_i, active, active_slots, active_pos)
- *                 arr_t1[slot_i] = key_t1             # <<<<<<<<<<<<<<
- *                 arr_t2[slot_i] = key_t2
- *                 arr_window[slot_i] = window_size
+      /* "monitor_kernels.pyx":503
+ *             if sp.active == 0:
+ *                 self._activate_slot(slots, slot_i, active_slots)
+ *                 sp.t1 = key_t1             # <<<<<<<<<<<<<<
+ *                 sp.t2 = key_t2
+ *                 sp.window = <int32_t>window_size
  */
-      __pyx_t_18 = __pyx_v_slot_i;
-      *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_t1.data + __pyx_t_18 * __pyx_v_arr_t1.strides[0]) )) = __pyx_v_key_t1;
+      __pyx_v_sp->t1 = __pyx_v_key_t1;
 
-      /* "monitor_kernels.pyx":557
- *                 self._activate_slot(slot_i, active, active_slots, active_pos)
- *                 arr_t1[slot_i] = key_t1
- *                 arr_t2[slot_i] = key_t2             # <<<<<<<<<<<<<<
- *                 arr_window[slot_i] = window_size
- *                 arr_length[slot_i] = window_size
+      /* "monitor_kernels.pyx":504
+ *                 self._activate_slot(slots, slot_i, active_slots)
+ *                 sp.t1 = key_t1
+ *                 sp.t2 = key_t2             # <<<<<<<<<<<<<<
+ *                 sp.window = <int32_t>window_size
+ *                 sp.length = <int32_t>window_size
  */
-      __pyx_t_18 = __pyx_v_slot_i;
-      *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_t2.data + __pyx_t_18 * __pyx_v_arr_t2.strides[0]) )) = __pyx_v_key_t2;
+      __pyx_v_sp->t2 = __pyx_v_key_t2;
 
-      /* "monitor_kernels.pyx":558
- *                 arr_t1[slot_i] = key_t1
- *                 arr_t2[slot_i] = key_t2
- *                 arr_window[slot_i] = window_size             # <<<<<<<<<<<<<<
- *                 arr_length[slot_i] = window_size
- *                 arr_sign[slot_i] = corr_sign
+      /* "monitor_kernels.pyx":505
+ *                 sp.t1 = key_t1
+ *                 sp.t2 = key_t2
+ *                 sp.window = <int32_t>window_size             # <<<<<<<<<<<<<<
+ *                 sp.length = <int32_t>window_size
+ *                 sp.sign = <int8_t>corr_sign
  */
-      __pyx_t_18 = __pyx_v_slot_i;
-      *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_window.data + __pyx_t_18 * __pyx_v_arr_window.strides[0]) )) = __pyx_v_window_size;
+      __pyx_v_sp->window = ((int32_t)__pyx_v_window_size);
 
-      /* "monitor_kernels.pyx":559
- *                 arr_t2[slot_i] = key_t2
- *                 arr_window[slot_i] = window_size
- *                 arr_length[slot_i] = window_size             # <<<<<<<<<<<<<<
- *                 arr_sign[slot_i] = corr_sign
- *                 arr_seen[slot_i] = self._step_id
+      /* "monitor_kernels.pyx":506
+ *                 sp.t2 = key_t2
+ *                 sp.window = <int32_t>window_size
+ *                 sp.length = <int32_t>window_size             # <<<<<<<<<<<<<<
+ *                 sp.sign = <int8_t>corr_sign
+ *                 sp.seen = <int32_t>self._step_id
  */
-      __pyx_t_18 = __pyx_v_slot_i;
-      *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_length.data + __pyx_t_18 * __pyx_v_arr_length.strides[0]) )) = __pyx_v_window_size;
+      __pyx_v_sp->length = ((int32_t)__pyx_v_window_size);
 
-      /* "monitor_kernels.pyx":560
- *                 arr_window[slot_i] = window_size
- *                 arr_length[slot_i] = window_size
- *                 arr_sign[slot_i] = corr_sign             # <<<<<<<<<<<<<<
- *                 arr_seen[slot_i] = self._step_id
- *                 self._mark_current_frontier(slot_i, queued_step, next_frontier)
+      /* "monitor_kernels.pyx":507
+ *                 sp.window = <int32_t>window_size
+ *                 sp.length = <int32_t>window_size
+ *                 sp.sign = <int8_t>corr_sign             # <<<<<<<<<<<<<<
+ *                 sp.seen = <int32_t>self._step_id
+ *                 self._mark_current_frontier(slots, slot_i, next_frontier)
  */
-      __pyx_t_18 = __pyx_v_slot_i;
-      *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_sign.data + __pyx_t_18 * __pyx_v_arr_sign.strides[0]) )) = __pyx_v_corr_sign;
+      __pyx_v_sp->sign = ((int8_t)__pyx_v_corr_sign);
 
-      /* "monitor_kernels.pyx":561
- *                 arr_length[slot_i] = window_size
- *                 arr_sign[slot_i] = corr_sign
- *                 arr_seen[slot_i] = self._step_id             # <<<<<<<<<<<<<<
- *                 self._mark_current_frontier(slot_i, queued_step, next_frontier)
+      /* "monitor_kernels.pyx":508
+ *                 sp.length = <int32_t>window_size
+ *                 sp.sign = <int8_t>corr_sign
+ *                 sp.seen = <int32_t>self._step_id             # <<<<<<<<<<<<<<
+ *                 self._mark_current_frontier(slots, slot_i, next_frontier)
  *                 if save_anomalies:
  */
-      __pyx_t_21 = __pyx_v_self->_step_id;
-      __pyx_t_18 = __pyx_v_slot_i;
-      *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_seen.data + __pyx_t_18 * __pyx_v_arr_seen.strides[0]) )) = __pyx_t_21;
+      __pyx_v_sp->seen = ((int32_t)__pyx_v_self->_step_id);
 
-      /* "monitor_kernels.pyx":562
- *                 arr_sign[slot_i] = corr_sign
- *                 arr_seen[slot_i] = self._step_id
- *                 self._mark_current_frontier(slot_i, queued_step, next_frontier)             # <<<<<<<<<<<<<<
+      /* "monitor_kernels.pyx":509
+ *                 sp.sign = <int8_t>corr_sign
+ *                 sp.seen = <int32_t>self._step_id
+ *                 self._mark_current_frontier(slots, slot_i, next_frontier)             # <<<<<<<<<<<<<<
  *                 if save_anomalies:
  *                     self._append_anomaly(key_s1, key_s2, lag, min_time, 1)
  */
-      ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_mark_current_frontier(__pyx_v_self, __pyx_v_slot_i, __pyx_v_queued_step, __pyx_v_next_frontier); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 562, __pyx_L1_error)
+      __pyx_f_15monitor_kernels_19NumericMonitorState__mark_current_frontier(__pyx_v_self, __pyx_v_slots, __pyx_v_slot_i, __pyx_v_next_frontier);
 
-      /* "monitor_kernels.pyx":563
- *                 arr_seen[slot_i] = self._step_id
- *                 self._mark_current_frontier(slot_i, queued_step, next_frontier)
+      /* "monitor_kernels.pyx":510
+ *                 sp.seen = <int32_t>self._step_id
+ *                 self._mark_current_frontier(slots, slot_i, next_frontier)
  *                 if save_anomalies:             # <<<<<<<<<<<<<<
  *                     self._append_anomaly(key_s1, key_s2, lag, min_time, 1)
  *                 self._rows_new_activation += 1
  */
       if (__pyx_v_save_anomalies) {
 
-        /* "monitor_kernels.pyx":564
- *                 self._mark_current_frontier(slot_i, queued_step, next_frontier)
+        /* "monitor_kernels.pyx":511
+ *                 self._mark_current_frontier(slots, slot_i, next_frontier)
  *                 if save_anomalies:
  *                     self._append_anomaly(key_s1, key_s2, lag, min_time, 1)             # <<<<<<<<<<<<<<
  *                 self._rows_new_activation += 1
  *                 continue
  */
-        ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_append_anomaly(__pyx_v_self, __pyx_v_key_s1, __pyx_v_key_s2, __pyx_v_lag, __pyx_v_min_time, 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 564, __pyx_L1_error)
+        __pyx_f_15monitor_kernels_19NumericMonitorState__append_anomaly(__pyx_v_self, __pyx_v_key_s1, __pyx_v_key_s2, __pyx_v_lag, __pyx_v_min_time, 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 511, __pyx_L1_error)
 
-        /* "monitor_kernels.pyx":563
- *                 arr_seen[slot_i] = self._step_id
- *                 self._mark_current_frontier(slot_i, queued_step, next_frontier)
+        /* "monitor_kernels.pyx":510
+ *                 sp.seen = <int32_t>self._step_id
+ *                 self._mark_current_frontier(slots, slot_i, next_frontier)
  *                 if save_anomalies:             # <<<<<<<<<<<<<<
  *                     self._append_anomaly(key_s1, key_s2, lag, min_time, 1)
  *                 self._rows_new_activation += 1
  */
       }
 
-      /* "monitor_kernels.pyx":565
+      /* "monitor_kernels.pyx":512
  *                 if save_anomalies:
  *                     self._append_anomaly(key_s1, key_s2, lag, min_time, 1)
  *                 self._rows_new_activation += 1             # <<<<<<<<<<<<<<
@@ -26067,103 +24591,103 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
  */
       __pyx_v_self->_rows_new_activation = (__pyx_v_self->_rows_new_activation + 1);
 
-      /* "monitor_kernels.pyx":566
+      /* "monitor_kernels.pyx":513
  *                     self._append_anomaly(key_s1, key_s2, lag, min_time, 1)
  *                 self._rows_new_activation += 1
  *                 continue             # <<<<<<<<<<<<<<
  * 
- *             self._mark_current_frontier(slot_i, queued_step, next_frontier)
+ *             self._mark_current_frontier(slots, slot_i, next_frontier)
  */
-      goto __pyx_L3_continue;
+      goto __pyx_L14_continue;
 
-      /* "monitor_kernels.pyx":554
+      /* "monitor_kernels.pyx":501
  * 
- *             self._remove_previous_frontier_slot(slot_i, frontier_slots, frontier_pos)
- *             if active[slot_i] == 0:             # <<<<<<<<<<<<<<
- *                 self._activate_slot(slot_i, active, active_slots, active_pos)
- *                 arr_t1[slot_i] = key_t1
+ *             self._remove_previous_frontier_slot(slots, slot_i, frontier_slots)
+ *             if sp.active == 0:             # <<<<<<<<<<<<<<
+ *                 self._activate_slot(slots, slot_i, active_slots)
+ *                 sp.t1 = key_t1
  */
     }
 
-    /* "monitor_kernels.pyx":568
+    /* "monitor_kernels.pyx":515
  *                 continue
  * 
- *             self._mark_current_frontier(slot_i, queued_step, next_frontier)             # <<<<<<<<<<<<<<
- *             first_t1 = arr_t1[slot_i]
- *             first_t2 = arr_t2[slot_i]
+ *             self._mark_current_frontier(slots, slot_i, next_frontier)             # <<<<<<<<<<<<<<
+ *             first_t1 = sp.t1
+ *             first_t2 = sp.t2
  */
-    ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_mark_current_frontier(__pyx_v_self, __pyx_v_slot_i, __pyx_v_queued_step, __pyx_v_next_frontier); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 568, __pyx_L1_error)
+    __pyx_f_15monitor_kernels_19NumericMonitorState__mark_current_frontier(__pyx_v_self, __pyx_v_slots, __pyx_v_slot_i, __pyx_v_next_frontier);
 
-    /* "monitor_kernels.pyx":569
+    /* "monitor_kernels.pyx":516
  * 
- *             self._mark_current_frontier(slot_i, queued_step, next_frontier)
- *             first_t1 = arr_t1[slot_i]             # <<<<<<<<<<<<<<
- *             first_t2 = arr_t2[slot_i]
- *             last_window_size = arr_window[slot_i]
+ *             self._mark_current_frontier(slots, slot_i, next_frontier)
+ *             first_t1 = sp.t1             # <<<<<<<<<<<<<<
+ *             first_t2 = sp.t2
+ *             last_window_size = sp.window
  */
-    __pyx_t_18 = __pyx_v_slot_i;
-    __pyx_v_first_t1 = (*((int64_t *) ( /* dim=0 */ (__pyx_v_arr_t1.data + __pyx_t_18 * __pyx_v_arr_t1.strides[0]) )));
+    __pyx_t_21 = __pyx_v_sp->t1;
+    __pyx_v_first_t1 = __pyx_t_21;
 
-    /* "monitor_kernels.pyx":570
- *             self._mark_current_frontier(slot_i, queued_step, next_frontier)
- *             first_t1 = arr_t1[slot_i]
- *             first_t2 = arr_t2[slot_i]             # <<<<<<<<<<<<<<
- *             last_window_size = arr_window[slot_i]
- *             last_corr_length = arr_length[slot_i]
+    /* "monitor_kernels.pyx":517
+ *             self._mark_current_frontier(slots, slot_i, next_frontier)
+ *             first_t1 = sp.t1
+ *             first_t2 = sp.t2             # <<<<<<<<<<<<<<
+ *             last_window_size = sp.window
+ *             last_corr_length = sp.length
  */
-    __pyx_t_18 = __pyx_v_slot_i;
-    __pyx_v_first_t2 = (*((int64_t *) ( /* dim=0 */ (__pyx_v_arr_t2.data + __pyx_t_18 * __pyx_v_arr_t2.strides[0]) )));
+    __pyx_t_21 = __pyx_v_sp->t2;
+    __pyx_v_first_t2 = __pyx_t_21;
 
-    /* "monitor_kernels.pyx":571
- *             first_t1 = arr_t1[slot_i]
- *             first_t2 = arr_t2[slot_i]
- *             last_window_size = arr_window[slot_i]             # <<<<<<<<<<<<<<
- *             last_corr_length = arr_length[slot_i]
- *             last_corr_sign = arr_sign[slot_i]
+    /* "monitor_kernels.pyx":518
+ *             first_t1 = sp.t1
+ *             first_t2 = sp.t2
+ *             last_window_size = sp.window             # <<<<<<<<<<<<<<
+ *             last_corr_length = sp.length
+ *             last_corr_sign = sp.sign
  */
-    __pyx_t_18 = __pyx_v_slot_i;
-    __pyx_v_last_window_size = (*((int64_t *) ( /* dim=0 */ (__pyx_v_arr_window.data + __pyx_t_18 * __pyx_v_arr_window.strides[0]) )));
+    __pyx_t_25 = __pyx_v_sp->window;
+    __pyx_v_last_window_size = __pyx_t_25;
 
-    /* "monitor_kernels.pyx":572
- *             first_t2 = arr_t2[slot_i]
- *             last_window_size = arr_window[slot_i]
- *             last_corr_length = arr_length[slot_i]             # <<<<<<<<<<<<<<
- *             last_corr_sign = arr_sign[slot_i]
+    /* "monitor_kernels.pyx":519
+ *             first_t2 = sp.t2
+ *             last_window_size = sp.window
+ *             last_corr_length = sp.length             # <<<<<<<<<<<<<<
+ *             last_corr_sign = sp.sign
  *             curr_time = max_time + window_size
  */
-    __pyx_t_18 = __pyx_v_slot_i;
-    __pyx_v_last_corr_length = (*((int64_t *) ( /* dim=0 */ (__pyx_v_arr_length.data + __pyx_t_18 * __pyx_v_arr_length.strides[0]) )));
+    __pyx_t_25 = __pyx_v_sp->length;
+    __pyx_v_last_corr_length = __pyx_t_25;
 
-    /* "monitor_kernels.pyx":573
- *             last_window_size = arr_window[slot_i]
- *             last_corr_length = arr_length[slot_i]
- *             last_corr_sign = arr_sign[slot_i]             # <<<<<<<<<<<<<<
+    /* "monitor_kernels.pyx":520
+ *             last_window_size = sp.window
+ *             last_corr_length = sp.length
+ *             last_corr_sign = sp.sign             # <<<<<<<<<<<<<<
  *             curr_time = max_time + window_size
  *             if first_t1 >= first_t2:
  */
-    __pyx_t_18 = __pyx_v_slot_i;
-    __pyx_v_last_corr_sign = (*((int64_t *) ( /* dim=0 */ (__pyx_v_arr_sign.data + __pyx_t_18 * __pyx_v_arr_sign.strides[0]) )));
+    __pyx_t_26 = __pyx_v_sp->sign;
+    __pyx_v_last_corr_sign = __pyx_t_26;
 
-    /* "monitor_kernels.pyx":574
- *             last_corr_length = arr_length[slot_i]
- *             last_corr_sign = arr_sign[slot_i]
+    /* "monitor_kernels.pyx":521
+ *             last_corr_length = sp.length
+ *             last_corr_sign = sp.sign
  *             curr_time = max_time + window_size             # <<<<<<<<<<<<<<
  *             if first_t1 >= first_t2:
  *                 next_corr_time = first_t1 + last_corr_length + window_step
  */
     __pyx_v_curr_time = (__pyx_v_max_time + __pyx_v_window_size);
 
-    /* "monitor_kernels.pyx":575
- *             last_corr_sign = arr_sign[slot_i]
+    /* "monitor_kernels.pyx":522
+ *             last_corr_sign = sp.sign
  *             curr_time = max_time + window_size
  *             if first_t1 >= first_t2:             # <<<<<<<<<<<<<<
  *                 next_corr_time = first_t1 + last_corr_length + window_step
  *             else:
  */
-    __pyx_t_19 = (__pyx_v_first_t1 >= __pyx_v_first_t2);
-    if (__pyx_t_19) {
+    __pyx_t_17 = (__pyx_v_first_t1 >= __pyx_v_first_t2);
+    if (__pyx_t_17) {
 
-      /* "monitor_kernels.pyx":576
+      /* "monitor_kernels.pyx":523
  *             curr_time = max_time + window_size
  *             if first_t1 >= first_t2:
  *                 next_corr_time = first_t1 + last_corr_length + window_step             # <<<<<<<<<<<<<<
@@ -26172,17 +24696,17 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
  */
       __pyx_v_next_corr_time = ((__pyx_v_first_t1 + __pyx_v_last_corr_length) + __pyx_v_window_step);
 
-      /* "monitor_kernels.pyx":575
- *             last_corr_sign = arr_sign[slot_i]
+      /* "monitor_kernels.pyx":522
+ *             last_corr_sign = sp.sign
  *             curr_time = max_time + window_size
  *             if first_t1 >= first_t2:             # <<<<<<<<<<<<<<
  *                 next_corr_time = first_t1 + last_corr_length + window_step
  *             else:
  */
-      goto __pyx_L12;
+      goto __pyx_L30;
     }
 
-    /* "monitor_kernels.pyx":578
+    /* "monitor_kernels.pyx":525
  *                 next_corr_time = first_t1 + last_corr_length + window_step
  *             else:
  *                 next_corr_time = first_t2 + last_corr_length + window_step             # <<<<<<<<<<<<<<
@@ -26192,250 +24716,238 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
     /*else*/ {
       __pyx_v_next_corr_time = ((__pyx_v_first_t2 + __pyx_v_last_corr_length) + __pyx_v_window_step);
     }
-    __pyx_L12:;
+    __pyx_L30:;
 
-    /* "monitor_kernels.pyx":580
+    /* "monitor_kernels.pyx":527
  *                 next_corr_time = first_t2 + last_corr_length + window_step
  * 
  *             if curr_time < next_corr_time:             # <<<<<<<<<<<<<<
- *                 arr_seen[slot_i] = self._step_id
+ *                 sp.seen = <int32_t>self._step_id
  *                 self._rows_early_unchanged += 1
  */
-    __pyx_t_19 = (__pyx_v_curr_time < __pyx_v_next_corr_time);
-    if (__pyx_t_19) {
+    __pyx_t_17 = (__pyx_v_curr_time < __pyx_v_next_corr_time);
+    if (__pyx_t_17) {
 
-      /* "monitor_kernels.pyx":581
+      /* "monitor_kernels.pyx":528
  * 
  *             if curr_time < next_corr_time:
- *                 arr_seen[slot_i] = self._step_id             # <<<<<<<<<<<<<<
+ *                 sp.seen = <int32_t>self._step_id             # <<<<<<<<<<<<<<
  *                 self._rows_early_unchanged += 1
  *                 continue
  */
-      __pyx_t_21 = __pyx_v_self->_step_id;
-      __pyx_t_18 = __pyx_v_slot_i;
-      *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_seen.data + __pyx_t_18 * __pyx_v_arr_seen.strides[0]) )) = __pyx_t_21;
+      __pyx_v_sp->seen = ((int32_t)__pyx_v_self->_step_id);
 
-      /* "monitor_kernels.pyx":582
+      /* "monitor_kernels.pyx":529
  *             if curr_time < next_corr_time:
- *                 arr_seen[slot_i] = self._step_id
+ *                 sp.seen = <int32_t>self._step_id
  *                 self._rows_early_unchanged += 1             # <<<<<<<<<<<<<<
  *                 continue
  *             if curr_time == next_corr_time and window_size == last_window_size and corr_sign == last_corr_sign:
  */
       __pyx_v_self->_rows_early_unchanged = (__pyx_v_self->_rows_early_unchanged + 1);
 
-      /* "monitor_kernels.pyx":583
- *                 arr_seen[slot_i] = self._step_id
+      /* "monitor_kernels.pyx":530
+ *                 sp.seen = <int32_t>self._step_id
  *                 self._rows_early_unchanged += 1
  *                 continue             # <<<<<<<<<<<<<<
  *             if curr_time == next_corr_time and window_size == last_window_size and corr_sign == last_corr_sign:
- *                 arr_length[slot_i] = last_corr_length + window_step
+ *                 sp.length = <int32_t>(last_corr_length + window_step)
  */
-      goto __pyx_L3_continue;
+      goto __pyx_L14_continue;
 
-      /* "monitor_kernels.pyx":580
+      /* "monitor_kernels.pyx":527
  *                 next_corr_time = first_t2 + last_corr_length + window_step
  * 
  *             if curr_time < next_corr_time:             # <<<<<<<<<<<<<<
- *                 arr_seen[slot_i] = self._step_id
+ *                 sp.seen = <int32_t>self._step_id
  *                 self._rows_early_unchanged += 1
  */
     }
 
-    /* "monitor_kernels.pyx":584
+    /* "monitor_kernels.pyx":531
  *                 self._rows_early_unchanged += 1
  *                 continue
  *             if curr_time == next_corr_time and window_size == last_window_size and corr_sign == last_corr_sign:             # <<<<<<<<<<<<<<
- *                 arr_length[slot_i] = last_corr_length + window_step
- *                 arr_seen[slot_i] = self._step_id
+ *                 sp.length = <int32_t>(last_corr_length + window_step)
+ *                 sp.seen = <int32_t>self._step_id
  */
-    __pyx_t_20 = (__pyx_v_curr_time == __pyx_v_next_corr_time);
-    if (__pyx_t_20) {
+    __pyx_t_18 = (__pyx_v_curr_time == __pyx_v_next_corr_time);
+    if (__pyx_t_18) {
     } else {
-      __pyx_t_19 = __pyx_t_20;
-      goto __pyx_L15_bool_binop_done;
+      __pyx_t_17 = __pyx_t_18;
+      goto __pyx_L33_bool_binop_done;
     }
-    __pyx_t_20 = (__pyx_v_window_size == __pyx_v_last_window_size);
-    if (__pyx_t_20) {
+    __pyx_t_18 = (__pyx_v_window_size == __pyx_v_last_window_size);
+    if (__pyx_t_18) {
     } else {
-      __pyx_t_19 = __pyx_t_20;
-      goto __pyx_L15_bool_binop_done;
+      __pyx_t_17 = __pyx_t_18;
+      goto __pyx_L33_bool_binop_done;
     }
-    __pyx_t_20 = (__pyx_v_corr_sign == __pyx_v_last_corr_sign);
-    __pyx_t_19 = __pyx_t_20;
-    __pyx_L15_bool_binop_done:;
-    if (__pyx_t_19) {
+    __pyx_t_18 = (__pyx_v_corr_sign == __pyx_v_last_corr_sign);
+    __pyx_t_17 = __pyx_t_18;
+    __pyx_L33_bool_binop_done:;
+    if (__pyx_t_17) {
 
-      /* "monitor_kernels.pyx":585
+      /* "monitor_kernels.pyx":532
  *                 continue
  *             if curr_time == next_corr_time and window_size == last_window_size and corr_sign == last_corr_sign:
- *                 arr_length[slot_i] = last_corr_length + window_step             # <<<<<<<<<<<<<<
- *                 arr_seen[slot_i] = self._step_id
+ *                 sp.length = <int32_t>(last_corr_length + window_step)             # <<<<<<<<<<<<<<
+ *                 sp.seen = <int32_t>self._step_id
  *                 self._rows_extend += 1
  */
-      __pyx_t_18 = __pyx_v_slot_i;
-      *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_length.data + __pyx_t_18 * __pyx_v_arr_length.strides[0]) )) = (__pyx_v_last_corr_length + __pyx_v_window_step);
+      __pyx_v_sp->length = ((int32_t)(__pyx_v_last_corr_length + __pyx_v_window_step));
 
-      /* "monitor_kernels.pyx":586
+      /* "monitor_kernels.pyx":533
  *             if curr_time == next_corr_time and window_size == last_window_size and corr_sign == last_corr_sign:
- *                 arr_length[slot_i] = last_corr_length + window_step
- *                 arr_seen[slot_i] = self._step_id             # <<<<<<<<<<<<<<
+ *                 sp.length = <int32_t>(last_corr_length + window_step)
+ *                 sp.seen = <int32_t>self._step_id             # <<<<<<<<<<<<<<
  *                 self._rows_extend += 1
  *                 continue
  */
-      __pyx_t_21 = __pyx_v_self->_step_id;
-      __pyx_t_18 = __pyx_v_slot_i;
-      *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_seen.data + __pyx_t_18 * __pyx_v_arr_seen.strides[0]) )) = __pyx_t_21;
+      __pyx_v_sp->seen = ((int32_t)__pyx_v_self->_step_id);
 
-      /* "monitor_kernels.pyx":587
- *                 arr_length[slot_i] = last_corr_length + window_step
- *                 arr_seen[slot_i] = self._step_id
+      /* "monitor_kernels.pyx":534
+ *                 sp.length = <int32_t>(last_corr_length + window_step)
+ *                 sp.seen = <int32_t>self._step_id
  *                 self._rows_extend += 1             # <<<<<<<<<<<<<<
  *                 continue
  * 
  */
       __pyx_v_self->_rows_extend = (__pyx_v_self->_rows_extend + 1);
 
-      /* "monitor_kernels.pyx":588
- *                 arr_seen[slot_i] = self._step_id
+      /* "monitor_kernels.pyx":535
+ *                 sp.seen = <int32_t>self._step_id
  *                 self._rows_extend += 1
  *                 continue             # <<<<<<<<<<<<<<
  * 
  *             if save_status:
  */
-      goto __pyx_L3_continue;
+      goto __pyx_L14_continue;
 
-      /* "monitor_kernels.pyx":584
+      /* "monitor_kernels.pyx":531
  *                 self._rows_early_unchanged += 1
  *                 continue
  *             if curr_time == next_corr_time and window_size == last_window_size and corr_sign == last_corr_sign:             # <<<<<<<<<<<<<<
- *                 arr_length[slot_i] = last_corr_length + window_step
- *                 arr_seen[slot_i] = self._step_id
+ *                 sp.length = <int32_t>(last_corr_length + window_step)
+ *                 sp.seen = <int32_t>self._step_id
  */
     }
 
-    /* "monitor_kernels.pyx":590
+    /* "monitor_kernels.pyx":537
  *                 continue
  * 
  *             if save_status:             # <<<<<<<<<<<<<<
- *                 self._append_status(slot_i)
- *             arr_t1[slot_i] = key_t1
+ *                 self._append_status(slots, slot_i)
+ *             sp.t1 = key_t1
  */
     if (__pyx_v_save_status) {
 
-      /* "monitor_kernels.pyx":591
+      /* "monitor_kernels.pyx":538
  * 
  *             if save_status:
- *                 self._append_status(slot_i)             # <<<<<<<<<<<<<<
- *             arr_t1[slot_i] = key_t1
- *             arr_t2[slot_i] = key_t2
+ *                 self._append_status(slots, slot_i)             # <<<<<<<<<<<<<<
+ *             sp.t1 = key_t1
+ *             sp.t2 = key_t2
  */
-      ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_append_status(__pyx_v_self, __pyx_v_slot_i); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 591, __pyx_L1_error)
+      __pyx_f_15monitor_kernels_19NumericMonitorState__append_status(__pyx_v_self, __pyx_v_slots, __pyx_v_slot_i); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 538, __pyx_L1_error)
 
-      /* "monitor_kernels.pyx":590
+      /* "monitor_kernels.pyx":537
  *                 continue
  * 
  *             if save_status:             # <<<<<<<<<<<<<<
- *                 self._append_status(slot_i)
- *             arr_t1[slot_i] = key_t1
+ *                 self._append_status(slots, slot_i)
+ *             sp.t1 = key_t1
  */
     }
 
-    /* "monitor_kernels.pyx":592
+    /* "monitor_kernels.pyx":539
  *             if save_status:
- *                 self._append_status(slot_i)
- *             arr_t1[slot_i] = key_t1             # <<<<<<<<<<<<<<
- *             arr_t2[slot_i] = key_t2
- *             arr_window[slot_i] = window_size
+ *                 self._append_status(slots, slot_i)
+ *             sp.t1 = key_t1             # <<<<<<<<<<<<<<
+ *             sp.t2 = key_t2
+ *             sp.window = <int32_t>window_size
  */
-    __pyx_t_18 = __pyx_v_slot_i;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_t1.data + __pyx_t_18 * __pyx_v_arr_t1.strides[0]) )) = __pyx_v_key_t1;
+    __pyx_v_sp->t1 = __pyx_v_key_t1;
 
-    /* "monitor_kernels.pyx":593
- *                 self._append_status(slot_i)
- *             arr_t1[slot_i] = key_t1
- *             arr_t2[slot_i] = key_t2             # <<<<<<<<<<<<<<
- *             arr_window[slot_i] = window_size
- *             arr_length[slot_i] = window_size
+    /* "monitor_kernels.pyx":540
+ *                 self._append_status(slots, slot_i)
+ *             sp.t1 = key_t1
+ *             sp.t2 = key_t2             # <<<<<<<<<<<<<<
+ *             sp.window = <int32_t>window_size
+ *             sp.length = <int32_t>window_size
  */
-    __pyx_t_18 = __pyx_v_slot_i;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_t2.data + __pyx_t_18 * __pyx_v_arr_t2.strides[0]) )) = __pyx_v_key_t2;
+    __pyx_v_sp->t2 = __pyx_v_key_t2;
 
-    /* "monitor_kernels.pyx":594
- *             arr_t1[slot_i] = key_t1
- *             arr_t2[slot_i] = key_t2
- *             arr_window[slot_i] = window_size             # <<<<<<<<<<<<<<
- *             arr_length[slot_i] = window_size
- *             arr_sign[slot_i] = corr_sign
+    /* "monitor_kernels.pyx":541
+ *             sp.t1 = key_t1
+ *             sp.t2 = key_t2
+ *             sp.window = <int32_t>window_size             # <<<<<<<<<<<<<<
+ *             sp.length = <int32_t>window_size
+ *             sp.sign = <int8_t>corr_sign
  */
-    __pyx_t_18 = __pyx_v_slot_i;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_window.data + __pyx_t_18 * __pyx_v_arr_window.strides[0]) )) = __pyx_v_window_size;
+    __pyx_v_sp->window = ((int32_t)__pyx_v_window_size);
 
-    /* "monitor_kernels.pyx":595
- *             arr_t2[slot_i] = key_t2
- *             arr_window[slot_i] = window_size
- *             arr_length[slot_i] = window_size             # <<<<<<<<<<<<<<
- *             arr_sign[slot_i] = corr_sign
- *             arr_seen[slot_i] = self._step_id
+    /* "monitor_kernels.pyx":542
+ *             sp.t2 = key_t2
+ *             sp.window = <int32_t>window_size
+ *             sp.length = <int32_t>window_size             # <<<<<<<<<<<<<<
+ *             sp.sign = <int8_t>corr_sign
+ *             sp.seen = <int32_t>self._step_id
  */
-    __pyx_t_18 = __pyx_v_slot_i;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_length.data + __pyx_t_18 * __pyx_v_arr_length.strides[0]) )) = __pyx_v_window_size;
+    __pyx_v_sp->length = ((int32_t)__pyx_v_window_size);
 
-    /* "monitor_kernels.pyx":596
- *             arr_window[slot_i] = window_size
- *             arr_length[slot_i] = window_size
- *             arr_sign[slot_i] = corr_sign             # <<<<<<<<<<<<<<
- *             arr_seen[slot_i] = self._step_id
+    /* "monitor_kernels.pyx":543
+ *             sp.window = <int32_t>window_size
+ *             sp.length = <int32_t>window_size
+ *             sp.sign = <int8_t>corr_sign             # <<<<<<<<<<<<<<
+ *             sp.seen = <int32_t>self._step_id
  *             if save_anomalies:
  */
-    __pyx_t_18 = __pyx_v_slot_i;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_sign.data + __pyx_t_18 * __pyx_v_arr_sign.strides[0]) )) = __pyx_v_corr_sign;
+    __pyx_v_sp->sign = ((int8_t)__pyx_v_corr_sign);
 
-    /* "monitor_kernels.pyx":597
- *             arr_length[slot_i] = window_size
- *             arr_sign[slot_i] = corr_sign
- *             arr_seen[slot_i] = self._step_id             # <<<<<<<<<<<<<<
+    /* "monitor_kernels.pyx":544
+ *             sp.length = <int32_t>window_size
+ *             sp.sign = <int8_t>corr_sign
+ *             sp.seen = <int32_t>self._step_id             # <<<<<<<<<<<<<<
  *             if save_anomalies:
  *                 self._append_anomaly(key_s1, key_s2, lag, min_time, 1 if corr_sign == last_corr_sign else 0)
  */
-    __pyx_t_21 = __pyx_v_self->_step_id;
-    __pyx_t_18 = __pyx_v_slot_i;
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_arr_seen.data + __pyx_t_18 * __pyx_v_arr_seen.strides[0]) )) = __pyx_t_21;
+    __pyx_v_sp->seen = ((int32_t)__pyx_v_self->_step_id);
 
-    /* "monitor_kernels.pyx":598
- *             arr_sign[slot_i] = corr_sign
- *             arr_seen[slot_i] = self._step_id
+    /* "monitor_kernels.pyx":545
+ *             sp.sign = <int8_t>corr_sign
+ *             sp.seen = <int32_t>self._step_id
  *             if save_anomalies:             # <<<<<<<<<<<<<<
  *                 self._append_anomaly(key_s1, key_s2, lag, min_time, 1 if corr_sign == last_corr_sign else 0)
  *             self._rows_transition += 1
  */
     if (__pyx_v_save_anomalies) {
 
-      /* "monitor_kernels.pyx":599
- *             arr_seen[slot_i] = self._step_id
+      /* "monitor_kernels.pyx":546
+ *             sp.seen = <int32_t>self._step_id
  *             if save_anomalies:
  *                 self._append_anomaly(key_s1, key_s2, lag, min_time, 1 if corr_sign == last_corr_sign else 0)             # <<<<<<<<<<<<<<
  *             self._rows_transition += 1
  * 
  */
-      __pyx_t_19 = (__pyx_v_corr_sign == __pyx_v_last_corr_sign);
-      if (__pyx_t_19) {
+      __pyx_t_17 = (__pyx_v_corr_sign == __pyx_v_last_corr_sign);
+      if (__pyx_t_17) {
         __pyx_t_21 = 1;
       } else {
         __pyx_t_21 = 0;
       }
-      ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_append_anomaly(__pyx_v_self, __pyx_v_key_s1, __pyx_v_key_s2, __pyx_v_lag, __pyx_v_min_time, __pyx_t_21); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 599, __pyx_L1_error)
+      __pyx_f_15monitor_kernels_19NumericMonitorState__append_anomaly(__pyx_v_self, __pyx_v_key_s1, __pyx_v_key_s2, __pyx_v_lag, __pyx_v_min_time, __pyx_t_21); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 546, __pyx_L1_error)
 
-      /* "monitor_kernels.pyx":598
- *             arr_sign[slot_i] = corr_sign
- *             arr_seen[slot_i] = self._step_id
+      /* "monitor_kernels.pyx":545
+ *             sp.sign = <int8_t>corr_sign
+ *             sp.seen = <int32_t>self._step_id
  *             if save_anomalies:             # <<<<<<<<<<<<<<
  *                 self._append_anomaly(key_s1, key_s2, lag, min_time, 1 if corr_sign == last_corr_sign else 0)
  *             self._rows_transition += 1
  */
     }
 
-    /* "monitor_kernels.pyx":600
+    /* "monitor_kernels.pyx":547
  *             if save_anomalies:
  *                 self._append_anomaly(key_s1, key_s2, lag, min_time, 1 if corr_sign == last_corr_sign else 0)
  *             self._rows_transition += 1             # <<<<<<<<<<<<<<
@@ -26443,21 +24955,21 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
  *         self._t_row_loop += time.perf_counter() - _tp0
  */
     __pyx_v_self->_rows_transition = (__pyx_v_self->_rows_transition + 1);
-    __pyx_L3_continue:;
+    __pyx_L14_continue:;
   }
 
-  /* "monitor_kernels.pyx":602
+  /* "monitor_kernels.pyx":549
  *             self._rows_transition += 1
  * 
  *         self._t_row_loop += time.perf_counter() - _tp0             # <<<<<<<<<<<<<<
  * 
- *         # arr_t1/arr_t2/arr_window/arr_length/arr_seen/arr_s1/arr_s2/arr_lag
+ *         _tp0 = time.perf_counter()
  */
-  __pyx_t_7 = PyFloat_FromDouble(__pyx_v_self->_t_row_loop); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 602, __pyx_L1_error)
+  __pyx_t_7 = PyFloat_FromDouble(__pyx_v_self->_t_row_loop); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 549, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 602, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 549, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_perf_counter); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 602, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_perf_counter); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 549, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __pyx_t_2 = NULL;
@@ -26478,34 +24990,34 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
     PyObject *__pyx_callargs[2] = {__pyx_t_2, NULL};
     __pyx_t_1 = __Pyx_PyObject_FastCall(__pyx_t_8, __pyx_callargs+1-__pyx_t_10, 0+__pyx_t_10);
     __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-    if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 602, __pyx_L1_error)
+    if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 549, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_1);
     __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
   }
-  __pyx_t_8 = PyFloat_FromDouble(__pyx_v__tp0); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 602, __pyx_L1_error)
+  __pyx_t_8 = PyFloat_FromDouble(__pyx_v__tp0); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 549, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_2 = PyNumber_Subtract(__pyx_t_1, __pyx_t_8); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 602, __pyx_L1_error)
+  __pyx_t_2 = PyNumber_Subtract(__pyx_t_1, __pyx_t_8); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 549, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = PyNumber_InPlaceAdd(__pyx_t_7, __pyx_t_2); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 602, __pyx_L1_error)
+  __pyx_t_8 = PyNumber_InPlaceAdd(__pyx_t_7, __pyx_t_2); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 549, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_11 = __pyx_PyFloat_AsDouble(__pyx_t_8); if (unlikely((__pyx_t_11 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 602, __pyx_L1_error)
+  __pyx_t_22 = __pyx_PyFloat_AsDouble(__pyx_t_8); if (unlikely((__pyx_t_22 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 549, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_v_self->_t_row_loop = __pyx_t_11;
+  __pyx_v_self->_t_row_loop = __pyx_t_22;
 
-  /* "monitor_kernels.pyx":610
- *         # were written, which a stale-vs-fresh memoryview distinction doesn't
- *         # affect). frontier_pos is also still valid for the same reason.
+  /* "monitor_kernels.pyx":551
+ *         self._t_row_loop += time.perf_counter() - _tp0
+ * 
  *         _tp0 = time.perf_counter()             # <<<<<<<<<<<<<<
  *         while self._frontier_count > 0:
  *             slot_i = <Py_ssize_t>frontier_slots[self._frontier_count - 1]
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 610, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 551, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_perf_counter); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 610, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_perf_counter); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 551, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __pyx_t_2 = NULL;
@@ -26526,153 +25038,153 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
     PyObject *__pyx_callargs[2] = {__pyx_t_2, NULL};
     __pyx_t_8 = __Pyx_PyObject_FastCall(__pyx_t_7, __pyx_callargs+1-__pyx_t_10, 0+__pyx_t_10);
     __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-    if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 610, __pyx_L1_error)
+    if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 551, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_8);
     __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   }
-  __pyx_t_11 = __pyx_PyFloat_AsDouble(__pyx_t_8); if (unlikely((__pyx_t_11 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 610, __pyx_L1_error)
+  __pyx_t_22 = __pyx_PyFloat_AsDouble(__pyx_t_8); if (unlikely((__pyx_t_22 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 551, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_v__tp0 = __pyx_t_11;
+  __pyx_v__tp0 = __pyx_t_22;
 
-  /* "monitor_kernels.pyx":611
- *         # affect). frontier_pos is also still valid for the same reason.
+  /* "monitor_kernels.pyx":552
+ * 
  *         _tp0 = time.perf_counter()
  *         while self._frontier_count > 0:             # <<<<<<<<<<<<<<
  *             slot_i = <Py_ssize_t>frontier_slots[self._frontier_count - 1]
- *             min_time = arr_t1[slot_i] if arr_t1[slot_i] <= arr_t2[slot_i] else arr_t2[slot_i]
+ *             sp = &slots[slot_i]
  */
   while (1) {
-    __pyx_t_19 = (__pyx_v_self->_frontier_count > 0);
-    if (!__pyx_t_19) break;
+    __pyx_t_17 = (__pyx_v_self->_frontier_count > 0);
+    if (!__pyx_t_17) break;
 
-    /* "monitor_kernels.pyx":612
+    /* "monitor_kernels.pyx":553
  *         _tp0 = time.perf_counter()
  *         while self._frontier_count > 0:
  *             slot_i = <Py_ssize_t>frontier_slots[self._frontier_count - 1]             # <<<<<<<<<<<<<<
- *             min_time = arr_t1[slot_i] if arr_t1[slot_i] <= arr_t2[slot_i] else arr_t2[slot_i]
- *             out_time = min_time + arr_length[slot_i] - (arr_window[slot_i] - window_step)
+ *             sp = &slots[slot_i]
+ *             min_time = sp.t1 if sp.t1 <= sp.t2 else sp.t2
  */
-    __pyx_t_18 = (__pyx_v_self->_frontier_count - 1);
-    __pyx_v_slot_i = ((Py_ssize_t)(*((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_slots.data + __pyx_t_18 * __pyx_v_frontier_slots.strides[0]) ))));
+    __pyx_t_15 = (__pyx_v_self->_frontier_count - 1);
+    __pyx_v_slot_i = ((Py_ssize_t)(*((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_slots.data + __pyx_t_15 * __pyx_v_frontier_slots.strides[0]) ))));
 
-    /* "monitor_kernels.pyx":613
+    /* "monitor_kernels.pyx":554
  *         while self._frontier_count > 0:
  *             slot_i = <Py_ssize_t>frontier_slots[self._frontier_count - 1]
- *             min_time = arr_t1[slot_i] if arr_t1[slot_i] <= arr_t2[slot_i] else arr_t2[slot_i]             # <<<<<<<<<<<<<<
- *             out_time = min_time + arr_length[slot_i] - (arr_window[slot_i] - window_step)
+ *             sp = &slots[slot_i]             # <<<<<<<<<<<<<<
+ *             min_time = sp.t1 if sp.t1 <= sp.t2 else sp.t2
+ *             out_time = min_time + sp.length - (sp.window - window_step)
+ */
+    __pyx_v_sp = (&(__pyx_v_slots[__pyx_v_slot_i]));
+
+    /* "monitor_kernels.pyx":555
+ *             slot_i = <Py_ssize_t>frontier_slots[self._frontier_count - 1]
+ *             sp = &slots[slot_i]
+ *             min_time = sp.t1 if sp.t1 <= sp.t2 else sp.t2             # <<<<<<<<<<<<<<
+ *             out_time = min_time + sp.length - (sp.window - window_step)
  *             if save_anomalies:
  */
-    __pyx_t_18 = __pyx_v_slot_i;
-    __pyx_t_17 = __pyx_v_slot_i;
-    __pyx_t_19 = ((*((int64_t *) ( /* dim=0 */ (__pyx_v_arr_t1.data + __pyx_t_18 * __pyx_v_arr_t1.strides[0]) ))) <= (*((int64_t *) ( /* dim=0 */ (__pyx_v_arr_t2.data + __pyx_t_17 * __pyx_v_arr_t2.strides[0]) ))));
-    if (__pyx_t_19) {
-      __pyx_t_17 = __pyx_v_slot_i;
-      __pyx_t_21 = (*((int64_t *) ( /* dim=0 */ (__pyx_v_arr_t1.data + __pyx_t_17 * __pyx_v_arr_t1.strides[0]) )));
+    __pyx_t_17 = (__pyx_v_sp->t1 <= __pyx_v_sp->t2);
+    if (__pyx_t_17) {
+      __pyx_t_21 = __pyx_v_sp->t1;
     } else {
-      __pyx_t_17 = __pyx_v_slot_i;
-      __pyx_t_21 = (*((int64_t *) ( /* dim=0 */ (__pyx_v_arr_t2.data + __pyx_t_17 * __pyx_v_arr_t2.strides[0]) )));
+      __pyx_t_21 = __pyx_v_sp->t2;
     }
     __pyx_v_min_time = __pyx_t_21;
 
-    /* "monitor_kernels.pyx":614
- *             slot_i = <Py_ssize_t>frontier_slots[self._frontier_count - 1]
- *             min_time = arr_t1[slot_i] if arr_t1[slot_i] <= arr_t2[slot_i] else arr_t2[slot_i]
- *             out_time = min_time + arr_length[slot_i] - (arr_window[slot_i] - window_step)             # <<<<<<<<<<<<<<
+    /* "monitor_kernels.pyx":556
+ *             sp = &slots[slot_i]
+ *             min_time = sp.t1 if sp.t1 <= sp.t2 else sp.t2
+ *             out_time = min_time + sp.length - (sp.window - window_step)             # <<<<<<<<<<<<<<
  *             if save_anomalies:
- *                 self._append_anomaly(arr_s1[slot_i], arr_s2[slot_i], arr_lag[slot_i], out_time, -1)
+ *                 self._append_anomaly(sp.s1, sp.s2, sp.lag, out_time, -1)
  */
-    __pyx_t_17 = __pyx_v_slot_i;
-    __pyx_t_18 = __pyx_v_slot_i;
-    __pyx_v_out_time = ((__pyx_v_min_time + (*((int64_t *) ( /* dim=0 */ (__pyx_v_arr_length.data + __pyx_t_17 * __pyx_v_arr_length.strides[0]) )))) - ((*((int64_t *) ( /* dim=0 */ (__pyx_v_arr_window.data + __pyx_t_18 * __pyx_v_arr_window.strides[0]) ))) - __pyx_v_window_step));
+    __pyx_v_out_time = ((__pyx_v_min_time + __pyx_v_sp->length) - (__pyx_v_sp->window - __pyx_v_window_step));
 
-    /* "monitor_kernels.pyx":615
- *             min_time = arr_t1[slot_i] if arr_t1[slot_i] <= arr_t2[slot_i] else arr_t2[slot_i]
- *             out_time = min_time + arr_length[slot_i] - (arr_window[slot_i] - window_step)
+    /* "monitor_kernels.pyx":557
+ *             min_time = sp.t1 if sp.t1 <= sp.t2 else sp.t2
+ *             out_time = min_time + sp.length - (sp.window - window_step)
  *             if save_anomalies:             # <<<<<<<<<<<<<<
- *                 self._append_anomaly(arr_s1[slot_i], arr_s2[slot_i], arr_lag[slot_i], out_time, -1)
+ *                 self._append_anomaly(sp.s1, sp.s2, sp.lag, out_time, -1)
  *             if save_status:
  */
     if (__pyx_v_save_anomalies) {
 
-      /* "monitor_kernels.pyx":616
- *             out_time = min_time + arr_length[slot_i] - (arr_window[slot_i] - window_step)
+      /* "monitor_kernels.pyx":558
+ *             out_time = min_time + sp.length - (sp.window - window_step)
  *             if save_anomalies:
- *                 self._append_anomaly(arr_s1[slot_i], arr_s2[slot_i], arr_lag[slot_i], out_time, -1)             # <<<<<<<<<<<<<<
+ *                 self._append_anomaly(sp.s1, sp.s2, sp.lag, out_time, -1)             # <<<<<<<<<<<<<<
  *             if save_status:
- *                 self._append_status(slot_i)
+ *                 self._append_status(slots, slot_i)
  */
-      __pyx_t_18 = __pyx_v_slot_i;
-      __pyx_t_17 = __pyx_v_slot_i;
-      __pyx_t_23 = __pyx_v_slot_i;
-      ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_append_anomaly(__pyx_v_self, (*((int64_t *) ( /* dim=0 */ (__pyx_v_arr_s1.data + __pyx_t_18 * __pyx_v_arr_s1.strides[0]) ))), (*((int64_t *) ( /* dim=0 */ (__pyx_v_arr_s2.data + __pyx_t_17 * __pyx_v_arr_s2.strides[0]) ))), (*((int64_t *) ( /* dim=0 */ (__pyx_v_arr_lag.data + __pyx_t_23 * __pyx_v_arr_lag.strides[0]) ))), __pyx_v_out_time, -1L); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 616, __pyx_L1_error)
+      __pyx_f_15monitor_kernels_19NumericMonitorState__append_anomaly(__pyx_v_self, __pyx_v_sp->s1, __pyx_v_sp->s2, __pyx_v_sp->lag, __pyx_v_out_time, -1L); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 558, __pyx_L1_error)
 
-      /* "monitor_kernels.pyx":615
- *             min_time = arr_t1[slot_i] if arr_t1[slot_i] <= arr_t2[slot_i] else arr_t2[slot_i]
- *             out_time = min_time + arr_length[slot_i] - (arr_window[slot_i] - window_step)
+      /* "monitor_kernels.pyx":557
+ *             min_time = sp.t1 if sp.t1 <= sp.t2 else sp.t2
+ *             out_time = min_time + sp.length - (sp.window - window_step)
  *             if save_anomalies:             # <<<<<<<<<<<<<<
- *                 self._append_anomaly(arr_s1[slot_i], arr_s2[slot_i], arr_lag[slot_i], out_time, -1)
+ *                 self._append_anomaly(sp.s1, sp.s2, sp.lag, out_time, -1)
  *             if save_status:
  */
     }
 
-    /* "monitor_kernels.pyx":617
+    /* "monitor_kernels.pyx":559
  *             if save_anomalies:
- *                 self._append_anomaly(arr_s1[slot_i], arr_s2[slot_i], arr_lag[slot_i], out_time, -1)
+ *                 self._append_anomaly(sp.s1, sp.s2, sp.lag, out_time, -1)
  *             if save_status:             # <<<<<<<<<<<<<<
- *                 self._append_status(slot_i)
- *             self._remove_previous_frontier_slot(slot_i, frontier_slots, frontier_pos)
+ *                 self._append_status(slots, slot_i)
+ *             self._remove_previous_frontier_slot(slots, slot_i, frontier_slots)
  */
     if (__pyx_v_save_status) {
 
-      /* "monitor_kernels.pyx":618
- *                 self._append_anomaly(arr_s1[slot_i], arr_s2[slot_i], arr_lag[slot_i], out_time, -1)
+      /* "monitor_kernels.pyx":560
+ *                 self._append_anomaly(sp.s1, sp.s2, sp.lag, out_time, -1)
  *             if save_status:
- *                 self._append_status(slot_i)             # <<<<<<<<<<<<<<
- *             self._remove_previous_frontier_slot(slot_i, frontier_slots, frontier_pos)
- *             self._deactivate_slot(slot_i, active, active_slots, active_pos)
+ *                 self._append_status(slots, slot_i)             # <<<<<<<<<<<<<<
+ *             self._remove_previous_frontier_slot(slots, slot_i, frontier_slots)
+ *             self._deactivate_slot(slots, slot_i, active_slots)
  */
-      ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_append_status(__pyx_v_self, __pyx_v_slot_i); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 618, __pyx_L1_error)
+      __pyx_f_15monitor_kernels_19NumericMonitorState__append_status(__pyx_v_self, __pyx_v_slots, __pyx_v_slot_i); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 560, __pyx_L1_error)
 
-      /* "monitor_kernels.pyx":617
+      /* "monitor_kernels.pyx":559
  *             if save_anomalies:
- *                 self._append_anomaly(arr_s1[slot_i], arr_s2[slot_i], arr_lag[slot_i], out_time, -1)
+ *                 self._append_anomaly(sp.s1, sp.s2, sp.lag, out_time, -1)
  *             if save_status:             # <<<<<<<<<<<<<<
- *                 self._append_status(slot_i)
- *             self._remove_previous_frontier_slot(slot_i, frontier_slots, frontier_pos)
+ *                 self._append_status(slots, slot_i)
+ *             self._remove_previous_frontier_slot(slots, slot_i, frontier_slots)
  */
     }
 
-    /* "monitor_kernels.pyx":619
+    /* "monitor_kernels.pyx":561
  *             if save_status:
- *                 self._append_status(slot_i)
- *             self._remove_previous_frontier_slot(slot_i, frontier_slots, frontier_pos)             # <<<<<<<<<<<<<<
- *             self._deactivate_slot(slot_i, active, active_slots, active_pos)
+ *                 self._append_status(slots, slot_i)
+ *             self._remove_previous_frontier_slot(slots, slot_i, frontier_slots)             # <<<<<<<<<<<<<<
+ *             self._deactivate_slot(slots, slot_i, active_slots)
  *         self._t_closeout += time.perf_counter() - _tp0
  */
-    ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_remove_previous_frontier_slot(__pyx_v_self, __pyx_v_slot_i, __pyx_v_frontier_slots, __pyx_v_frontier_pos); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 619, __pyx_L1_error)
+    (void)(__pyx_f_15monitor_kernels_19NumericMonitorState__remove_previous_frontier_slot(__pyx_v_self, __pyx_v_slots, __pyx_v_slot_i, __pyx_v_frontier_slots));
 
-    /* "monitor_kernels.pyx":620
- *                 self._append_status(slot_i)
- *             self._remove_previous_frontier_slot(slot_i, frontier_slots, frontier_pos)
- *             self._deactivate_slot(slot_i, active, active_slots, active_pos)             # <<<<<<<<<<<<<<
+    /* "monitor_kernels.pyx":562
+ *                 self._append_status(slots, slot_i)
+ *             self._remove_previous_frontier_slot(slots, slot_i, frontier_slots)
+ *             self._deactivate_slot(slots, slot_i, active_slots)             # <<<<<<<<<<<<<<
  *         self._t_closeout += time.perf_counter() - _tp0
  *         _tp0 = time.perf_counter()
  */
-    ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_deactivate_slot(__pyx_v_self, __pyx_v_slot_i, __pyx_v_active, __pyx_v_active_slots, __pyx_v_active_pos); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 620, __pyx_L1_error)
+    __pyx_f_15monitor_kernels_19NumericMonitorState__deactivate_slot(__pyx_v_self, __pyx_v_slots, __pyx_v_slot_i, __pyx_v_active_slots);
   }
 
-  /* "monitor_kernels.pyx":621
- *             self._remove_previous_frontier_slot(slot_i, frontier_slots, frontier_pos)
- *             self._deactivate_slot(slot_i, active, active_slots, active_pos)
+  /* "monitor_kernels.pyx":563
+ *             self._remove_previous_frontier_slot(slots, slot_i, frontier_slots)
+ *             self._deactivate_slot(slots, slot_i, active_slots)
  *         self._t_closeout += time.perf_counter() - _tp0             # <<<<<<<<<<<<<<
  *         _tp0 = time.perf_counter()
  *         swap_obj = self._frontier_slots_arr
  */
-  __pyx_t_8 = PyFloat_FromDouble(__pyx_v_self->_t_closeout); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 621, __pyx_L1_error)
+  __pyx_t_8 = PyFloat_FromDouble(__pyx_v_self->_t_closeout); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 563, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 621, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 563, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_perf_counter); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 621, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_perf_counter); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 563, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __pyx_t_2 = NULL;
@@ -26693,34 +25205,34 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
     PyObject *__pyx_callargs[2] = {__pyx_t_2, NULL};
     __pyx_t_7 = __Pyx_PyObject_FastCall(__pyx_t_1, __pyx_callargs+1-__pyx_t_10, 0+__pyx_t_10);
     __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-    if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 621, __pyx_L1_error)
+    if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 563, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_7);
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   }
-  __pyx_t_1 = PyFloat_FromDouble(__pyx_v__tp0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 621, __pyx_L1_error)
+  __pyx_t_1 = PyFloat_FromDouble(__pyx_v__tp0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 563, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = PyNumber_Subtract(__pyx_t_7, __pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 621, __pyx_L1_error)
+  __pyx_t_2 = PyNumber_Subtract(__pyx_t_7, __pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 563, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = PyNumber_InPlaceAdd(__pyx_t_8, __pyx_t_2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 621, __pyx_L1_error)
+  __pyx_t_1 = PyNumber_InPlaceAdd(__pyx_t_8, __pyx_t_2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 563, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_11 = __pyx_PyFloat_AsDouble(__pyx_t_1); if (unlikely((__pyx_t_11 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 621, __pyx_L1_error)
+  __pyx_t_22 = __pyx_PyFloat_AsDouble(__pyx_t_1); if (unlikely((__pyx_t_22 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 563, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_v_self->_t_closeout = __pyx_t_11;
+  __pyx_v_self->_t_closeout = __pyx_t_22;
 
-  /* "monitor_kernels.pyx":622
- *             self._deactivate_slot(slot_i, active, active_slots, active_pos)
+  /* "monitor_kernels.pyx":564
+ *             self._deactivate_slot(slots, slot_i, active_slots)
  *         self._t_closeout += time.perf_counter() - _tp0
  *         _tp0 = time.perf_counter()             # <<<<<<<<<<<<<<
  *         swap_obj = self._frontier_slots_arr
  *         self._frontier_slots_arr = self._next_frontier_slots_arr
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 622, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 564, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_perf_counter); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 622, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_perf_counter); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 564, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __pyx_t_2 = NULL;
@@ -26741,15 +25253,15 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
     PyObject *__pyx_callargs[2] = {__pyx_t_2, NULL};
     __pyx_t_1 = __Pyx_PyObject_FastCall(__pyx_t_8, __pyx_callargs+1-__pyx_t_10, 0+__pyx_t_10);
     __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-    if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 622, __pyx_L1_error)
+    if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 564, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_1);
     __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
   }
-  __pyx_t_11 = __pyx_PyFloat_AsDouble(__pyx_t_1); if (unlikely((__pyx_t_11 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 622, __pyx_L1_error)
+  __pyx_t_22 = __pyx_PyFloat_AsDouble(__pyx_t_1); if (unlikely((__pyx_t_22 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 564, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_v__tp0 = __pyx_t_11;
+  __pyx_v__tp0 = __pyx_t_22;
 
-  /* "monitor_kernels.pyx":623
+  /* "monitor_kernels.pyx":565
  *         self._t_closeout += time.perf_counter() - _tp0
  *         _tp0 = time.perf_counter()
  *         swap_obj = self._frontier_slots_arr             # <<<<<<<<<<<<<<
@@ -26761,7 +25273,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
   __pyx_v_swap_obj = __pyx_t_1;
   __pyx_t_1 = 0;
 
-  /* "monitor_kernels.pyx":624
+  /* "monitor_kernels.pyx":566
  *         _tp0 = time.perf_counter()
  *         swap_obj = self._frontier_slots_arr
  *         self._frontier_slots_arr = self._next_frontier_slots_arr             # <<<<<<<<<<<<<<
@@ -26776,7 +25288,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
   __pyx_v_self->_frontier_slots_arr = __pyx_t_1;
   __pyx_t_1 = 0;
 
-  /* "monitor_kernels.pyx":625
+  /* "monitor_kernels.pyx":567
  *         swap_obj = self._frontier_slots_arr
  *         self._frontier_slots_arr = self._next_frontier_slots_arr
  *         self._next_frontier_slots_arr = swap_obj             # <<<<<<<<<<<<<<
@@ -26789,87 +25301,73 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
   __Pyx_DECREF(__pyx_v_self->_next_frontier_slots_arr);
   __pyx_v_self->_next_frontier_slots_arr = __pyx_v_swap_obj;
 
-  /* "monitor_kernels.pyx":626
+  /* "monitor_kernels.pyx":568
  *         self._frontier_slots_arr = self._next_frontier_slots_arr
  *         self._next_frontier_slots_arr = swap_obj
  *         self._frontier_count = self._next_frontier_count             # <<<<<<<<<<<<<<
  *         self._next_frontier_count = 0
  *         frontier_slots = self._frontier_slots_arr
  */
-  __pyx_t_14 = __pyx_v_self->_next_frontier_count;
-  __pyx_v_self->_frontier_count = __pyx_t_14;
+  __pyx_t_11 = __pyx_v_self->_next_frontier_count;
+  __pyx_v_self->_frontier_count = __pyx_t_11;
 
-  /* "monitor_kernels.pyx":627
+  /* "monitor_kernels.pyx":569
  *         self._next_frontier_slots_arr = swap_obj
  *         self._frontier_count = self._next_frontier_count
  *         self._next_frontier_count = 0             # <<<<<<<<<<<<<<
  *         frontier_slots = self._frontier_slots_arr
- *         frontier_pos = self._frontier_pos_arr
+ *         for scan_pos in range(self._frontier_count):
  */
   __pyx_v_self->_next_frontier_count = 0;
 
-  /* "monitor_kernels.pyx":628
+  /* "monitor_kernels.pyx":570
  *         self._frontier_count = self._next_frontier_count
  *         self._next_frontier_count = 0
  *         frontier_slots = self._frontier_slots_arr             # <<<<<<<<<<<<<<
- *         frontier_pos = self._frontier_pos_arr
  *         for scan_pos in range(self._frontier_count):
+ *             slots[<Py_ssize_t>frontier_slots[scan_pos]].frontier_pos = <int32_t>scan_pos
  */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_frontier_slots_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 628, __pyx_L1_error)
+  __pyx_t_24 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_frontier_slots_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_24.memview)) __PYX_ERR(0, 570, __pyx_L1_error)
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_frontier_slots, 1);
-  __pyx_v_frontier_slots = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
+  __pyx_v_frontier_slots = __pyx_t_24;
+  __pyx_t_24.memview = NULL;
+  __pyx_t_24.data = NULL;
 
-  /* "monitor_kernels.pyx":629
+  /* "monitor_kernels.pyx":571
  *         self._next_frontier_count = 0
  *         frontier_slots = self._frontier_slots_arr
- *         frontier_pos = self._frontier_pos_arr             # <<<<<<<<<<<<<<
- *         for scan_pos in range(self._frontier_count):
- *             frontier_pos[<Py_ssize_t>frontier_slots[scan_pos]] = <int64_t>scan_pos
- */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_frontier_pos_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 629, __pyx_L1_error)
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_frontier_pos, 1);
-  __pyx_v_frontier_pos = __pyx_t_13;
-  __pyx_t_13.memview = NULL;
-  __pyx_t_13.data = NULL;
-
-  /* "monitor_kernels.pyx":630
- *         frontier_slots = self._frontier_slots_arr
- *         frontier_pos = self._frontier_pos_arr
  *         for scan_pos in range(self._frontier_count):             # <<<<<<<<<<<<<<
- *             frontier_pos[<Py_ssize_t>frontier_slots[scan_pos]] = <int64_t>scan_pos
+ *             slots[<Py_ssize_t>frontier_slots[scan_pos]].frontier_pos = <int32_t>scan_pos
  *         self._t_swap += time.perf_counter() - _tp0
  */
-  __pyx_t_14 = __pyx_v_self->_frontier_count;
-  __pyx_t_15 = __pyx_t_14;
-  for (__pyx_t_16 = 0; __pyx_t_16 < __pyx_t_15; __pyx_t_16+=1) {
-    __pyx_v_scan_pos = __pyx_t_16;
+  __pyx_t_11 = __pyx_v_self->_frontier_count;
+  __pyx_t_12 = __pyx_t_11;
+  for (__pyx_t_13 = 0; __pyx_t_13 < __pyx_t_12; __pyx_t_13+=1) {
+    __pyx_v_scan_pos = __pyx_t_13;
 
-    /* "monitor_kernels.pyx":631
- *         frontier_pos = self._frontier_pos_arr
+    /* "monitor_kernels.pyx":572
+ *         frontier_slots = self._frontier_slots_arr
  *         for scan_pos in range(self._frontier_count):
- *             frontier_pos[<Py_ssize_t>frontier_slots[scan_pos]] = <int64_t>scan_pos             # <<<<<<<<<<<<<<
+ *             slots[<Py_ssize_t>frontier_slots[scan_pos]].frontier_pos = <int32_t>scan_pos             # <<<<<<<<<<<<<<
  *         self._t_swap += time.perf_counter() - _tp0
  *         self._profile_calls += 1
  */
-    __pyx_t_23 = __pyx_v_scan_pos;
-    __pyx_t_17 = ((Py_ssize_t)(*((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_slots.data + __pyx_t_23 * __pyx_v_frontier_slots.strides[0]) ))));
-    *((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_pos.data + __pyx_t_17 * __pyx_v_frontier_pos.strides[0]) )) = ((int64_t)__pyx_v_scan_pos);
+    __pyx_t_15 = __pyx_v_scan_pos;
+    (__pyx_v_slots[((Py_ssize_t)(*((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_slots.data + __pyx_t_15 * __pyx_v_frontier_slots.strides[0]) ))))]).frontier_pos = ((int32_t)__pyx_v_scan_pos);
   }
 
-  /* "monitor_kernels.pyx":632
+  /* "monitor_kernels.pyx":573
  *         for scan_pos in range(self._frontier_count):
- *             frontier_pos[<Py_ssize_t>frontier_slots[scan_pos]] = <int64_t>scan_pos
+ *             slots[<Py_ssize_t>frontier_slots[scan_pos]].frontier_pos = <int32_t>scan_pos
  *         self._t_swap += time.perf_counter() - _tp0             # <<<<<<<<<<<<<<
  *         self._profile_calls += 1
  * 
  */
-  __pyx_t_1 = PyFloat_FromDouble(__pyx_v_self->_t_swap); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 632, __pyx_L1_error)
+  __pyx_t_1 = PyFloat_FromDouble(__pyx_v_self->_t_swap); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 573, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 632, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 573, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_perf_counter); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 632, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_perf_counter); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 573, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __pyx_t_2 = NULL;
@@ -26890,26 +25388,26 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
     PyObject *__pyx_callargs[2] = {__pyx_t_2, NULL};
     __pyx_t_8 = __Pyx_PyObject_FastCall(__pyx_t_7, __pyx_callargs+1-__pyx_t_10, 0+__pyx_t_10);
     __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-    if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 632, __pyx_L1_error)
+    if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 573, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_8);
     __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   }
-  __pyx_t_7 = PyFloat_FromDouble(__pyx_v__tp0); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 632, __pyx_L1_error)
+  __pyx_t_7 = PyFloat_FromDouble(__pyx_v__tp0); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 573, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  __pyx_t_2 = PyNumber_Subtract(__pyx_t_8, __pyx_t_7); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 632, __pyx_L1_error)
+  __pyx_t_2 = PyNumber_Subtract(__pyx_t_8, __pyx_t_7); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 573, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = PyNumber_InPlaceAdd(__pyx_t_1, __pyx_t_2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 632, __pyx_L1_error)
+  __pyx_t_7 = PyNumber_InPlaceAdd(__pyx_t_1, __pyx_t_2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 573, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_11 = __pyx_PyFloat_AsDouble(__pyx_t_7); if (unlikely((__pyx_t_11 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 632, __pyx_L1_error)
+  __pyx_t_22 = __pyx_PyFloat_AsDouble(__pyx_t_7); if (unlikely((__pyx_t_22 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 573, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_v_self->_t_swap = __pyx_t_11;
+  __pyx_v_self->_t_swap = __pyx_t_22;
 
-  /* "monitor_kernels.pyx":633
- *             frontier_pos[<Py_ssize_t>frontier_slots[scan_pos]] = <int64_t>scan_pos
+  /* "monitor_kernels.pyx":574
+ *             slots[<Py_ssize_t>frontier_slots[scan_pos]].frontier_pos = <int32_t>scan_pos
  *         self._t_swap += time.perf_counter() - _tp0
  *         self._profile_calls += 1             # <<<<<<<<<<<<<<
  * 
@@ -26917,7 +25415,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
  */
   __pyx_v_self->_profile_calls = (__pyx_v_self->_profile_calls + 1);
 
-  /* "monitor_kernels.pyx":444
+  /* "monitor_kernels.pyx":402
  *         self._anomaly_count += 1
  * 
  *     cpdef update(self,             # <<<<<<<<<<<<<<
@@ -26938,27 +25436,12 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_update(struct _
   __Pyx_XDECREF(__pyx_t_7);
   __Pyx_XDECREF(__pyx_t_8);
   __Pyx_XDECREF(__pyx_t_9);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_t_12, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_t_13, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_t_24, 1);
   __Pyx_AddTraceback("monitor_kernels.NumericMonitorState.update", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = 0;
   __pyx_L0:;
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_occupied, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_active, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_arr_s1, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_arr_s2, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_arr_lag, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_arr_t1, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_arr_t2, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_arr_window, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_arr_length, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_arr_sign, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_arr_seen, 1);
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_frontier_slots, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_frontier_pos, 1);
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_active_slots, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_active_pos, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_queued_step, 1);
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_next_frontier, 1);
   __Pyx_XDECREF(__pyx_v_swap_obj);
   __Pyx_XGIVEREF(__pyx_r);
@@ -27031,7 +25514,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[0]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 444, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 402, __pyx_L3_error)
         else goto __pyx_L5_argtuple_error;
         CYTHON_FALLTHROUGH;
         case  1:
@@ -27039,9 +25522,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[1]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 444, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 402, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("update", 1, 5, 5, 1); __PYX_ERR(0, 444, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("update", 1, 5, 5, 1); __PYX_ERR(0, 402, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  2:
@@ -27049,9 +25532,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[2]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 444, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 402, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("update", 1, 5, 5, 2); __PYX_ERR(0, 444, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("update", 1, 5, 5, 2); __PYX_ERR(0, 402, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  3:
@@ -27059,9 +25542,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[3]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 444, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 402, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("update", 1, 5, 5, 3); __PYX_ERR(0, 444, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("update", 1, 5, 5, 3); __PYX_ERR(0, 402, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  4:
@@ -27069,14 +25552,14 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[4]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 444, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 402, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("update", 1, 5, 5, 4); __PYX_ERR(0, 444, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("update", 1, 5, 5, 4); __PYX_ERR(0, 402, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
         const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "update") < 0)) __PYX_ERR(0, 444, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "update") < 0)) __PYX_ERR(0, 402, __pyx_L3_error)
       }
     } else if (unlikely(__pyx_nargs != 5)) {
       goto __pyx_L5_argtuple_error;
@@ -27087,15 +25570,15 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       values[3] = __Pyx_Arg_FASTCALL(__pyx_args, 3);
       values[4] = __Pyx_Arg_FASTCALL(__pyx_args, 4);
     }
-    __pyx_v_rows = __Pyx_PyObject_to_MemoryviewSlice_d_dc_long(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_rows.memview)) __PYX_ERR(0, 445, __pyx_L3_error)
-    __pyx_v_corrs = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_corrs.memview)) __PYX_ERR(0, 446, __pyx_L3_error)
-    __pyx_v_window_step = __Pyx_PyInt_As_int(values[2]); if (unlikely((__pyx_v_window_step == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 447, __pyx_L3_error)
-    __pyx_v_save_status = __Pyx_PyObject_IsTrue(values[3]); if (unlikely((__pyx_v_save_status == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 448, __pyx_L3_error)
-    __pyx_v_save_anomalies = __Pyx_PyObject_IsTrue(values[4]); if (unlikely((__pyx_v_save_anomalies == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 449, __pyx_L3_error)
+    __pyx_v_rows = __Pyx_PyObject_to_MemoryviewSlice_d_dc_long(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_rows.memview)) __PYX_ERR(0, 403, __pyx_L3_error)
+    __pyx_v_corrs = __Pyx_PyObject_to_MemoryviewSlice_ds_double(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_corrs.memview)) __PYX_ERR(0, 404, __pyx_L3_error)
+    __pyx_v_window_step = __Pyx_PyInt_As_int(values[2]); if (unlikely((__pyx_v_window_step == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 405, __pyx_L3_error)
+    __pyx_v_save_status = __Pyx_PyObject_IsTrue(values[3]); if (unlikely((__pyx_v_save_status == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 406, __pyx_L3_error)
+    __pyx_v_save_anomalies = __Pyx_PyObject_IsTrue(values[4]); if (unlikely((__pyx_v_save_anomalies == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 407, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("update", 1, 5, 5, __pyx_nargs); __PYX_ERR(0, 444, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("update", 1, 5, 5, __pyx_nargs); __PYX_ERR(0, 402, __pyx_L3_error)
   __pyx_L6_skip:;
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
@@ -27135,9 +25618,9 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_4update(struct
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("update", 1);
   __Pyx_XDECREF(__pyx_r);
-  if (unlikely(!__pyx_v_rows.memview)) { __Pyx_RaiseUnboundLocalError("rows"); __PYX_ERR(0, 444, __pyx_L1_error) }
-  if (unlikely(!__pyx_v_corrs.memview)) { __Pyx_RaiseUnboundLocalError("corrs"); __PYX_ERR(0, 444, __pyx_L1_error) }
-  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_update(__pyx_v_self, __pyx_v_rows, __pyx_v_corrs, __pyx_v_window_step, __pyx_v_save_status, __pyx_v_save_anomalies, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 444, __pyx_L1_error)
+  if (unlikely(!__pyx_v_rows.memview)) { __Pyx_RaiseUnboundLocalError("rows"); __PYX_ERR(0, 402, __pyx_L1_error) }
+  if (unlikely(!__pyx_v_corrs.memview)) { __Pyx_RaiseUnboundLocalError("corrs"); __PYX_ERR(0, 402, __pyx_L1_error) }
+  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_update(__pyx_v_self, __pyx_v_rows, __pyx_v_corrs, __pyx_v_window_step, __pyx_v_save_status, __pyx_v_save_anomalies, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 402, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
@@ -27154,11 +25637,11 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_4update(struct
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":635
+/* "monitor_kernels.pyx":576
  *         self._profile_calls += 1
  * 
  *     cpdef finalize(self, bint save_status=True):             # <<<<<<<<<<<<<<
- *         cdef uint8_t[:] active = self._active_arr
+ *         cdef MonitorSlot* slots = self._slots
  *         cdef int64_t[:] active_slots = self._active_slots_arr
  */
 
@@ -27171,11 +25654,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
 ); /*proto*/
 static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_finalize(struct __pyx_obj_15monitor_kernels_NumericMonitorState *__pyx_v_self, int __pyx_skip_dispatch, struct __pyx_opt_args_15monitor_kernels_19NumericMonitorState_finalize *__pyx_optional_args) {
   int __pyx_v_save_status = ((int)1);
-  __Pyx_memviewslice __pyx_v_active = { 0, 0, { 0 }, { 0 }, { 0 } };
+  struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_v_slots;
   __Pyx_memviewslice __pyx_v_active_slots = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_active_pos = { 0, 0, { 0 }, { 0 }, { 0 } };
   __Pyx_memviewslice __pyx_v_frontier_slots = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_frontier_pos = { 0, 0, { 0 }, { 0 }, { 0 } };
   Py_ssize_t __pyx_v_slot_i;
   Py_ssize_t __pyx_v_pos;
   PyObject *__pyx_r = NULL;
@@ -27186,7 +25667,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_finalize(struct
   PyObject *__pyx_t_4 = NULL;
   PyObject *__pyx_t_5 = NULL;
   int __pyx_t_6;
-  __Pyx_memviewslice __pyx_t_7 = { 0, 0, { 0 }, { 0 }, { 0 } };
+  struct __pyx_t_15monitor_kernels_MonitorSlot *__pyx_t_7;
   __Pyx_memviewslice __pyx_t_8 = { 0, 0, { 0 }, { 0 }, { 0 } };
   Py_ssize_t __pyx_t_9;
   Py_ssize_t __pyx_t_10;
@@ -27212,11 +25693,11 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_finalize(struct
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_finalize); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 635, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_finalize); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 576, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_19NumericMonitorState_7finalize)) {
         __Pyx_XDECREF(__pyx_r);
-        __pyx_t_3 = __Pyx_PyBool_FromLong(__pyx_v_save_status); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 635, __pyx_L1_error)
+        __pyx_t_3 = __Pyx_PyBool_FromLong(__pyx_v_save_status); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 576, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_3);
         __Pyx_INCREF(__pyx_t_1);
         __pyx_t_4 = __pyx_t_1; __pyx_t_5 = NULL;
@@ -27238,7 +25719,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_finalize(struct
           __pyx_t_2 = __Pyx_PyObject_FastCall(__pyx_t_4, __pyx_callargs+1-__pyx_t_6, 1+__pyx_t_6);
           __Pyx_XDECREF(__pyx_t_5); __pyx_t_5 = 0;
           __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 635, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 576, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
         }
@@ -27260,67 +25741,41 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_finalize(struct
     #endif
   }
 
-  /* "monitor_kernels.pyx":636
+  /* "monitor_kernels.pyx":577
  * 
  *     cpdef finalize(self, bint save_status=True):
- *         cdef uint8_t[:] active = self._active_arr             # <<<<<<<<<<<<<<
+ *         cdef MonitorSlot* slots = self._slots             # <<<<<<<<<<<<<<
  *         cdef int64_t[:] active_slots = self._active_slots_arr
- *         cdef int64_t[:] active_pos = self._active_pos_arr
- */
-  __pyx_t_7 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_self->_active_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_7.memview)) __PYX_ERR(0, 636, __pyx_L1_error)
-  __pyx_v_active = __pyx_t_7;
-  __pyx_t_7.memview = NULL;
-  __pyx_t_7.data = NULL;
-
-  /* "monitor_kernels.pyx":637
- *     cpdef finalize(self, bint save_status=True):
- *         cdef uint8_t[:] active = self._active_arr
- *         cdef int64_t[:] active_slots = self._active_slots_arr             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] active_pos = self._active_pos_arr
  *         cdef int64_t[:] frontier_slots = self._frontier_slots_arr
  */
-  __pyx_t_8 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_active_slots_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_8.memview)) __PYX_ERR(0, 637, __pyx_L1_error)
+  __pyx_t_7 = __pyx_v_self->_slots;
+  __pyx_v_slots = __pyx_t_7;
+
+  /* "monitor_kernels.pyx":578
+ *     cpdef finalize(self, bint save_status=True):
+ *         cdef MonitorSlot* slots = self._slots
+ *         cdef int64_t[:] active_slots = self._active_slots_arr             # <<<<<<<<<<<<<<
+ *         cdef int64_t[:] frontier_slots = self._frontier_slots_arr
+ *         cdef Py_ssize_t slot_i
+ */
+  __pyx_t_8 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_active_slots_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_8.memview)) __PYX_ERR(0, 578, __pyx_L1_error)
   __pyx_v_active_slots = __pyx_t_8;
   __pyx_t_8.memview = NULL;
   __pyx_t_8.data = NULL;
 
-  /* "monitor_kernels.pyx":638
- *         cdef uint8_t[:] active = self._active_arr
+  /* "monitor_kernels.pyx":579
+ *         cdef MonitorSlot* slots = self._slots
  *         cdef int64_t[:] active_slots = self._active_slots_arr
- *         cdef int64_t[:] active_pos = self._active_pos_arr             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] frontier_slots = self._frontier_slots_arr
- *         cdef int64_t[:] frontier_pos = self._frontier_pos_arr
- */
-  __pyx_t_8 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_active_pos_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_8.memview)) __PYX_ERR(0, 638, __pyx_L1_error)
-  __pyx_v_active_pos = __pyx_t_8;
-  __pyx_t_8.memview = NULL;
-  __pyx_t_8.data = NULL;
-
-  /* "monitor_kernels.pyx":639
- *         cdef int64_t[:] active_slots = self._active_slots_arr
- *         cdef int64_t[:] active_pos = self._active_pos_arr
  *         cdef int64_t[:] frontier_slots = self._frontier_slots_arr             # <<<<<<<<<<<<<<
- *         cdef int64_t[:] frontier_pos = self._frontier_pos_arr
  *         cdef Py_ssize_t slot_i
+ *         cdef Py_ssize_t pos
  */
-  __pyx_t_8 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_frontier_slots_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_8.memview)) __PYX_ERR(0, 639, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_frontier_slots_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_8.memview)) __PYX_ERR(0, 579, __pyx_L1_error)
   __pyx_v_frontier_slots = __pyx_t_8;
   __pyx_t_8.memview = NULL;
   __pyx_t_8.data = NULL;
 
-  /* "monitor_kernels.pyx":640
- *         cdef int64_t[:] active_pos = self._active_pos_arr
- *         cdef int64_t[:] frontier_slots = self._frontier_slots_arr
- *         cdef int64_t[:] frontier_pos = self._frontier_pos_arr             # <<<<<<<<<<<<<<
- *         cdef Py_ssize_t slot_i
- *         cdef Py_ssize_t pos
- */
-  __pyx_t_8 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_frontier_pos_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_8.memview)) __PYX_ERR(0, 640, __pyx_L1_error)
-  __pyx_v_frontier_pos = __pyx_t_8;
-  __pyx_t_8.memview = NULL;
-  __pyx_t_8.data = NULL;
-
-  /* "monitor_kernels.pyx":643
+  /* "monitor_kernels.pyx":582
  *         cdef Py_ssize_t slot_i
  *         cdef Py_ssize_t pos
  *         for pos in range(self._frontier_count):             # <<<<<<<<<<<<<<
@@ -27332,21 +25787,21 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_finalize(struct
   for (__pyx_t_11 = 0; __pyx_t_11 < __pyx_t_10; __pyx_t_11+=1) {
     __pyx_v_pos = __pyx_t_11;
 
-    /* "monitor_kernels.pyx":644
+    /* "monitor_kernels.pyx":583
  *         cdef Py_ssize_t pos
  *         for pos in range(self._frontier_count):
  *             slot_i = <Py_ssize_t>frontier_slots[pos]             # <<<<<<<<<<<<<<
  *             if slot_i >= 0 and slot_i < self._capacity:
- *                 frontier_pos[slot_i] = <int64_t>-1
+ *                 slots[slot_i].frontier_pos = -1
  */
     __pyx_t_12 = __pyx_v_pos;
     __pyx_v_slot_i = ((Py_ssize_t)(*((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_slots.data + __pyx_t_12 * __pyx_v_frontier_slots.strides[0]) ))));
 
-    /* "monitor_kernels.pyx":645
+    /* "monitor_kernels.pyx":584
  *         for pos in range(self._frontier_count):
  *             slot_i = <Py_ssize_t>frontier_slots[pos]
  *             if slot_i >= 0 and slot_i < self._capacity:             # <<<<<<<<<<<<<<
- *                 frontier_pos[slot_i] = <int64_t>-1
+ *                 slots[slot_i].frontier_pos = -1
  *         while self._active_count > 0:
  */
     __pyx_t_14 = (__pyx_v_slot_i >= 0);
@@ -27360,29 +25815,28 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_finalize(struct
     __pyx_L6_bool_binop_done:;
     if (__pyx_t_13) {
 
-      /* "monitor_kernels.pyx":646
+      /* "monitor_kernels.pyx":585
  *             slot_i = <Py_ssize_t>frontier_slots[pos]
  *             if slot_i >= 0 and slot_i < self._capacity:
- *                 frontier_pos[slot_i] = <int64_t>-1             # <<<<<<<<<<<<<<
+ *                 slots[slot_i].frontier_pos = -1             # <<<<<<<<<<<<<<
  *         while self._active_count > 0:
  *             slot_i = <Py_ssize_t>active_slots[self._active_count - 1]
  */
-      __pyx_t_12 = __pyx_v_slot_i;
-      *((int64_t *) ( /* dim=0 */ (__pyx_v_frontier_pos.data + __pyx_t_12 * __pyx_v_frontier_pos.strides[0]) )) = ((int64_t)-1L);
+      (__pyx_v_slots[__pyx_v_slot_i]).frontier_pos = -1;
 
-      /* "monitor_kernels.pyx":645
+      /* "monitor_kernels.pyx":584
  *         for pos in range(self._frontier_count):
  *             slot_i = <Py_ssize_t>frontier_slots[pos]
  *             if slot_i >= 0 and slot_i < self._capacity:             # <<<<<<<<<<<<<<
- *                 frontier_pos[slot_i] = <int64_t>-1
+ *                 slots[slot_i].frontier_pos = -1
  *         while self._active_count > 0:
  */
     }
   }
 
-  /* "monitor_kernels.pyx":647
+  /* "monitor_kernels.pyx":586
  *             if slot_i >= 0 and slot_i < self._capacity:
- *                 frontier_pos[slot_i] = <int64_t>-1
+ *                 slots[slot_i].frontier_pos = -1
  *         while self._active_count > 0:             # <<<<<<<<<<<<<<
  *             slot_i = <Py_ssize_t>active_slots[self._active_count - 1]
  *             if save_status:
@@ -27391,64 +25845,64 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_finalize(struct
     __pyx_t_13 = (__pyx_v_self->_active_count > 0);
     if (!__pyx_t_13) break;
 
-    /* "monitor_kernels.pyx":648
- *                 frontier_pos[slot_i] = <int64_t>-1
+    /* "monitor_kernels.pyx":587
+ *                 slots[slot_i].frontier_pos = -1
  *         while self._active_count > 0:
  *             slot_i = <Py_ssize_t>active_slots[self._active_count - 1]             # <<<<<<<<<<<<<<
  *             if save_status:
- *                 self._append_status(slot_i)
+ *                 self._append_status(slots, slot_i)
  */
     __pyx_t_12 = (__pyx_v_self->_active_count - 1);
     __pyx_v_slot_i = ((Py_ssize_t)(*((int64_t *) ( /* dim=0 */ (__pyx_v_active_slots.data + __pyx_t_12 * __pyx_v_active_slots.strides[0]) ))));
 
-    /* "monitor_kernels.pyx":649
+    /* "monitor_kernels.pyx":588
  *         while self._active_count > 0:
  *             slot_i = <Py_ssize_t>active_slots[self._active_count - 1]
  *             if save_status:             # <<<<<<<<<<<<<<
- *                 self._append_status(slot_i)
- *             self._deactivate_slot(slot_i, active, active_slots, active_pos)
+ *                 self._append_status(slots, slot_i)
+ *             self._deactivate_slot(slots, slot_i, active_slots)
  */
     if (__pyx_v_save_status) {
 
-      /* "monitor_kernels.pyx":650
+      /* "monitor_kernels.pyx":589
  *             slot_i = <Py_ssize_t>active_slots[self._active_count - 1]
  *             if save_status:
- *                 self._append_status(slot_i)             # <<<<<<<<<<<<<<
- *             self._deactivate_slot(slot_i, active, active_slots, active_pos)
+ *                 self._append_status(slots, slot_i)             # <<<<<<<<<<<<<<
+ *             self._deactivate_slot(slots, slot_i, active_slots)
  *         self._frontier_count = 0
  */
-      ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_append_status(__pyx_v_self, __pyx_v_slot_i); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 650, __pyx_L1_error)
+      __pyx_f_15monitor_kernels_19NumericMonitorState__append_status(__pyx_v_self, __pyx_v_slots, __pyx_v_slot_i); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 589, __pyx_L1_error)
 
-      /* "monitor_kernels.pyx":649
+      /* "monitor_kernels.pyx":588
  *         while self._active_count > 0:
  *             slot_i = <Py_ssize_t>active_slots[self._active_count - 1]
  *             if save_status:             # <<<<<<<<<<<<<<
- *                 self._append_status(slot_i)
- *             self._deactivate_slot(slot_i, active, active_slots, active_pos)
+ *                 self._append_status(slots, slot_i)
+ *             self._deactivate_slot(slots, slot_i, active_slots)
  */
     }
 
-    /* "monitor_kernels.pyx":651
+    /* "monitor_kernels.pyx":590
  *             if save_status:
- *                 self._append_status(slot_i)
- *             self._deactivate_slot(slot_i, active, active_slots, active_pos)             # <<<<<<<<<<<<<<
+ *                 self._append_status(slots, slot_i)
+ *             self._deactivate_slot(slots, slot_i, active_slots)             # <<<<<<<<<<<<<<
  *         self._frontier_count = 0
  *         self._next_frontier_count = 0
  */
-    ((struct __pyx_vtabstruct_15monitor_kernels_NumericMonitorState *)__pyx_v_self->__pyx_vtab)->_deactivate_slot(__pyx_v_self, __pyx_v_slot_i, __pyx_v_active, __pyx_v_active_slots, __pyx_v_active_pos); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 651, __pyx_L1_error)
+    __pyx_f_15monitor_kernels_19NumericMonitorState__deactivate_slot(__pyx_v_self, __pyx_v_slots, __pyx_v_slot_i, __pyx_v_active_slots);
   }
 
-  /* "monitor_kernels.pyx":652
- *                 self._append_status(slot_i)
- *             self._deactivate_slot(slot_i, active, active_slots, active_pos)
+  /* "monitor_kernels.pyx":591
+ *                 self._append_status(slots, slot_i)
+ *             self._deactivate_slot(slots, slot_i, active_slots)
  *         self._frontier_count = 0             # <<<<<<<<<<<<<<
  *         self._next_frontier_count = 0
  * 
  */
   __pyx_v_self->_frontier_count = 0;
 
-  /* "monitor_kernels.pyx":653
- *             self._deactivate_slot(slot_i, active, active_slots, active_pos)
+  /* "monitor_kernels.pyx":592
+ *             self._deactivate_slot(slots, slot_i, active_slots)
  *         self._frontier_count = 0
  *         self._next_frontier_count = 0             # <<<<<<<<<<<<<<
  * 
@@ -27456,11 +25910,11 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_finalize(struct
  */
   __pyx_v_self->_next_frontier_count = 0;
 
-  /* "monitor_kernels.pyx":635
+  /* "monitor_kernels.pyx":576
  *         self._profile_calls += 1
  * 
  *     cpdef finalize(self, bint save_status=True):             # <<<<<<<<<<<<<<
- *         cdef uint8_t[:] active = self._active_arr
+ *         cdef MonitorSlot* slots = self._slots
  *         cdef int64_t[:] active_slots = self._active_slots_arr
  */
 
@@ -27473,16 +25927,12 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_finalize(struct
   __Pyx_XDECREF(__pyx_t_3);
   __Pyx_XDECREF(__pyx_t_4);
   __Pyx_XDECREF(__pyx_t_5);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_t_7, 1);
   __PYX_XCLEAR_MEMVIEW(&__pyx_t_8, 1);
   __Pyx_AddTraceback("monitor_kernels.NumericMonitorState.finalize", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = 0;
   __pyx_L0:;
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_active, 1);
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_active_slots, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_active_pos, 1);
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_frontier_slots, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_frontier_pos, 1);
   __Pyx_XGIVEREF(__pyx_r);
   __Pyx_RefNannyFinishContext();
   return __pyx_r;
@@ -27540,12 +25990,12 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
         if (kw_args > 0) {
           PyObject* value = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_save_status);
           if (value) { values[0] = __Pyx_Arg_NewRef_FASTCALL(value); kw_args--; }
-          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 635, __pyx_L3_error)
+          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 576, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
         const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "finalize") < 0)) __PYX_ERR(0, 635, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "finalize") < 0)) __PYX_ERR(0, 576, __pyx_L3_error)
       }
     } else {
       switch (__pyx_nargs) {
@@ -27556,14 +26006,14 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       }
     }
     if (values[0]) {
-      __pyx_v_save_status = __Pyx_PyObject_IsTrue(values[0]); if (unlikely((__pyx_v_save_status == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 635, __pyx_L3_error)
+      __pyx_v_save_status = __Pyx_PyObject_IsTrue(values[0]); if (unlikely((__pyx_v_save_status == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 576, __pyx_L3_error)
     } else {
       __pyx_v_save_status = ((int)1);
     }
   }
   goto __pyx_L6_skip;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("finalize", 0, 0, 1, __pyx_nargs); __PYX_ERR(0, 635, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("finalize", 0, 0, 1, __pyx_nargs); __PYX_ERR(0, 576, __pyx_L3_error)
   __pyx_L6_skip:;
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
@@ -27602,7 +26052,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_6finalize(stru
   __Pyx_XDECREF(__pyx_r);
   __pyx_t_2.__pyx_n = 1;
   __pyx_t_2.save_status = __pyx_v_save_status;
-  __pyx_t_1 = __pyx_vtabptr_15monitor_kernels_NumericMonitorState->finalize(__pyx_v_self, 1, &__pyx_t_2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 635, __pyx_L1_error)
+  __pyx_t_1 = __pyx_vtabptr_15monitor_kernels_NumericMonitorState->finalize(__pyx_v_self, 1, &__pyx_t_2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 576, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
@@ -27619,7 +26069,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_6finalize(stru
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":655
+/* "monitor_kernels.pyx":594
  *         self._next_frontier_count = 0
  * 
  *     cpdef Py_ssize_t pending_status_count(self):             # <<<<<<<<<<<<<<
@@ -27656,7 +26106,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_pending_status
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_pending_status_count); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 655, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_pending_status_count); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 594, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_19NumericMonitorState_9pending_status_count)) {
         __Pyx_INCREF(__pyx_t_1);
@@ -27678,11 +26128,11 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_pending_status
           PyObject *__pyx_callargs[2] = {__pyx_t_4, NULL};
           __pyx_t_2 = __Pyx_PyObject_FastCall(__pyx_t_3, __pyx_callargs+1-__pyx_t_5, 0+__pyx_t_5);
           __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 655, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 594, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         }
-        __pyx_t_6 = __Pyx_PyIndex_AsSsize_t(__pyx_t_2); if (unlikely((__pyx_t_6 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 655, __pyx_L1_error)
+        __pyx_t_6 = __Pyx_PyIndex_AsSsize_t(__pyx_t_2); if (unlikely((__pyx_t_6 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 594, __pyx_L1_error)
         __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
         __pyx_r = __pyx_t_6;
         __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -27701,7 +26151,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_pending_status
     #endif
   }
 
-  /* "monitor_kernels.pyx":656
+  /* "monitor_kernels.pyx":595
  * 
  *     cpdef Py_ssize_t pending_status_count(self):
  *         return self._status_count             # <<<<<<<<<<<<<<
@@ -27711,7 +26161,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_pending_status
   __pyx_r = __pyx_v_self->_status_count;
   goto __pyx_L0;
 
-  /* "monitor_kernels.pyx":655
+  /* "monitor_kernels.pyx":594
  *         self._next_frontier_count = 0
  * 
  *     cpdef Py_ssize_t pending_status_count(self):             # <<<<<<<<<<<<<<
@@ -27783,8 +26233,8 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_8pending_statu
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("pending_status_count", 1);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_pending_status_count(__pyx_v_self, 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 655, __pyx_L1_error)
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 655, __pyx_L1_error)
+  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_pending_status_count(__pyx_v_self, 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 594, __pyx_L1_error)
+  __pyx_t_2 = PyInt_FromSsize_t(__pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 594, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_r = __pyx_t_2;
   __pyx_t_2 = 0;
@@ -27801,7 +26251,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_8pending_statu
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":658
+/* "monitor_kernels.pyx":597
  *         return self._status_count
  * 
  *     cpdef Py_ssize_t pending_anomaly_count(self):             # <<<<<<<<<<<<<<
@@ -27838,7 +26288,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_pending_anomal
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_pending_anomaly_count); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 658, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_pending_anomaly_count); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 597, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_19NumericMonitorState_11pending_anomaly_count)) {
         __Pyx_INCREF(__pyx_t_1);
@@ -27860,11 +26310,11 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_pending_anomal
           PyObject *__pyx_callargs[2] = {__pyx_t_4, NULL};
           __pyx_t_2 = __Pyx_PyObject_FastCall(__pyx_t_3, __pyx_callargs+1-__pyx_t_5, 0+__pyx_t_5);
           __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 658, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 597, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         }
-        __pyx_t_6 = __Pyx_PyIndex_AsSsize_t(__pyx_t_2); if (unlikely((__pyx_t_6 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 658, __pyx_L1_error)
+        __pyx_t_6 = __Pyx_PyIndex_AsSsize_t(__pyx_t_2); if (unlikely((__pyx_t_6 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 597, __pyx_L1_error)
         __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
         __pyx_r = __pyx_t_6;
         __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -27883,7 +26333,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_pending_anomal
     #endif
   }
 
-  /* "monitor_kernels.pyx":659
+  /* "monitor_kernels.pyx":598
  * 
  *     cpdef Py_ssize_t pending_anomaly_count(self):
  *         return self._anomaly_count             # <<<<<<<<<<<<<<
@@ -27893,7 +26343,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_pending_anomal
   __pyx_r = __pyx_v_self->_anomaly_count;
   goto __pyx_L0;
 
-  /* "monitor_kernels.pyx":658
+  /* "monitor_kernels.pyx":597
  *         return self._status_count
  * 
  *     cpdef Py_ssize_t pending_anomaly_count(self):             # <<<<<<<<<<<<<<
@@ -27965,8 +26415,8 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_10pending_anom
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("pending_anomaly_count", 1);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_pending_anomaly_count(__pyx_v_self, 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 658, __pyx_L1_error)
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 658, __pyx_L1_error)
+  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_pending_anomaly_count(__pyx_v_self, 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 597, __pyx_L1_error)
+  __pyx_t_2 = PyInt_FromSsize_t(__pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 597, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_r = __pyx_t_2;
   __pyx_t_2 = 0;
@@ -27983,7 +26433,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_10pending_anom
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":661
+/* "monitor_kernels.pyx":600
  *         return self._anomaly_count
  * 
  *     cpdef Py_ssize_t active_count(self):             # <<<<<<<<<<<<<<
@@ -28020,7 +26470,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_active_count(s
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_active_count); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 661, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_active_count); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 600, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_19NumericMonitorState_13active_count)) {
         __Pyx_INCREF(__pyx_t_1);
@@ -28042,11 +26492,11 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_active_count(s
           PyObject *__pyx_callargs[2] = {__pyx_t_4, NULL};
           __pyx_t_2 = __Pyx_PyObject_FastCall(__pyx_t_3, __pyx_callargs+1-__pyx_t_5, 0+__pyx_t_5);
           __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 661, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 600, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         }
-        __pyx_t_6 = __Pyx_PyIndex_AsSsize_t(__pyx_t_2); if (unlikely((__pyx_t_6 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 661, __pyx_L1_error)
+        __pyx_t_6 = __Pyx_PyIndex_AsSsize_t(__pyx_t_2); if (unlikely((__pyx_t_6 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 600, __pyx_L1_error)
         __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
         __pyx_r = __pyx_t_6;
         __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -28065,7 +26515,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_active_count(s
     #endif
   }
 
-  /* "monitor_kernels.pyx":662
+  /* "monitor_kernels.pyx":601
  * 
  *     cpdef Py_ssize_t active_count(self):
  *         return self._active_count             # <<<<<<<<<<<<<<
@@ -28075,7 +26525,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_active_count(s
   __pyx_r = __pyx_v_self->_active_count;
   goto __pyx_L0;
 
-  /* "monitor_kernels.pyx":661
+  /* "monitor_kernels.pyx":600
  *         return self._anomaly_count
  * 
  *     cpdef Py_ssize_t active_count(self):             # <<<<<<<<<<<<<<
@@ -28147,8 +26597,8 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_12active_count
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("active_count", 1);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_active_count(__pyx_v_self, 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 661, __pyx_L1_error)
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 661, __pyx_L1_error)
+  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_active_count(__pyx_v_self, 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 600, __pyx_L1_error)
+  __pyx_t_2 = PyInt_FromSsize_t(__pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 600, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_r = __pyx_t_2;
   __pyx_t_2 = 0;
@@ -28165,12 +26615,12 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_12active_count
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":664
+/* "monitor_kernels.pyx":603
  *         return self._active_count
  * 
  *     cpdef Py_ssize_t occupied_count(self):             # <<<<<<<<<<<<<<
- *         """Diagnostic-only (2026-07-03): total distinct (s1,s2,lag) slots ever
- *         occupied, which never shrinks (deactivation only clears _active_arr,
+ *         return self._size
+ * 
  */
 
 static PyObject *__pyx_pw_15monitor_kernels_19NumericMonitorState_15occupied_count(PyObject *__pyx_v_self, 
@@ -28202,7 +26652,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_occupied_count
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_occupied_count); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 664, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_occupied_count); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 603, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_19NumericMonitorState_15occupied_count)) {
         __Pyx_INCREF(__pyx_t_1);
@@ -28224,11 +26674,11 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_occupied_count
           PyObject *__pyx_callargs[2] = {__pyx_t_4, NULL};
           __pyx_t_2 = __Pyx_PyObject_FastCall(__pyx_t_3, __pyx_callargs+1-__pyx_t_5, 0+__pyx_t_5);
           __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 664, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 603, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         }
-        __pyx_t_6 = __Pyx_PyIndex_AsSsize_t(__pyx_t_2); if (unlikely((__pyx_t_6 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 664, __pyx_L1_error)
+        __pyx_t_6 = __Pyx_PyIndex_AsSsize_t(__pyx_t_2); if (unlikely((__pyx_t_6 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 603, __pyx_L1_error)
         __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
         __pyx_r = __pyx_t_6;
         __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -28247,9 +26697,9 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_occupied_count
     #endif
   }
 
-  /* "monitor_kernels.pyx":668
- *         occupied, which never shrinks (deactivation only clears _active_arr,
- *         not _occupied_arr) -- compare against active_count() and capacity()."""
+  /* "monitor_kernels.pyx":604
+ * 
+ *     cpdef Py_ssize_t occupied_count(self):
  *         return self._size             # <<<<<<<<<<<<<<
  * 
  *     cpdef Py_ssize_t capacity(self):
@@ -28257,12 +26707,12 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_occupied_count
   __pyx_r = __pyx_v_self->_size;
   goto __pyx_L0;
 
-  /* "monitor_kernels.pyx":664
+  /* "monitor_kernels.pyx":603
  *         return self._active_count
  * 
  *     cpdef Py_ssize_t occupied_count(self):             # <<<<<<<<<<<<<<
- *         """Diagnostic-only (2026-07-03): total distinct (s1,s2,lag) slots ever
- *         occupied, which never shrinks (deactivation only clears _active_arr,
+ *         return self._size
+ * 
  */
 
   /* function exit code */
@@ -28286,8 +26736,7 @@ PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-PyDoc_STRVAR(__pyx_doc_15monitor_kernels_19NumericMonitorState_14occupied_count, "Diagnostic-only (2026-07-03): total distinct (s1,s2,lag) slots ever\n        occupied, which never shrinks (deactivation only clears _active_arr,\n        not _occupied_arr) -- compare against active_count() and capacity().");
-static PyMethodDef __pyx_mdef_15monitor_kernels_19NumericMonitorState_15occupied_count = {"occupied_count", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_15monitor_kernels_19NumericMonitorState_15occupied_count, __Pyx_METH_FASTCALL|METH_KEYWORDS, __pyx_doc_15monitor_kernels_19NumericMonitorState_14occupied_count};
+static PyMethodDef __pyx_mdef_15monitor_kernels_19NumericMonitorState_15occupied_count = {"occupied_count", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_15monitor_kernels_19NumericMonitorState_15occupied_count, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
 static PyObject *__pyx_pw_15monitor_kernels_19NumericMonitorState_15occupied_count(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
@@ -28330,8 +26779,8 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_14occupied_cou
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("occupied_count", 1);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_occupied_count(__pyx_v_self, 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 664, __pyx_L1_error)
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 664, __pyx_L1_error)
+  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_occupied_count(__pyx_v_self, 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 603, __pyx_L1_error)
+  __pyx_t_2 = PyInt_FromSsize_t(__pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 603, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_r = __pyx_t_2;
   __pyx_t_2 = 0;
@@ -28348,7 +26797,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_14occupied_cou
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":670
+/* "monitor_kernels.pyx":606
  *         return self._size
  * 
  *     cpdef Py_ssize_t capacity(self):             # <<<<<<<<<<<<<<
@@ -28385,7 +26834,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_capacity(struc
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 670, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 606, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_19NumericMonitorState_17capacity)) {
         __Pyx_INCREF(__pyx_t_1);
@@ -28407,11 +26856,11 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_capacity(struc
           PyObject *__pyx_callargs[2] = {__pyx_t_4, NULL};
           __pyx_t_2 = __Pyx_PyObject_FastCall(__pyx_t_3, __pyx_callargs+1-__pyx_t_5, 0+__pyx_t_5);
           __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 670, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 606, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         }
-        __pyx_t_6 = __Pyx_PyIndex_AsSsize_t(__pyx_t_2); if (unlikely((__pyx_t_6 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 670, __pyx_L1_error)
+        __pyx_t_6 = __Pyx_PyIndex_AsSsize_t(__pyx_t_2); if (unlikely((__pyx_t_6 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 606, __pyx_L1_error)
         __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
         __pyx_r = __pyx_t_6;
         __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -28430,7 +26879,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_capacity(struc
     #endif
   }
 
-  /* "monitor_kernels.pyx":671
+  /* "monitor_kernels.pyx":607
  * 
  *     cpdef Py_ssize_t capacity(self):
  *         return self._capacity             # <<<<<<<<<<<<<<
@@ -28440,7 +26889,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_19NumericMonitorState_capacity(struc
   __pyx_r = __pyx_v_self->_capacity;
   goto __pyx_L0;
 
-  /* "monitor_kernels.pyx":670
+  /* "monitor_kernels.pyx":606
  *         return self._size
  * 
  *     cpdef Py_ssize_t capacity(self):             # <<<<<<<<<<<<<<
@@ -28512,8 +26961,8 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_16capacity(str
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("capacity", 1);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_capacity(__pyx_v_self, 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 670, __pyx_L1_error)
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 670, __pyx_L1_error)
+  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_capacity(__pyx_v_self, 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 606, __pyx_L1_error)
+  __pyx_t_2 = PyInt_FromSsize_t(__pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 606, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_r = __pyx_t_2;
   __pyx_t_2 = 0;
@@ -28530,12 +26979,12 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_16capacity(str
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":673
+/* "monitor_kernels.pyx":609
  *         return self._capacity
  * 
  *     cpdef object profile_snapshot(self):             # <<<<<<<<<<<<<<
- *         """Diagnostic-only (2026-07-03): cumulative section timings from update().
- *         Returns (t_capacity, t_row_loop, t_closeout, t_swap, call_count)."""
+ *         return (
+ *             self._t_capacity,
  */
 
 static PyObject *__pyx_pw_15monitor_kernels_19NumericMonitorState_19profile_snapshot(PyObject *__pyx_v_self, 
@@ -28568,7 +27017,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_profile_snapsho
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_profile_snapshot); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 673, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_profile_snapshot); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 609, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_19NumericMonitorState_19profile_snapshot)) {
         __Pyx_XDECREF(__pyx_r);
@@ -28591,7 +27040,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_profile_snapsho
           PyObject *__pyx_callargs[2] = {__pyx_t_4, NULL};
           __pyx_t_2 = __Pyx_PyObject_FastCall(__pyx_t_3, __pyx_callargs+1-__pyx_t_5, 0+__pyx_t_5);
           __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 673, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 609, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         }
@@ -28613,84 +27062,84 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_profile_snapsho
     #endif
   }
 
-  /* "monitor_kernels.pyx":676
- *         """Diagnostic-only (2026-07-03): cumulative section timings from update().
- *         Returns (t_capacity, t_row_loop, t_closeout, t_swap, call_count)."""
+  /* "monitor_kernels.pyx":610
+ * 
+ *     cpdef object profile_snapshot(self):
  *         return (             # <<<<<<<<<<<<<<
  *             self._t_capacity,
  *             self._t_row_loop,
  */
   __Pyx_XDECREF(__pyx_r);
 
-  /* "monitor_kernels.pyx":677
- *         Returns (t_capacity, t_row_loop, t_closeout, t_swap, call_count)."""
+  /* "monitor_kernels.pyx":611
+ *     cpdef object profile_snapshot(self):
  *         return (
  *             self._t_capacity,             # <<<<<<<<<<<<<<
  *             self._t_row_loop,
  *             self._t_closeout,
  */
-  __pyx_t_1 = PyFloat_FromDouble(__pyx_v_self->_t_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 677, __pyx_L1_error)
+  __pyx_t_1 = PyFloat_FromDouble(__pyx_v_self->_t_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 611, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
 
-  /* "monitor_kernels.pyx":678
+  /* "monitor_kernels.pyx":612
  *         return (
  *             self._t_capacity,
  *             self._t_row_loop,             # <<<<<<<<<<<<<<
  *             self._t_closeout,
  *             self._t_swap,
  */
-  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_t_row_loop); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 678, __pyx_L1_error)
+  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_t_row_loop); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 612, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
 
-  /* "monitor_kernels.pyx":679
+  /* "monitor_kernels.pyx":613
  *             self._t_capacity,
  *             self._t_row_loop,
  *             self._t_closeout,             # <<<<<<<<<<<<<<
  *             self._t_swap,
  *             self._profile_calls,
  */
-  __pyx_t_3 = PyFloat_FromDouble(__pyx_v_self->_t_closeout); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 679, __pyx_L1_error)
+  __pyx_t_3 = PyFloat_FromDouble(__pyx_v_self->_t_closeout); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 613, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
 
-  /* "monitor_kernels.pyx":680
+  /* "monitor_kernels.pyx":614
  *             self._t_row_loop,
  *             self._t_closeout,
  *             self._t_swap,             # <<<<<<<<<<<<<<
  *             self._profile_calls,
  *         )
  */
-  __pyx_t_4 = PyFloat_FromDouble(__pyx_v_self->_t_swap); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 680, __pyx_L1_error)
+  __pyx_t_4 = PyFloat_FromDouble(__pyx_v_self->_t_swap); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 614, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
 
-  /* "monitor_kernels.pyx":681
+  /* "monitor_kernels.pyx":615
  *             self._t_closeout,
  *             self._t_swap,
  *             self._profile_calls,             # <<<<<<<<<<<<<<
  *         )
  * 
  */
-  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_self->_profile_calls); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 681, __pyx_L1_error)
+  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_self->_profile_calls); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 615, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
 
-  /* "monitor_kernels.pyx":677
- *         Returns (t_capacity, t_row_loop, t_closeout, t_swap, call_count)."""
+  /* "monitor_kernels.pyx":611
+ *     cpdef object profile_snapshot(self):
  *         return (
  *             self._t_capacity,             # <<<<<<<<<<<<<<
  *             self._t_row_loop,
  *             self._t_closeout,
  */
-  __pyx_t_7 = PyTuple_New(5); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 677, __pyx_L1_error)
+  __pyx_t_7 = PyTuple_New(5); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 611, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_GIVEREF(__pyx_t_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_1)) __PYX_ERR(0, 677, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_1)) __PYX_ERR(0, 611, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 1, __pyx_t_2)) __PYX_ERR(0, 677, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 1, __pyx_t_2)) __PYX_ERR(0, 611, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_3);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 2, __pyx_t_3)) __PYX_ERR(0, 677, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 2, __pyx_t_3)) __PYX_ERR(0, 611, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_4);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 3, __pyx_t_4)) __PYX_ERR(0, 677, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 3, __pyx_t_4)) __PYX_ERR(0, 611, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_6);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 4, __pyx_t_6)) __PYX_ERR(0, 677, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 4, __pyx_t_6)) __PYX_ERR(0, 611, __pyx_L1_error);
   __pyx_t_1 = 0;
   __pyx_t_2 = 0;
   __pyx_t_3 = 0;
@@ -28700,12 +27149,12 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_profile_snapsho
   __pyx_t_7 = 0;
   goto __pyx_L0;
 
-  /* "monitor_kernels.pyx":673
+  /* "monitor_kernels.pyx":609
  *         return self._capacity
  * 
  *     cpdef object profile_snapshot(self):             # <<<<<<<<<<<<<<
- *         """Diagnostic-only (2026-07-03): cumulative section timings from update().
- *         Returns (t_capacity, t_row_loop, t_closeout, t_swap, call_count)."""
+ *         return (
+ *             self._t_capacity,
  */
 
   /* function exit code */
@@ -28732,8 +27181,7 @@ PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-PyDoc_STRVAR(__pyx_doc_15monitor_kernels_19NumericMonitorState_18profile_snapshot, "Diagnostic-only (2026-07-03): cumulative section timings from update().\n        Returns (t_capacity, t_row_loop, t_closeout, t_swap, call_count).");
-static PyMethodDef __pyx_mdef_15monitor_kernels_19NumericMonitorState_19profile_snapshot = {"profile_snapshot", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_15monitor_kernels_19NumericMonitorState_19profile_snapshot, __Pyx_METH_FASTCALL|METH_KEYWORDS, __pyx_doc_15monitor_kernels_19NumericMonitorState_18profile_snapshot};
+static PyMethodDef __pyx_mdef_15monitor_kernels_19NumericMonitorState_19profile_snapshot = {"profile_snapshot", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_15monitor_kernels_19NumericMonitorState_19profile_snapshot, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
 static PyObject *__pyx_pw_15monitor_kernels_19NumericMonitorState_19profile_snapshot(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
@@ -28775,7 +27223,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_18profile_snap
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("profile_snapshot", 1);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_profile_snapshot(__pyx_v_self, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 673, __pyx_L1_error)
+  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_profile_snapshot(__pyx_v_self, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 609, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
@@ -28792,12 +27240,12 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_18profile_snap
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":684
+/* "monitor_kernels.pyx":618
  *         )
  * 
  *     cpdef object row_branch_snapshot(self):             # <<<<<<<<<<<<<<
- *         """Diagnostic-only (2026-07-03): cumulative row-loop branch counts.
- *         Returns (new_activation, early_unchanged, extend, transition)."""
+ *         return (
+ *             self._rows_new_activation,
  */
 
 static PyObject *__pyx_pw_15monitor_kernels_19NumericMonitorState_21row_branch_snapshot(PyObject *__pyx_v_self, 
@@ -28829,7 +27277,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_row_branch_snap
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_row_branch_snapshot); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 684, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_row_branch_snapshot); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 618, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_19NumericMonitorState_21row_branch_snapshot)) {
         __Pyx_XDECREF(__pyx_r);
@@ -28852,7 +27300,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_row_branch_snap
           PyObject *__pyx_callargs[2] = {__pyx_t_4, NULL};
           __pyx_t_2 = __Pyx_PyObject_FastCall(__pyx_t_3, __pyx_callargs+1-__pyx_t_5, 0+__pyx_t_5);
           __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 684, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 618, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         }
@@ -28874,72 +27322,72 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_row_branch_snap
     #endif
   }
 
-  /* "monitor_kernels.pyx":687
- *         """Diagnostic-only (2026-07-03): cumulative row-loop branch counts.
- *         Returns (new_activation, early_unchanged, extend, transition)."""
+  /* "monitor_kernels.pyx":619
+ * 
+ *     cpdef object row_branch_snapshot(self):
  *         return (             # <<<<<<<<<<<<<<
  *             self._rows_new_activation,
  *             self._rows_early_unchanged,
  */
   __Pyx_XDECREF(__pyx_r);
 
-  /* "monitor_kernels.pyx":688
- *         Returns (new_activation, early_unchanged, extend, transition)."""
+  /* "monitor_kernels.pyx":620
+ *     cpdef object row_branch_snapshot(self):
  *         return (
  *             self._rows_new_activation,             # <<<<<<<<<<<<<<
  *             self._rows_early_unchanged,
  *             self._rows_extend,
  */
-  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_self->_rows_new_activation); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 688, __pyx_L1_error)
+  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_self->_rows_new_activation); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 620, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
 
-  /* "monitor_kernels.pyx":689
+  /* "monitor_kernels.pyx":621
  *         return (
  *             self._rows_new_activation,
  *             self._rows_early_unchanged,             # <<<<<<<<<<<<<<
  *             self._rows_extend,
  *             self._rows_transition,
  */
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_self->_rows_early_unchanged); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 689, __pyx_L1_error)
+  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_self->_rows_early_unchanged); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 621, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
 
-  /* "monitor_kernels.pyx":690
+  /* "monitor_kernels.pyx":622
  *             self._rows_new_activation,
  *             self._rows_early_unchanged,
  *             self._rows_extend,             # <<<<<<<<<<<<<<
  *             self._rows_transition,
  *         )
  */
-  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_self->_rows_extend); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 690, __pyx_L1_error)
+  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_self->_rows_extend); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 622, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
 
-  /* "monitor_kernels.pyx":691
+  /* "monitor_kernels.pyx":623
  *             self._rows_early_unchanged,
  *             self._rows_extend,
  *             self._rows_transition,             # <<<<<<<<<<<<<<
  *         )
  * 
  */
-  __pyx_t_4 = PyInt_FromSsize_t(__pyx_v_self->_rows_transition); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 691, __pyx_L1_error)
+  __pyx_t_4 = PyInt_FromSsize_t(__pyx_v_self->_rows_transition); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 623, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
 
-  /* "monitor_kernels.pyx":688
- *         Returns (new_activation, early_unchanged, extend, transition)."""
+  /* "monitor_kernels.pyx":620
+ *     cpdef object row_branch_snapshot(self):
  *         return (
  *             self._rows_new_activation,             # <<<<<<<<<<<<<<
  *             self._rows_early_unchanged,
  *             self._rows_extend,
  */
-  __pyx_t_6 = PyTuple_New(4); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 688, __pyx_L1_error)
+  __pyx_t_6 = PyTuple_New(4); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 620, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_GIVEREF(__pyx_t_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_1)) __PYX_ERR(0, 688, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_t_1)) __PYX_ERR(0, 620, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 1, __pyx_t_2)) __PYX_ERR(0, 688, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 1, __pyx_t_2)) __PYX_ERR(0, 620, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_3);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 2, __pyx_t_3)) __PYX_ERR(0, 688, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 2, __pyx_t_3)) __PYX_ERR(0, 620, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_4);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 3, __pyx_t_4)) __PYX_ERR(0, 688, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 3, __pyx_t_4)) __PYX_ERR(0, 620, __pyx_L1_error);
   __pyx_t_1 = 0;
   __pyx_t_2 = 0;
   __pyx_t_3 = 0;
@@ -28948,12 +27396,12 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_row_branch_snap
   __pyx_t_6 = 0;
   goto __pyx_L0;
 
-  /* "monitor_kernels.pyx":684
+  /* "monitor_kernels.pyx":618
  *         )
  * 
  *     cpdef object row_branch_snapshot(self):             # <<<<<<<<<<<<<<
- *         """Diagnostic-only (2026-07-03): cumulative row-loop branch counts.
- *         Returns (new_activation, early_unchanged, extend, transition)."""
+ *         return (
+ *             self._rows_new_activation,
  */
 
   /* function exit code */
@@ -28979,8 +27427,7 @@ PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
 PyObject *__pyx_args, PyObject *__pyx_kwds
 #endif
 ); /*proto*/
-PyDoc_STRVAR(__pyx_doc_15monitor_kernels_19NumericMonitorState_20row_branch_snapshot, "Diagnostic-only (2026-07-03): cumulative row-loop branch counts.\n        Returns (new_activation, early_unchanged, extend, transition).");
-static PyMethodDef __pyx_mdef_15monitor_kernels_19NumericMonitorState_21row_branch_snapshot = {"row_branch_snapshot", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_15monitor_kernels_19NumericMonitorState_21row_branch_snapshot, __Pyx_METH_FASTCALL|METH_KEYWORDS, __pyx_doc_15monitor_kernels_19NumericMonitorState_20row_branch_snapshot};
+static PyMethodDef __pyx_mdef_15monitor_kernels_19NumericMonitorState_21row_branch_snapshot = {"row_branch_snapshot", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_15monitor_kernels_19NumericMonitorState_21row_branch_snapshot, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
 static PyObject *__pyx_pw_15monitor_kernels_19NumericMonitorState_21row_branch_snapshot(PyObject *__pyx_v_self, 
 #if CYTHON_METH_FASTCALL
 PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
@@ -29022,7 +27469,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_20row_branch_s
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("row_branch_snapshot", 1);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_row_branch_snapshot(__pyx_v_self, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 684, __pyx_L1_error)
+  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_row_branch_snapshot(__pyx_v_self, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 618, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
@@ -29039,7 +27486,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_20row_branch_s
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":694
+/* "monitor_kernels.pyx":626
  *         )
  * 
  *     cpdef object take_status_rows(self):             # <<<<<<<<<<<<<<
@@ -29078,7 +27525,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_status_row
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_take_status_rows); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 694, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_take_status_rows); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 626, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_19NumericMonitorState_23take_status_rows)) {
         __Pyx_XDECREF(__pyx_r);
@@ -29101,7 +27548,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_status_row
           PyObject *__pyx_callargs[2] = {__pyx_t_4, NULL};
           __pyx_t_2 = __Pyx_PyObject_FastCall(__pyx_t_3, __pyx_callargs+1-__pyx_t_5, 0+__pyx_t_5);
           __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 694, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 626, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         }
@@ -29123,7 +27570,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_status_row
     #endif
   }
 
-  /* "monitor_kernels.pyx":696
+  /* "monitor_kernels.pyx":628
  *     cpdef object take_status_rows(self):
  *         cdef object out
  *         if self._status_count <= 0:             # <<<<<<<<<<<<<<
@@ -29133,7 +27580,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_status_row
   __pyx_t_6 = (__pyx_v_self->_status_count <= 0);
   if (__pyx_t_6) {
 
-    /* "monitor_kernels.pyx":697
+    /* "monitor_kernels.pyx":629
  *         cdef object out
  *         if self._status_count <= 0:
  *             return np.empty((0, 7), dtype=np.int64)             # <<<<<<<<<<<<<<
@@ -29141,21 +27588,21 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_status_row
  *         self._status_count = 0
  */
     __Pyx_XDECREF(__pyx_r);
-    __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 697, __pyx_L1_error)
+    __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 629, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_1);
-    __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_empty); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 697, __pyx_L1_error)
+    __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_empty); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 629, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_2);
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-    __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 697, __pyx_L1_error)
+    __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 629, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 697, __pyx_L1_error)
+    __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 629, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
-    __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 697, __pyx_L1_error)
+    __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 629, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_4);
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-    if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_4) < 0) __PYX_ERR(0, 697, __pyx_L1_error)
+    if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_4) < 0) __PYX_ERR(0, 629, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-    __pyx_t_4 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_tuple__12, __pyx_t_1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 697, __pyx_L1_error)
+    __pyx_t_4 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_tuple__12, __pyx_t_1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 629, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_4);
     __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -29163,7 +27610,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_status_row
     __pyx_t_4 = 0;
     goto __pyx_L0;
 
-    /* "monitor_kernels.pyx":696
+    /* "monitor_kernels.pyx":628
  *     cpdef object take_status_rows(self):
  *         cdef object out
  *         if self._status_count <= 0:             # <<<<<<<<<<<<<<
@@ -29172,49 +27619,49 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_status_row
  */
   }
 
-  /* "monitor_kernels.pyx":698
+  /* "monitor_kernels.pyx":630
  *         if self._status_count <= 0:
  *             return np.empty((0, 7), dtype=np.int64)
  *         out = np.ascontiguousarray(self._status_rows_arr[:self._status_count, :], dtype=np.int64)             # <<<<<<<<<<<<<<
  *         self._status_count = 0
  *         return out
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 698, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 630, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_ascontiguousarray); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 698, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_ascontiguousarray); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 630, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = PyInt_FromSsize_t(__pyx_v_self->_status_count); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 698, __pyx_L1_error)
+  __pyx_t_4 = PyInt_FromSsize_t(__pyx_v_self->_status_count); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 630, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_2 = PySlice_New(Py_None, __pyx_t_4, Py_None); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 698, __pyx_L1_error)
+  __pyx_t_2 = PySlice_New(Py_None, __pyx_t_4, Py_None); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 630, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 698, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 630, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 698, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 630, __pyx_L1_error);
   __Pyx_INCREF(__pyx_slice__5);
   __Pyx_GIVEREF(__pyx_slice__5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_slice__5)) __PYX_ERR(0, 698, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_slice__5)) __PYX_ERR(0, 630, __pyx_L1_error);
   __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyObject_GetItem(__pyx_v_self->_status_rows_arr, __pyx_t_4); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 698, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetItem(__pyx_v_self->_status_rows_arr, __pyx_t_4); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 630, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 698, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 630, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 698, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 630, __pyx_L1_error);
   __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 698, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 630, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 698, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 630, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 698, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 630, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 698, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 630, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 698, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 630, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
@@ -29222,7 +27669,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_status_row
   __pyx_v_out = __pyx_t_7;
   __pyx_t_7 = 0;
 
-  /* "monitor_kernels.pyx":699
+  /* "monitor_kernels.pyx":631
  *             return np.empty((0, 7), dtype=np.int64)
  *         out = np.ascontiguousarray(self._status_rows_arr[:self._status_count, :], dtype=np.int64)
  *         self._status_count = 0             # <<<<<<<<<<<<<<
@@ -29231,7 +27678,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_status_row
  */
   __pyx_v_self->_status_count = 0;
 
-  /* "monitor_kernels.pyx":700
+  /* "monitor_kernels.pyx":632
  *         out = np.ascontiguousarray(self._status_rows_arr[:self._status_count, :], dtype=np.int64)
  *         self._status_count = 0
  *         return out             # <<<<<<<<<<<<<<
@@ -29243,7 +27690,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_status_row
   __pyx_r = __pyx_v_out;
   goto __pyx_L0;
 
-  /* "monitor_kernels.pyx":694
+  /* "monitor_kernels.pyx":626
  *         )
  * 
  *     cpdef object take_status_rows(self):             # <<<<<<<<<<<<<<
@@ -29317,7 +27764,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_22take_status_
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("take_status_rows", 1);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_take_status_rows(__pyx_v_self, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 694, __pyx_L1_error)
+  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_take_status_rows(__pyx_v_self, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 626, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
@@ -29334,7 +27781,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_22take_status_
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":702
+/* "monitor_kernels.pyx":634
  *         return out
  * 
  *     cpdef object take_anomaly_rows(self):             # <<<<<<<<<<<<<<
@@ -29373,7 +27820,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_anomaly_ro
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_take_anomaly_rows); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 702, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_take_anomaly_rows); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 634, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_19NumericMonitorState_25take_anomaly_rows)) {
         __Pyx_XDECREF(__pyx_r);
@@ -29396,7 +27843,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_anomaly_ro
           PyObject *__pyx_callargs[2] = {__pyx_t_4, NULL};
           __pyx_t_2 = __Pyx_PyObject_FastCall(__pyx_t_3, __pyx_callargs+1-__pyx_t_5, 0+__pyx_t_5);
           __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 702, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 634, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         }
@@ -29418,7 +27865,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_anomaly_ro
     #endif
   }
 
-  /* "monitor_kernels.pyx":704
+  /* "monitor_kernels.pyx":636
  *     cpdef object take_anomaly_rows(self):
  *         cdef object out
  *         if self._anomaly_count <= 0:             # <<<<<<<<<<<<<<
@@ -29428,7 +27875,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_anomaly_ro
   __pyx_t_6 = (__pyx_v_self->_anomaly_count <= 0);
   if (__pyx_t_6) {
 
-    /* "monitor_kernels.pyx":705
+    /* "monitor_kernels.pyx":637
  *         cdef object out
  *         if self._anomaly_count <= 0:
  *             return np.empty((0, 5), dtype=np.int64)             # <<<<<<<<<<<<<<
@@ -29436,21 +27883,21 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_anomaly_ro
  *         self._anomaly_count = 0
  */
     __Pyx_XDECREF(__pyx_r);
-    __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 705, __pyx_L1_error)
+    __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 637, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_1);
-    __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_empty); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 705, __pyx_L1_error)
+    __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_empty); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 637, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_2);
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-    __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 705, __pyx_L1_error)
+    __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 637, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 705, __pyx_L1_error)
+    __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 637, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
-    __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 705, __pyx_L1_error)
+    __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 637, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_4);
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-    if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_4) < 0) __PYX_ERR(0, 705, __pyx_L1_error)
+    if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_4) < 0) __PYX_ERR(0, 637, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-    __pyx_t_4 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_tuple__14, __pyx_t_1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 705, __pyx_L1_error)
+    __pyx_t_4 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_tuple__14, __pyx_t_1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 637, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_4);
     __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -29458,7 +27905,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_anomaly_ro
     __pyx_t_4 = 0;
     goto __pyx_L0;
 
-    /* "monitor_kernels.pyx":704
+    /* "monitor_kernels.pyx":636
  *     cpdef object take_anomaly_rows(self):
  *         cdef object out
  *         if self._anomaly_count <= 0:             # <<<<<<<<<<<<<<
@@ -29467,49 +27914,49 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_anomaly_ro
  */
   }
 
-  /* "monitor_kernels.pyx":706
+  /* "monitor_kernels.pyx":638
  *         if self._anomaly_count <= 0:
  *             return np.empty((0, 5), dtype=np.int64)
  *         out = np.ascontiguousarray(self._anomaly_rows_arr[:self._anomaly_count, :], dtype=np.int64)             # <<<<<<<<<<<<<<
  *         self._anomaly_count = 0
  *         return out
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 706, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 638, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_ascontiguousarray); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 706, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_ascontiguousarray); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 638, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = PyInt_FromSsize_t(__pyx_v_self->_anomaly_count); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 706, __pyx_L1_error)
+  __pyx_t_4 = PyInt_FromSsize_t(__pyx_v_self->_anomaly_count); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 638, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_2 = PySlice_New(Py_None, __pyx_t_4, Py_None); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 706, __pyx_L1_error)
+  __pyx_t_2 = PySlice_New(Py_None, __pyx_t_4, Py_None); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 638, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 706, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 638, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 706, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 638, __pyx_L1_error);
   __Pyx_INCREF(__pyx_slice__5);
   __Pyx_GIVEREF(__pyx_slice__5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_slice__5)) __PYX_ERR(0, 706, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_slice__5)) __PYX_ERR(0, 638, __pyx_L1_error);
   __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyObject_GetItem(__pyx_v_self->_anomaly_rows_arr, __pyx_t_4); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 706, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetItem(__pyx_v_self->_anomaly_rows_arr, __pyx_t_4); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 638, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 706, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 638, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 706, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 638, __pyx_L1_error);
   __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 706, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 638, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 706, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 638, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 706, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 638, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 706, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 638, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 706, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 638, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
@@ -29517,7 +27964,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_anomaly_ro
   __pyx_v_out = __pyx_t_7;
   __pyx_t_7 = 0;
 
-  /* "monitor_kernels.pyx":707
+  /* "monitor_kernels.pyx":639
  *             return np.empty((0, 5), dtype=np.int64)
  *         out = np.ascontiguousarray(self._anomaly_rows_arr[:self._anomaly_count, :], dtype=np.int64)
  *         self._anomaly_count = 0             # <<<<<<<<<<<<<<
@@ -29526,7 +27973,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_anomaly_ro
  */
   __pyx_v_self->_anomaly_count = 0;
 
-  /* "monitor_kernels.pyx":708
+  /* "monitor_kernels.pyx":640
  *         out = np.ascontiguousarray(self._anomaly_rows_arr[:self._anomaly_count, :], dtype=np.int64)
  *         self._anomaly_count = 0
  *         return out             # <<<<<<<<<<<<<<
@@ -29538,7 +27985,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_take_anomaly_ro
   __pyx_r = __pyx_v_out;
   goto __pyx_L0;
 
-  /* "monitor_kernels.pyx":702
+  /* "monitor_kernels.pyx":634
  *         return out
  * 
  *     cpdef object take_anomaly_rows(self):             # <<<<<<<<<<<<<<
@@ -29612,7 +28059,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_24take_anomaly
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("take_anomaly_rows", 1);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_take_anomaly_rows(__pyx_v_self, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 702, __pyx_L1_error)
+  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_take_anomaly_rows(__pyx_v_self, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 634, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
@@ -29629,7 +28076,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_24take_anomaly
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":710
+/* "monitor_kernels.pyx":642
  *         return out
  * 
  *     cpdef object copy_status_rows(self):             # <<<<<<<<<<<<<<
@@ -29667,7 +28114,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_status_row
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_copy_status_rows); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 710, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_copy_status_rows); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 642, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_19NumericMonitorState_27copy_status_rows)) {
         __Pyx_XDECREF(__pyx_r);
@@ -29690,7 +28137,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_status_row
           PyObject *__pyx_callargs[2] = {__pyx_t_4, NULL};
           __pyx_t_2 = __Pyx_PyObject_FastCall(__pyx_t_3, __pyx_callargs+1-__pyx_t_5, 0+__pyx_t_5);
           __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 710, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 642, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         }
@@ -29712,7 +28159,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_status_row
     #endif
   }
 
-  /* "monitor_kernels.pyx":711
+  /* "monitor_kernels.pyx":643
  * 
  *     cpdef object copy_status_rows(self):
  *         if self._status_count <= 0:             # <<<<<<<<<<<<<<
@@ -29722,7 +28169,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_status_row
   __pyx_t_6 = (__pyx_v_self->_status_count <= 0);
   if (__pyx_t_6) {
 
-    /* "monitor_kernels.pyx":712
+    /* "monitor_kernels.pyx":644
  *     cpdef object copy_status_rows(self):
  *         if self._status_count <= 0:
  *             return np.empty((0, 7), dtype=np.int64)             # <<<<<<<<<<<<<<
@@ -29730,21 +28177,21 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_status_row
  * 
  */
     __Pyx_XDECREF(__pyx_r);
-    __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 712, __pyx_L1_error)
+    __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 644, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_1);
-    __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_empty); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 712, __pyx_L1_error)
+    __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_empty); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 644, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_2);
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-    __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 712, __pyx_L1_error)
+    __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 644, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 712, __pyx_L1_error)
+    __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 644, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
-    __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 712, __pyx_L1_error)
+    __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 644, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_4);
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-    if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_4) < 0) __PYX_ERR(0, 712, __pyx_L1_error)
+    if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_4) < 0) __PYX_ERR(0, 644, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-    __pyx_t_4 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_tuple__12, __pyx_t_1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 712, __pyx_L1_error)
+    __pyx_t_4 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_tuple__12, __pyx_t_1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 644, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_4);
     __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -29752,7 +28199,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_status_row
     __pyx_t_4 = 0;
     goto __pyx_L0;
 
-    /* "monitor_kernels.pyx":711
+    /* "monitor_kernels.pyx":643
  * 
  *     cpdef object copy_status_rows(self):
  *         if self._status_count <= 0:             # <<<<<<<<<<<<<<
@@ -29761,7 +28208,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_status_row
  */
   }
 
-  /* "monitor_kernels.pyx":713
+  /* "monitor_kernels.pyx":645
  *         if self._status_count <= 0:
  *             return np.empty((0, 7), dtype=np.int64)
  *         return np.ascontiguousarray(self._status_rows_arr[:self._status_count, :], dtype=np.int64)             # <<<<<<<<<<<<<<
@@ -29769,42 +28216,42 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_status_row
  *     cpdef object copy_anomaly_rows(self):
  */
   __Pyx_XDECREF(__pyx_r);
-  __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 713, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 645, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_ascontiguousarray); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 713, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_ascontiguousarray); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 645, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = PyInt_FromSsize_t(__pyx_v_self->_status_count); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 713, __pyx_L1_error)
+  __pyx_t_4 = PyInt_FromSsize_t(__pyx_v_self->_status_count); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 645, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_2 = PySlice_New(Py_None, __pyx_t_4, Py_None); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 713, __pyx_L1_error)
+  __pyx_t_2 = PySlice_New(Py_None, __pyx_t_4, Py_None); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 645, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 713, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 645, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 713, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 645, __pyx_L1_error);
   __Pyx_INCREF(__pyx_slice__5);
   __Pyx_GIVEREF(__pyx_slice__5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_slice__5)) __PYX_ERR(0, 713, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_slice__5)) __PYX_ERR(0, 645, __pyx_L1_error);
   __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyObject_GetItem(__pyx_v_self->_status_rows_arr, __pyx_t_4); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 713, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetItem(__pyx_v_self->_status_rows_arr, __pyx_t_4); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 645, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 713, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 645, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 713, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 645, __pyx_L1_error);
   __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 713, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 645, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 713, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 645, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 713, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 645, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 713, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 645, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 713, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 645, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
@@ -29813,7 +28260,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_status_row
   __pyx_t_7 = 0;
   goto __pyx_L0;
 
-  /* "monitor_kernels.pyx":710
+  /* "monitor_kernels.pyx":642
  *         return out
  * 
  *     cpdef object copy_status_rows(self):             # <<<<<<<<<<<<<<
@@ -29886,7 +28333,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_26copy_status_
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("copy_status_rows", 1);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_copy_status_rows(__pyx_v_self, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 710, __pyx_L1_error)
+  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_copy_status_rows(__pyx_v_self, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 642, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
@@ -29903,7 +28350,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_26copy_status_
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":715
+/* "monitor_kernels.pyx":647
  *         return np.ascontiguousarray(self._status_rows_arr[:self._status_count, :], dtype=np.int64)
  * 
  *     cpdef object copy_anomaly_rows(self):             # <<<<<<<<<<<<<<
@@ -29941,7 +28388,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_anomaly_ro
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_copy_anomaly_rows); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 715, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_copy_anomaly_rows); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 647, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_19NumericMonitorState_29copy_anomaly_rows)) {
         __Pyx_XDECREF(__pyx_r);
@@ -29964,7 +28411,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_anomaly_ro
           PyObject *__pyx_callargs[2] = {__pyx_t_4, NULL};
           __pyx_t_2 = __Pyx_PyObject_FastCall(__pyx_t_3, __pyx_callargs+1-__pyx_t_5, 0+__pyx_t_5);
           __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 715, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 647, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         }
@@ -29986,7 +28433,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_anomaly_ro
     #endif
   }
 
-  /* "monitor_kernels.pyx":716
+  /* "monitor_kernels.pyx":648
  * 
  *     cpdef object copy_anomaly_rows(self):
  *         if self._anomaly_count <= 0:             # <<<<<<<<<<<<<<
@@ -29996,7 +28443,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_anomaly_ro
   __pyx_t_6 = (__pyx_v_self->_anomaly_count <= 0);
   if (__pyx_t_6) {
 
-    /* "monitor_kernels.pyx":717
+    /* "monitor_kernels.pyx":649
  *     cpdef object copy_anomaly_rows(self):
  *         if self._anomaly_count <= 0:
  *             return np.empty((0, 5), dtype=np.int64)             # <<<<<<<<<<<<<<
@@ -30004,21 +28451,21 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_anomaly_ro
  * 
  */
     __Pyx_XDECREF(__pyx_r);
-    __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 717, __pyx_L1_error)
+    __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 649, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_1);
-    __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_empty); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 717, __pyx_L1_error)
+    __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_empty); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 649, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_2);
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-    __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 717, __pyx_L1_error)
+    __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 649, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 717, __pyx_L1_error)
+    __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 649, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
-    __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 717, __pyx_L1_error)
+    __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 649, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_4);
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-    if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_4) < 0) __PYX_ERR(0, 717, __pyx_L1_error)
+    if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_4) < 0) __PYX_ERR(0, 649, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-    __pyx_t_4 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_tuple__14, __pyx_t_1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 717, __pyx_L1_error)
+    __pyx_t_4 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_tuple__14, __pyx_t_1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 649, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_4);
     __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -30026,7 +28473,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_anomaly_ro
     __pyx_t_4 = 0;
     goto __pyx_L0;
 
-    /* "monitor_kernels.pyx":716
+    /* "monitor_kernels.pyx":648
  * 
  *     cpdef object copy_anomaly_rows(self):
  *         if self._anomaly_count <= 0:             # <<<<<<<<<<<<<<
@@ -30035,7 +28482,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_anomaly_ro
  */
   }
 
-  /* "monitor_kernels.pyx":718
+  /* "monitor_kernels.pyx":650
  *         if self._anomaly_count <= 0:
  *             return np.empty((0, 5), dtype=np.int64)
  *         return np.ascontiguousarray(self._anomaly_rows_arr[:self._anomaly_count, :], dtype=np.int64)             # <<<<<<<<<<<<<<
@@ -30043,42 +28490,42 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_anomaly_ro
  * 
  */
   __Pyx_XDECREF(__pyx_r);
-  __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 718, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_n_s_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 650, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_ascontiguousarray); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 718, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_ascontiguousarray); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 650, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = PyInt_FromSsize_t(__pyx_v_self->_anomaly_count); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 718, __pyx_L1_error)
+  __pyx_t_4 = PyInt_FromSsize_t(__pyx_v_self->_anomaly_count); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 650, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_2 = PySlice_New(Py_None, __pyx_t_4, Py_None); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 718, __pyx_L1_error)
+  __pyx_t_2 = PySlice_New(Py_None, __pyx_t_4, Py_None); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 650, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 718, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 650, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 718, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 650, __pyx_L1_error);
   __Pyx_INCREF(__pyx_slice__5);
   __Pyx_GIVEREF(__pyx_slice__5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_slice__5)) __PYX_ERR(0, 718, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 1, __pyx_slice__5)) __PYX_ERR(0, 650, __pyx_L1_error);
   __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyObject_GetItem(__pyx_v_self->_anomaly_rows_arr, __pyx_t_4); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 718, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetItem(__pyx_v_self->_anomaly_rows_arr, __pyx_t_4); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 650, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 718, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 650, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 718, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 650, __pyx_L1_error);
   __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 718, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 650, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 718, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 650, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 718, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 650, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 718, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_7) < 0) __PYX_ERR(0, 650, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 718, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 650, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
@@ -30087,7 +28534,7 @@ static PyObject *__pyx_f_15monitor_kernels_19NumericMonitorState_copy_anomaly_ro
   __pyx_t_7 = 0;
   goto __pyx_L0;
 
-  /* "monitor_kernels.pyx":715
+  /* "monitor_kernels.pyx":647
  *         return np.ascontiguousarray(self._status_rows_arr[:self._status_count, :], dtype=np.int64)
  * 
  *     cpdef object copy_anomaly_rows(self):             # <<<<<<<<<<<<<<
@@ -30160,7 +28607,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_28copy_anomaly
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("copy_anomaly_rows", 1);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_copy_anomaly_rows(__pyx_v_self, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 715, __pyx_L1_error)
+  __pyx_t_1 = __pyx_f_15monitor_kernels_19NumericMonitorState_copy_anomaly_rows(__pyx_v_self, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 647, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
@@ -30391,7 +28838,7 @@ static PyObject *__pyx_pf_15monitor_kernels_19NumericMonitorState_32__setstate_c
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":740
+/* "monitor_kernels.pyx":672
  *     cdef Py_ssize_t _size
  * 
  *     def __cinit__(self, Py_ssize_t initial_capacity=1024):             # <<<<<<<<<<<<<<
@@ -30434,12 +28881,12 @@ static int __pyx_pw_15monitor_kernels_14SkipAheadState_1__cinit__(PyObject *__py
         if (kw_args > 0) {
           PyObject* value = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_initial_capacity);
           if (value) { values[0] = __Pyx_Arg_NewRef_VARARGS(value); kw_args--; }
-          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 740, __pyx_L3_error)
+          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 672, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
         const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "__cinit__") < 0)) __PYX_ERR(0, 740, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "__cinit__") < 0)) __PYX_ERR(0, 672, __pyx_L3_error)
       }
     } else {
       switch (__pyx_nargs) {
@@ -30450,14 +28897,14 @@ static int __pyx_pw_15monitor_kernels_14SkipAheadState_1__cinit__(PyObject *__py
       }
     }
     if (values[0]) {
-      __pyx_v_initial_capacity = __Pyx_PyIndex_AsSsize_t(values[0]); if (unlikely((__pyx_v_initial_capacity == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 740, __pyx_L3_error)
+      __pyx_v_initial_capacity = __Pyx_PyIndex_AsSsize_t(values[0]); if (unlikely((__pyx_v_initial_capacity == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 672, __pyx_L3_error)
     } else {
       __pyx_v_initial_capacity = ((Py_ssize_t)0x400);
     }
   }
   goto __pyx_L6_skip;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("__cinit__", 0, 0, 1, __pyx_nargs); __PYX_ERR(0, 740, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("__cinit__", 0, 0, 1, __pyx_nargs); __PYX_ERR(0, 672, __pyx_L3_error)
   __pyx_L6_skip:;
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
@@ -30498,7 +28945,7 @@ static int __pyx_pf_15monitor_kernels_14SkipAheadState___cinit__(struct __pyx_ob
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__cinit__", 1);
 
-  /* "monitor_kernels.pyx":741
+  /* "monitor_kernels.pyx":673
  * 
  *     def __cinit__(self, Py_ssize_t initial_capacity=1024):
  *         if initial_capacity < 16:             # <<<<<<<<<<<<<<
@@ -30508,7 +28955,7 @@ static int __pyx_pf_15monitor_kernels_14SkipAheadState___cinit__(struct __pyx_ob
   __pyx_t_1 = (__pyx_v_initial_capacity < 16);
   if (__pyx_t_1) {
 
-    /* "monitor_kernels.pyx":742
+    /* "monitor_kernels.pyx":674
  *     def __cinit__(self, Py_ssize_t initial_capacity=1024):
  *         if initial_capacity < 16:
  *             initial_capacity = 16             # <<<<<<<<<<<<<<
@@ -30517,7 +28964,7 @@ static int __pyx_pf_15monitor_kernels_14SkipAheadState___cinit__(struct __pyx_ob
  */
     __pyx_v_initial_capacity = 16;
 
-    /* "monitor_kernels.pyx":741
+    /* "monitor_kernels.pyx":673
  * 
  *     def __cinit__(self, Py_ssize_t initial_capacity=1024):
  *         if initial_capacity < 16:             # <<<<<<<<<<<<<<
@@ -30526,7 +28973,7 @@ static int __pyx_pf_15monitor_kernels_14SkipAheadState___cinit__(struct __pyx_ob
  */
   }
 
-  /* "monitor_kernels.pyx":743
+  /* "monitor_kernels.pyx":675
  *         if initial_capacity < 16:
  *             initial_capacity = 16
  *         self._capacity = _monitor_next_power2(initial_capacity)             # <<<<<<<<<<<<<<
@@ -30535,7 +28982,7 @@ static int __pyx_pf_15monitor_kernels_14SkipAheadState___cinit__(struct __pyx_ob
  */
   __pyx_v_self->_capacity = __pyx_f_15monitor_kernels__monitor_next_power2(__pyx_v_initial_capacity);
 
-  /* "monitor_kernels.pyx":744
+  /* "monitor_kernels.pyx":676
  *             initial_capacity = 16
  *         self._capacity = _monitor_next_power2(initial_capacity)
  *         self._size = 0             # <<<<<<<<<<<<<<
@@ -30544,35 +28991,35 @@ static int __pyx_pf_15monitor_kernels_14SkipAheadState___cinit__(struct __pyx_ob
  */
   __pyx_v_self->_size = 0;
 
-  /* "monitor_kernels.pyx":745
+  /* "monitor_kernels.pyx":677
  *         self._capacity = _monitor_next_power2(initial_capacity)
  *         self._size = 0
  *         self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)             # <<<<<<<<<<<<<<
  *         self._key_s1_arr = np.zeros(self._capacity, dtype=np.int64)
  *         self._key_s2_arr = np.zeros(self._capacity, dtype=np.int64)
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 745, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 677, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_zeros); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 745, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_zeros); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 677, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 745, __pyx_L1_error)
+  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 677, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 745, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 677, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 745, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 677, __pyx_L1_error);
   __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 745, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 677, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 745, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 677, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_uint8); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 745, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_uint8); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 677, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 745, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 677, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 745, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 677, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
@@ -30583,35 +29030,35 @@ static int __pyx_pf_15monitor_kernels_14SkipAheadState___cinit__(struct __pyx_ob
   __pyx_v_self->_occupied_arr = __pyx_t_6;
   __pyx_t_6 = 0;
 
-  /* "monitor_kernels.pyx":746
+  /* "monitor_kernels.pyx":678
  *         self._size = 0
  *         self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)
  *         self._key_s1_arr = np.zeros(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
  *         self._key_s2_arr = np.zeros(self._capacity, dtype=np.int64)
  *         self._key_lag_arr = np.zeros(self._capacity, dtype=np.int64)
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 746, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 678, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_zeros); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 746, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_zeros); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 678, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 746, __pyx_L1_error)
+  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 678, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 746, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 678, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_6);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_6)) __PYX_ERR(0, 746, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_6)) __PYX_ERR(0, 678, __pyx_L1_error);
   __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 746, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 678, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 746, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 678, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 746, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 678, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  if (PyDict_SetItem(__pyx_t_6, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 746, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_6, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 678, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_4, __pyx_t_6); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 746, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_4, __pyx_t_6); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 678, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
@@ -30622,35 +29069,35 @@ static int __pyx_pf_15monitor_kernels_14SkipAheadState___cinit__(struct __pyx_ob
   __pyx_v_self->_key_s1_arr = __pyx_t_5;
   __pyx_t_5 = 0;
 
-  /* "monitor_kernels.pyx":747
+  /* "monitor_kernels.pyx":679
  *         self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)
  *         self._key_s1_arr = np.zeros(self._capacity, dtype=np.int64)
  *         self._key_s2_arr = np.zeros(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
  *         self._key_lag_arr = np.zeros(self._capacity, dtype=np.int64)
  *         self._corr_arr = np.zeros(self._capacity, dtype=np.float64)
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 747, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 679, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_zeros); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 747, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_zeros); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 679, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 747, __pyx_L1_error)
+  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 679, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 747, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 679, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_5)) __PYX_ERR(0, 747, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_5)) __PYX_ERR(0, 679, __pyx_L1_error);
   __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 747, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 679, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 747, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 679, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_int64); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 747, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_int64); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 679, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_3) < 0) __PYX_ERR(0, 747, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_5, __pyx_n_s_dtype, __pyx_t_3) < 0) __PYX_ERR(0, 679, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_4, __pyx_t_5); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 747, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_4, __pyx_t_5); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 679, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
@@ -30661,35 +29108,35 @@ static int __pyx_pf_15monitor_kernels_14SkipAheadState___cinit__(struct __pyx_ob
   __pyx_v_self->_key_s2_arr = __pyx_t_3;
   __pyx_t_3 = 0;
 
-  /* "monitor_kernels.pyx":748
+  /* "monitor_kernels.pyx":680
  *         self._key_s1_arr = np.zeros(self._capacity, dtype=np.int64)
  *         self._key_s2_arr = np.zeros(self._capacity, dtype=np.int64)
  *         self._key_lag_arr = np.zeros(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
  *         self._corr_arr = np.zeros(self._capacity, dtype=np.float64)
  *         self._steps_arr = np.zeros(self._capacity, dtype=np.int64)
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 748, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 680, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_zeros); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 748, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_zeros); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 680, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 748, __pyx_L1_error)
+  __pyx_t_3 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 680, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 748, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 680, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_3);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_3)) __PYX_ERR(0, 748, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_3)) __PYX_ERR(0, 680, __pyx_L1_error);
   __pyx_t_3 = 0;
-  __pyx_t_3 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 748, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 680, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 748, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 680, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_int64); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 748, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_int64); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 680, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (PyDict_SetItem(__pyx_t_3, __pyx_n_s_dtype, __pyx_t_2) < 0) __PYX_ERR(0, 748, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_3, __pyx_n_s_dtype, __pyx_t_2) < 0) __PYX_ERR(0, 680, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_5, __pyx_t_4, __pyx_t_3); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 748, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_Call(__pyx_t_5, __pyx_t_4, __pyx_t_3); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 680, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
@@ -30700,35 +29147,35 @@ static int __pyx_pf_15monitor_kernels_14SkipAheadState___cinit__(struct __pyx_ob
   __pyx_v_self->_key_lag_arr = __pyx_t_2;
   __pyx_t_2 = 0;
 
-  /* "monitor_kernels.pyx":749
+  /* "monitor_kernels.pyx":681
  *         self._key_s2_arr = np.zeros(self._capacity, dtype=np.int64)
  *         self._key_lag_arr = np.zeros(self._capacity, dtype=np.int64)
  *         self._corr_arr = np.zeros(self._capacity, dtype=np.float64)             # <<<<<<<<<<<<<<
  *         self._steps_arr = np.zeros(self._capacity, dtype=np.int64)
  * 
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 749, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 681, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_zeros); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 749, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_zeros); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 681, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 749, __pyx_L1_error)
+  __pyx_t_2 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 681, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 749, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 681, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 749, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_2)) __PYX_ERR(0, 681, __pyx_L1_error);
   __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 749, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 681, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 749, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_5, __pyx_n_s_np); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 681, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_float64); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 749, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_5, __pyx_n_s_float64); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 681, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 749, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 681, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 749, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_3, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 681, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
@@ -30739,35 +29186,35 @@ static int __pyx_pf_15monitor_kernels_14SkipAheadState___cinit__(struct __pyx_ob
   __pyx_v_self->_corr_arr = __pyx_t_6;
   __pyx_t_6 = 0;
 
-  /* "monitor_kernels.pyx":750
+  /* "monitor_kernels.pyx":682
  *         self._key_lag_arr = np.zeros(self._capacity, dtype=np.int64)
  *         self._corr_arr = np.zeros(self._capacity, dtype=np.float64)
  *         self._steps_arr = np.zeros(self._capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
  * 
  *     cdef Py_ssize_t _find_slot(self, int64_t s1, int64_t s2, int64_t lag):
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 750, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 682, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_zeros); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 750, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_zeros); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 682, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 750, __pyx_L1_error)
+  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_self->_capacity); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 682, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 750, __pyx_L1_error)
+  __pyx_t_4 = PyTuple_New(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 682, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_GIVEREF(__pyx_t_6);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_6)) __PYX_ERR(0, 750, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_4, 0, __pyx_t_6)) __PYX_ERR(0, 682, __pyx_L1_error);
   __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 750, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 682, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 750, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_n_s_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 682, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 750, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_int64); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 682, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  if (PyDict_SetItem(__pyx_t_6, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 750, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_6, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 682, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_4, __pyx_t_6); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 750, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_4, __pyx_t_6); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 682, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
@@ -30778,7 +29225,7 @@ static int __pyx_pf_15monitor_kernels_14SkipAheadState___cinit__(struct __pyx_ob
   __pyx_v_self->_steps_arr = __pyx_t_5;
   __pyx_t_5 = 0;
 
-  /* "monitor_kernels.pyx":740
+  /* "monitor_kernels.pyx":672
  *     cdef Py_ssize_t _size
  * 
  *     def __cinit__(self, Py_ssize_t initial_capacity=1024):             # <<<<<<<<<<<<<<
@@ -30802,7 +29249,7 @@ static int __pyx_pf_15monitor_kernels_14SkipAheadState___cinit__(struct __pyx_ob
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":752
+/* "monitor_kernels.pyx":684
  *         self._steps_arr = np.zeros(self._capacity, dtype=np.int64)
  * 
  *     cdef Py_ssize_t _find_slot(self, int64_t s1, int64_t s2, int64_t lag):             # <<<<<<<<<<<<<<
@@ -30827,55 +29274,55 @@ static Py_ssize_t __pyx_f_15monitor_kernels_14SkipAheadState__find_slot(struct _
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
 
-  /* "monitor_kernels.pyx":753
+  /* "monitor_kernels.pyx":685
  * 
  *     cdef Py_ssize_t _find_slot(self, int64_t s1, int64_t s2, int64_t lag):
  *         cdef uint8_t[:] occupied = self._occupied_arr             # <<<<<<<<<<<<<<
  *         cdef int64_t[:] key_s1 = self._key_s1_arr
  *         cdef int64_t[:] key_s2 = self._key_s2_arr
  */
-  __pyx_t_1 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_self->_occupied_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_1.memview)) __PYX_ERR(0, 753, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_self->_occupied_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_1.memview)) __PYX_ERR(0, 685, __pyx_L1_error)
   __pyx_v_occupied = __pyx_t_1;
   __pyx_t_1.memview = NULL;
   __pyx_t_1.data = NULL;
 
-  /* "monitor_kernels.pyx":754
+  /* "monitor_kernels.pyx":686
  *     cdef Py_ssize_t _find_slot(self, int64_t s1, int64_t s2, int64_t lag):
  *         cdef uint8_t[:] occupied = self._occupied_arr
  *         cdef int64_t[:] key_s1 = self._key_s1_arr             # <<<<<<<<<<<<<<
  *         cdef int64_t[:] key_s2 = self._key_s2_arr
  *         cdef int64_t[:] key_lag = self._key_lag_arr
  */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s1_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 754, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s1_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 686, __pyx_L1_error)
   __pyx_v_key_s1 = __pyx_t_2;
   __pyx_t_2.memview = NULL;
   __pyx_t_2.data = NULL;
 
-  /* "monitor_kernels.pyx":755
+  /* "monitor_kernels.pyx":687
  *         cdef uint8_t[:] occupied = self._occupied_arr
  *         cdef int64_t[:] key_s1 = self._key_s1_arr
  *         cdef int64_t[:] key_s2 = self._key_s2_arr             # <<<<<<<<<<<<<<
  *         cdef int64_t[:] key_lag = self._key_lag_arr
  *         cdef Py_ssize_t mask = self._capacity - 1
  */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s2_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 755, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s2_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 687, __pyx_L1_error)
   __pyx_v_key_s2 = __pyx_t_2;
   __pyx_t_2.memview = NULL;
   __pyx_t_2.data = NULL;
 
-  /* "monitor_kernels.pyx":756
+  /* "monitor_kernels.pyx":688
  *         cdef int64_t[:] key_s1 = self._key_s1_arr
  *         cdef int64_t[:] key_s2 = self._key_s2_arr
  *         cdef int64_t[:] key_lag = self._key_lag_arr             # <<<<<<<<<<<<<<
  *         cdef Py_ssize_t mask = self._capacity - 1
  *         cdef Py_ssize_t idx = <Py_ssize_t>(_monitor_hash_key(s1, s2, lag) & <uint64_t>mask)
  */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_lag_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 756, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_lag_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 688, __pyx_L1_error)
   __pyx_v_key_lag = __pyx_t_2;
   __pyx_t_2.memview = NULL;
   __pyx_t_2.data = NULL;
 
-  /* "monitor_kernels.pyx":757
+  /* "monitor_kernels.pyx":689
  *         cdef int64_t[:] key_s2 = self._key_s2_arr
  *         cdef int64_t[:] key_lag = self._key_lag_arr
  *         cdef Py_ssize_t mask = self._capacity - 1             # <<<<<<<<<<<<<<
@@ -30884,7 +29331,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_14SkipAheadState__find_slot(struct _
  */
   __pyx_v_mask = (__pyx_v_self->_capacity - 1);
 
-  /* "monitor_kernels.pyx":758
+  /* "monitor_kernels.pyx":690
  *         cdef int64_t[:] key_lag = self._key_lag_arr
  *         cdef Py_ssize_t mask = self._capacity - 1
  *         cdef Py_ssize_t idx = <Py_ssize_t>(_monitor_hash_key(s1, s2, lag) & <uint64_t>mask)             # <<<<<<<<<<<<<<
@@ -30893,7 +29340,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_14SkipAheadState__find_slot(struct _
  */
   __pyx_v_idx = ((Py_ssize_t)(__pyx_f_15monitor_kernels__monitor_hash_key(__pyx_v_s1, __pyx_v_s2, __pyx_v_lag) & ((uint64_t)__pyx_v_mask)));
 
-  /* "monitor_kernels.pyx":759
+  /* "monitor_kernels.pyx":691
  *         cdef Py_ssize_t mask = self._capacity - 1
  *         cdef Py_ssize_t idx = <Py_ssize_t>(_monitor_hash_key(s1, s2, lag) & <uint64_t>mask)
  *         while occupied[idx] != 0:             # <<<<<<<<<<<<<<
@@ -30905,7 +29352,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_14SkipAheadState__find_slot(struct _
     __pyx_t_4 = ((*((uint8_t *) ( /* dim=0 */ (__pyx_v_occupied.data + __pyx_t_3 * __pyx_v_occupied.strides[0]) ))) != 0);
     if (!__pyx_t_4) break;
 
-    /* "monitor_kernels.pyx":760
+    /* "monitor_kernels.pyx":692
  *         cdef Py_ssize_t idx = <Py_ssize_t>(_monitor_hash_key(s1, s2, lag) & <uint64_t>mask)
  *         while occupied[idx] != 0:
  *             if key_s1[idx] == s1 and key_s2[idx] == s2 and key_lag[idx] == lag:             # <<<<<<<<<<<<<<
@@ -30932,7 +29379,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_14SkipAheadState__find_slot(struct _
     __pyx_L6_bool_binop_done:;
     if (__pyx_t_4) {
 
-      /* "monitor_kernels.pyx":761
+      /* "monitor_kernels.pyx":693
  *         while occupied[idx] != 0:
  *             if key_s1[idx] == s1 and key_s2[idx] == s2 and key_lag[idx] == lag:
  *                 return idx             # <<<<<<<<<<<<<<
@@ -30942,7 +29389,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_14SkipAheadState__find_slot(struct _
       __pyx_r = __pyx_v_idx;
       goto __pyx_L0;
 
-      /* "monitor_kernels.pyx":760
+      /* "monitor_kernels.pyx":692
  *         cdef Py_ssize_t idx = <Py_ssize_t>(_monitor_hash_key(s1, s2, lag) & <uint64_t>mask)
  *         while occupied[idx] != 0:
  *             if key_s1[idx] == s1 and key_s2[idx] == s2 and key_lag[idx] == lag:             # <<<<<<<<<<<<<<
@@ -30951,7 +29398,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_14SkipAheadState__find_slot(struct _
  */
     }
 
-    /* "monitor_kernels.pyx":762
+    /* "monitor_kernels.pyx":694
  *             if key_s1[idx] == s1 and key_s2[idx] == s2 and key_lag[idx] == lag:
  *                 return idx
  *             idx = (idx + 1) & mask             # <<<<<<<<<<<<<<
@@ -30961,7 +29408,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_14SkipAheadState__find_slot(struct _
     __pyx_v_idx = ((__pyx_v_idx + 1) & __pyx_v_mask);
   }
 
-  /* "monitor_kernels.pyx":763
+  /* "monitor_kernels.pyx":695
  *                 return idx
  *             idx = (idx + 1) & mask
  *         return idx             # <<<<<<<<<<<<<<
@@ -30971,7 +29418,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_14SkipAheadState__find_slot(struct _
   __pyx_r = __pyx_v_idx;
   goto __pyx_L0;
 
-  /* "monitor_kernels.pyx":752
+  /* "monitor_kernels.pyx":684
  *         self._steps_arr = np.zeros(self._capacity, dtype=np.int64)
  * 
  *     cdef Py_ssize_t _find_slot(self, int64_t s1, int64_t s2, int64_t lag):             # <<<<<<<<<<<<<<
@@ -30993,7 +29440,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_14SkipAheadState__find_slot(struct _
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":765
+/* "monitor_kernels.pyx":697
  *         return idx
  * 
  *     cdef void _rehash(self, Py_ssize_t new_capacity):             # <<<<<<<<<<<<<<
@@ -31045,7 +29492,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("_rehash", 1);
 
-  /* "monitor_kernels.pyx":766
+  /* "monitor_kernels.pyx":698
  * 
  *     cdef void _rehash(self, Py_ssize_t new_capacity):
  *         cdef object old_occupied_obj = self._occupied_arr             # <<<<<<<<<<<<<<
@@ -31057,7 +29504,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
   __pyx_v_old_occupied_obj = __pyx_t_1;
   __pyx_t_1 = 0;
 
-  /* "monitor_kernels.pyx":767
+  /* "monitor_kernels.pyx":699
  *     cdef void _rehash(self, Py_ssize_t new_capacity):
  *         cdef object old_occupied_obj = self._occupied_arr
  *         cdef object old_s1_obj = self._key_s1_arr             # <<<<<<<<<<<<<<
@@ -31069,7 +29516,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
   __pyx_v_old_s1_obj = __pyx_t_1;
   __pyx_t_1 = 0;
 
-  /* "monitor_kernels.pyx":768
+  /* "monitor_kernels.pyx":700
  *         cdef object old_occupied_obj = self._occupied_arr
  *         cdef object old_s1_obj = self._key_s1_arr
  *         cdef object old_s2_obj = self._key_s2_arr             # <<<<<<<<<<<<<<
@@ -31081,7 +29528,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
   __pyx_v_old_s2_obj = __pyx_t_1;
   __pyx_t_1 = 0;
 
-  /* "monitor_kernels.pyx":769
+  /* "monitor_kernels.pyx":701
  *         cdef object old_s1_obj = self._key_s1_arr
  *         cdef object old_s2_obj = self._key_s2_arr
  *         cdef object old_lag_obj = self._key_lag_arr             # <<<<<<<<<<<<<<
@@ -31093,7 +29540,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
   __pyx_v_old_lag_obj = __pyx_t_1;
   __pyx_t_1 = 0;
 
-  /* "monitor_kernels.pyx":770
+  /* "monitor_kernels.pyx":702
  *         cdef object old_s2_obj = self._key_s2_arr
  *         cdef object old_lag_obj = self._key_lag_arr
  *         cdef object old_corr_obj = self._corr_arr             # <<<<<<<<<<<<<<
@@ -31105,7 +29552,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
   __pyx_v_old_corr_obj = __pyx_t_1;
   __pyx_t_1 = 0;
 
-  /* "monitor_kernels.pyx":771
+  /* "monitor_kernels.pyx":703
  *         cdef object old_lag_obj = self._key_lag_arr
  *         cdef object old_corr_obj = self._corr_arr
  *         cdef object old_steps_obj = self._steps_arr             # <<<<<<<<<<<<<<
@@ -31117,79 +29564,79 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
   __pyx_v_old_steps_obj = __pyx_t_1;
   __pyx_t_1 = 0;
 
-  /* "monitor_kernels.pyx":772
+  /* "monitor_kernels.pyx":704
  *         cdef object old_corr_obj = self._corr_arr
  *         cdef object old_steps_obj = self._steps_arr
  *         cdef uint8_t[:] old_occupied = old_occupied_obj             # <<<<<<<<<<<<<<
  *         cdef int64_t[:] old_s1 = old_s1_obj
  *         cdef int64_t[:] old_s2 = old_s2_obj
  */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_old_occupied_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 772, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_old_occupied_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 704, __pyx_L1_error)
   __pyx_v_old_occupied = __pyx_t_2;
   __pyx_t_2.memview = NULL;
   __pyx_t_2.data = NULL;
 
-  /* "monitor_kernels.pyx":773
+  /* "monitor_kernels.pyx":705
  *         cdef object old_steps_obj = self._steps_arr
  *         cdef uint8_t[:] old_occupied = old_occupied_obj
  *         cdef int64_t[:] old_s1 = old_s1_obj             # <<<<<<<<<<<<<<
  *         cdef int64_t[:] old_s2 = old_s2_obj
  *         cdef int64_t[:] old_lag = old_lag_obj
  */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_s1_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 773, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_s1_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 705, __pyx_L1_error)
   __pyx_v_old_s1 = __pyx_t_3;
   __pyx_t_3.memview = NULL;
   __pyx_t_3.data = NULL;
 
-  /* "monitor_kernels.pyx":774
+  /* "monitor_kernels.pyx":706
  *         cdef uint8_t[:] old_occupied = old_occupied_obj
  *         cdef int64_t[:] old_s1 = old_s1_obj
  *         cdef int64_t[:] old_s2 = old_s2_obj             # <<<<<<<<<<<<<<
  *         cdef int64_t[:] old_lag = old_lag_obj
  *         cdef double[:] old_corr = old_corr_obj
  */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_s2_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 774, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_s2_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 706, __pyx_L1_error)
   __pyx_v_old_s2 = __pyx_t_3;
   __pyx_t_3.memview = NULL;
   __pyx_t_3.data = NULL;
 
-  /* "monitor_kernels.pyx":775
+  /* "monitor_kernels.pyx":707
  *         cdef int64_t[:] old_s1 = old_s1_obj
  *         cdef int64_t[:] old_s2 = old_s2_obj
  *         cdef int64_t[:] old_lag = old_lag_obj             # <<<<<<<<<<<<<<
  *         cdef double[:] old_corr = old_corr_obj
  *         cdef int64_t[:] old_steps = old_steps_obj
  */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_lag_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 775, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_lag_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 707, __pyx_L1_error)
   __pyx_v_old_lag = __pyx_t_3;
   __pyx_t_3.memview = NULL;
   __pyx_t_3.data = NULL;
 
-  /* "monitor_kernels.pyx":776
+  /* "monitor_kernels.pyx":708
  *         cdef int64_t[:] old_s2 = old_s2_obj
  *         cdef int64_t[:] old_lag = old_lag_obj
  *         cdef double[:] old_corr = old_corr_obj             # <<<<<<<<<<<<<<
  *         cdef int64_t[:] old_steps = old_steps_obj
  *         cdef Py_ssize_t old_capacity = self._capacity
  */
-  __pyx_t_4 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(__pyx_v_old_corr_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_4.memview)) __PYX_ERR(0, 776, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(__pyx_v_old_corr_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_4.memview)) __PYX_ERR(0, 708, __pyx_L1_error)
   __pyx_v_old_corr = __pyx_t_4;
   __pyx_t_4.memview = NULL;
   __pyx_t_4.data = NULL;
 
-  /* "monitor_kernels.pyx":777
+  /* "monitor_kernels.pyx":709
  *         cdef int64_t[:] old_lag = old_lag_obj
  *         cdef double[:] old_corr = old_corr_obj
  *         cdef int64_t[:] old_steps = old_steps_obj             # <<<<<<<<<<<<<<
  *         cdef Py_ssize_t old_capacity = self._capacity
  *         cdef Py_ssize_t old_i, idx, mask
  */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_steps_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 777, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_old_steps_obj, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 709, __pyx_L1_error)
   __pyx_v_old_steps = __pyx_t_3;
   __pyx_t_3.memview = NULL;
   __pyx_t_3.data = NULL;
 
-  /* "monitor_kernels.pyx":778
+  /* "monitor_kernels.pyx":710
  *         cdef double[:] old_corr = old_corr_obj
  *         cdef int64_t[:] old_steps = old_steps_obj
  *         cdef Py_ssize_t old_capacity = self._capacity             # <<<<<<<<<<<<<<
@@ -31199,7 +29646,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
   __pyx_t_5 = __pyx_v_self->_capacity;
   __pyx_v_old_capacity = __pyx_t_5;
 
-  /* "monitor_kernels.pyx":787
+  /* "monitor_kernels.pyx":719
  *         cdef int64_t[:] steps_arr
  * 
  *         new_capacity = _monitor_next_power2(new_capacity)             # <<<<<<<<<<<<<<
@@ -31208,7 +29655,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
  */
   __pyx_v_new_capacity = __pyx_f_15monitor_kernels__monitor_next_power2(__pyx_v_new_capacity);
 
-  /* "monitor_kernels.pyx":788
+  /* "monitor_kernels.pyx":720
  * 
  *         new_capacity = _monitor_next_power2(new_capacity)
  *         self._capacity = new_capacity             # <<<<<<<<<<<<<<
@@ -31217,35 +29664,35 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
  */
   __pyx_v_self->_capacity = __pyx_v_new_capacity;
 
-  /* "monitor_kernels.pyx":789
+  /* "monitor_kernels.pyx":721
  *         new_capacity = _monitor_next_power2(new_capacity)
  *         self._capacity = new_capacity
  *         self._occupied_arr = np.zeros(new_capacity, dtype=np.uint8)             # <<<<<<<<<<<<<<
  *         self._key_s1_arr = np.zeros(new_capacity, dtype=np.int64)
  *         self._key_s2_arr = np.zeros(new_capacity, dtype=np.int64)
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 789, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 721, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_zeros); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 789, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_zeros); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 721, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 789, __pyx_L1_error)
+  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 721, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 789, __pyx_L1_error)
+  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 721, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_GIVEREF(__pyx_t_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_1)) __PYX_ERR(0, 789, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_1)) __PYX_ERR(0, 721, __pyx_L1_error);
   __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 789, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 721, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_n_s_np); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 789, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_n_s_np); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 721, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_9 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_uint8); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 789, __pyx_L1_error)
+  __pyx_t_9 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_uint8); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 721, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_9);
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_9) < 0) __PYX_ERR(0, 789, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_9) < 0) __PYX_ERR(0, 721, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
-  __pyx_t_9 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_7, __pyx_t_1); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 789, __pyx_L1_error)
+  __pyx_t_9 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_7, __pyx_t_1); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 721, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_9);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
@@ -31256,35 +29703,35 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
   __pyx_v_self->_occupied_arr = __pyx_t_9;
   __pyx_t_9 = 0;
 
-  /* "monitor_kernels.pyx":790
+  /* "monitor_kernels.pyx":722
  *         self._capacity = new_capacity
  *         self._occupied_arr = np.zeros(new_capacity, dtype=np.uint8)
  *         self._key_s1_arr = np.zeros(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
  *         self._key_s2_arr = np.zeros(new_capacity, dtype=np.int64)
  *         self._key_lag_arr = np.zeros(new_capacity, dtype=np.int64)
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_9, __pyx_n_s_np); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 790, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_9, __pyx_n_s_np); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 722, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_9);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_9, __pyx_n_s_zeros); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 790, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_9, __pyx_n_s_zeros); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 722, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
-  __pyx_t_9 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 790, __pyx_L1_error)
+  __pyx_t_9 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 722, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_9);
-  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 790, __pyx_L1_error)
+  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 722, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_GIVEREF(__pyx_t_9);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_9)) __PYX_ERR(0, 790, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_9)) __PYX_ERR(0, 722, __pyx_L1_error);
   __pyx_t_9 = 0;
-  __pyx_t_9 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 790, __pyx_L1_error)
+  __pyx_t_9 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 722, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_9);
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 790, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 722, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_int64); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 790, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_int64); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 722, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (PyDict_SetItem(__pyx_t_9, __pyx_n_s_dtype, __pyx_t_8) < 0) __PYX_ERR(0, 790, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_9, __pyx_n_s_dtype, __pyx_t_8) < 0) __PYX_ERR(0, 722, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_7, __pyx_t_9); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 790, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_7, __pyx_t_9); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 722, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
@@ -31295,35 +29742,35 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
   __pyx_v_self->_key_s1_arr = __pyx_t_8;
   __pyx_t_8 = 0;
 
-  /* "monitor_kernels.pyx":791
+  /* "monitor_kernels.pyx":723
  *         self._occupied_arr = np.zeros(new_capacity, dtype=np.uint8)
  *         self._key_s1_arr = np.zeros(new_capacity, dtype=np.int64)
  *         self._key_s2_arr = np.zeros(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
  *         self._key_lag_arr = np.zeros(new_capacity, dtype=np.int64)
  *         self._corr_arr = np.zeros(new_capacity, dtype=np.float64)
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_n_s_np); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 791, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_n_s_np); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 723, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_9 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_zeros); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 791, __pyx_L1_error)
+  __pyx_t_9 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_zeros); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 723, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_9);
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 791, __pyx_L1_error)
+  __pyx_t_8 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 723, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 791, __pyx_L1_error)
+  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 723, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_GIVEREF(__pyx_t_8);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_8)) __PYX_ERR(0, 791, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_8)) __PYX_ERR(0, 723, __pyx_L1_error);
   __pyx_t_8 = 0;
-  __pyx_t_8 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 791, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 723, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 791, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 723, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_int64); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 791, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_int64); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 723, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  if (PyDict_SetItem(__pyx_t_8, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 791, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_8, __pyx_n_s_dtype, __pyx_t_6) < 0) __PYX_ERR(0, 723, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_9, __pyx_t_7, __pyx_t_8); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 791, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_Call(__pyx_t_9, __pyx_t_7, __pyx_t_8); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 723, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
@@ -31334,35 +29781,35 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
   __pyx_v_self->_key_s2_arr = __pyx_t_6;
   __pyx_t_6 = 0;
 
-  /* "monitor_kernels.pyx":792
+  /* "monitor_kernels.pyx":724
  *         self._key_s1_arr = np.zeros(new_capacity, dtype=np.int64)
  *         self._key_s2_arr = np.zeros(new_capacity, dtype=np.int64)
  *         self._key_lag_arr = np.zeros(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
  *         self._corr_arr = np.zeros(new_capacity, dtype=np.float64)
  *         self._steps_arr = np.zeros(new_capacity, dtype=np.int64)
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 792, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 724, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_zeros); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 792, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_zeros); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 724, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 792, __pyx_L1_error)
+  __pyx_t_6 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 724, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 792, __pyx_L1_error)
+  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 724, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_GIVEREF(__pyx_t_6);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_6)) __PYX_ERR(0, 792, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_6)) __PYX_ERR(0, 724, __pyx_L1_error);
   __pyx_t_6 = 0;
-  __pyx_t_6 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 792, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 724, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __Pyx_GetModuleGlobalName(__pyx_t_9, __pyx_n_s_np); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 792, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_9, __pyx_n_s_np); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 724, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_9);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_9, __pyx_n_s_int64); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 792, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_9, __pyx_n_s_int64); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 724, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
-  if (PyDict_SetItem(__pyx_t_6, __pyx_n_s_dtype, __pyx_t_1) < 0) __PYX_ERR(0, 792, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_6, __pyx_n_s_dtype, __pyx_t_1) < 0) __PYX_ERR(0, 724, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_8, __pyx_t_7, __pyx_t_6); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 792, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_Call(__pyx_t_8, __pyx_t_7, __pyx_t_6); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 724, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
@@ -31373,35 +29820,35 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
   __pyx_v_self->_key_lag_arr = __pyx_t_1;
   __pyx_t_1 = 0;
 
-  /* "monitor_kernels.pyx":793
+  /* "monitor_kernels.pyx":725
  *         self._key_s2_arr = np.zeros(new_capacity, dtype=np.int64)
  *         self._key_lag_arr = np.zeros(new_capacity, dtype=np.int64)
  *         self._corr_arr = np.zeros(new_capacity, dtype=np.float64)             # <<<<<<<<<<<<<<
  *         self._steps_arr = np.zeros(new_capacity, dtype=np.int64)
  * 
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 793, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 725, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_zeros); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 793, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_zeros); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 725, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 793, __pyx_L1_error)
+  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 725, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 793, __pyx_L1_error)
+  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 725, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_GIVEREF(__pyx_t_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_1)) __PYX_ERR(0, 793, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_1)) __PYX_ERR(0, 725, __pyx_L1_error);
   __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 793, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 725, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_n_s_np); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 793, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_n_s_np); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 725, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
-  __pyx_t_9 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_float64); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 793, __pyx_L1_error)
+  __pyx_t_9 = __Pyx_PyObject_GetAttrStr(__pyx_t_8, __pyx_n_s_float64); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 725, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_9);
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_9) < 0) __PYX_ERR(0, 793, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_9) < 0) __PYX_ERR(0, 725, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
-  __pyx_t_9 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_7, __pyx_t_1); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 793, __pyx_L1_error)
+  __pyx_t_9 = __Pyx_PyObject_Call(__pyx_t_6, __pyx_t_7, __pyx_t_1); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 725, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_9);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
@@ -31412,35 +29859,35 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
   __pyx_v_self->_corr_arr = __pyx_t_9;
   __pyx_t_9 = 0;
 
-  /* "monitor_kernels.pyx":794
+  /* "monitor_kernels.pyx":726
  *         self._key_lag_arr = np.zeros(new_capacity, dtype=np.int64)
  *         self._corr_arr = np.zeros(new_capacity, dtype=np.float64)
  *         self._steps_arr = np.zeros(new_capacity, dtype=np.int64)             # <<<<<<<<<<<<<<
  * 
  *         occupied = self._occupied_arr
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_9, __pyx_n_s_np); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 794, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_9, __pyx_n_s_np); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 726, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_9);
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_9, __pyx_n_s_zeros); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 794, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_9, __pyx_n_s_zeros); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 726, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
-  __pyx_t_9 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 794, __pyx_L1_error)
+  __pyx_t_9 = PyInt_FromSsize_t(__pyx_v_new_capacity); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 726, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_9);
-  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 794, __pyx_L1_error)
+  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 726, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_GIVEREF(__pyx_t_9);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_9)) __PYX_ERR(0, 794, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_9)) __PYX_ERR(0, 726, __pyx_L1_error);
   __pyx_t_9 = 0;
-  __pyx_t_9 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 794, __pyx_L1_error)
+  __pyx_t_9 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 726, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_9);
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 794, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 726, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_int64); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 794, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_int64); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 726, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (PyDict_SetItem(__pyx_t_9, __pyx_n_s_dtype, __pyx_t_8) < 0) __PYX_ERR(0, 794, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_9, __pyx_n_s_dtype, __pyx_t_8) < 0) __PYX_ERR(0, 726, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-  __pyx_t_8 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_7, __pyx_t_9); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 794, __pyx_L1_error)
+  __pyx_t_8 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_7, __pyx_t_9); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 726, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_8);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
@@ -31451,79 +29898,79 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
   __pyx_v_self->_steps_arr = __pyx_t_8;
   __pyx_t_8 = 0;
 
-  /* "monitor_kernels.pyx":796
+  /* "monitor_kernels.pyx":728
  *         self._steps_arr = np.zeros(new_capacity, dtype=np.int64)
  * 
  *         occupied = self._occupied_arr             # <<<<<<<<<<<<<<
  *         key_s1 = self._key_s1_arr
  *         key_s2 = self._key_s2_arr
  */
-  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_self->_occupied_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 796, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_self->_occupied_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_2.memview)) __PYX_ERR(0, 728, __pyx_L1_error)
   __pyx_v_occupied = __pyx_t_2;
   __pyx_t_2.memview = NULL;
   __pyx_t_2.data = NULL;
 
-  /* "monitor_kernels.pyx":797
+  /* "monitor_kernels.pyx":729
  * 
  *         occupied = self._occupied_arr
  *         key_s1 = self._key_s1_arr             # <<<<<<<<<<<<<<
  *         key_s2 = self._key_s2_arr
  *         key_lag = self._key_lag_arr
  */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s1_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 797, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s1_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 729, __pyx_L1_error)
   __pyx_v_key_s1 = __pyx_t_3;
   __pyx_t_3.memview = NULL;
   __pyx_t_3.data = NULL;
 
-  /* "monitor_kernels.pyx":798
+  /* "monitor_kernels.pyx":730
  *         occupied = self._occupied_arr
  *         key_s1 = self._key_s1_arr
  *         key_s2 = self._key_s2_arr             # <<<<<<<<<<<<<<
  *         key_lag = self._key_lag_arr
  *         corr_arr = self._corr_arr
  */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s2_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 798, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s2_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 730, __pyx_L1_error)
   __pyx_v_key_s2 = __pyx_t_3;
   __pyx_t_3.memview = NULL;
   __pyx_t_3.data = NULL;
 
-  /* "monitor_kernels.pyx":799
+  /* "monitor_kernels.pyx":731
  *         key_s1 = self._key_s1_arr
  *         key_s2 = self._key_s2_arr
  *         key_lag = self._key_lag_arr             # <<<<<<<<<<<<<<
  *         corr_arr = self._corr_arr
  *         steps_arr = self._steps_arr
  */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_lag_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 799, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_lag_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 731, __pyx_L1_error)
   __pyx_v_key_lag = __pyx_t_3;
   __pyx_t_3.memview = NULL;
   __pyx_t_3.data = NULL;
 
-  /* "monitor_kernels.pyx":800
+  /* "monitor_kernels.pyx":732
  *         key_s2 = self._key_s2_arr
  *         key_lag = self._key_lag_arr
  *         corr_arr = self._corr_arr             # <<<<<<<<<<<<<<
  *         steps_arr = self._steps_arr
  *         mask = new_capacity - 1
  */
-  __pyx_t_4 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(__pyx_v_self->_corr_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_4.memview)) __PYX_ERR(0, 800, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(__pyx_v_self->_corr_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_4.memview)) __PYX_ERR(0, 732, __pyx_L1_error)
   __pyx_v_corr_arr = __pyx_t_4;
   __pyx_t_4.memview = NULL;
   __pyx_t_4.data = NULL;
 
-  /* "monitor_kernels.pyx":801
+  /* "monitor_kernels.pyx":733
  *         key_lag = self._key_lag_arr
  *         corr_arr = self._corr_arr
  *         steps_arr = self._steps_arr             # <<<<<<<<<<<<<<
  *         mask = new_capacity - 1
  *         self._size = 0
  */
-  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_steps_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 801, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_steps_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_3.memview)) __PYX_ERR(0, 733, __pyx_L1_error)
   __pyx_v_steps_arr = __pyx_t_3;
   __pyx_t_3.memview = NULL;
   __pyx_t_3.data = NULL;
 
-  /* "monitor_kernels.pyx":802
+  /* "monitor_kernels.pyx":734
  *         corr_arr = self._corr_arr
  *         steps_arr = self._steps_arr
  *         mask = new_capacity - 1             # <<<<<<<<<<<<<<
@@ -31532,7 +29979,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
  */
   __pyx_v_mask = (__pyx_v_new_capacity - 1);
 
-  /* "monitor_kernels.pyx":803
+  /* "monitor_kernels.pyx":735
  *         steps_arr = self._steps_arr
  *         mask = new_capacity - 1
  *         self._size = 0             # <<<<<<<<<<<<<<
@@ -31541,7 +29988,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
  */
   __pyx_v_self->_size = 0;
 
-  /* "monitor_kernels.pyx":804
+  /* "monitor_kernels.pyx":736
  *         mask = new_capacity - 1
  *         self._size = 0
  *         for old_i in range(old_capacity):             # <<<<<<<<<<<<<<
@@ -31553,7 +30000,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
   for (__pyx_t_11 = 0; __pyx_t_11 < __pyx_t_10; __pyx_t_11+=1) {
     __pyx_v_old_i = __pyx_t_11;
 
-    /* "monitor_kernels.pyx":805
+    /* "monitor_kernels.pyx":737
  *         self._size = 0
  *         for old_i in range(old_capacity):
  *             if old_occupied[old_i] == 0:             # <<<<<<<<<<<<<<
@@ -31564,7 +30011,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
     __pyx_t_13 = ((*((uint8_t *) ( /* dim=0 */ (__pyx_v_old_occupied.data + __pyx_t_12 * __pyx_v_old_occupied.strides[0]) ))) == 0);
     if (__pyx_t_13) {
 
-      /* "monitor_kernels.pyx":806
+      /* "monitor_kernels.pyx":738
  *         for old_i in range(old_capacity):
  *             if old_occupied[old_i] == 0:
  *                 continue             # <<<<<<<<<<<<<<
@@ -31573,7 +30020,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
  */
       goto __pyx_L3_continue;
 
-      /* "monitor_kernels.pyx":805
+      /* "monitor_kernels.pyx":737
  *         self._size = 0
  *         for old_i in range(old_capacity):
  *             if old_occupied[old_i] == 0:             # <<<<<<<<<<<<<<
@@ -31582,7 +30029,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
  */
     }
 
-    /* "monitor_kernels.pyx":807
+    /* "monitor_kernels.pyx":739
  *             if old_occupied[old_i] == 0:
  *                 continue
  *             idx = <Py_ssize_t>(_monitor_hash_key(old_s1[old_i], old_s2[old_i], old_lag[old_i]) & <uint64_t>mask)             # <<<<<<<<<<<<<<
@@ -31594,7 +30041,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
     __pyx_t_15 = __pyx_v_old_i;
     __pyx_v_idx = ((Py_ssize_t)(__pyx_f_15monitor_kernels__monitor_hash_key((*((int64_t *) ( /* dim=0 */ (__pyx_v_old_s1.data + __pyx_t_12 * __pyx_v_old_s1.strides[0]) ))), (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_s2.data + __pyx_t_14 * __pyx_v_old_s2.strides[0]) ))), (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_lag.data + __pyx_t_15 * __pyx_v_old_lag.strides[0]) )))) & ((uint64_t)__pyx_v_mask)));
 
-    /* "monitor_kernels.pyx":808
+    /* "monitor_kernels.pyx":740
  *                 continue
  *             idx = <Py_ssize_t>(_monitor_hash_key(old_s1[old_i], old_s2[old_i], old_lag[old_i]) & <uint64_t>mask)
  *             while occupied[idx] != 0:             # <<<<<<<<<<<<<<
@@ -31606,7 +30053,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
       __pyx_t_13 = ((*((uint8_t *) ( /* dim=0 */ (__pyx_v_occupied.data + __pyx_t_15 * __pyx_v_occupied.strides[0]) ))) != 0);
       if (!__pyx_t_13) break;
 
-      /* "monitor_kernels.pyx":809
+      /* "monitor_kernels.pyx":741
  *             idx = <Py_ssize_t>(_monitor_hash_key(old_s1[old_i], old_s2[old_i], old_lag[old_i]) & <uint64_t>mask)
  *             while occupied[idx] != 0:
  *                 idx = (idx + 1) & mask             # <<<<<<<<<<<<<<
@@ -31616,7 +30063,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
       __pyx_v_idx = ((__pyx_v_idx + 1) & __pyx_v_mask);
     }
 
-    /* "monitor_kernels.pyx":810
+    /* "monitor_kernels.pyx":742
  *             while occupied[idx] != 0:
  *                 idx = (idx + 1) & mask
  *             occupied[idx] = <uint8_t>1             # <<<<<<<<<<<<<<
@@ -31626,7 +30073,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
     __pyx_t_15 = __pyx_v_idx;
     *((uint8_t *) ( /* dim=0 */ (__pyx_v_occupied.data + __pyx_t_15 * __pyx_v_occupied.strides[0]) )) = ((uint8_t)1);
 
-    /* "monitor_kernels.pyx":811
+    /* "monitor_kernels.pyx":743
  *                 idx = (idx + 1) & mask
  *             occupied[idx] = <uint8_t>1
  *             key_s1[idx] = old_s1[old_i]             # <<<<<<<<<<<<<<
@@ -31637,7 +30084,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
     __pyx_t_14 = __pyx_v_idx;
     *((int64_t *) ( /* dim=0 */ (__pyx_v_key_s1.data + __pyx_t_14 * __pyx_v_key_s1.strides[0]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_s1.data + __pyx_t_15 * __pyx_v_old_s1.strides[0]) )));
 
-    /* "monitor_kernels.pyx":812
+    /* "monitor_kernels.pyx":744
  *             occupied[idx] = <uint8_t>1
  *             key_s1[idx] = old_s1[old_i]
  *             key_s2[idx] = old_s2[old_i]             # <<<<<<<<<<<<<<
@@ -31648,7 +30095,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
     __pyx_t_14 = __pyx_v_idx;
     *((int64_t *) ( /* dim=0 */ (__pyx_v_key_s2.data + __pyx_t_14 * __pyx_v_key_s2.strides[0]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_s2.data + __pyx_t_15 * __pyx_v_old_s2.strides[0]) )));
 
-    /* "monitor_kernels.pyx":813
+    /* "monitor_kernels.pyx":745
  *             key_s1[idx] = old_s1[old_i]
  *             key_s2[idx] = old_s2[old_i]
  *             key_lag[idx] = old_lag[old_i]             # <<<<<<<<<<<<<<
@@ -31659,7 +30106,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
     __pyx_t_14 = __pyx_v_idx;
     *((int64_t *) ( /* dim=0 */ (__pyx_v_key_lag.data + __pyx_t_14 * __pyx_v_key_lag.strides[0]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_lag.data + __pyx_t_15 * __pyx_v_old_lag.strides[0]) )));
 
-    /* "monitor_kernels.pyx":814
+    /* "monitor_kernels.pyx":746
  *             key_s2[idx] = old_s2[old_i]
  *             key_lag[idx] = old_lag[old_i]
  *             corr_arr[idx] = old_corr[old_i]             # <<<<<<<<<<<<<<
@@ -31670,7 +30117,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
     __pyx_t_14 = __pyx_v_idx;
     *((double *) ( /* dim=0 */ (__pyx_v_corr_arr.data + __pyx_t_14 * __pyx_v_corr_arr.strides[0]) )) = (*((double *) ( /* dim=0 */ (__pyx_v_old_corr.data + __pyx_t_15 * __pyx_v_old_corr.strides[0]) )));
 
-    /* "monitor_kernels.pyx":815
+    /* "monitor_kernels.pyx":747
  *             key_lag[idx] = old_lag[old_i]
  *             corr_arr[idx] = old_corr[old_i]
  *             steps_arr[idx] = old_steps[old_i]             # <<<<<<<<<<<<<<
@@ -31681,7 +30128,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
     __pyx_t_14 = __pyx_v_idx;
     *((int64_t *) ( /* dim=0 */ (__pyx_v_steps_arr.data + __pyx_t_14 * __pyx_v_steps_arr.strides[0]) )) = (*((int64_t *) ( /* dim=0 */ (__pyx_v_old_steps.data + __pyx_t_15 * __pyx_v_old_steps.strides[0]) )));
 
-    /* "monitor_kernels.pyx":816
+    /* "monitor_kernels.pyx":748
  *             corr_arr[idx] = old_corr[old_i]
  *             steps_arr[idx] = old_steps[old_i]
  *             self._size += 1             # <<<<<<<<<<<<<<
@@ -31692,7 +30139,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
     __pyx_L3_continue:;
   }
 
-  /* "monitor_kernels.pyx":765
+  /* "monitor_kernels.pyx":697
  *         return idx
  * 
  *     cdef void _rehash(self, Py_ssize_t new_capacity):             # <<<<<<<<<<<<<<
@@ -31734,7 +30181,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__rehash(struct __pyx_obj_
   __Pyx_RefNannyFinishContext();
 }
 
-/* "monitor_kernels.pyx":818
+/* "monitor_kernels.pyx":750
  *             self._size += 1
  * 
  *     cdef void _ensure_capacity(self, Py_ssize_t need):             # <<<<<<<<<<<<<<
@@ -31748,7 +30195,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__ensure_capacity(struct _
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
 
-  /* "monitor_kernels.pyx":819
+  /* "monitor_kernels.pyx":751
  * 
  *     cdef void _ensure_capacity(self, Py_ssize_t need):
  *         while need * 2 >= self._capacity:             # <<<<<<<<<<<<<<
@@ -31759,17 +30206,17 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__ensure_capacity(struct _
     __pyx_t_1 = ((__pyx_v_need * 2) >= __pyx_v_self->_capacity);
     if (!__pyx_t_1) break;
 
-    /* "monitor_kernels.pyx":820
+    /* "monitor_kernels.pyx":752
  *     cdef void _ensure_capacity(self, Py_ssize_t need):
  *         while need * 2 >= self._capacity:
  *             self._rehash(self._capacity * 2)             # <<<<<<<<<<<<<<
  * 
  *     cpdef void update_batch(self, np.ndarray rows, np.ndarray corrs):
  */
-    ((struct __pyx_vtabstruct_15monitor_kernels_SkipAheadState *)__pyx_v_self->__pyx_vtab)->_rehash(__pyx_v_self, (__pyx_v_self->_capacity * 2)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 820, __pyx_L1_error)
+    ((struct __pyx_vtabstruct_15monitor_kernels_SkipAheadState *)__pyx_v_self->__pyx_vtab)->_rehash(__pyx_v_self, (__pyx_v_self->_capacity * 2)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 752, __pyx_L1_error)
   }
 
-  /* "monitor_kernels.pyx":818
+  /* "monitor_kernels.pyx":750
  *             self._size += 1
  * 
  *     cdef void _ensure_capacity(self, Py_ssize_t need):             # <<<<<<<<<<<<<<
@@ -31784,7 +30231,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState__ensure_capacity(struct _
   __pyx_L0:;
 }
 
-/* "monitor_kernels.pyx":822
+/* "monitor_kernels.pyx":754
  *             self._rehash(self._capacity * 2)
  * 
  *     cpdef void update_batch(self, np.ndarray rows, np.ndarray corrs):             # <<<<<<<<<<<<<<
@@ -31850,7 +30297,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_update_batch); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 822, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_update_batch); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 754, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_14SkipAheadState_3update_batch)) {
         __Pyx_INCREF(__pyx_t_1);
@@ -31872,7 +30319,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
           PyObject *__pyx_callargs[3] = {__pyx_t_4, ((PyObject *)__pyx_v_rows), ((PyObject *)__pyx_v_corrs)};
           __pyx_t_2 = __Pyx_PyObject_FastCall(__pyx_t_3, __pyx_callargs+1-__pyx_t_5, 2+__pyx_t_5);
           __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 822, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 754, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         }
@@ -31893,31 +30340,31 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
     #endif
   }
 
-  /* "monitor_kernels.pyx":823
+  /* "monitor_kernels.pyx":755
  * 
  *     cpdef void update_batch(self, np.ndarray rows, np.ndarray corrs):
  *         cdef int64_t[:, :] rows_view = rows             # <<<<<<<<<<<<<<
  *         cdef double[:] corrs_view = corrs
  *         cdef Py_ssize_t n = rows_view.shape[0]
  */
-  __pyx_t_6 = __Pyx_PyObject_to_MemoryviewSlice_dsds_nn_int64_t(((PyObject *)__pyx_v_rows), PyBUF_WRITABLE); if (unlikely(!__pyx_t_6.memview)) __PYX_ERR(0, 823, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyObject_to_MemoryviewSlice_dsds_nn_int64_t(((PyObject *)__pyx_v_rows), PyBUF_WRITABLE); if (unlikely(!__pyx_t_6.memview)) __PYX_ERR(0, 755, __pyx_L1_error)
   __pyx_v_rows_view = __pyx_t_6;
   __pyx_t_6.memview = NULL;
   __pyx_t_6.data = NULL;
 
-  /* "monitor_kernels.pyx":824
+  /* "monitor_kernels.pyx":756
  *     cpdef void update_batch(self, np.ndarray rows, np.ndarray corrs):
  *         cdef int64_t[:, :] rows_view = rows
  *         cdef double[:] corrs_view = corrs             # <<<<<<<<<<<<<<
  *         cdef Py_ssize_t n = rows_view.shape[0]
  *         cdef Py_ssize_t i, idx
  */
-  __pyx_t_7 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(((PyObject *)__pyx_v_corrs), PyBUF_WRITABLE); if (unlikely(!__pyx_t_7.memview)) __PYX_ERR(0, 824, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(((PyObject *)__pyx_v_corrs), PyBUF_WRITABLE); if (unlikely(!__pyx_t_7.memview)) __PYX_ERR(0, 756, __pyx_L1_error)
   __pyx_v_corrs_view = __pyx_t_7;
   __pyx_t_7.memview = NULL;
   __pyx_t_7.data = NULL;
 
-  /* "monitor_kernels.pyx":825
+  /* "monitor_kernels.pyx":757
  *         cdef int64_t[:, :] rows_view = rows
  *         cdef double[:] corrs_view = corrs
  *         cdef Py_ssize_t n = rows_view.shape[0]             # <<<<<<<<<<<<<<
@@ -31926,7 +30373,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
  */
   __pyx_v_n = (__pyx_v_rows_view.shape[0]);
 
-  /* "monitor_kernels.pyx":835
+  /* "monitor_kernels.pyx":767
  *         cdef int64_t[:] steps_arr
  * 
  *         if n == 0:             # <<<<<<<<<<<<<<
@@ -31936,7 +30383,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
   __pyx_t_8 = (__pyx_v_n == 0);
   if (__pyx_t_8) {
 
-    /* "monitor_kernels.pyx":836
+    /* "monitor_kernels.pyx":768
  * 
  *         if n == 0:
  *             return             # <<<<<<<<<<<<<<
@@ -31945,7 +30392,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
  */
     goto __pyx_L0;
 
-    /* "monitor_kernels.pyx":835
+    /* "monitor_kernels.pyx":767
  *         cdef int64_t[:] steps_arr
  * 
  *         if n == 0:             # <<<<<<<<<<<<<<
@@ -31954,88 +30401,88 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
  */
   }
 
-  /* "monitor_kernels.pyx":837
+  /* "monitor_kernels.pyx":769
  *         if n == 0:
  *             return
  *         self._ensure_capacity(self._size + n)             # <<<<<<<<<<<<<<
  *         occupied = self._occupied_arr
  *         key_s1 = self._key_s1_arr
  */
-  ((struct __pyx_vtabstruct_15monitor_kernels_SkipAheadState *)__pyx_v_self->__pyx_vtab)->_ensure_capacity(__pyx_v_self, (__pyx_v_self->_size + __pyx_v_n)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 837, __pyx_L1_error)
+  ((struct __pyx_vtabstruct_15monitor_kernels_SkipAheadState *)__pyx_v_self->__pyx_vtab)->_ensure_capacity(__pyx_v_self, (__pyx_v_self->_size + __pyx_v_n)); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 769, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":838
+  /* "monitor_kernels.pyx":770
  *             return
  *         self._ensure_capacity(self._size + n)
  *         occupied = self._occupied_arr             # <<<<<<<<<<<<<<
  *         key_s1 = self._key_s1_arr
  *         key_s2 = self._key_s2_arr
  */
-  __pyx_t_9 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_self->_occupied_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_9.memview)) __PYX_ERR(0, 838, __pyx_L1_error)
+  __pyx_t_9 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_self->_occupied_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_9.memview)) __PYX_ERR(0, 770, __pyx_L1_error)
   __pyx_v_occupied = __pyx_t_9;
   __pyx_t_9.memview = NULL;
   __pyx_t_9.data = NULL;
 
-  /* "monitor_kernels.pyx":839
+  /* "monitor_kernels.pyx":771
  *         self._ensure_capacity(self._size + n)
  *         occupied = self._occupied_arr
  *         key_s1 = self._key_s1_arr             # <<<<<<<<<<<<<<
  *         key_s2 = self._key_s2_arr
  *         key_lag = self._key_lag_arr
  */
-  __pyx_t_10 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s1_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_10.memview)) __PYX_ERR(0, 839, __pyx_L1_error)
+  __pyx_t_10 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s1_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_10.memview)) __PYX_ERR(0, 771, __pyx_L1_error)
   __pyx_v_key_s1 = __pyx_t_10;
   __pyx_t_10.memview = NULL;
   __pyx_t_10.data = NULL;
 
-  /* "monitor_kernels.pyx":840
+  /* "monitor_kernels.pyx":772
  *         occupied = self._occupied_arr
  *         key_s1 = self._key_s1_arr
  *         key_s2 = self._key_s2_arr             # <<<<<<<<<<<<<<
  *         key_lag = self._key_lag_arr
  *         corr_arr = self._corr_arr
  */
-  __pyx_t_10 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s2_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_10.memview)) __PYX_ERR(0, 840, __pyx_L1_error)
+  __pyx_t_10 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s2_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_10.memview)) __PYX_ERR(0, 772, __pyx_L1_error)
   __pyx_v_key_s2 = __pyx_t_10;
   __pyx_t_10.memview = NULL;
   __pyx_t_10.data = NULL;
 
-  /* "monitor_kernels.pyx":841
+  /* "monitor_kernels.pyx":773
  *         key_s1 = self._key_s1_arr
  *         key_s2 = self._key_s2_arr
  *         key_lag = self._key_lag_arr             # <<<<<<<<<<<<<<
  *         corr_arr = self._corr_arr
  *         steps_arr = self._steps_arr
  */
-  __pyx_t_10 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_lag_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_10.memview)) __PYX_ERR(0, 841, __pyx_L1_error)
+  __pyx_t_10 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_lag_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_10.memview)) __PYX_ERR(0, 773, __pyx_L1_error)
   __pyx_v_key_lag = __pyx_t_10;
   __pyx_t_10.memview = NULL;
   __pyx_t_10.data = NULL;
 
-  /* "monitor_kernels.pyx":842
+  /* "monitor_kernels.pyx":774
  *         key_s2 = self._key_s2_arr
  *         key_lag = self._key_lag_arr
  *         corr_arr = self._corr_arr             # <<<<<<<<<<<<<<
  *         steps_arr = self._steps_arr
  * 
  */
-  __pyx_t_7 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(__pyx_v_self->_corr_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_7.memview)) __PYX_ERR(0, 842, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(__pyx_v_self->_corr_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_7.memview)) __PYX_ERR(0, 774, __pyx_L1_error)
   __pyx_v_corr_arr = __pyx_t_7;
   __pyx_t_7.memview = NULL;
   __pyx_t_7.data = NULL;
 
-  /* "monitor_kernels.pyx":843
+  /* "monitor_kernels.pyx":775
  *         key_lag = self._key_lag_arr
  *         corr_arr = self._corr_arr
  *         steps_arr = self._steps_arr             # <<<<<<<<<<<<<<
  * 
  *         for i in range(n):
  */
-  __pyx_t_10 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_steps_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_10.memview)) __PYX_ERR(0, 843, __pyx_L1_error)
+  __pyx_t_10 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_steps_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_10.memview)) __PYX_ERR(0, 775, __pyx_L1_error)
   __pyx_v_steps_arr = __pyx_t_10;
   __pyx_t_10.memview = NULL;
   __pyx_t_10.data = NULL;
 
-  /* "monitor_kernels.pyx":845
+  /* "monitor_kernels.pyx":777
  *         steps_arr = self._steps_arr
  * 
  *         for i in range(n):             # <<<<<<<<<<<<<<
@@ -32047,7 +30494,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
   for (__pyx_t_13 = 0; __pyx_t_13 < __pyx_t_12; __pyx_t_13+=1) {
     __pyx_v_i = __pyx_t_13;
 
-    /* "monitor_kernels.pyx":846
+    /* "monitor_kernels.pyx":778
  * 
  *         for i in range(n):
  *             s1 = rows_view[i, 0]             # <<<<<<<<<<<<<<
@@ -32058,7 +30505,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
     __pyx_t_15 = 0;
     __pyx_v_s1 = (*((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows_view.data + __pyx_t_14 * __pyx_v_rows_view.strides[0]) ) + __pyx_t_15 * __pyx_v_rows_view.strides[1]) )));
 
-    /* "monitor_kernels.pyx":847
+    /* "monitor_kernels.pyx":779
  *         for i in range(n):
  *             s1 = rows_view[i, 0]
  *             s2 = rows_view[i, 1]             # <<<<<<<<<<<<<<
@@ -32069,7 +30516,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
     __pyx_t_14 = 1;
     __pyx_v_s2 = (*((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows_view.data + __pyx_t_15 * __pyx_v_rows_view.strides[0]) ) + __pyx_t_14 * __pyx_v_rows_view.strides[1]) )));
 
-    /* "monitor_kernels.pyx":848
+    /* "monitor_kernels.pyx":780
  *             s1 = rows_view[i, 0]
  *             s2 = rows_view[i, 1]
  *             t1 = rows_view[i, 2]             # <<<<<<<<<<<<<<
@@ -32080,7 +30527,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
     __pyx_t_15 = 2;
     __pyx_v_t1 = (*((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows_view.data + __pyx_t_14 * __pyx_v_rows_view.strides[0]) ) + __pyx_t_15 * __pyx_v_rows_view.strides[1]) )));
 
-    /* "monitor_kernels.pyx":849
+    /* "monitor_kernels.pyx":781
  *             s2 = rows_view[i, 1]
  *             t1 = rows_view[i, 2]
  *             t2 = rows_view[i, 3]             # <<<<<<<<<<<<<<
@@ -32091,7 +30538,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
     __pyx_t_14 = 3;
     __pyx_v_t2 = (*((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows_view.data + __pyx_t_15 * __pyx_v_rows_view.strides[0]) ) + __pyx_t_14 * __pyx_v_rows_view.strides[1]) )));
 
-    /* "monitor_kernels.pyx":850
+    /* "monitor_kernels.pyx":782
  *             t1 = rows_view[i, 2]
  *             t2 = rows_view[i, 3]
  *             lag = t1 - t2             # <<<<<<<<<<<<<<
@@ -32100,7 +30547,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
  */
     __pyx_v_lag = (__pyx_v_t1 - __pyx_v_t2);
 
-    /* "monitor_kernels.pyx":851
+    /* "monitor_kernels.pyx":783
  *             t2 = rows_view[i, 3]
  *             lag = t1 - t2
  *             if s1 == s2:             # <<<<<<<<<<<<<<
@@ -32110,7 +30557,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
     __pyx_t_8 = (__pyx_v_s1 == __pyx_v_s2);
     if (__pyx_t_8) {
 
-      /* "monitor_kernels.pyx":852
+      /* "monitor_kernels.pyx":784
  *             lag = t1 - t2
  *             if s1 == s2:
  *                 ns1 = s1             # <<<<<<<<<<<<<<
@@ -32119,7 +30566,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
  */
       __pyx_v_ns1 = __pyx_v_s1;
 
-      /* "monitor_kernels.pyx":853
+      /* "monitor_kernels.pyx":785
  *             if s1 == s2:
  *                 ns1 = s1
  *                 ns2 = s2             # <<<<<<<<<<<<<<
@@ -32128,7 +30575,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
  */
       __pyx_v_ns2 = __pyx_v_s2;
 
-      /* "monitor_kernels.pyx":854
+      /* "monitor_kernels.pyx":786
  *                 ns1 = s1
  *                 ns2 = s2
  *                 nlag = lag if lag >= 0 else -lag             # <<<<<<<<<<<<<<
@@ -32143,7 +30590,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
       }
       __pyx_v_nlag = __pyx_t_16;
 
-      /* "monitor_kernels.pyx":851
+      /* "monitor_kernels.pyx":783
  *             t2 = rows_view[i, 3]
  *             lag = t1 - t2
  *             if s1 == s2:             # <<<<<<<<<<<<<<
@@ -32153,7 +30600,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
       goto __pyx_L6;
     }
 
-    /* "monitor_kernels.pyx":855
+    /* "monitor_kernels.pyx":787
  *                 ns2 = s2
  *                 nlag = lag if lag >= 0 else -lag
  *             elif s1 < s2:             # <<<<<<<<<<<<<<
@@ -32163,7 +30610,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
     __pyx_t_8 = (__pyx_v_s1 < __pyx_v_s2);
     if (__pyx_t_8) {
 
-      /* "monitor_kernels.pyx":856
+      /* "monitor_kernels.pyx":788
  *                 nlag = lag if lag >= 0 else -lag
  *             elif s1 < s2:
  *                 ns1 = s1             # <<<<<<<<<<<<<<
@@ -32172,7 +30619,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
  */
       __pyx_v_ns1 = __pyx_v_s1;
 
-      /* "monitor_kernels.pyx":857
+      /* "monitor_kernels.pyx":789
  *             elif s1 < s2:
  *                 ns1 = s1
  *                 ns2 = s2             # <<<<<<<<<<<<<<
@@ -32181,7 +30628,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
  */
       __pyx_v_ns2 = __pyx_v_s2;
 
-      /* "monitor_kernels.pyx":858
+      /* "monitor_kernels.pyx":790
  *                 ns1 = s1
  *                 ns2 = s2
  *                 nlag = lag             # <<<<<<<<<<<<<<
@@ -32190,7 +30637,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
  */
       __pyx_v_nlag = __pyx_v_lag;
 
-      /* "monitor_kernels.pyx":855
+      /* "monitor_kernels.pyx":787
  *                 ns2 = s2
  *                 nlag = lag if lag >= 0 else -lag
  *             elif s1 < s2:             # <<<<<<<<<<<<<<
@@ -32200,7 +30647,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
       goto __pyx_L6;
     }
 
-    /* "monitor_kernels.pyx":860
+    /* "monitor_kernels.pyx":792
  *                 nlag = lag
  *             else:
  *                 ns1 = s2             # <<<<<<<<<<<<<<
@@ -32210,7 +30657,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
     /*else*/ {
       __pyx_v_ns1 = __pyx_v_s2;
 
-      /* "monitor_kernels.pyx":861
+      /* "monitor_kernels.pyx":793
  *             else:
  *                 ns1 = s2
  *                 ns2 = s1             # <<<<<<<<<<<<<<
@@ -32219,7 +30666,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
  */
       __pyx_v_ns2 = __pyx_v_s1;
 
-      /* "monitor_kernels.pyx":862
+      /* "monitor_kernels.pyx":794
  *                 ns1 = s2
  *                 ns2 = s1
  *                 nlag = -lag             # <<<<<<<<<<<<<<
@@ -32230,17 +30677,17 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
     }
     __pyx_L6:;
 
-    /* "monitor_kernels.pyx":863
+    /* "monitor_kernels.pyx":795
  *                 ns2 = s1
  *                 nlag = -lag
  *             idx = self._find_slot(ns1, ns2, nlag)             # <<<<<<<<<<<<<<
  *             if occupied[idx] == 0:
  *                 occupied[idx] = <uint8_t>1
  */
-    __pyx_t_17 = ((struct __pyx_vtabstruct_15monitor_kernels_SkipAheadState *)__pyx_v_self->__pyx_vtab)->_find_slot(__pyx_v_self, __pyx_v_ns1, __pyx_v_ns2, __pyx_v_nlag); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 863, __pyx_L1_error)
+    __pyx_t_17 = ((struct __pyx_vtabstruct_15monitor_kernels_SkipAheadState *)__pyx_v_self->__pyx_vtab)->_find_slot(__pyx_v_self, __pyx_v_ns1, __pyx_v_ns2, __pyx_v_nlag); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 795, __pyx_L1_error)
     __pyx_v_idx = __pyx_t_17;
 
-    /* "monitor_kernels.pyx":864
+    /* "monitor_kernels.pyx":796
  *                 nlag = -lag
  *             idx = self._find_slot(ns1, ns2, nlag)
  *             if occupied[idx] == 0:             # <<<<<<<<<<<<<<
@@ -32251,7 +30698,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
     __pyx_t_8 = ((*((uint8_t *) ( /* dim=0 */ (__pyx_v_occupied.data + __pyx_t_14 * __pyx_v_occupied.strides[0]) ))) == 0);
     if (__pyx_t_8) {
 
-      /* "monitor_kernels.pyx":865
+      /* "monitor_kernels.pyx":797
  *             idx = self._find_slot(ns1, ns2, nlag)
  *             if occupied[idx] == 0:
  *                 occupied[idx] = <uint8_t>1             # <<<<<<<<<<<<<<
@@ -32261,7 +30708,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
       __pyx_t_14 = __pyx_v_idx;
       *((uint8_t *) ( /* dim=0 */ (__pyx_v_occupied.data + __pyx_t_14 * __pyx_v_occupied.strides[0]) )) = ((uint8_t)1);
 
-      /* "monitor_kernels.pyx":866
+      /* "monitor_kernels.pyx":798
  *             if occupied[idx] == 0:
  *                 occupied[idx] = <uint8_t>1
  *                 key_s1[idx] = ns1             # <<<<<<<<<<<<<<
@@ -32271,7 +30718,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
       __pyx_t_14 = __pyx_v_idx;
       *((int64_t *) ( /* dim=0 */ (__pyx_v_key_s1.data + __pyx_t_14 * __pyx_v_key_s1.strides[0]) )) = __pyx_v_ns1;
 
-      /* "monitor_kernels.pyx":867
+      /* "monitor_kernels.pyx":799
  *                 occupied[idx] = <uint8_t>1
  *                 key_s1[idx] = ns1
  *                 key_s2[idx] = ns2             # <<<<<<<<<<<<<<
@@ -32281,7 +30728,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
       __pyx_t_14 = __pyx_v_idx;
       *((int64_t *) ( /* dim=0 */ (__pyx_v_key_s2.data + __pyx_t_14 * __pyx_v_key_s2.strides[0]) )) = __pyx_v_ns2;
 
-      /* "monitor_kernels.pyx":868
+      /* "monitor_kernels.pyx":800
  *                 key_s1[idx] = ns1
  *                 key_s2[idx] = ns2
  *                 key_lag[idx] = nlag             # <<<<<<<<<<<<<<
@@ -32291,7 +30738,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
       __pyx_t_14 = __pyx_v_idx;
       *((int64_t *) ( /* dim=0 */ (__pyx_v_key_lag.data + __pyx_t_14 * __pyx_v_key_lag.strides[0]) )) = __pyx_v_nlag;
 
-      /* "monitor_kernels.pyx":869
+      /* "monitor_kernels.pyx":801
  *                 key_s2[idx] = ns2
  *                 key_lag[idx] = nlag
  *                 self._size += 1             # <<<<<<<<<<<<<<
@@ -32300,7 +30747,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
  */
       __pyx_v_self->_size = (__pyx_v_self->_size + 1);
 
-      /* "monitor_kernels.pyx":864
+      /* "monitor_kernels.pyx":796
  *                 nlag = -lag
  *             idx = self._find_slot(ns1, ns2, nlag)
  *             if occupied[idx] == 0:             # <<<<<<<<<<<<<<
@@ -32309,7 +30756,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
  */
     }
 
-    /* "monitor_kernels.pyx":870
+    /* "monitor_kernels.pyx":802
  *                 key_lag[idx] = nlag
  *                 self._size += 1
  *             corr_arr[idx] = corrs_view[i]             # <<<<<<<<<<<<<<
@@ -32320,7 +30767,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
     __pyx_t_15 = __pyx_v_idx;
     *((double *) ( /* dim=0 */ (__pyx_v_corr_arr.data + __pyx_t_15 * __pyx_v_corr_arr.strides[0]) )) = (*((double *) ( /* dim=0 */ (__pyx_v_corrs_view.data + __pyx_t_14 * __pyx_v_corrs_view.strides[0]) )));
 
-    /* "monitor_kernels.pyx":871
+    /* "monitor_kernels.pyx":803
  *                 self._size += 1
  *             corr_arr[idx] = corrs_view[i]
  *             steps_arr[idx] = 0             # <<<<<<<<<<<<<<
@@ -32331,7 +30778,7 @@ static void __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(struct __pyx
     *((int64_t *) ( /* dim=0 */ (__pyx_v_steps_arr.data + __pyx_t_14 * __pyx_v_steps_arr.strides[0]) )) = 0;
   }
 
-  /* "monitor_kernels.pyx":822
+  /* "monitor_kernels.pyx":754
  *             self._rehash(self._capacity * 2)
  * 
  *     cpdef void update_batch(self, np.ndarray rows, np.ndarray corrs):             # <<<<<<<<<<<<<<
@@ -32419,7 +30866,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[0]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 822, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 754, __pyx_L3_error)
         else goto __pyx_L5_argtuple_error;
         CYTHON_FALLTHROUGH;
         case  1:
@@ -32427,14 +30874,14 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[1]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 822, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 754, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("update_batch", 1, 2, 2, 1); __PYX_ERR(0, 822, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("update_batch", 1, 2, 2, 1); __PYX_ERR(0, 754, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
         const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "update_batch") < 0)) __PYX_ERR(0, 822, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "update_batch") < 0)) __PYX_ERR(0, 754, __pyx_L3_error)
       }
     } else if (unlikely(__pyx_nargs != 2)) {
       goto __pyx_L5_argtuple_error;
@@ -32447,7 +30894,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   }
   goto __pyx_L6_skip;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("update_batch", 1, 2, 2, __pyx_nargs); __PYX_ERR(0, 822, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("update_batch", 1, 2, 2, __pyx_nargs); __PYX_ERR(0, 754, __pyx_L3_error)
   __pyx_L6_skip:;
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
@@ -32461,8 +30908,8 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_rows), __pyx_ptype_5numpy_ndarray, 1, "rows", 0))) __PYX_ERR(0, 822, __pyx_L1_error)
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_corrs), __pyx_ptype_5numpy_ndarray, 1, "corrs", 0))) __PYX_ERR(0, 822, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_rows), __pyx_ptype_5numpy_ndarray, 1, "rows", 0))) __PYX_ERR(0, 754, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_corrs), __pyx_ptype_5numpy_ndarray, 1, "corrs", 0))) __PYX_ERR(0, 754, __pyx_L1_error)
   __pyx_r = __pyx_pf_15monitor_kernels_14SkipAheadState_2update_batch(((struct __pyx_obj_15monitor_kernels_SkipAheadState *)__pyx_v_self), __pyx_v_rows, __pyx_v_corrs);
 
   /* function exit code */
@@ -32489,8 +30936,8 @@ static PyObject *__pyx_pf_15monitor_kernels_14SkipAheadState_2update_batch(struc
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("update_batch", 1);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(__pyx_v_self, __pyx_v_rows, __pyx_v_corrs, 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 822, __pyx_L1_error)
-  __pyx_t_1 = __Pyx_void_to_None(NULL); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 822, __pyx_L1_error)
+  __pyx_f_15monitor_kernels_14SkipAheadState_update_batch(__pyx_v_self, __pyx_v_rows, __pyx_v_corrs, 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 754, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_void_to_None(NULL); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 754, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
@@ -32507,7 +30954,7 @@ static PyObject *__pyx_pf_15monitor_kernels_14SkipAheadState_2update_batch(struc
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":873
+/* "monitor_kernels.pyx":805
  *             steps_arr[idx] = 0
  * 
  *     cpdef object prune_mask(self, np.ndarray rows, double threshold, double margin, int64_t max_steps, bint neg_corr):             # <<<<<<<<<<<<<<
@@ -32585,17 +31032,17 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_prune_mask); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 873, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_prune_mask); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 805, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_14SkipAheadState_5prune_mask)) {
         __Pyx_XDECREF(__pyx_r);
-        __pyx_t_3 = PyFloat_FromDouble(__pyx_v_threshold); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 873, __pyx_L1_error)
+        __pyx_t_3 = PyFloat_FromDouble(__pyx_v_threshold); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 805, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_3);
-        __pyx_t_4 = PyFloat_FromDouble(__pyx_v_margin); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 873, __pyx_L1_error)
+        __pyx_t_4 = PyFloat_FromDouble(__pyx_v_margin); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 805, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_4);
-        __pyx_t_5 = __Pyx_PyInt_From_int64_t(__pyx_v_max_steps); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 873, __pyx_L1_error)
+        __pyx_t_5 = __Pyx_PyInt_From_int64_t(__pyx_v_max_steps); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 805, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_5);
-        __pyx_t_6 = __Pyx_PyBool_FromLong(__pyx_v_neg_corr); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 873, __pyx_L1_error)
+        __pyx_t_6 = __Pyx_PyBool_FromLong(__pyx_v_neg_corr); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 805, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_6);
         __Pyx_INCREF(__pyx_t_1);
         __pyx_t_7 = __pyx_t_1; __pyx_t_8 = NULL;
@@ -32620,7 +31067,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
           __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
           __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
           __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 873, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 805, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
         }
@@ -32642,19 +31089,19 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
     #endif
   }
 
-  /* "monitor_kernels.pyx":874
+  /* "monitor_kernels.pyx":806
  * 
  *     cpdef object prune_mask(self, np.ndarray rows, double threshold, double margin, int64_t max_steps, bint neg_corr):
  *         cdef int64_t[:, :] rows_view = rows             # <<<<<<<<<<<<<<
  *         cdef Py_ssize_t n = rows_view.shape[0]
  *         cdef Py_ssize_t i, idx
  */
-  __pyx_t_10 = __Pyx_PyObject_to_MemoryviewSlice_dsds_nn_int64_t(((PyObject *)__pyx_v_rows), PyBUF_WRITABLE); if (unlikely(!__pyx_t_10.memview)) __PYX_ERR(0, 874, __pyx_L1_error)
+  __pyx_t_10 = __Pyx_PyObject_to_MemoryviewSlice_dsds_nn_int64_t(((PyObject *)__pyx_v_rows), PyBUF_WRITABLE); if (unlikely(!__pyx_t_10.memview)) __PYX_ERR(0, 806, __pyx_L1_error)
   __pyx_v_rows_view = __pyx_t_10;
   __pyx_t_10.memview = NULL;
   __pyx_t_10.data = NULL;
 
-  /* "monitor_kernels.pyx":875
+  /* "monitor_kernels.pyx":807
  *     cpdef object prune_mask(self, np.ndarray rows, double threshold, double margin, int64_t max_steps, bint neg_corr):
  *         cdef int64_t[:, :] rows_view = rows
  *         cdef Py_ssize_t n = rows_view.shape[0]             # <<<<<<<<<<<<<<
@@ -32663,35 +31110,35 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
  */
   __pyx_v_n = (__pyx_v_rows_view.shape[0]);
 
-  /* "monitor_kernels.pyx":886
+  /* "monitor_kernels.pyx":818
  *         cdef double last_corr, floor
  *         cdef bint comfortably_below
  *         cdef object keep = np.ones(n, dtype=np.uint8)             # <<<<<<<<<<<<<<
  *         cdef uint8_t[:] keep_view = keep
  *         cdef Py_ssize_t skipped = 0
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 886, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_np); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 818, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_ones); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 886, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_ones); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 818, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_n); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 886, __pyx_L1_error)
+  __pyx_t_1 = PyInt_FromSsize_t(__pyx_v_n); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 818, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 886, __pyx_L1_error)
+  __pyx_t_7 = PyTuple_New(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 818, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_GIVEREF(__pyx_t_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_1)) __PYX_ERR(0, 886, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_7, 0, __pyx_t_1)) __PYX_ERR(0, 818, __pyx_L1_error);
   __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 886, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 818, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 886, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_n_s_np); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 818, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
-  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_uint8); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 886, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_uint8); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 818, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 886, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_1, __pyx_n_s_dtype, __pyx_t_5) < 0) __PYX_ERR(0, 818, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_7, __pyx_t_1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 886, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_7, __pyx_t_1); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 818, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
@@ -32699,19 +31146,19 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
   __pyx_v_keep = __pyx_t_5;
   __pyx_t_5 = 0;
 
-  /* "monitor_kernels.pyx":887
+  /* "monitor_kernels.pyx":819
  *         cdef bint comfortably_below
  *         cdef object keep = np.ones(n, dtype=np.uint8)
  *         cdef uint8_t[:] keep_view = keep             # <<<<<<<<<<<<<<
  *         cdef Py_ssize_t skipped = 0
  * 
  */
-  __pyx_t_11 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_keep, PyBUF_WRITABLE); if (unlikely(!__pyx_t_11.memview)) __PYX_ERR(0, 887, __pyx_L1_error)
+  __pyx_t_11 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_keep, PyBUF_WRITABLE); if (unlikely(!__pyx_t_11.memview)) __PYX_ERR(0, 819, __pyx_L1_error)
   __pyx_v_keep_view = __pyx_t_11;
   __pyx_t_11.memview = NULL;
   __pyx_t_11.data = NULL;
 
-  /* "monitor_kernels.pyx":888
+  /* "monitor_kernels.pyx":820
  *         cdef object keep = np.ones(n, dtype=np.uint8)
  *         cdef uint8_t[:] keep_view = keep
  *         cdef Py_ssize_t skipped = 0             # <<<<<<<<<<<<<<
@@ -32720,79 +31167,79 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
  */
   __pyx_v_skipped = 0;
 
-  /* "monitor_kernels.pyx":890
+  /* "monitor_kernels.pyx":822
  *         cdef Py_ssize_t skipped = 0
  * 
  *         occupied = self._occupied_arr             # <<<<<<<<<<<<<<
  *         key_s1 = self._key_s1_arr
  *         key_s2 = self._key_s2_arr
  */
-  __pyx_t_11 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_self->_occupied_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_11.memview)) __PYX_ERR(0, 890, __pyx_L1_error)
+  __pyx_t_11 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(__pyx_v_self->_occupied_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_11.memview)) __PYX_ERR(0, 822, __pyx_L1_error)
   __pyx_v_occupied = __pyx_t_11;
   __pyx_t_11.memview = NULL;
   __pyx_t_11.data = NULL;
 
-  /* "monitor_kernels.pyx":891
+  /* "monitor_kernels.pyx":823
  * 
  *         occupied = self._occupied_arr
  *         key_s1 = self._key_s1_arr             # <<<<<<<<<<<<<<
  *         key_s2 = self._key_s2_arr
  *         key_lag = self._key_lag_arr
  */
-  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s1_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 891, __pyx_L1_error)
+  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s1_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 823, __pyx_L1_error)
   __pyx_v_key_s1 = __pyx_t_12;
   __pyx_t_12.memview = NULL;
   __pyx_t_12.data = NULL;
 
-  /* "monitor_kernels.pyx":892
+  /* "monitor_kernels.pyx":824
  *         occupied = self._occupied_arr
  *         key_s1 = self._key_s1_arr
  *         key_s2 = self._key_s2_arr             # <<<<<<<<<<<<<<
  *         key_lag = self._key_lag_arr
  *         corr_arr = self._corr_arr
  */
-  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s2_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 892, __pyx_L1_error)
+  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_s2_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 824, __pyx_L1_error)
   __pyx_v_key_s2 = __pyx_t_12;
   __pyx_t_12.memview = NULL;
   __pyx_t_12.data = NULL;
 
-  /* "monitor_kernels.pyx":893
+  /* "monitor_kernels.pyx":825
  *         key_s1 = self._key_s1_arr
  *         key_s2 = self._key_s2_arr
  *         key_lag = self._key_lag_arr             # <<<<<<<<<<<<<<
  *         corr_arr = self._corr_arr
  *         steps_arr = self._steps_arr
  */
-  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_lag_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 893, __pyx_L1_error)
+  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_key_lag_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 825, __pyx_L1_error)
   __pyx_v_key_lag = __pyx_t_12;
   __pyx_t_12.memview = NULL;
   __pyx_t_12.data = NULL;
 
-  /* "monitor_kernels.pyx":894
+  /* "monitor_kernels.pyx":826
  *         key_s2 = self._key_s2_arr
  *         key_lag = self._key_lag_arr
  *         corr_arr = self._corr_arr             # <<<<<<<<<<<<<<
  *         steps_arr = self._steps_arr
  *         floor = threshold - margin
  */
-  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(__pyx_v_self->_corr_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 894, __pyx_L1_error)
+  __pyx_t_13 = __Pyx_PyObject_to_MemoryviewSlice_ds_double(__pyx_v_self->_corr_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_13.memview)) __PYX_ERR(0, 826, __pyx_L1_error)
   __pyx_v_corr_arr = __pyx_t_13;
   __pyx_t_13.memview = NULL;
   __pyx_t_13.data = NULL;
 
-  /* "monitor_kernels.pyx":895
+  /* "monitor_kernels.pyx":827
  *         key_lag = self._key_lag_arr
  *         corr_arr = self._corr_arr
  *         steps_arr = self._steps_arr             # <<<<<<<<<<<<<<
  *         floor = threshold - margin
  * 
  */
-  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_steps_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 895, __pyx_L1_error)
+  __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(__pyx_v_self->_steps_arr, PyBUF_WRITABLE); if (unlikely(!__pyx_t_12.memview)) __PYX_ERR(0, 827, __pyx_L1_error)
   __pyx_v_steps_arr = __pyx_t_12;
   __pyx_t_12.memview = NULL;
   __pyx_t_12.data = NULL;
 
-  /* "monitor_kernels.pyx":896
+  /* "monitor_kernels.pyx":828
  *         corr_arr = self._corr_arr
  *         steps_arr = self._steps_arr
  *         floor = threshold - margin             # <<<<<<<<<<<<<<
@@ -32801,7 +31248,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
  */
   __pyx_v_floor = (__pyx_v_threshold - __pyx_v_margin);
 
-  /* "monitor_kernels.pyx":898
+  /* "monitor_kernels.pyx":830
  *         floor = threshold - margin
  * 
  *         for i in range(n):             # <<<<<<<<<<<<<<
@@ -32813,7 +31260,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
   for (__pyx_t_16 = 0; __pyx_t_16 < __pyx_t_15; __pyx_t_16+=1) {
     __pyx_v_i = __pyx_t_16;
 
-    /* "monitor_kernels.pyx":899
+    /* "monitor_kernels.pyx":831
  * 
  *         for i in range(n):
  *             s1 = rows_view[i, 0]             # <<<<<<<<<<<<<<
@@ -32824,7 +31271,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
     __pyx_t_18 = 0;
     __pyx_v_s1 = (*((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows_view.data + __pyx_t_17 * __pyx_v_rows_view.strides[0]) ) + __pyx_t_18 * __pyx_v_rows_view.strides[1]) )));
 
-    /* "monitor_kernels.pyx":900
+    /* "monitor_kernels.pyx":832
  *         for i in range(n):
  *             s1 = rows_view[i, 0]
  *             s2 = rows_view[i, 1]             # <<<<<<<<<<<<<<
@@ -32835,7 +31282,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
     __pyx_t_17 = 1;
     __pyx_v_s2 = (*((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows_view.data + __pyx_t_18 * __pyx_v_rows_view.strides[0]) ) + __pyx_t_17 * __pyx_v_rows_view.strides[1]) )));
 
-    /* "monitor_kernels.pyx":901
+    /* "monitor_kernels.pyx":833
  *             s1 = rows_view[i, 0]
  *             s2 = rows_view[i, 1]
  *             t1 = rows_view[i, 2]             # <<<<<<<<<<<<<<
@@ -32846,7 +31293,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
     __pyx_t_18 = 2;
     __pyx_v_t1 = (*((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows_view.data + __pyx_t_17 * __pyx_v_rows_view.strides[0]) ) + __pyx_t_18 * __pyx_v_rows_view.strides[1]) )));
 
-    /* "monitor_kernels.pyx":902
+    /* "monitor_kernels.pyx":834
  *             s2 = rows_view[i, 1]
  *             t1 = rows_view[i, 2]
  *             t2 = rows_view[i, 3]             # <<<<<<<<<<<<<<
@@ -32857,7 +31304,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
     __pyx_t_17 = 3;
     __pyx_v_t2 = (*((int64_t *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_rows_view.data + __pyx_t_18 * __pyx_v_rows_view.strides[0]) ) + __pyx_t_17 * __pyx_v_rows_view.strides[1]) )));
 
-    /* "monitor_kernels.pyx":903
+    /* "monitor_kernels.pyx":835
  *             t1 = rows_view[i, 2]
  *             t2 = rows_view[i, 3]
  *             lag = t1 - t2             # <<<<<<<<<<<<<<
@@ -32866,7 +31313,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
  */
     __pyx_v_lag = (__pyx_v_t1 - __pyx_v_t2);
 
-    /* "monitor_kernels.pyx":904
+    /* "monitor_kernels.pyx":836
  *             t2 = rows_view[i, 3]
  *             lag = t1 - t2
  *             if s1 == s2:             # <<<<<<<<<<<<<<
@@ -32876,7 +31323,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
     __pyx_t_19 = (__pyx_v_s1 == __pyx_v_s2);
     if (__pyx_t_19) {
 
-      /* "monitor_kernels.pyx":905
+      /* "monitor_kernels.pyx":837
  *             lag = t1 - t2
  *             if s1 == s2:
  *                 ns1 = s1             # <<<<<<<<<<<<<<
@@ -32885,7 +31332,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
  */
       __pyx_v_ns1 = __pyx_v_s1;
 
-      /* "monitor_kernels.pyx":906
+      /* "monitor_kernels.pyx":838
  *             if s1 == s2:
  *                 ns1 = s1
  *                 ns2 = s2             # <<<<<<<<<<<<<<
@@ -32894,7 +31341,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
  */
       __pyx_v_ns2 = __pyx_v_s2;
 
-      /* "monitor_kernels.pyx":907
+      /* "monitor_kernels.pyx":839
  *                 ns1 = s1
  *                 ns2 = s2
  *                 nlag = lag if lag >= 0 else -lag             # <<<<<<<<<<<<<<
@@ -32909,7 +31356,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
       }
       __pyx_v_nlag = __pyx_t_20;
 
-      /* "monitor_kernels.pyx":904
+      /* "monitor_kernels.pyx":836
  *             t2 = rows_view[i, 3]
  *             lag = t1 - t2
  *             if s1 == s2:             # <<<<<<<<<<<<<<
@@ -32919,7 +31366,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
       goto __pyx_L5;
     }
 
-    /* "monitor_kernels.pyx":908
+    /* "monitor_kernels.pyx":840
  *                 ns2 = s2
  *                 nlag = lag if lag >= 0 else -lag
  *             elif s1 < s2:             # <<<<<<<<<<<<<<
@@ -32929,7 +31376,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
     __pyx_t_19 = (__pyx_v_s1 < __pyx_v_s2);
     if (__pyx_t_19) {
 
-      /* "monitor_kernels.pyx":909
+      /* "monitor_kernels.pyx":841
  *                 nlag = lag if lag >= 0 else -lag
  *             elif s1 < s2:
  *                 ns1 = s1             # <<<<<<<<<<<<<<
@@ -32938,7 +31385,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
  */
       __pyx_v_ns1 = __pyx_v_s1;
 
-      /* "monitor_kernels.pyx":910
+      /* "monitor_kernels.pyx":842
  *             elif s1 < s2:
  *                 ns1 = s1
  *                 ns2 = s2             # <<<<<<<<<<<<<<
@@ -32947,7 +31394,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
  */
       __pyx_v_ns2 = __pyx_v_s2;
 
-      /* "monitor_kernels.pyx":911
+      /* "monitor_kernels.pyx":843
  *                 ns1 = s1
  *                 ns2 = s2
  *                 nlag = lag             # <<<<<<<<<<<<<<
@@ -32956,7 +31403,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
  */
       __pyx_v_nlag = __pyx_v_lag;
 
-      /* "monitor_kernels.pyx":908
+      /* "monitor_kernels.pyx":840
  *                 ns2 = s2
  *                 nlag = lag if lag >= 0 else -lag
  *             elif s1 < s2:             # <<<<<<<<<<<<<<
@@ -32966,7 +31413,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
       goto __pyx_L5;
     }
 
-    /* "monitor_kernels.pyx":913
+    /* "monitor_kernels.pyx":845
  *                 nlag = lag
  *             else:
  *                 ns1 = s2             # <<<<<<<<<<<<<<
@@ -32976,7 +31423,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
     /*else*/ {
       __pyx_v_ns1 = __pyx_v_s2;
 
-      /* "monitor_kernels.pyx":914
+      /* "monitor_kernels.pyx":846
  *             else:
  *                 ns1 = s2
  *                 ns2 = s1             # <<<<<<<<<<<<<<
@@ -32985,7 +31432,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
  */
       __pyx_v_ns2 = __pyx_v_s1;
 
-      /* "monitor_kernels.pyx":915
+      /* "monitor_kernels.pyx":847
  *                 ns1 = s2
  *                 ns2 = s1
  *                 nlag = -lag             # <<<<<<<<<<<<<<
@@ -32996,17 +31443,17 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
     }
     __pyx_L5:;
 
-    /* "monitor_kernels.pyx":916
+    /* "monitor_kernels.pyx":848
  *                 ns2 = s1
  *                 nlag = -lag
  *             idx = self._find_slot(ns1, ns2, nlag)             # <<<<<<<<<<<<<<
  *             if occupied[idx] == 0:
  *                 continue
  */
-    __pyx_t_21 = ((struct __pyx_vtabstruct_15monitor_kernels_SkipAheadState *)__pyx_v_self->__pyx_vtab)->_find_slot(__pyx_v_self, __pyx_v_ns1, __pyx_v_ns2, __pyx_v_nlag); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 916, __pyx_L1_error)
+    __pyx_t_21 = ((struct __pyx_vtabstruct_15monitor_kernels_SkipAheadState *)__pyx_v_self->__pyx_vtab)->_find_slot(__pyx_v_self, __pyx_v_ns1, __pyx_v_ns2, __pyx_v_nlag); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 848, __pyx_L1_error)
     __pyx_v_idx = __pyx_t_21;
 
-    /* "monitor_kernels.pyx":917
+    /* "monitor_kernels.pyx":849
  *                 nlag = -lag
  *             idx = self._find_slot(ns1, ns2, nlag)
  *             if occupied[idx] == 0:             # <<<<<<<<<<<<<<
@@ -33017,7 +31464,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
     __pyx_t_19 = ((*((uint8_t *) ( /* dim=0 */ (__pyx_v_occupied.data + __pyx_t_17 * __pyx_v_occupied.strides[0]) ))) == 0);
     if (__pyx_t_19) {
 
-      /* "monitor_kernels.pyx":918
+      /* "monitor_kernels.pyx":850
  *             idx = self._find_slot(ns1, ns2, nlag)
  *             if occupied[idx] == 0:
  *                 continue             # <<<<<<<<<<<<<<
@@ -33026,7 +31473,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
  */
       goto __pyx_L3_continue;
 
-      /* "monitor_kernels.pyx":917
+      /* "monitor_kernels.pyx":849
  *                 nlag = -lag
  *             idx = self._find_slot(ns1, ns2, nlag)
  *             if occupied[idx] == 0:             # <<<<<<<<<<<<<<
@@ -33035,7 +31482,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
  */
     }
 
-    /* "monitor_kernels.pyx":919
+    /* "monitor_kernels.pyx":851
  *             if occupied[idx] == 0:
  *                 continue
  *             last_corr = corr_arr[idx]             # <<<<<<<<<<<<<<
@@ -33045,7 +31492,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
     __pyx_t_17 = __pyx_v_idx;
     __pyx_v_last_corr = (*((double *) ( /* dim=0 */ (__pyx_v_corr_arr.data + __pyx_t_17 * __pyx_v_corr_arr.strides[0]) )));
 
-    /* "monitor_kernels.pyx":920
+    /* "monitor_kernels.pyx":852
  *                 continue
  *             last_corr = corr_arr[idx]
  *             if neg_corr:             # <<<<<<<<<<<<<<
@@ -33054,7 +31501,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
  */
     if (__pyx_v_neg_corr) {
 
-      /* "monitor_kernels.pyx":921
+      /* "monitor_kernels.pyx":853
  *             last_corr = corr_arr[idx]
  *             if neg_corr:
  *                 comfortably_below = (last_corr if last_corr >= 0 else -last_corr) < floor             # <<<<<<<<<<<<<<
@@ -33069,7 +31516,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
       }
       __pyx_v_comfortably_below = (__pyx_t_22 < __pyx_v_floor);
 
-      /* "monitor_kernels.pyx":920
+      /* "monitor_kernels.pyx":852
  *                 continue
  *             last_corr = corr_arr[idx]
  *             if neg_corr:             # <<<<<<<<<<<<<<
@@ -33079,7 +31526,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
       goto __pyx_L7;
     }
 
-    /* "monitor_kernels.pyx":923
+    /* "monitor_kernels.pyx":855
  *                 comfortably_below = (last_corr if last_corr >= 0 else -last_corr) < floor
  *             else:
  *                 comfortably_below = last_corr < floor             # <<<<<<<<<<<<<<
@@ -33091,7 +31538,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
     }
     __pyx_L7:;
 
-    /* "monitor_kernels.pyx":924
+    /* "monitor_kernels.pyx":856
  *             else:
  *                 comfortably_below = last_corr < floor
  *             if comfortably_below and steps_arr[idx] < max_steps:             # <<<<<<<<<<<<<<
@@ -33109,7 +31556,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
     __pyx_L9_bool_binop_done:;
     if (__pyx_t_19) {
 
-      /* "monitor_kernels.pyx":925
+      /* "monitor_kernels.pyx":857
  *                 comfortably_below = last_corr < floor
  *             if comfortably_below and steps_arr[idx] < max_steps:
  *                 keep_view[i] = <uint8_t>0             # <<<<<<<<<<<<<<
@@ -33119,7 +31566,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
       __pyx_t_17 = __pyx_v_i;
       *((uint8_t *) ( /* dim=0 */ (__pyx_v_keep_view.data + __pyx_t_17 * __pyx_v_keep_view.strides[0]) )) = ((uint8_t)0);
 
-      /* "monitor_kernels.pyx":926
+      /* "monitor_kernels.pyx":858
  *             if comfortably_below and steps_arr[idx] < max_steps:
  *                 keep_view[i] = <uint8_t>0
  *                 steps_arr[idx] += 1             # <<<<<<<<<<<<<<
@@ -33129,7 +31576,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
       __pyx_t_17 = __pyx_v_idx;
       *((int64_t *) ( /* dim=0 */ (__pyx_v_steps_arr.data + __pyx_t_17 * __pyx_v_steps_arr.strides[0]) )) += 1;
 
-      /* "monitor_kernels.pyx":927
+      /* "monitor_kernels.pyx":859
  *                 keep_view[i] = <uint8_t>0
  *                 steps_arr[idx] += 1
  *                 skipped += 1             # <<<<<<<<<<<<<<
@@ -33138,7 +31585,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
  */
       __pyx_v_skipped = (__pyx_v_skipped + 1);
 
-      /* "monitor_kernels.pyx":924
+      /* "monitor_kernels.pyx":856
  *             else:
  *                 comfortably_below = last_corr < floor
  *             if comfortably_below and steps_arr[idx] < max_steps:             # <<<<<<<<<<<<<<
@@ -33149,7 +31596,7 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
     __pyx_L3_continue:;
   }
 
-  /* "monitor_kernels.pyx":928
+  /* "monitor_kernels.pyx":860
  *                 steps_arr[idx] += 1
  *                 skipped += 1
  *         return keep, skipped             # <<<<<<<<<<<<<<
@@ -33157,21 +31604,21 @@ static PyObject *__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(struct __
  *     cpdef Py_ssize_t size(self):
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_skipped); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 928, __pyx_L1_error)
+  __pyx_t_5 = PyInt_FromSsize_t(__pyx_v_skipped); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 860, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
-  __pyx_t_1 = PyTuple_New(2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 928, __pyx_L1_error)
+  __pyx_t_1 = PyTuple_New(2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 860, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_INCREF(__pyx_v_keep);
   __Pyx_GIVEREF(__pyx_v_keep);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_1, 0, __pyx_v_keep)) __PYX_ERR(0, 928, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_1, 0, __pyx_v_keep)) __PYX_ERR(0, 860, __pyx_L1_error);
   __Pyx_GIVEREF(__pyx_t_5);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_1, 1, __pyx_t_5)) __PYX_ERR(0, 928, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_1, 1, __pyx_t_5)) __PYX_ERR(0, 860, __pyx_L1_error);
   __pyx_t_5 = 0;
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
   goto __pyx_L0;
 
-  /* "monitor_kernels.pyx":873
+  /* "monitor_kernels.pyx":805
  *             steps_arr[idx] = 0
  * 
  *     cpdef object prune_mask(self, np.ndarray rows, double threshold, double margin, int64_t max_steps, bint neg_corr):             # <<<<<<<<<<<<<<
@@ -33275,7 +31722,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[0]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 873, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 805, __pyx_L3_error)
         else goto __pyx_L5_argtuple_error;
         CYTHON_FALLTHROUGH;
         case  1:
@@ -33283,9 +31730,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[1]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 873, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 805, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("prune_mask", 1, 5, 5, 1); __PYX_ERR(0, 873, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("prune_mask", 1, 5, 5, 1); __PYX_ERR(0, 805, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  2:
@@ -33293,9 +31740,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[2]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 873, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 805, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("prune_mask", 1, 5, 5, 2); __PYX_ERR(0, 873, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("prune_mask", 1, 5, 5, 2); __PYX_ERR(0, 805, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  3:
@@ -33303,9 +31750,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[3]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 873, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 805, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("prune_mask", 1, 5, 5, 3); __PYX_ERR(0, 873, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("prune_mask", 1, 5, 5, 3); __PYX_ERR(0, 805, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  4:
@@ -33313,14 +31760,14 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[4]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 873, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 805, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("prune_mask", 1, 5, 5, 4); __PYX_ERR(0, 873, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("prune_mask", 1, 5, 5, 4); __PYX_ERR(0, 805, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
         const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "prune_mask") < 0)) __PYX_ERR(0, 873, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "prune_mask") < 0)) __PYX_ERR(0, 805, __pyx_L3_error)
       }
     } else if (unlikely(__pyx_nargs != 5)) {
       goto __pyx_L5_argtuple_error;
@@ -33332,14 +31779,14 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       values[4] = __Pyx_Arg_FASTCALL(__pyx_args, 4);
     }
     __pyx_v_rows = ((PyArrayObject *)values[0]);
-    __pyx_v_threshold = __pyx_PyFloat_AsDouble(values[1]); if (unlikely((__pyx_v_threshold == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 873, __pyx_L3_error)
-    __pyx_v_margin = __pyx_PyFloat_AsDouble(values[2]); if (unlikely((__pyx_v_margin == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 873, __pyx_L3_error)
-    __pyx_v_max_steps = __Pyx_PyInt_As_int64_t(values[3]); if (unlikely((__pyx_v_max_steps == ((int64_t)-1)) && PyErr_Occurred())) __PYX_ERR(0, 873, __pyx_L3_error)
-    __pyx_v_neg_corr = __Pyx_PyObject_IsTrue(values[4]); if (unlikely((__pyx_v_neg_corr == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 873, __pyx_L3_error)
+    __pyx_v_threshold = __pyx_PyFloat_AsDouble(values[1]); if (unlikely((__pyx_v_threshold == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 805, __pyx_L3_error)
+    __pyx_v_margin = __pyx_PyFloat_AsDouble(values[2]); if (unlikely((__pyx_v_margin == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 805, __pyx_L3_error)
+    __pyx_v_max_steps = __Pyx_PyInt_As_int64_t(values[3]); if (unlikely((__pyx_v_max_steps == ((int64_t)-1)) && PyErr_Occurred())) __PYX_ERR(0, 805, __pyx_L3_error)
+    __pyx_v_neg_corr = __Pyx_PyObject_IsTrue(values[4]); if (unlikely((__pyx_v_neg_corr == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 805, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("prune_mask", 1, 5, 5, __pyx_nargs); __PYX_ERR(0, 873, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("prune_mask", 1, 5, 5, __pyx_nargs); __PYX_ERR(0, 805, __pyx_L3_error)
   __pyx_L6_skip:;
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
@@ -33353,7 +31800,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_rows), __pyx_ptype_5numpy_ndarray, 1, "rows", 0))) __PYX_ERR(0, 873, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_rows), __pyx_ptype_5numpy_ndarray, 1, "rows", 0))) __PYX_ERR(0, 805, __pyx_L1_error)
   __pyx_r = __pyx_pf_15monitor_kernels_14SkipAheadState_4prune_mask(((struct __pyx_obj_15monitor_kernels_SkipAheadState *)__pyx_v_self), __pyx_v_rows, __pyx_v_threshold, __pyx_v_margin, __pyx_v_max_steps, __pyx_v_neg_corr);
 
   /* function exit code */
@@ -33380,7 +31827,7 @@ static PyObject *__pyx_pf_15monitor_kernels_14SkipAheadState_4prune_mask(struct 
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("prune_mask", 1);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(__pyx_v_self, __pyx_v_rows, __pyx_v_threshold, __pyx_v_margin, __pyx_v_max_steps, __pyx_v_neg_corr, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 873, __pyx_L1_error)
+  __pyx_t_1 = __pyx_f_15monitor_kernels_14SkipAheadState_prune_mask(__pyx_v_self, __pyx_v_rows, __pyx_v_threshold, __pyx_v_margin, __pyx_v_max_steps, __pyx_v_neg_corr, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 805, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
@@ -33397,7 +31844,7 @@ static PyObject *__pyx_pf_15monitor_kernels_14SkipAheadState_4prune_mask(struct 
   return __pyx_r;
 }
 
-/* "monitor_kernels.pyx":930
+/* "monitor_kernels.pyx":862
  *         return keep, skipped
  * 
  *     cpdef Py_ssize_t size(self):             # <<<<<<<<<<<<<<
@@ -33433,7 +31880,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_14SkipAheadState_size(struct __pyx_o
     if (unlikely(!__Pyx_object_dict_version_matches(((PyObject *)__pyx_v_self), __pyx_tp_dict_version, __pyx_obj_dict_version))) {
       PY_UINT64_T __pyx_typedict_guard = __Pyx_get_tp_dict_version(((PyObject *)__pyx_v_self));
       #endif
-      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_size); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 930, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_GetAttrStr(((PyObject *)__pyx_v_self), __pyx_n_s_size); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 862, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
       if (!__Pyx_IsSameCFunction(__pyx_t_1, (void*) __pyx_pw_15monitor_kernels_14SkipAheadState_7size)) {
         __Pyx_INCREF(__pyx_t_1);
@@ -33455,11 +31902,11 @@ static Py_ssize_t __pyx_f_15monitor_kernels_14SkipAheadState_size(struct __pyx_o
           PyObject *__pyx_callargs[2] = {__pyx_t_4, NULL};
           __pyx_t_2 = __Pyx_PyObject_FastCall(__pyx_t_3, __pyx_callargs+1-__pyx_t_5, 0+__pyx_t_5);
           __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 930, __pyx_L1_error)
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 862, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         }
-        __pyx_t_6 = __Pyx_PyIndex_AsSsize_t(__pyx_t_2); if (unlikely((__pyx_t_6 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 930, __pyx_L1_error)
+        __pyx_t_6 = __Pyx_PyIndex_AsSsize_t(__pyx_t_2); if (unlikely((__pyx_t_6 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 862, __pyx_L1_error)
         __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
         __pyx_r = __pyx_t_6;
         __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -33478,7 +31925,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_14SkipAheadState_size(struct __pyx_o
     #endif
   }
 
-  /* "monitor_kernels.pyx":931
+  /* "monitor_kernels.pyx":863
  * 
  *     cpdef Py_ssize_t size(self):
  *         return self._size             # <<<<<<<<<<<<<<
@@ -33486,7 +31933,7 @@ static Py_ssize_t __pyx_f_15monitor_kernels_14SkipAheadState_size(struct __pyx_o
   __pyx_r = __pyx_v_self->_size;
   goto __pyx_L0;
 
-  /* "monitor_kernels.pyx":930
+  /* "monitor_kernels.pyx":862
  *         return keep, skipped
  * 
  *     cpdef Py_ssize_t size(self):             # <<<<<<<<<<<<<<
@@ -33557,8 +32004,8 @@ static PyObject *__pyx_pf_15monitor_kernels_14SkipAheadState_6size(struct __pyx_
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("size", 1);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __pyx_f_15monitor_kernels_14SkipAheadState_size(__pyx_v_self, 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 930, __pyx_L1_error)
-  __pyx_t_2 = PyInt_FromSsize_t(__pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 930, __pyx_L1_error)
+  __pyx_t_1 = __pyx_f_15monitor_kernels_14SkipAheadState_size(__pyx_v_self, 1); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 862, __pyx_L1_error)
+  __pyx_t_2 = PyInt_FromSsize_t(__pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 862, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_r = __pyx_t_2;
   __pyx_t_2 = 0;
@@ -33806,23 +32253,10 @@ static PyObject *__pyx_tp_new_15monitor_kernels_NumericMonitorState(PyTypeObject
   #endif
   p = ((struct __pyx_obj_15monitor_kernels_NumericMonitorState *)o);
   p->__pyx_vtab = __pyx_vtabptr_15monitor_kernels_NumericMonitorState;
-  p->_occupied_arr = Py_None; Py_INCREF(Py_None);
-  p->_active_arr = Py_None; Py_INCREF(Py_None);
+  p->_slots_buf = Py_None; Py_INCREF(Py_None);
   p->_active_slots_arr = Py_None; Py_INCREF(Py_None);
-  p->_active_pos_arr = Py_None; Py_INCREF(Py_None);
   p->_frontier_slots_arr = Py_None; Py_INCREF(Py_None);
-  p->_frontier_pos_arr = Py_None; Py_INCREF(Py_None);
   p->_next_frontier_slots_arr = Py_None; Py_INCREF(Py_None);
-  p->_queued_step_arr = Py_None; Py_INCREF(Py_None);
-  p->_key_s1_arr = Py_None; Py_INCREF(Py_None);
-  p->_key_s2_arr = Py_None; Py_INCREF(Py_None);
-  p->_key_lag_arr = Py_None; Py_INCREF(Py_None);
-  p->_t1_arr = Py_None; Py_INCREF(Py_None);
-  p->_t2_arr = Py_None; Py_INCREF(Py_None);
-  p->_window_arr = Py_None; Py_INCREF(Py_None);
-  p->_length_arr = Py_None; Py_INCREF(Py_None);
-  p->_sign_arr = Py_None; Py_INCREF(Py_None);
-  p->_seen_step_arr = Py_None; Py_INCREF(Py_None);
   p->_status_rows_arr = Py_None; Py_INCREF(Py_None);
   p->_anomaly_rows_arr = Py_None; Py_INCREF(Py_None);
   if (unlikely(__pyx_pw_15monitor_kernels_19NumericMonitorState_1__cinit__(o, a, k) < 0)) goto bad;
@@ -33842,23 +32276,10 @@ static void __pyx_tp_dealloc_15monitor_kernels_NumericMonitorState(PyObject *o) 
   }
   #endif
   PyObject_GC_UnTrack(o);
-  Py_CLEAR(p->_occupied_arr);
-  Py_CLEAR(p->_active_arr);
+  Py_CLEAR(p->_slots_buf);
   Py_CLEAR(p->_active_slots_arr);
-  Py_CLEAR(p->_active_pos_arr);
   Py_CLEAR(p->_frontier_slots_arr);
-  Py_CLEAR(p->_frontier_pos_arr);
   Py_CLEAR(p->_next_frontier_slots_arr);
-  Py_CLEAR(p->_queued_step_arr);
-  Py_CLEAR(p->_key_s1_arr);
-  Py_CLEAR(p->_key_s2_arr);
-  Py_CLEAR(p->_key_lag_arr);
-  Py_CLEAR(p->_t1_arr);
-  Py_CLEAR(p->_t2_arr);
-  Py_CLEAR(p->_window_arr);
-  Py_CLEAR(p->_length_arr);
-  Py_CLEAR(p->_sign_arr);
-  Py_CLEAR(p->_seen_step_arr);
   Py_CLEAR(p->_status_rows_arr);
   Py_CLEAR(p->_anomaly_rows_arr);
   #if CYTHON_USE_TYPE_SLOTS || CYTHON_COMPILING_IN_PYPY
@@ -33874,56 +32295,17 @@ static void __pyx_tp_dealloc_15monitor_kernels_NumericMonitorState(PyObject *o) 
 static int __pyx_tp_traverse_15monitor_kernels_NumericMonitorState(PyObject *o, visitproc v, void *a) {
   int e;
   struct __pyx_obj_15monitor_kernels_NumericMonitorState *p = (struct __pyx_obj_15monitor_kernels_NumericMonitorState *)o;
-  if (p->_occupied_arr) {
-    e = (*v)(p->_occupied_arr, a); if (e) return e;
-  }
-  if (p->_active_arr) {
-    e = (*v)(p->_active_arr, a); if (e) return e;
+  if (p->_slots_buf) {
+    e = (*v)(p->_slots_buf, a); if (e) return e;
   }
   if (p->_active_slots_arr) {
     e = (*v)(p->_active_slots_arr, a); if (e) return e;
   }
-  if (p->_active_pos_arr) {
-    e = (*v)(p->_active_pos_arr, a); if (e) return e;
-  }
   if (p->_frontier_slots_arr) {
     e = (*v)(p->_frontier_slots_arr, a); if (e) return e;
   }
-  if (p->_frontier_pos_arr) {
-    e = (*v)(p->_frontier_pos_arr, a); if (e) return e;
-  }
   if (p->_next_frontier_slots_arr) {
     e = (*v)(p->_next_frontier_slots_arr, a); if (e) return e;
-  }
-  if (p->_queued_step_arr) {
-    e = (*v)(p->_queued_step_arr, a); if (e) return e;
-  }
-  if (p->_key_s1_arr) {
-    e = (*v)(p->_key_s1_arr, a); if (e) return e;
-  }
-  if (p->_key_s2_arr) {
-    e = (*v)(p->_key_s2_arr, a); if (e) return e;
-  }
-  if (p->_key_lag_arr) {
-    e = (*v)(p->_key_lag_arr, a); if (e) return e;
-  }
-  if (p->_t1_arr) {
-    e = (*v)(p->_t1_arr, a); if (e) return e;
-  }
-  if (p->_t2_arr) {
-    e = (*v)(p->_t2_arr, a); if (e) return e;
-  }
-  if (p->_window_arr) {
-    e = (*v)(p->_window_arr, a); if (e) return e;
-  }
-  if (p->_length_arr) {
-    e = (*v)(p->_length_arr, a); if (e) return e;
-  }
-  if (p->_sign_arr) {
-    e = (*v)(p->_sign_arr, a); if (e) return e;
-  }
-  if (p->_seen_step_arr) {
-    e = (*v)(p->_seen_step_arr, a); if (e) return e;
   }
   if (p->_status_rows_arr) {
     e = (*v)(p->_status_rows_arr, a); if (e) return e;
@@ -33937,56 +32319,17 @@ static int __pyx_tp_traverse_15monitor_kernels_NumericMonitorState(PyObject *o, 
 static int __pyx_tp_clear_15monitor_kernels_NumericMonitorState(PyObject *o) {
   PyObject* tmp;
   struct __pyx_obj_15monitor_kernels_NumericMonitorState *p = (struct __pyx_obj_15monitor_kernels_NumericMonitorState *)o;
-  tmp = ((PyObject*)p->_occupied_arr);
-  p->_occupied_arr = Py_None; Py_INCREF(Py_None);
-  Py_XDECREF(tmp);
-  tmp = ((PyObject*)p->_active_arr);
-  p->_active_arr = Py_None; Py_INCREF(Py_None);
+  tmp = ((PyObject*)p->_slots_buf);
+  p->_slots_buf = Py_None; Py_INCREF(Py_None);
   Py_XDECREF(tmp);
   tmp = ((PyObject*)p->_active_slots_arr);
   p->_active_slots_arr = Py_None; Py_INCREF(Py_None);
   Py_XDECREF(tmp);
-  tmp = ((PyObject*)p->_active_pos_arr);
-  p->_active_pos_arr = Py_None; Py_INCREF(Py_None);
-  Py_XDECREF(tmp);
   tmp = ((PyObject*)p->_frontier_slots_arr);
   p->_frontier_slots_arr = Py_None; Py_INCREF(Py_None);
   Py_XDECREF(tmp);
-  tmp = ((PyObject*)p->_frontier_pos_arr);
-  p->_frontier_pos_arr = Py_None; Py_INCREF(Py_None);
-  Py_XDECREF(tmp);
   tmp = ((PyObject*)p->_next_frontier_slots_arr);
   p->_next_frontier_slots_arr = Py_None; Py_INCREF(Py_None);
-  Py_XDECREF(tmp);
-  tmp = ((PyObject*)p->_queued_step_arr);
-  p->_queued_step_arr = Py_None; Py_INCREF(Py_None);
-  Py_XDECREF(tmp);
-  tmp = ((PyObject*)p->_key_s1_arr);
-  p->_key_s1_arr = Py_None; Py_INCREF(Py_None);
-  Py_XDECREF(tmp);
-  tmp = ((PyObject*)p->_key_s2_arr);
-  p->_key_s2_arr = Py_None; Py_INCREF(Py_None);
-  Py_XDECREF(tmp);
-  tmp = ((PyObject*)p->_key_lag_arr);
-  p->_key_lag_arr = Py_None; Py_INCREF(Py_None);
-  Py_XDECREF(tmp);
-  tmp = ((PyObject*)p->_t1_arr);
-  p->_t1_arr = Py_None; Py_INCREF(Py_None);
-  Py_XDECREF(tmp);
-  tmp = ((PyObject*)p->_t2_arr);
-  p->_t2_arr = Py_None; Py_INCREF(Py_None);
-  Py_XDECREF(tmp);
-  tmp = ((PyObject*)p->_window_arr);
-  p->_window_arr = Py_None; Py_INCREF(Py_None);
-  Py_XDECREF(tmp);
-  tmp = ((PyObject*)p->_length_arr);
-  p->_length_arr = Py_None; Py_INCREF(Py_None);
-  Py_XDECREF(tmp);
-  tmp = ((PyObject*)p->_sign_arr);
-  p->_sign_arr = Py_None; Py_INCREF(Py_None);
-  Py_XDECREF(tmp);
-  tmp = ((PyObject*)p->_seen_step_arr);
-  p->_seen_step_arr = Py_None; Py_INCREF(Py_None);
   Py_XDECREF(tmp);
   tmp = ((PyObject*)p->_status_rows_arr);
   p->_status_rows_arr = Py_None; Py_INCREF(Py_None);
@@ -35310,6 +33653,7 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_NumericMonitorState_profile_snap, __pyx_k_NumericMonitorState_profile_snap, sizeof(__pyx_k_NumericMonitorState_profile_snap), 0, 0, 1, 1},
     {&__pyx_n_s_NumericMonitorState_reset, __pyx_k_NumericMonitorState_reset, sizeof(__pyx_k_NumericMonitorState_reset), 0, 0, 1, 1},
     {&__pyx_n_s_NumericMonitorState_row_branch_s, __pyx_k_NumericMonitorState_row_branch_s, sizeof(__pyx_k_NumericMonitorState_row_branch_s), 0, 0, 1, 1},
+    {&__pyx_kp_u_NumericMonitorState_series_id_ti, __pyx_k_NumericMonitorState_series_id_ti, sizeof(__pyx_k_NumericMonitorState_series_id_ti), 0, 1, 0, 0},
     {&__pyx_n_s_NumericMonitorState_take_anomaly, __pyx_k_NumericMonitorState_take_anomaly, sizeof(__pyx_k_NumericMonitorState_take_anomaly), 0, 0, 1, 1},
     {&__pyx_n_s_NumericMonitorState_take_status, __pyx_k_NumericMonitorState_take_status, sizeof(__pyx_k_NumericMonitorState_take_status), 0, 0, 1, 1},
     {&__pyx_n_s_NumericMonitorState_update, __pyx_k_NumericMonitorState_update, sizeof(__pyx_k_NumericMonitorState_update), 0, 0, 1, 1},
@@ -35369,7 +33713,6 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_format, __pyx_k_format, sizeof(__pyx_k_format), 0, 0, 1, 1},
     {&__pyx_n_s_fortran, __pyx_k_fortran, sizeof(__pyx_k_fortran), 0, 0, 1, 1},
     {&__pyx_n_u_fortran, __pyx_k_fortran, sizeof(__pyx_k_fortran), 0, 1, 0, 1},
-    {&__pyx_n_s_full, __pyx_k_full, sizeof(__pyx_k_full), 0, 0, 1, 1},
     {&__pyx_kp_u_gc, __pyx_k_gc, sizeof(__pyx_k_gc), 0, 1, 0, 0},
     {&__pyx_n_s_getstate, __pyx_k_getstate, sizeof(__pyx_k_getstate), 0, 0, 1, 1},
     {&__pyx_kp_u_got, __pyx_k_got, sizeof(__pyx_k_got), 0, 1, 0, 0},
@@ -35410,6 +33753,7 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_pending_status_count, __pyx_k_pending_status_count, sizeof(__pyx_k_pending_status_count), 0, 0, 1, 1},
     {&__pyx_n_s_perf_counter, __pyx_k_perf_counter, sizeof(__pyx_k_perf_counter), 0, 0, 1, 1},
     {&__pyx_n_s_pickle, __pyx_k_pickle, sizeof(__pyx_k_pickle), 0, 0, 1, 1},
+    {&__pyx_n_s_prefetch_dist, __pyx_k_prefetch_dist, sizeof(__pyx_k_prefetch_dist), 0, 0, 1, 1},
     {&__pyx_n_s_profile_snapshot, __pyx_k_profile_snapshot, sizeof(__pyx_k_profile_snapshot), 0, 0, 1, 1},
     {&__pyx_n_s_prune_mask, __pyx_k_prune_mask, sizeof(__pyx_k_prune_mask), 0, 0, 1, 1},
     {&__pyx_n_s_pyx_PickleError, __pyx_k_pyx_PickleError, sizeof(__pyx_k_pyx_PickleError), 0, 0, 1, 1},
@@ -35464,10 +33808,10 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
 }
 /* #### Code section: cached_builtins ### */
 static CYTHON_SMALL_CODE int __Pyx_InitCachedBuiltins(void) {
-  __pyx_builtin_range = __Pyx_GetBuiltinName(__pyx_n_s_range); if (!__pyx_builtin_range) __PYX_ERR(0, 236, __pyx_L1_error)
+  __pyx_builtin_range = __Pyx_GetBuiltinName(__pyx_n_s_range); if (!__pyx_builtin_range) __PYX_ERR(0, 161, __pyx_L1_error)
+  __pyx_builtin_ValueError = __Pyx_GetBuiltinName(__pyx_n_s_ValueError); if (!__pyx_builtin_ValueError) __PYX_ERR(0, 436, __pyx_L1_error)
   __pyx_builtin_TypeError = __Pyx_GetBuiltinName(__pyx_n_s_TypeError); if (!__pyx_builtin_TypeError) __PYX_ERR(1, 2, __pyx_L1_error)
   __pyx_builtin___import__ = __Pyx_GetBuiltinName(__pyx_n_s_import); if (!__pyx_builtin___import__) __PYX_ERR(1, 100, __pyx_L1_error)
-  __pyx_builtin_ValueError = __Pyx_GetBuiltinName(__pyx_n_s_ValueError); if (!__pyx_builtin_ValueError) __PYX_ERR(1, 141, __pyx_L1_error)
   __pyx_builtin_MemoryError = __Pyx_GetBuiltinName(__pyx_n_s_MemoryError); if (!__pyx_builtin_MemoryError) __PYX_ERR(1, 156, __pyx_L1_error)
   __pyx_builtin_enumerate = __Pyx_GetBuiltinName(__pyx_n_s_enumerate); if (!__pyx_builtin_enumerate) __PYX_ERR(1, 159, __pyx_L1_error)
   __pyx_builtin_AssertionError = __Pyx_GetBuiltinName(__pyx_n_s_AssertionError); if (!__pyx_builtin_AssertionError) __PYX_ERR(1, 373, __pyx_L1_error)
@@ -35543,31 +33887,31 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
   __Pyx_GOTREF(__pyx_tuple__10);
   __Pyx_GIVEREF(__pyx_tuple__10);
 
-  /* "monitor_kernels.pyx":697
+  /* "monitor_kernels.pyx":629
  *         cdef object out
  *         if self._status_count <= 0:
  *             return np.empty((0, 7), dtype=np.int64)             # <<<<<<<<<<<<<<
  *         out = np.ascontiguousarray(self._status_rows_arr[:self._status_count, :], dtype=np.int64)
  *         self._status_count = 0
  */
-  __pyx_tuple__11 = PyTuple_Pack(2, __pyx_int_0, __pyx_int_7); if (unlikely(!__pyx_tuple__11)) __PYX_ERR(0, 697, __pyx_L1_error)
+  __pyx_tuple__11 = PyTuple_Pack(2, __pyx_int_0, __pyx_int_7); if (unlikely(!__pyx_tuple__11)) __PYX_ERR(0, 629, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__11);
   __Pyx_GIVEREF(__pyx_tuple__11);
-  __pyx_tuple__12 = PyTuple_Pack(1, __pyx_tuple__11); if (unlikely(!__pyx_tuple__12)) __PYX_ERR(0, 697, __pyx_L1_error)
+  __pyx_tuple__12 = PyTuple_Pack(1, __pyx_tuple__11); if (unlikely(!__pyx_tuple__12)) __PYX_ERR(0, 629, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__12);
   __Pyx_GIVEREF(__pyx_tuple__12);
 
-  /* "monitor_kernels.pyx":705
+  /* "monitor_kernels.pyx":637
  *         cdef object out
  *         if self._anomaly_count <= 0:
  *             return np.empty((0, 5), dtype=np.int64)             # <<<<<<<<<<<<<<
  *         out = np.ascontiguousarray(self._anomaly_rows_arr[:self._anomaly_count, :], dtype=np.int64)
  *         self._anomaly_count = 0
  */
-  __pyx_tuple__13 = PyTuple_Pack(2, __pyx_int_0, __pyx_int_5); if (unlikely(!__pyx_tuple__13)) __PYX_ERR(0, 705, __pyx_L1_error)
+  __pyx_tuple__13 = PyTuple_Pack(2, __pyx_int_0, __pyx_int_5); if (unlikely(!__pyx_tuple__13)) __PYX_ERR(0, 637, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__13);
   __Pyx_GIVEREF(__pyx_tuple__13);
-  __pyx_tuple__14 = PyTuple_Pack(1, __pyx_tuple__13); if (unlikely(!__pyx_tuple__14)) __PYX_ERR(0, 705, __pyx_L1_error)
+  __pyx_tuple__14 = PyTuple_Pack(1, __pyx_tuple__13); if (unlikely(!__pyx_tuple__14)) __PYX_ERR(0, 637, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__14);
   __Pyx_GIVEREF(__pyx_tuple__14);
 
@@ -35672,143 +34016,143 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
   __Pyx_GIVEREF(__pyx_tuple__24);
   __pyx_codeobj__25 = (PyObject*)__Pyx_PyCode_New(3, 0, 0, 5, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__24, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_stringsource, __pyx_n_s_pyx_unpickle_Enum, 1, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__25)) __PYX_ERR(1, 1, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":125
- *         self._anomaly_rows_arr = np.empty((self._anomaly_capacity, 5), dtype=np.int64)
+  /* "monitor_kernels.pyx":165
+ *             self._slots[i].frontier_pos = -1
  * 
  *     cpdef reset(self):             # <<<<<<<<<<<<<<
- *         self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)
- *         self._active_arr = np.zeros(self._capacity, dtype=np.uint8)
+ *         self._alloc_slots(self._capacity)
+ *         self._size = 0
  */
-  __pyx_tuple__26 = PyTuple_Pack(1, __pyx_n_s_self); if (unlikely(!__pyx_tuple__26)) __PYX_ERR(0, 125, __pyx_L1_error)
+  __pyx_tuple__26 = PyTuple_Pack(1, __pyx_n_s_self); if (unlikely(!__pyx_tuple__26)) __PYX_ERR(0, 165, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__26);
   __Pyx_GIVEREF(__pyx_tuple__26);
-  __pyx_codeobj__27 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_reset, 125, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__27)) __PYX_ERR(0, 125, __pyx_L1_error)
+  __pyx_codeobj__27 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_reset, 165, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__27)) __PYX_ERR(0, 165, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":444
+  /* "monitor_kernels.pyx":402
  *         self._anomaly_count += 1
  * 
  *     cpdef update(self,             # <<<<<<<<<<<<<<
  *                  long[:, ::1] rows,
  *                  double[:] corrs,
  */
-  __pyx_tuple__28 = PyTuple_Pack(6, __pyx_n_s_self, __pyx_n_s_rows, __pyx_n_s_corrs, __pyx_n_s_window_step, __pyx_n_s_save_status, __pyx_n_s_save_anomalies); if (unlikely(!__pyx_tuple__28)) __PYX_ERR(0, 444, __pyx_L1_error)
+  __pyx_tuple__28 = PyTuple_Pack(6, __pyx_n_s_self, __pyx_n_s_rows, __pyx_n_s_corrs, __pyx_n_s_window_step, __pyx_n_s_save_status, __pyx_n_s_save_anomalies); if (unlikely(!__pyx_tuple__28)) __PYX_ERR(0, 402, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__28);
   __Pyx_GIVEREF(__pyx_tuple__28);
-  __pyx_codeobj__29 = (PyObject*)__Pyx_PyCode_New(6, 0, 0, 6, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__28, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_update, 444, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__29)) __PYX_ERR(0, 444, __pyx_L1_error)
+  __pyx_codeobj__29 = (PyObject*)__Pyx_PyCode_New(6, 0, 0, 6, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__28, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_update, 402, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__29)) __PYX_ERR(0, 402, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":635
+  /* "monitor_kernels.pyx":576
  *         self._profile_calls += 1
  * 
  *     cpdef finalize(self, bint save_status=True):             # <<<<<<<<<<<<<<
- *         cdef uint8_t[:] active = self._active_arr
+ *         cdef MonitorSlot* slots = self._slots
  *         cdef int64_t[:] active_slots = self._active_slots_arr
  */
-  __pyx_tuple__30 = PyTuple_Pack(2, __pyx_n_s_self, __pyx_n_s_save_status); if (unlikely(!__pyx_tuple__30)) __PYX_ERR(0, 635, __pyx_L1_error)
+  __pyx_tuple__30 = PyTuple_Pack(2, __pyx_n_s_self, __pyx_n_s_save_status); if (unlikely(!__pyx_tuple__30)) __PYX_ERR(0, 576, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__30);
   __Pyx_GIVEREF(__pyx_tuple__30);
-  __pyx_codeobj__31 = (PyObject*)__Pyx_PyCode_New(2, 0, 0, 2, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__30, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_finalize, 635, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__31)) __PYX_ERR(0, 635, __pyx_L1_error)
-  __pyx_tuple__32 = PyTuple_Pack(1, Py_True); if (unlikely(!__pyx_tuple__32)) __PYX_ERR(0, 635, __pyx_L1_error)
+  __pyx_codeobj__31 = (PyObject*)__Pyx_PyCode_New(2, 0, 0, 2, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__30, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_finalize, 576, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__31)) __PYX_ERR(0, 576, __pyx_L1_error)
+  __pyx_tuple__32 = PyTuple_Pack(1, Py_True); if (unlikely(!__pyx_tuple__32)) __PYX_ERR(0, 576, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__32);
   __Pyx_GIVEREF(__pyx_tuple__32);
 
-  /* "monitor_kernels.pyx":655
+  /* "monitor_kernels.pyx":594
  *         self._next_frontier_count = 0
  * 
  *     cpdef Py_ssize_t pending_status_count(self):             # <<<<<<<<<<<<<<
  *         return self._status_count
  * 
  */
-  __pyx_codeobj__33 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_pending_status_count, 655, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__33)) __PYX_ERR(0, 655, __pyx_L1_error)
+  __pyx_codeobj__33 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_pending_status_count, 594, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__33)) __PYX_ERR(0, 594, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":658
+  /* "monitor_kernels.pyx":597
  *         return self._status_count
  * 
  *     cpdef Py_ssize_t pending_anomaly_count(self):             # <<<<<<<<<<<<<<
  *         return self._anomaly_count
  * 
  */
-  __pyx_codeobj__34 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_pending_anomaly_count, 658, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__34)) __PYX_ERR(0, 658, __pyx_L1_error)
+  __pyx_codeobj__34 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_pending_anomaly_count, 597, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__34)) __PYX_ERR(0, 597, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":661
+  /* "monitor_kernels.pyx":600
  *         return self._anomaly_count
  * 
  *     cpdef Py_ssize_t active_count(self):             # <<<<<<<<<<<<<<
  *         return self._active_count
  * 
  */
-  __pyx_codeobj__35 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_active_count, 661, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__35)) __PYX_ERR(0, 661, __pyx_L1_error)
+  __pyx_codeobj__35 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_active_count, 600, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__35)) __PYX_ERR(0, 600, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":664
+  /* "monitor_kernels.pyx":603
  *         return self._active_count
  * 
  *     cpdef Py_ssize_t occupied_count(self):             # <<<<<<<<<<<<<<
- *         """Diagnostic-only (2026-07-03): total distinct (s1,s2,lag) slots ever
- *         occupied, which never shrinks (deactivation only clears _active_arr,
+ *         return self._size
+ * 
  */
-  __pyx_codeobj__36 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_occupied_count, 664, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__36)) __PYX_ERR(0, 664, __pyx_L1_error)
+  __pyx_codeobj__36 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_occupied_count, 603, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__36)) __PYX_ERR(0, 603, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":670
+  /* "monitor_kernels.pyx":606
  *         return self._size
  * 
  *     cpdef Py_ssize_t capacity(self):             # <<<<<<<<<<<<<<
  *         return self._capacity
  * 
  */
-  __pyx_codeobj__37 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_capacity, 670, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__37)) __PYX_ERR(0, 670, __pyx_L1_error)
+  __pyx_codeobj__37 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_capacity, 606, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__37)) __PYX_ERR(0, 606, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":673
+  /* "monitor_kernels.pyx":609
  *         return self._capacity
  * 
  *     cpdef object profile_snapshot(self):             # <<<<<<<<<<<<<<
- *         """Diagnostic-only (2026-07-03): cumulative section timings from update().
- *         Returns (t_capacity, t_row_loop, t_closeout, t_swap, call_count)."""
+ *         return (
+ *             self._t_capacity,
  */
-  __pyx_codeobj__38 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_profile_snapshot, 673, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__38)) __PYX_ERR(0, 673, __pyx_L1_error)
+  __pyx_codeobj__38 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_profile_snapshot, 609, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__38)) __PYX_ERR(0, 609, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":684
+  /* "monitor_kernels.pyx":618
  *         )
  * 
  *     cpdef object row_branch_snapshot(self):             # <<<<<<<<<<<<<<
- *         """Diagnostic-only (2026-07-03): cumulative row-loop branch counts.
- *         Returns (new_activation, early_unchanged, extend, transition)."""
+ *         return (
+ *             self._rows_new_activation,
  */
-  __pyx_codeobj__39 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_row_branch_snapshot, 684, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__39)) __PYX_ERR(0, 684, __pyx_L1_error)
+  __pyx_codeobj__39 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_row_branch_snapshot, 618, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__39)) __PYX_ERR(0, 618, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":694
+  /* "monitor_kernels.pyx":626
  *         )
  * 
  *     cpdef object take_status_rows(self):             # <<<<<<<<<<<<<<
  *         cdef object out
  *         if self._status_count <= 0:
  */
-  __pyx_codeobj__40 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_take_status_rows, 694, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__40)) __PYX_ERR(0, 694, __pyx_L1_error)
+  __pyx_codeobj__40 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_take_status_rows, 626, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__40)) __PYX_ERR(0, 626, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":702
+  /* "monitor_kernels.pyx":634
  *         return out
  * 
  *     cpdef object take_anomaly_rows(self):             # <<<<<<<<<<<<<<
  *         cdef object out
  *         if self._anomaly_count <= 0:
  */
-  __pyx_codeobj__41 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_take_anomaly_rows, 702, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__41)) __PYX_ERR(0, 702, __pyx_L1_error)
+  __pyx_codeobj__41 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_take_anomaly_rows, 634, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__41)) __PYX_ERR(0, 634, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":710
+  /* "monitor_kernels.pyx":642
  *         return out
  * 
  *     cpdef object copy_status_rows(self):             # <<<<<<<<<<<<<<
  *         if self._status_count <= 0:
  *             return np.empty((0, 7), dtype=np.int64)
  */
-  __pyx_codeobj__42 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_copy_status_rows, 710, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__42)) __PYX_ERR(0, 710, __pyx_L1_error)
+  __pyx_codeobj__42 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_copy_status_rows, 642, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__42)) __PYX_ERR(0, 642, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":715
+  /* "monitor_kernels.pyx":647
  *         return np.ascontiguousarray(self._status_rows_arr[:self._status_count, :], dtype=np.int64)
  * 
  *     cpdef object copy_anomaly_rows(self):             # <<<<<<<<<<<<<<
  *         if self._anomaly_count <= 0:
  *             return np.empty((0, 5), dtype=np.int64)
  */
-  __pyx_codeobj__43 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_copy_anomaly_rows, 715, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__43)) __PYX_ERR(0, 715, __pyx_L1_error)
+  __pyx_codeobj__43 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_copy_anomaly_rows, 647, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__43)) __PYX_ERR(0, 647, __pyx_L1_error)
 
   /* "(tree fragment)":1
  * def __reduce_cython__(self):             # <<<<<<<<<<<<<<
@@ -35828,37 +34172,37 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
   __Pyx_GIVEREF(__pyx_tuple__45);
   __pyx_codeobj__46 = (PyObject*)__Pyx_PyCode_New(2, 0, 0, 2, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__45, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_stringsource, __pyx_n_s_setstate_cython, 3, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__46)) __PYX_ERR(1, 3, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":822
+  /* "monitor_kernels.pyx":754
  *             self._rehash(self._capacity * 2)
  * 
  *     cpdef void update_batch(self, np.ndarray rows, np.ndarray corrs):             # <<<<<<<<<<<<<<
  *         cdef int64_t[:, :] rows_view = rows
  *         cdef double[:] corrs_view = corrs
  */
-  __pyx_tuple__47 = PyTuple_Pack(3, __pyx_n_s_self, __pyx_n_s_rows, __pyx_n_s_corrs); if (unlikely(!__pyx_tuple__47)) __PYX_ERR(0, 822, __pyx_L1_error)
+  __pyx_tuple__47 = PyTuple_Pack(3, __pyx_n_s_self, __pyx_n_s_rows, __pyx_n_s_corrs); if (unlikely(!__pyx_tuple__47)) __PYX_ERR(0, 754, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__47);
   __Pyx_GIVEREF(__pyx_tuple__47);
-  __pyx_codeobj__48 = (PyObject*)__Pyx_PyCode_New(3, 0, 0, 3, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__47, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_update_batch, 822, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__48)) __PYX_ERR(0, 822, __pyx_L1_error)
+  __pyx_codeobj__48 = (PyObject*)__Pyx_PyCode_New(3, 0, 0, 3, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__47, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_update_batch, 754, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__48)) __PYX_ERR(0, 754, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":873
+  /* "monitor_kernels.pyx":805
  *             steps_arr[idx] = 0
  * 
  *     cpdef object prune_mask(self, np.ndarray rows, double threshold, double margin, int64_t max_steps, bint neg_corr):             # <<<<<<<<<<<<<<
  *         cdef int64_t[:, :] rows_view = rows
  *         cdef Py_ssize_t n = rows_view.shape[0]
  */
-  __pyx_tuple__49 = PyTuple_Pack(6, __pyx_n_s_self, __pyx_n_s_rows, __pyx_n_s_threshold, __pyx_n_s_margin, __pyx_n_s_max_steps, __pyx_n_s_neg_corr); if (unlikely(!__pyx_tuple__49)) __PYX_ERR(0, 873, __pyx_L1_error)
+  __pyx_tuple__49 = PyTuple_Pack(6, __pyx_n_s_self, __pyx_n_s_rows, __pyx_n_s_threshold, __pyx_n_s_margin, __pyx_n_s_max_steps, __pyx_n_s_neg_corr); if (unlikely(!__pyx_tuple__49)) __PYX_ERR(0, 805, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_tuple__49);
   __Pyx_GIVEREF(__pyx_tuple__49);
-  __pyx_codeobj__50 = (PyObject*)__Pyx_PyCode_New(6, 0, 0, 6, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__49, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_prune_mask, 873, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__50)) __PYX_ERR(0, 873, __pyx_L1_error)
+  __pyx_codeobj__50 = (PyObject*)__Pyx_PyCode_New(6, 0, 0, 6, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__49, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_prune_mask, 805, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__50)) __PYX_ERR(0, 805, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":930
+  /* "monitor_kernels.pyx":862
  *         return keep, skipped
  * 
  *     cpdef Py_ssize_t size(self):             # <<<<<<<<<<<<<<
  *         return self._size
  */
-  __pyx_codeobj__51 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_size, 930, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__51)) __PYX_ERR(0, 930, __pyx_L1_error)
+  __pyx_codeobj__51 = (PyObject*)__Pyx_PyCode_New(1, 0, 0, 1, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__26, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_monitor_kernels_pyx, __pyx_n_s_size, 862, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__51)) __PYX_ERR(0, 862, __pyx_L1_error)
 
   /* "(tree fragment)":1
  * def __reduce_cython__(self):             # <<<<<<<<<<<<<<
@@ -35958,18 +34302,19 @@ static int __Pyx_modinit_type_init_code(void) {
   __Pyx_RefNannySetupContext("__Pyx_modinit_type_init_code", 0);
   /*--- Type init code ---*/
   __pyx_vtabptr_15monitor_kernels_NumericMonitorState = &__pyx_vtable_15monitor_kernels_NumericMonitorState;
+  __pyx_vtable_15monitor_kernels_NumericMonitorState._alloc_slots = (void (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t))__pyx_f_15monitor_kernels_19NumericMonitorState__alloc_slots;
   __pyx_vtable_15monitor_kernels_NumericMonitorState.reset = (PyObject *(*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, int __pyx_skip_dispatch))__pyx_f_15monitor_kernels_19NumericMonitorState_reset;
-  __pyx_vtable_15monitor_kernels_NumericMonitorState._find_slot = (Py_ssize_t (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, int64_t, int64_t, int64_t))__pyx_f_15monitor_kernels_19NumericMonitorState__find_slot;
+  __pyx_vtable_15monitor_kernels_NumericMonitorState._find_slot = (Py_ssize_t (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, int64_t, int64_t, int64_t))__pyx_f_15monitor_kernels_19NumericMonitorState__find_slot;
   __pyx_vtable_15monitor_kernels_NumericMonitorState._rehash = (void (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t, int))__pyx_f_15monitor_kernels_19NumericMonitorState__rehash;
   __pyx_vtable_15monitor_kernels_NumericMonitorState._ensure_hash_capacity = (void (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t))__pyx_f_15monitor_kernels_19NumericMonitorState__ensure_hash_capacity;
   __pyx_vtable_15monitor_kernels_NumericMonitorState._maybe_compact = (void (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *))__pyx_f_15monitor_kernels_19NumericMonitorState__maybe_compact;
   __pyx_vtable_15monitor_kernels_NumericMonitorState._ensure_status_capacity = (void (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t))__pyx_f_15monitor_kernels_19NumericMonitorState__ensure_status_capacity;
   __pyx_vtable_15monitor_kernels_NumericMonitorState._ensure_anomaly_capacity = (void (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t))__pyx_f_15monitor_kernels_19NumericMonitorState__ensure_anomaly_capacity;
-  __pyx_vtable_15monitor_kernels_NumericMonitorState._activate_slot = (void (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t, __Pyx_memviewslice, __Pyx_memviewslice, __Pyx_memviewslice))__pyx_f_15monitor_kernels_19NumericMonitorState__activate_slot;
-  __pyx_vtable_15monitor_kernels_NumericMonitorState._deactivate_slot = (void (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t, __Pyx_memviewslice, __Pyx_memviewslice, __Pyx_memviewslice))__pyx_f_15monitor_kernels_19NumericMonitorState__deactivate_slot;
-  __pyx_vtable_15monitor_kernels_NumericMonitorState._mark_current_frontier = (void (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t, __Pyx_memviewslice, __Pyx_memviewslice))__pyx_f_15monitor_kernels_19NumericMonitorState__mark_current_frontier;
-  __pyx_vtable_15monitor_kernels_NumericMonitorState._remove_previous_frontier_slot = (int (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, Py_ssize_t, __Pyx_memviewslice, __Pyx_memviewslice))__pyx_f_15monitor_kernels_19NumericMonitorState__remove_previous_frontier_slot;
-  __pyx_vtable_15monitor_kernels_NumericMonitorState._append_status = (void (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, int64_t))__pyx_f_15monitor_kernels_19NumericMonitorState__append_status;
+  __pyx_vtable_15monitor_kernels_NumericMonitorState._activate_slot = (void (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, Py_ssize_t, __Pyx_memviewslice))__pyx_f_15monitor_kernels_19NumericMonitorState__activate_slot;
+  __pyx_vtable_15monitor_kernels_NumericMonitorState._deactivate_slot = (void (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, Py_ssize_t, __Pyx_memviewslice))__pyx_f_15monitor_kernels_19NumericMonitorState__deactivate_slot;
+  __pyx_vtable_15monitor_kernels_NumericMonitorState._mark_current_frontier = (void (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, Py_ssize_t, __Pyx_memviewslice))__pyx_f_15monitor_kernels_19NumericMonitorState__mark_current_frontier;
+  __pyx_vtable_15monitor_kernels_NumericMonitorState._remove_previous_frontier_slot = (int (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, Py_ssize_t, __Pyx_memviewslice))__pyx_f_15monitor_kernels_19NumericMonitorState__remove_previous_frontier_slot;
+  __pyx_vtable_15monitor_kernels_NumericMonitorState._append_status = (void (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, struct __pyx_t_15monitor_kernels_MonitorSlot *, Py_ssize_t))__pyx_f_15monitor_kernels_19NumericMonitorState__append_status;
   __pyx_vtable_15monitor_kernels_NumericMonitorState._append_anomaly = (void (*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, int64_t, int64_t, int64_t, int64_t, int64_t))__pyx_f_15monitor_kernels_19NumericMonitorState__append_anomaly;
   __pyx_vtable_15monitor_kernels_NumericMonitorState.update = (PyObject *(*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, __Pyx_memviewslice, __Pyx_memviewslice, int, int, int, int __pyx_skip_dispatch))__pyx_f_15monitor_kernels_19NumericMonitorState_update;
   __pyx_vtable_15monitor_kernels_NumericMonitorState.finalize = (PyObject *(*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, int __pyx_skip_dispatch, struct __pyx_opt_args_15monitor_kernels_19NumericMonitorState_finalize *__pyx_optional_args))__pyx_f_15monitor_kernels_19NumericMonitorState_finalize;
@@ -35985,15 +34330,15 @@ static int __Pyx_modinit_type_init_code(void) {
   __pyx_vtable_15monitor_kernels_NumericMonitorState.copy_status_rows = (PyObject *(*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, int __pyx_skip_dispatch))__pyx_f_15monitor_kernels_19NumericMonitorState_copy_status_rows;
   __pyx_vtable_15monitor_kernels_NumericMonitorState.copy_anomaly_rows = (PyObject *(*)(struct __pyx_obj_15monitor_kernels_NumericMonitorState *, int __pyx_skip_dispatch))__pyx_f_15monitor_kernels_19NumericMonitorState_copy_anomaly_rows;
   #if CYTHON_USE_TYPE_SPECS
-  __pyx_ptype_15monitor_kernels_NumericMonitorState = (PyTypeObject *) __Pyx_PyType_FromModuleAndSpec(__pyx_m, &__pyx_type_15monitor_kernels_NumericMonitorState_spec, NULL); if (unlikely(!__pyx_ptype_15monitor_kernels_NumericMonitorState)) __PYX_ERR(0, 32, __pyx_L1_error)
-  if (__Pyx_fix_up_extension_type_from_spec(&__pyx_type_15monitor_kernels_NumericMonitorState_spec, __pyx_ptype_15monitor_kernels_NumericMonitorState) < 0) __PYX_ERR(0, 32, __pyx_L1_error)
+  __pyx_ptype_15monitor_kernels_NumericMonitorState = (PyTypeObject *) __Pyx_PyType_FromModuleAndSpec(__pyx_m, &__pyx_type_15monitor_kernels_NumericMonitorState_spec, NULL); if (unlikely(!__pyx_ptype_15monitor_kernels_NumericMonitorState)) __PYX_ERR(0, 82, __pyx_L1_error)
+  if (__Pyx_fix_up_extension_type_from_spec(&__pyx_type_15monitor_kernels_NumericMonitorState_spec, __pyx_ptype_15monitor_kernels_NumericMonitorState) < 0) __PYX_ERR(0, 82, __pyx_L1_error)
   #else
   __pyx_ptype_15monitor_kernels_NumericMonitorState = &__pyx_type_15monitor_kernels_NumericMonitorState;
   #endif
   #if !CYTHON_COMPILING_IN_LIMITED_API
   #endif
   #if !CYTHON_USE_TYPE_SPECS
-  if (__Pyx_PyType_Ready(__pyx_ptype_15monitor_kernels_NumericMonitorState) < 0) __PYX_ERR(0, 32, __pyx_L1_error)
+  if (__Pyx_PyType_Ready(__pyx_ptype_15monitor_kernels_NumericMonitorState) < 0) __PYX_ERR(0, 82, __pyx_L1_error)
   #endif
   #if PY_MAJOR_VERSION < 3
   __pyx_ptype_15monitor_kernels_NumericMonitorState->tp_print = 0;
@@ -36003,13 +34348,13 @@ static int __Pyx_modinit_type_init_code(void) {
     __pyx_ptype_15monitor_kernels_NumericMonitorState->tp_getattro = __Pyx_PyObject_GenericGetAttr;
   }
   #endif
-  if (__Pyx_SetVtable(__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_vtabptr_15monitor_kernels_NumericMonitorState) < 0) __PYX_ERR(0, 32, __pyx_L1_error)
+  if (__Pyx_SetVtable(__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_vtabptr_15monitor_kernels_NumericMonitorState) < 0) __PYX_ERR(0, 82, __pyx_L1_error)
   #if !CYTHON_COMPILING_IN_LIMITED_API
-  if (__Pyx_MergeVtables(__pyx_ptype_15monitor_kernels_NumericMonitorState) < 0) __PYX_ERR(0, 32, __pyx_L1_error)
+  if (__Pyx_MergeVtables(__pyx_ptype_15monitor_kernels_NumericMonitorState) < 0) __PYX_ERR(0, 82, __pyx_L1_error)
   #endif
-  if (PyObject_SetAttr(__pyx_m, __pyx_n_s_NumericMonitorState, (PyObject *) __pyx_ptype_15monitor_kernels_NumericMonitorState) < 0) __PYX_ERR(0, 32, __pyx_L1_error)
+  if (PyObject_SetAttr(__pyx_m, __pyx_n_s_NumericMonitorState, (PyObject *) __pyx_ptype_15monitor_kernels_NumericMonitorState) < 0) __PYX_ERR(0, 82, __pyx_L1_error)
   #if !CYTHON_COMPILING_IN_LIMITED_API
-  if (__Pyx_setup_reduce((PyObject *) __pyx_ptype_15monitor_kernels_NumericMonitorState) < 0) __PYX_ERR(0, 32, __pyx_L1_error)
+  if (__Pyx_setup_reduce((PyObject *) __pyx_ptype_15monitor_kernels_NumericMonitorState) < 0) __PYX_ERR(0, 82, __pyx_L1_error)
   #endif
   __pyx_vtabptr_15monitor_kernels_SkipAheadState = &__pyx_vtable_15monitor_kernels_SkipAheadState;
   __pyx_vtable_15monitor_kernels_SkipAheadState._find_slot = (Py_ssize_t (*)(struct __pyx_obj_15monitor_kernels_SkipAheadState *, int64_t, int64_t, int64_t))__pyx_f_15monitor_kernels_14SkipAheadState__find_slot;
@@ -36019,15 +34364,15 @@ static int __Pyx_modinit_type_init_code(void) {
   __pyx_vtable_15monitor_kernels_SkipAheadState.prune_mask = (PyObject *(*)(struct __pyx_obj_15monitor_kernels_SkipAheadState *, PyArrayObject *, double, double, int64_t, int, int __pyx_skip_dispatch))__pyx_f_15monitor_kernels_14SkipAheadState_prune_mask;
   __pyx_vtable_15monitor_kernels_SkipAheadState.size = (Py_ssize_t (*)(struct __pyx_obj_15monitor_kernels_SkipAheadState *, int __pyx_skip_dispatch))__pyx_f_15monitor_kernels_14SkipAheadState_size;
   #if CYTHON_USE_TYPE_SPECS
-  __pyx_ptype_15monitor_kernels_SkipAheadState = (PyTypeObject *) __Pyx_PyType_FromModuleAndSpec(__pyx_m, &__pyx_type_15monitor_kernels_SkipAheadState_spec, NULL); if (unlikely(!__pyx_ptype_15monitor_kernels_SkipAheadState)) __PYX_ERR(0, 730, __pyx_L1_error)
-  if (__Pyx_fix_up_extension_type_from_spec(&__pyx_type_15monitor_kernels_SkipAheadState_spec, __pyx_ptype_15monitor_kernels_SkipAheadState) < 0) __PYX_ERR(0, 730, __pyx_L1_error)
+  __pyx_ptype_15monitor_kernels_SkipAheadState = (PyTypeObject *) __Pyx_PyType_FromModuleAndSpec(__pyx_m, &__pyx_type_15monitor_kernels_SkipAheadState_spec, NULL); if (unlikely(!__pyx_ptype_15monitor_kernels_SkipAheadState)) __PYX_ERR(0, 662, __pyx_L1_error)
+  if (__Pyx_fix_up_extension_type_from_spec(&__pyx_type_15monitor_kernels_SkipAheadState_spec, __pyx_ptype_15monitor_kernels_SkipAheadState) < 0) __PYX_ERR(0, 662, __pyx_L1_error)
   #else
   __pyx_ptype_15monitor_kernels_SkipAheadState = &__pyx_type_15monitor_kernels_SkipAheadState;
   #endif
   #if !CYTHON_COMPILING_IN_LIMITED_API
   #endif
   #if !CYTHON_USE_TYPE_SPECS
-  if (__Pyx_PyType_Ready(__pyx_ptype_15monitor_kernels_SkipAheadState) < 0) __PYX_ERR(0, 730, __pyx_L1_error)
+  if (__Pyx_PyType_Ready(__pyx_ptype_15monitor_kernels_SkipAheadState) < 0) __PYX_ERR(0, 662, __pyx_L1_error)
   #endif
   #if PY_MAJOR_VERSION < 3
   __pyx_ptype_15monitor_kernels_SkipAheadState->tp_print = 0;
@@ -36037,13 +34382,13 @@ static int __Pyx_modinit_type_init_code(void) {
     __pyx_ptype_15monitor_kernels_SkipAheadState->tp_getattro = __Pyx_PyObject_GenericGetAttr;
   }
   #endif
-  if (__Pyx_SetVtable(__pyx_ptype_15monitor_kernels_SkipAheadState, __pyx_vtabptr_15monitor_kernels_SkipAheadState) < 0) __PYX_ERR(0, 730, __pyx_L1_error)
+  if (__Pyx_SetVtable(__pyx_ptype_15monitor_kernels_SkipAheadState, __pyx_vtabptr_15monitor_kernels_SkipAheadState) < 0) __PYX_ERR(0, 662, __pyx_L1_error)
   #if !CYTHON_COMPILING_IN_LIMITED_API
-  if (__Pyx_MergeVtables(__pyx_ptype_15monitor_kernels_SkipAheadState) < 0) __PYX_ERR(0, 730, __pyx_L1_error)
+  if (__Pyx_MergeVtables(__pyx_ptype_15monitor_kernels_SkipAheadState) < 0) __PYX_ERR(0, 662, __pyx_L1_error)
   #endif
-  if (PyObject_SetAttr(__pyx_m, __pyx_n_s_SkipAheadState, (PyObject *) __pyx_ptype_15monitor_kernels_SkipAheadState) < 0) __PYX_ERR(0, 730, __pyx_L1_error)
+  if (PyObject_SetAttr(__pyx_m, __pyx_n_s_SkipAheadState, (PyObject *) __pyx_ptype_15monitor_kernels_SkipAheadState) < 0) __PYX_ERR(0, 662, __pyx_L1_error)
   #if !CYTHON_COMPILING_IN_LIMITED_API
-  if (__Pyx_setup_reduce((PyObject *) __pyx_ptype_15monitor_kernels_SkipAheadState) < 0) __PYX_ERR(0, 730, __pyx_L1_error)
+  if (__Pyx_setup_reduce((PyObject *) __pyx_ptype_15monitor_kernels_SkipAheadState) < 0) __PYX_ERR(0, 662, __pyx_L1_error)
   #endif
   __pyx_vtabptr_array = &__pyx_vtable_array;
   __pyx_vtable_array.get_memview = (PyObject *(*)(struct __pyx_array_obj *))__pyx_array_get_memview;
@@ -37070,7 +35415,7 @@ if (!__Pyx_RefNanny) {
  * import time
  * import numpy as np             # <<<<<<<<<<<<<<
  * cimport numpy as np
- * from libc.stdint cimport int64_t, uint64_t, uint8_t
+ * from libc.stdint cimport int64_t, uint64_t, uint8_t, int32_t, int8_t, uintptr_t
  */
   __pyx_t_7 = __Pyx_ImportDottedModule(__pyx_n_s_numpy, NULL); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 4, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
@@ -37078,7 +35423,7 @@ if (!__Pyx_RefNanny) {
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
 
   /* "monitor_kernels.pyx":8
- * from libc.stdint cimport int64_t, uint64_t, uint8_t
+ * from libc.stdint cimport int64_t, uint64_t, uint8_t, int32_t, int8_t, uintptr_t
  * 
  * np.import_array()             # <<<<<<<<<<<<<<
  * 
@@ -37086,186 +35431,195 @@ if (!__Pyx_RefNanny) {
  */
   __pyx_t_9 = __pyx_f_5numpy_import_array(); if (unlikely(__pyx_t_9 == ((int)-1))) __PYX_ERR(0, 8, __pyx_L1_error)
 
-  /* "monitor_kernels.pyx":125
- *         self._anomaly_rows_arr = np.empty((self._anomaly_capacity, 5), dtype=np.int64)
+  /* "monitor_kernels.pyx":79
+ *     int64_t _pad1
+ * 
+ * cdef int64_t MON_INT32_LIMIT = <int64_t>1 << 30             # <<<<<<<<<<<<<<
+ * 
+ * 
+ */
+  __pyx_v_15monitor_kernels_MON_INT32_LIMIT = (((int64_t)1) << 30);
+
+  /* "monitor_kernels.pyx":165
+ *             self._slots[i].frontier_pos = -1
  * 
  *     cpdef reset(self):             # <<<<<<<<<<<<<<
- *         self._occupied_arr = np.zeros(self._capacity, dtype=np.uint8)
- *         self._active_arr = np.zeros(self._capacity, dtype=np.uint8)
+ *         self._alloc_slots(self._capacity)
+ *         self._size = 0
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_3reset, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_reset, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__27)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 125, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_3reset, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_reset, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__27)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 165, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_reset, __pyx_t_7) < 0) __PYX_ERR(0, 125, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_reset, __pyx_t_7) < 0) __PYX_ERR(0, 165, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_NumericMonitorState);
 
-  /* "monitor_kernels.pyx":444
+  /* "monitor_kernels.pyx":402
  *         self._anomaly_count += 1
  * 
  *     cpdef update(self,             # <<<<<<<<<<<<<<
  *                  long[:, ::1] rows,
  *                  double[:] corrs,
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_5update, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_update, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__29)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 444, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_5update, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_update, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__29)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 402, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_update, __pyx_t_7) < 0) __PYX_ERR(0, 444, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_update, __pyx_t_7) < 0) __PYX_ERR(0, 402, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_NumericMonitorState);
 
-  /* "monitor_kernels.pyx":635
+  /* "monitor_kernels.pyx":576
  *         self._profile_calls += 1
  * 
  *     cpdef finalize(self, bint save_status=True):             # <<<<<<<<<<<<<<
- *         cdef uint8_t[:] active = self._active_arr
+ *         cdef MonitorSlot* slots = self._slots
  *         cdef int64_t[:] active_slots = self._active_slots_arr
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_7finalize, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_finalize, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__31)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 635, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_7finalize, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_finalize, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__31)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 576, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_CyFunction_SetDefaultsTuple(__pyx_t_7, __pyx_tuple__32);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_finalize, __pyx_t_7) < 0) __PYX_ERR(0, 635, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_finalize, __pyx_t_7) < 0) __PYX_ERR(0, 576, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_NumericMonitorState);
 
-  /* "monitor_kernels.pyx":655
+  /* "monitor_kernels.pyx":594
  *         self._next_frontier_count = 0
  * 
  *     cpdef Py_ssize_t pending_status_count(self):             # <<<<<<<<<<<<<<
  *         return self._status_count
  * 
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_9pending_status_count, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_pending_stat, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__33)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 655, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_9pending_status_count, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_pending_stat, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__33)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 594, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_pending_status_count, __pyx_t_7) < 0) __PYX_ERR(0, 655, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_pending_status_count, __pyx_t_7) < 0) __PYX_ERR(0, 594, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_NumericMonitorState);
 
-  /* "monitor_kernels.pyx":658
+  /* "monitor_kernels.pyx":597
  *         return self._status_count
  * 
  *     cpdef Py_ssize_t pending_anomaly_count(self):             # <<<<<<<<<<<<<<
  *         return self._anomaly_count
  * 
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_11pending_anomaly_count, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_pending_anom, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__34)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 658, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_11pending_anomaly_count, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_pending_anom, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__34)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 597, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_pending_anomaly_count, __pyx_t_7) < 0) __PYX_ERR(0, 658, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_pending_anomaly_count, __pyx_t_7) < 0) __PYX_ERR(0, 597, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_NumericMonitorState);
 
-  /* "monitor_kernels.pyx":661
+  /* "monitor_kernels.pyx":600
  *         return self._anomaly_count
  * 
  *     cpdef Py_ssize_t active_count(self):             # <<<<<<<<<<<<<<
  *         return self._active_count
  * 
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_13active_count, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_active_count, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__35)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 661, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_13active_count, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_active_count, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__35)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 600, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_active_count, __pyx_t_7) < 0) __PYX_ERR(0, 661, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_active_count, __pyx_t_7) < 0) __PYX_ERR(0, 600, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_NumericMonitorState);
 
-  /* "monitor_kernels.pyx":664
+  /* "monitor_kernels.pyx":603
  *         return self._active_count
  * 
  *     cpdef Py_ssize_t occupied_count(self):             # <<<<<<<<<<<<<<
- *         """Diagnostic-only (2026-07-03): total distinct (s1,s2,lag) slots ever
- *         occupied, which never shrinks (deactivation only clears _active_arr,
+ *         return self._size
+ * 
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_15occupied_count, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_occupied_cou, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__36)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 664, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_15occupied_count, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_occupied_cou, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__36)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 603, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_occupied_count, __pyx_t_7) < 0) __PYX_ERR(0, 664, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_occupied_count, __pyx_t_7) < 0) __PYX_ERR(0, 603, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_NumericMonitorState);
 
-  /* "monitor_kernels.pyx":670
+  /* "monitor_kernels.pyx":606
  *         return self._size
  * 
  *     cpdef Py_ssize_t capacity(self):             # <<<<<<<<<<<<<<
  *         return self._capacity
  * 
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_17capacity, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_capacity, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__37)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 670, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_17capacity, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_capacity, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__37)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 606, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_capacity, __pyx_t_7) < 0) __PYX_ERR(0, 670, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_capacity, __pyx_t_7) < 0) __PYX_ERR(0, 606, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_NumericMonitorState);
 
-  /* "monitor_kernels.pyx":673
+  /* "monitor_kernels.pyx":609
  *         return self._capacity
  * 
  *     cpdef object profile_snapshot(self):             # <<<<<<<<<<<<<<
- *         """Diagnostic-only (2026-07-03): cumulative section timings from update().
- *         Returns (t_capacity, t_row_loop, t_closeout, t_swap, call_count)."""
+ *         return (
+ *             self._t_capacity,
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_19profile_snapshot, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_profile_snap, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__38)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 673, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_19profile_snapshot, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_profile_snap, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__38)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 609, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_profile_snapshot, __pyx_t_7) < 0) __PYX_ERR(0, 673, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_profile_snapshot, __pyx_t_7) < 0) __PYX_ERR(0, 609, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_NumericMonitorState);
 
-  /* "monitor_kernels.pyx":684
+  /* "monitor_kernels.pyx":618
  *         )
  * 
  *     cpdef object row_branch_snapshot(self):             # <<<<<<<<<<<<<<
- *         """Diagnostic-only (2026-07-03): cumulative row-loop branch counts.
- *         Returns (new_activation, early_unchanged, extend, transition)."""
+ *         return (
+ *             self._rows_new_activation,
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_21row_branch_snapshot, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_row_branch_s, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__39)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 684, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_21row_branch_snapshot, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_row_branch_s, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__39)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 618, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_row_branch_snapshot, __pyx_t_7) < 0) __PYX_ERR(0, 684, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_row_branch_snapshot, __pyx_t_7) < 0) __PYX_ERR(0, 618, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_NumericMonitorState);
 
-  /* "monitor_kernels.pyx":694
+  /* "monitor_kernels.pyx":626
  *         )
  * 
  *     cpdef object take_status_rows(self):             # <<<<<<<<<<<<<<
  *         cdef object out
  *         if self._status_count <= 0:
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_23take_status_rows, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_take_status, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__40)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 694, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_23take_status_rows, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_take_status, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__40)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 626, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_take_status_rows, __pyx_t_7) < 0) __PYX_ERR(0, 694, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_take_status_rows, __pyx_t_7) < 0) __PYX_ERR(0, 626, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_NumericMonitorState);
 
-  /* "monitor_kernels.pyx":702
+  /* "monitor_kernels.pyx":634
  *         return out
  * 
  *     cpdef object take_anomaly_rows(self):             # <<<<<<<<<<<<<<
  *         cdef object out
  *         if self._anomaly_count <= 0:
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_25take_anomaly_rows, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_take_anomaly, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__41)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 702, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_25take_anomaly_rows, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_take_anomaly, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__41)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 634, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_take_anomaly_rows, __pyx_t_7) < 0) __PYX_ERR(0, 702, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_take_anomaly_rows, __pyx_t_7) < 0) __PYX_ERR(0, 634, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_NumericMonitorState);
 
-  /* "monitor_kernels.pyx":710
+  /* "monitor_kernels.pyx":642
  *         return out
  * 
  *     cpdef object copy_status_rows(self):             # <<<<<<<<<<<<<<
  *         if self._status_count <= 0:
  *             return np.empty((0, 7), dtype=np.int64)
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_27copy_status_rows, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_copy_status, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__42)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 710, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_27copy_status_rows, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_copy_status, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__42)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 642, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_copy_status_rows, __pyx_t_7) < 0) __PYX_ERR(0, 710, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_copy_status_rows, __pyx_t_7) < 0) __PYX_ERR(0, 642, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_NumericMonitorState);
 
-  /* "monitor_kernels.pyx":715
+  /* "monitor_kernels.pyx":647
  *         return np.ascontiguousarray(self._status_rows_arr[:self._status_count, :], dtype=np.int64)
  * 
  *     cpdef object copy_anomaly_rows(self):             # <<<<<<<<<<<<<<
  *         if self._anomaly_count <= 0:
  *             return np.empty((0, 5), dtype=np.int64)
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_29copy_anomaly_rows, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_copy_anomaly, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__43)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 715, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_19NumericMonitorState_29copy_anomaly_rows, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_NumericMonitorState_copy_anomaly, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__43)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 647, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_copy_anomaly_rows, __pyx_t_7) < 0) __PYX_ERR(0, 715, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_NumericMonitorState, __pyx_n_s_copy_anomaly_rows, __pyx_t_7) < 0) __PYX_ERR(0, 647, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_NumericMonitorState);
 
@@ -37290,41 +35644,41 @@ if (!__Pyx_RefNanny) {
   if (PyDict_SetItem(__pyx_d, __pyx_n_s_setstate_cython, __pyx_t_7) < 0) __PYX_ERR(1, 3, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
 
-  /* "monitor_kernels.pyx":822
+  /* "monitor_kernels.pyx":754
  *             self._rehash(self._capacity * 2)
  * 
  *     cpdef void update_batch(self, np.ndarray rows, np.ndarray corrs):             # <<<<<<<<<<<<<<
  *         cdef int64_t[:, :] rows_view = rows
  *         cdef double[:] corrs_view = corrs
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_14SkipAheadState_3update_batch, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_SkipAheadState_update_batch, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__48)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 822, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_14SkipAheadState_3update_batch, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_SkipAheadState_update_batch, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__48)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 754, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_SkipAheadState, __pyx_n_s_update_batch, __pyx_t_7) < 0) __PYX_ERR(0, 822, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_SkipAheadState, __pyx_n_s_update_batch, __pyx_t_7) < 0) __PYX_ERR(0, 754, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_SkipAheadState);
 
-  /* "monitor_kernels.pyx":873
+  /* "monitor_kernels.pyx":805
  *             steps_arr[idx] = 0
  * 
  *     cpdef object prune_mask(self, np.ndarray rows, double threshold, double margin, int64_t max_steps, bint neg_corr):             # <<<<<<<<<<<<<<
  *         cdef int64_t[:, :] rows_view = rows
  *         cdef Py_ssize_t n = rows_view.shape[0]
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_14SkipAheadState_5prune_mask, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_SkipAheadState_prune_mask, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__50)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 873, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_14SkipAheadState_5prune_mask, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_SkipAheadState_prune_mask, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__50)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 805, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_SkipAheadState, __pyx_n_s_prune_mask, __pyx_t_7) < 0) __PYX_ERR(0, 873, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_SkipAheadState, __pyx_n_s_prune_mask, __pyx_t_7) < 0) __PYX_ERR(0, 805, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_SkipAheadState);
 
-  /* "monitor_kernels.pyx":930
+  /* "monitor_kernels.pyx":862
  *         return keep, skipped
  * 
  *     cpdef Py_ssize_t size(self):             # <<<<<<<<<<<<<<
  *         return self._size
  */
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_14SkipAheadState_7size, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_SkipAheadState_size, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__51)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 930, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_15monitor_kernels_14SkipAheadState_7size, __Pyx_CYFUNCTION_CCLASS, __pyx_n_s_SkipAheadState_size, NULL, __pyx_n_s_monitor_kernels, __pyx_d, ((PyObject *)__pyx_codeobj__51)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 862, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
-  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_SkipAheadState, __pyx_n_s_size, __pyx_t_7) < 0) __PYX_ERR(0, 930, __pyx_L1_error)
+  if (__Pyx_SetItemOnTypeDict((PyObject *)__pyx_ptype_15monitor_kernels_SkipAheadState, __pyx_n_s_size, __pyx_t_7) < 0) __PYX_ERR(0, 862, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
   PyType_Modified(__pyx_ptype_15monitor_kernels_SkipAheadState);
 
@@ -39845,8 +38199,576 @@ static CYTHON_INLINE int __Pyx_HasAttr(PyObject *o, PyObject *n) {
 }
 #endif
 
+/* IsLittleEndian */
+static CYTHON_INLINE int __Pyx_Is_Little_Endian(void)
+{
+  union {
+    uint32_t u32;
+    uint8_t u8[4];
+  } S;
+  S.u32 = 0x01020304;
+  return S.u8[0] == 4;
+}
+
+/* BufferFormatCheck */
+static void __Pyx_BufFmt_Init(__Pyx_BufFmt_Context* ctx,
+                              __Pyx_BufFmt_StackElem* stack,
+                              __Pyx_TypeInfo* type) {
+  stack[0].field = &ctx->root;
+  stack[0].parent_offset = 0;
+  ctx->root.type = type;
+  ctx->root.name = "buffer dtype";
+  ctx->root.offset = 0;
+  ctx->head = stack;
+  ctx->head->field = &ctx->root;
+  ctx->fmt_offset = 0;
+  ctx->head->parent_offset = 0;
+  ctx->new_packmode = '@';
+  ctx->enc_packmode = '@';
+  ctx->new_count = 1;
+  ctx->enc_count = 0;
+  ctx->enc_type = 0;
+  ctx->is_complex = 0;
+  ctx->is_valid_array = 0;
+  ctx->struct_alignment = 0;
+  while (type->typegroup == 'S') {
+    ++ctx->head;
+    ctx->head->field = type->fields;
+    ctx->head->parent_offset = 0;
+    type = type->fields->type;
+  }
+}
+static int __Pyx_BufFmt_ParseNumber(const char** ts) {
+    int count;
+    const char* t = *ts;
+    if (*t < '0' || *t > '9') {
+      return -1;
+    } else {
+        count = *t++ - '0';
+        while (*t >= '0' && *t <= '9') {
+            count *= 10;
+            count += *t++ - '0';
+        }
+    }
+    *ts = t;
+    return count;
+}
+static int __Pyx_BufFmt_ExpectNumber(const char **ts) {
+    int number = __Pyx_BufFmt_ParseNumber(ts);
+    if (number == -1)
+        PyErr_Format(PyExc_ValueError,\
+                     "Does not understand character buffer dtype format string ('%c')", **ts);
+    return number;
+}
+static void __Pyx_BufFmt_RaiseUnexpectedChar(char ch) {
+  PyErr_Format(PyExc_ValueError,
+               "Unexpected format string character: '%c'", ch);
+}
+static const char* __Pyx_BufFmt_DescribeTypeChar(char ch, int is_complex) {
+  switch (ch) {
+    case '?': return "'bool'";
+    case 'c': return "'char'";
+    case 'b': return "'signed char'";
+    case 'B': return "'unsigned char'";
+    case 'h': return "'short'";
+    case 'H': return "'unsigned short'";
+    case 'i': return "'int'";
+    case 'I': return "'unsigned int'";
+    case 'l': return "'long'";
+    case 'L': return "'unsigned long'";
+    case 'q': return "'long long'";
+    case 'Q': return "'unsigned long long'";
+    case 'f': return (is_complex ? "'complex float'" : "'float'");
+    case 'd': return (is_complex ? "'complex double'" : "'double'");
+    case 'g': return (is_complex ? "'complex long double'" : "'long double'");
+    case 'T': return "a struct";
+    case 'O': return "Python object";
+    case 'P': return "a pointer";
+    case 's': case 'p': return "a string";
+    case 0: return "end";
+    default: return "unparsable format string";
+  }
+}
+static size_t __Pyx_BufFmt_TypeCharToStandardSize(char ch, int is_complex) {
+  switch (ch) {
+    case '?': case 'c': case 'b': case 'B': case 's': case 'p': return 1;
+    case 'h': case 'H': return 2;
+    case 'i': case 'I': case 'l': case 'L': return 4;
+    case 'q': case 'Q': return 8;
+    case 'f': return (is_complex ? 8 : 4);
+    case 'd': return (is_complex ? 16 : 8);
+    case 'g': {
+      PyErr_SetString(PyExc_ValueError, "Python does not define a standard format string size for long double ('g')..");
+      return 0;
+    }
+    case 'O': case 'P': return sizeof(void*);
+    default:
+      __Pyx_BufFmt_RaiseUnexpectedChar(ch);
+      return 0;
+    }
+}
+static size_t __Pyx_BufFmt_TypeCharToNativeSize(char ch, int is_complex) {
+  switch (ch) {
+    case '?': case 'c': case 'b': case 'B': case 's': case 'p': return 1;
+    case 'h': case 'H': return sizeof(short);
+    case 'i': case 'I': return sizeof(int);
+    case 'l': case 'L': return sizeof(long);
+    #ifdef HAVE_LONG_LONG
+    case 'q': case 'Q': return sizeof(PY_LONG_LONG);
+    #endif
+    case 'f': return sizeof(float) * (is_complex ? 2 : 1);
+    case 'd': return sizeof(double) * (is_complex ? 2 : 1);
+    case 'g': return sizeof(long double) * (is_complex ? 2 : 1);
+    case 'O': case 'P': return sizeof(void*);
+    default: {
+      __Pyx_BufFmt_RaiseUnexpectedChar(ch);
+      return 0;
+    }
+  }
+}
+typedef struct { char c; short x; } __Pyx_st_short;
+typedef struct { char c; int x; } __Pyx_st_int;
+typedef struct { char c; long x; } __Pyx_st_long;
+typedef struct { char c; float x; } __Pyx_st_float;
+typedef struct { char c; double x; } __Pyx_st_double;
+typedef struct { char c; long double x; } __Pyx_st_longdouble;
+typedef struct { char c; void *x; } __Pyx_st_void_p;
+#ifdef HAVE_LONG_LONG
+typedef struct { char c; PY_LONG_LONG x; } __Pyx_st_longlong;
+#endif
+static size_t __Pyx_BufFmt_TypeCharToAlignment(char ch, int is_complex) {
+  CYTHON_UNUSED_VAR(is_complex);
+  switch (ch) {
+    case '?': case 'c': case 'b': case 'B': case 's': case 'p': return 1;
+    case 'h': case 'H': return sizeof(__Pyx_st_short) - sizeof(short);
+    case 'i': case 'I': return sizeof(__Pyx_st_int) - sizeof(int);
+    case 'l': case 'L': return sizeof(__Pyx_st_long) - sizeof(long);
+#ifdef HAVE_LONG_LONG
+    case 'q': case 'Q': return sizeof(__Pyx_st_longlong) - sizeof(PY_LONG_LONG);
+#endif
+    case 'f': return sizeof(__Pyx_st_float) - sizeof(float);
+    case 'd': return sizeof(__Pyx_st_double) - sizeof(double);
+    case 'g': return sizeof(__Pyx_st_longdouble) - sizeof(long double);
+    case 'P': case 'O': return sizeof(__Pyx_st_void_p) - sizeof(void*);
+    default:
+      __Pyx_BufFmt_RaiseUnexpectedChar(ch);
+      return 0;
+    }
+}
+/* These are for computing the padding at the end of the struct to align
+   on the first member of the struct. This will probably the same as above,
+   but we don't have any guarantees.
+ */
+typedef struct { short x; char c; } __Pyx_pad_short;
+typedef struct { int x; char c; } __Pyx_pad_int;
+typedef struct { long x; char c; } __Pyx_pad_long;
+typedef struct { float x; char c; } __Pyx_pad_float;
+typedef struct { double x; char c; } __Pyx_pad_double;
+typedef struct { long double x; char c; } __Pyx_pad_longdouble;
+typedef struct { void *x; char c; } __Pyx_pad_void_p;
+#ifdef HAVE_LONG_LONG
+typedef struct { PY_LONG_LONG x; char c; } __Pyx_pad_longlong;
+#endif
+static size_t __Pyx_BufFmt_TypeCharToPadding(char ch, int is_complex) {
+  CYTHON_UNUSED_VAR(is_complex);
+  switch (ch) {
+    case '?': case 'c': case 'b': case 'B': case 's': case 'p': return 1;
+    case 'h': case 'H': return sizeof(__Pyx_pad_short) - sizeof(short);
+    case 'i': case 'I': return sizeof(__Pyx_pad_int) - sizeof(int);
+    case 'l': case 'L': return sizeof(__Pyx_pad_long) - sizeof(long);
+#ifdef HAVE_LONG_LONG
+    case 'q': case 'Q': return sizeof(__Pyx_pad_longlong) - sizeof(PY_LONG_LONG);
+#endif
+    case 'f': return sizeof(__Pyx_pad_float) - sizeof(float);
+    case 'd': return sizeof(__Pyx_pad_double) - sizeof(double);
+    case 'g': return sizeof(__Pyx_pad_longdouble) - sizeof(long double);
+    case 'P': case 'O': return sizeof(__Pyx_pad_void_p) - sizeof(void*);
+    default:
+      __Pyx_BufFmt_RaiseUnexpectedChar(ch);
+      return 0;
+    }
+}
+static char __Pyx_BufFmt_TypeCharToGroup(char ch, int is_complex) {
+  switch (ch) {
+    case 'c':
+        return 'H';
+    case 'b': case 'h': case 'i':
+    case 'l': case 'q': case 's': case 'p':
+        return 'I';
+    case '?': case 'B': case 'H': case 'I': case 'L': case 'Q':
+        return 'U';
+    case 'f': case 'd': case 'g':
+        return (is_complex ? 'C' : 'R');
+    case 'O':
+        return 'O';
+    case 'P':
+        return 'P';
+    default: {
+      __Pyx_BufFmt_RaiseUnexpectedChar(ch);
+      return 0;
+    }
+  }
+}
+static void __Pyx_BufFmt_RaiseExpected(__Pyx_BufFmt_Context* ctx) {
+  if (ctx->head == NULL || ctx->head->field == &ctx->root) {
+    const char* expected;
+    const char* quote;
+    if (ctx->head == NULL) {
+      expected = "end";
+      quote = "";
+    } else {
+      expected = ctx->head->field->type->name;
+      quote = "'";
+    }
+    PyErr_Format(PyExc_ValueError,
+                 "Buffer dtype mismatch, expected %s%s%s but got %s",
+                 quote, expected, quote,
+                 __Pyx_BufFmt_DescribeTypeChar(ctx->enc_type, ctx->is_complex));
+  } else {
+    __Pyx_StructField* field = ctx->head->field;
+    __Pyx_StructField* parent = (ctx->head - 1)->field;
+    PyErr_Format(PyExc_ValueError,
+                 "Buffer dtype mismatch, expected '%s' but got %s in '%s.%s'",
+                 field->type->name, __Pyx_BufFmt_DescribeTypeChar(ctx->enc_type, ctx->is_complex),
+                 parent->type->name, field->name);
+  }
+}
+static int __Pyx_BufFmt_ProcessTypeChunk(__Pyx_BufFmt_Context* ctx) {
+  char group;
+  size_t size, offset, arraysize = 1;
+  if (ctx->enc_type == 0) return 0;
+  if (ctx->head->field->type->arraysize[0]) {
+    int i, ndim = 0;
+    if (ctx->enc_type == 's' || ctx->enc_type == 'p') {
+        ctx->is_valid_array = ctx->head->field->type->ndim == 1;
+        ndim = 1;
+        if (ctx->enc_count != ctx->head->field->type->arraysize[0]) {
+            PyErr_Format(PyExc_ValueError,
+                         "Expected a dimension of size %zu, got %zu",
+                         ctx->head->field->type->arraysize[0], ctx->enc_count);
+            return -1;
+        }
+    }
+    if (!ctx->is_valid_array) {
+      PyErr_Format(PyExc_ValueError, "Expected %d dimensions, got %d",
+                   ctx->head->field->type->ndim, ndim);
+      return -1;
+    }
+    for (i = 0; i < ctx->head->field->type->ndim; i++) {
+      arraysize *= ctx->head->field->type->arraysize[i];
+    }
+    ctx->is_valid_array = 0;
+    ctx->enc_count = 1;
+  }
+  group = __Pyx_BufFmt_TypeCharToGroup(ctx->enc_type, ctx->is_complex);
+  do {
+    __Pyx_StructField* field = ctx->head->field;
+    __Pyx_TypeInfo* type = field->type;
+    if (ctx->enc_packmode == '@' || ctx->enc_packmode == '^') {
+      size = __Pyx_BufFmt_TypeCharToNativeSize(ctx->enc_type, ctx->is_complex);
+    } else {
+      size = __Pyx_BufFmt_TypeCharToStandardSize(ctx->enc_type, ctx->is_complex);
+    }
+    if (ctx->enc_packmode == '@') {
+      size_t align_at = __Pyx_BufFmt_TypeCharToAlignment(ctx->enc_type, ctx->is_complex);
+      size_t align_mod_offset;
+      if (align_at == 0) return -1;
+      align_mod_offset = ctx->fmt_offset % align_at;
+      if (align_mod_offset > 0) ctx->fmt_offset += align_at - align_mod_offset;
+      if (ctx->struct_alignment == 0)
+          ctx->struct_alignment = __Pyx_BufFmt_TypeCharToPadding(ctx->enc_type,
+                                                                 ctx->is_complex);
+    }
+    if (type->size != size || type->typegroup != group) {
+      if (type->typegroup == 'C' && type->fields != NULL) {
+        size_t parent_offset = ctx->head->parent_offset + field->offset;
+        ++ctx->head;
+        ctx->head->field = type->fields;
+        ctx->head->parent_offset = parent_offset;
+        continue;
+      }
+      if ((type->typegroup == 'H' || group == 'H') && type->size == size) {
+      } else {
+          __Pyx_BufFmt_RaiseExpected(ctx);
+          return -1;
+      }
+    }
+    offset = ctx->head->parent_offset + field->offset;
+    if (ctx->fmt_offset != offset) {
+      PyErr_Format(PyExc_ValueError,
+                   "Buffer dtype mismatch; next field is at offset %" CYTHON_FORMAT_SSIZE_T "d but %" CYTHON_FORMAT_SSIZE_T "d expected",
+                   (Py_ssize_t)ctx->fmt_offset, (Py_ssize_t)offset);
+      return -1;
+    }
+    ctx->fmt_offset += size;
+    if (arraysize)
+      ctx->fmt_offset += (arraysize - 1) * size;
+    --ctx->enc_count;
+    while (1) {
+      if (field == &ctx->root) {
+        ctx->head = NULL;
+        if (ctx->enc_count != 0) {
+          __Pyx_BufFmt_RaiseExpected(ctx);
+          return -1;
+        }
+        break;
+      }
+      ctx->head->field = ++field;
+      if (field->type == NULL) {
+        --ctx->head;
+        field = ctx->head->field;
+        continue;
+      } else if (field->type->typegroup == 'S') {
+        size_t parent_offset = ctx->head->parent_offset + field->offset;
+        if (field->type->fields->type == NULL) continue;
+        field = field->type->fields;
+        ++ctx->head;
+        ctx->head->field = field;
+        ctx->head->parent_offset = parent_offset;
+        break;
+      } else {
+        break;
+      }
+    }
+  } while (ctx->enc_count);
+  ctx->enc_type = 0;
+  ctx->is_complex = 0;
+  return 0;
+}
+static int
+__pyx_buffmt_parse_array(__Pyx_BufFmt_Context* ctx, const char** tsp)
+{
+    const char *ts = *tsp;
+    int i = 0, number, ndim;
+    ++ts;
+    if (ctx->new_count != 1) {
+        PyErr_SetString(PyExc_ValueError,
+                        "Cannot handle repeated arrays in format string");
+        return -1;
+    }
+    if (__Pyx_BufFmt_ProcessTypeChunk(ctx) == -1) return -1;
+    ndim = ctx->head->field->type->ndim;
+    while (*ts && *ts != ')') {
+        switch (*ts) {
+            case ' ': case '\f': case '\r': case '\n': case '\t': case '\v':  continue;
+            default:  break;
+        }
+        number = __Pyx_BufFmt_ExpectNumber(&ts);
+        if (number == -1) return -1;
+        if (i < ndim && (size_t) number != ctx->head->field->type->arraysize[i]) {
+            PyErr_Format(PyExc_ValueError,
+                        "Expected a dimension of size %zu, got %d",
+                        ctx->head->field->type->arraysize[i], number);
+            return -1;
+        }
+        if (*ts != ',' && *ts != ')') {
+            PyErr_Format(PyExc_ValueError,
+                                "Expected a comma in format string, got '%c'", *ts);
+            return -1;
+        }
+        if (*ts == ',') ts++;
+        i++;
+    }
+    if (i != ndim) {
+        PyErr_Format(PyExc_ValueError, "Expected %d dimension(s), got %d",
+                            ctx->head->field->type->ndim, i);
+        return -1;
+    }
+    if (!*ts) {
+        PyErr_SetString(PyExc_ValueError,
+                        "Unexpected end of format string, expected ')'");
+        return -1;
+    }
+    ctx->is_valid_array = 1;
+    ctx->new_count = 1;
+    *tsp = ++ts;
+    return 0;
+}
+static const char* __Pyx_BufFmt_CheckString(__Pyx_BufFmt_Context* ctx, const char* ts) {
+  int got_Z = 0;
+  while (1) {
+    switch(*ts) {
+      case 0:
+        if (ctx->enc_type != 0 && ctx->head == NULL) {
+          __Pyx_BufFmt_RaiseExpected(ctx);
+          return NULL;
+        }
+        if (__Pyx_BufFmt_ProcessTypeChunk(ctx) == -1) return NULL;
+        if (ctx->head != NULL) {
+          __Pyx_BufFmt_RaiseExpected(ctx);
+          return NULL;
+        }
+        return ts;
+      case ' ':
+      case '\r':
+      case '\n':
+        ++ts;
+        break;
+      case '<':
+        if (!__Pyx_Is_Little_Endian()) {
+          PyErr_SetString(PyExc_ValueError, "Little-endian buffer not supported on big-endian compiler");
+          return NULL;
+        }
+        ctx->new_packmode = '=';
+        ++ts;
+        break;
+      case '>':
+      case '!':
+        if (__Pyx_Is_Little_Endian()) {
+          PyErr_SetString(PyExc_ValueError, "Big-endian buffer not supported on little-endian compiler");
+          return NULL;
+        }
+        ctx->new_packmode = '=';
+        ++ts;
+        break;
+      case '=':
+      case '@':
+      case '^':
+        ctx->new_packmode = *ts++;
+        break;
+      case 'T':
+        {
+          const char* ts_after_sub;
+          size_t i, struct_count = ctx->new_count;
+          size_t struct_alignment = ctx->struct_alignment;
+          ctx->new_count = 1;
+          ++ts;
+          if (*ts != '{') {
+            PyErr_SetString(PyExc_ValueError, "Buffer acquisition: Expected '{' after 'T'");
+            return NULL;
+          }
+          if (__Pyx_BufFmt_ProcessTypeChunk(ctx) == -1) return NULL;
+          ctx->enc_type = 0;
+          ctx->enc_count = 0;
+          ctx->struct_alignment = 0;
+          ++ts;
+          ts_after_sub = ts;
+          for (i = 0; i != struct_count; ++i) {
+            ts_after_sub = __Pyx_BufFmt_CheckString(ctx, ts);
+            if (!ts_after_sub) return NULL;
+          }
+          ts = ts_after_sub;
+          if (struct_alignment) ctx->struct_alignment = struct_alignment;
+        }
+        break;
+      case '}':
+        {
+          size_t alignment = ctx->struct_alignment;
+          ++ts;
+          if (__Pyx_BufFmt_ProcessTypeChunk(ctx) == -1) return NULL;
+          ctx->enc_type = 0;
+          if (alignment && ctx->fmt_offset % alignment) {
+            ctx->fmt_offset += alignment - (ctx->fmt_offset % alignment);
+          }
+        }
+        return ts;
+      case 'x':
+        if (__Pyx_BufFmt_ProcessTypeChunk(ctx) == -1) return NULL;
+        ctx->fmt_offset += ctx->new_count;
+        ctx->new_count = 1;
+        ctx->enc_count = 0;
+        ctx->enc_type = 0;
+        ctx->enc_packmode = ctx->new_packmode;
+        ++ts;
+        break;
+      case 'Z':
+        got_Z = 1;
+        ++ts;
+        if (*ts != 'f' && *ts != 'd' && *ts != 'g') {
+          __Pyx_BufFmt_RaiseUnexpectedChar('Z');
+          return NULL;
+        }
+        CYTHON_FALLTHROUGH;
+      case '?': case 'c': case 'b': case 'B': case 'h': case 'H': case 'i': case 'I':
+      case 'l': case 'L': case 'q': case 'Q':
+      case 'f': case 'd': case 'g':
+      case 'O': case 'p':
+        if ((ctx->enc_type == *ts) && (got_Z == ctx->is_complex) &&
+            (ctx->enc_packmode == ctx->new_packmode) && (!ctx->is_valid_array)) {
+          ctx->enc_count += ctx->new_count;
+          ctx->new_count = 1;
+          got_Z = 0;
+          ++ts;
+          break;
+        }
+        CYTHON_FALLTHROUGH;
+      case 's':
+        if (__Pyx_BufFmt_ProcessTypeChunk(ctx) == -1) return NULL;
+        ctx->enc_count = ctx->new_count;
+        ctx->enc_packmode = ctx->new_packmode;
+        ctx->enc_type = *ts;
+        ctx->is_complex = got_Z;
+        ++ts;
+        ctx->new_count = 1;
+        got_Z = 0;
+        break;
+      case ':':
+        ++ts;
+        while(*ts != ':') ++ts;
+        ++ts;
+        break;
+      case '(':
+        if (__pyx_buffmt_parse_array(ctx, &ts) < 0) return NULL;
+        break;
+      default:
+        {
+          int number = __Pyx_BufFmt_ExpectNumber(&ts);
+          if (number == -1) return NULL;
+          ctx->new_count = (size_t)number;
+        }
+    }
+  }
+}
+
+/* BufferGetAndValidate */
+  static CYTHON_INLINE void __Pyx_SafeReleaseBuffer(Py_buffer* info) {
+  if (unlikely(info->buf == NULL)) return;
+  if (info->suboffsets == __Pyx_minusones) info->suboffsets = NULL;
+  __Pyx_ReleaseBuffer(info);
+}
+static void __Pyx_ZeroBuffer(Py_buffer* buf) {
+  buf->buf = NULL;
+  buf->obj = NULL;
+  buf->strides = __Pyx_zeros;
+  buf->shape = __Pyx_zeros;
+  buf->suboffsets = __Pyx_minusones;
+}
+static int __Pyx__GetBufferAndValidate(
+        Py_buffer* buf, PyObject* obj,  __Pyx_TypeInfo* dtype, int flags,
+        int nd, int cast, __Pyx_BufFmt_StackElem* stack)
+{
+  buf->buf = NULL;
+  if (unlikely(__Pyx_GetBuffer(obj, buf, flags) == -1)) {
+    __Pyx_ZeroBuffer(buf);
+    return -1;
+  }
+  if (unlikely(buf->ndim != nd)) {
+    PyErr_Format(PyExc_ValueError,
+                 "Buffer has wrong number of dimensions (expected %d, got %d)",
+                 nd, buf->ndim);
+    goto fail;
+  }
+  if (!cast) {
+    __Pyx_BufFmt_Context ctx;
+    __Pyx_BufFmt_Init(&ctx, stack, dtype);
+    if (!__Pyx_BufFmt_CheckString(&ctx, buf->format)) goto fail;
+  }
+  if (unlikely((size_t)buf->itemsize != dtype->size)) {
+    PyErr_Format(PyExc_ValueError,
+      "Item size of buffer (%" CYTHON_FORMAT_SSIZE_T "d byte%s) does not match size of '%s' (%" CYTHON_FORMAT_SSIZE_T "d byte%s)",
+      buf->itemsize, (buf->itemsize > 1) ? "s" : "",
+      dtype->name, (Py_ssize_t)dtype->size, (dtype->size > 1) ? "s" : "");
+    goto fail;
+  }
+  if (buf->suboffsets == NULL) buf->suboffsets = __Pyx_minusones;
+  return 0;
+fail:;
+  __Pyx_SafeReleaseBuffer(buf);
+  return -1;
+}
+
 /* PyObject_GenericGetAttrNoDict */
-#if CYTHON_USE_TYPE_SLOTS && CYTHON_USE_PYTYPE_LOOKUP && PY_VERSION_HEX < 0x03070000
+  #if CYTHON_USE_TYPE_SLOTS && CYTHON_USE_PYTYPE_LOOKUP && PY_VERSION_HEX < 0x03070000
 static PyObject *__Pyx_RaiseGenericGetAttributeError(PyTypeObject *tp, PyObject *attr_name) {
     __Pyx_TypeName type_name = __Pyx_PyType_GetName(tp);
     PyErr_Format(PyExc_AttributeError,
@@ -39888,7 +38810,7 @@ static CYTHON_INLINE PyObject* __Pyx_PyObject_GenericGetAttrNoDict(PyObject* obj
 #endif
 
 /* PyObject_GenericGetAttr */
-#if CYTHON_USE_TYPE_SLOTS && CYTHON_USE_PYTYPE_LOOKUP && PY_VERSION_HEX < 0x03070000
+  #if CYTHON_USE_TYPE_SLOTS && CYTHON_USE_PYTYPE_LOOKUP && PY_VERSION_HEX < 0x03070000
 static PyObject* __Pyx_PyObject_GenericGetAttr(PyObject* obj, PyObject* attr_name) {
     if (unlikely(Py_TYPE(obj)->tp_dictoffset)) {
         return PyObject_GenericGetAttr(obj, attr_name);
@@ -39898,7 +38820,7 @@ static PyObject* __Pyx_PyObject_GenericGetAttr(PyObject* obj, PyObject* attr_nam
 #endif
 
 /* FixUpExtensionType */
-#if CYTHON_USE_TYPE_SPECS
+  #if CYTHON_USE_TYPE_SPECS
 static int __Pyx_fix_up_extension_type_from_spec(PyType_Spec *spec, PyTypeObject *type) {
 #if PY_VERSION_HEX > 0x030900B1 || CYTHON_COMPILING_IN_LIMITED_API
     CYTHON_UNUSED_VAR(spec);
@@ -39971,13 +38893,13 @@ static int __Pyx_fix_up_extension_type_from_spec(PyType_Spec *spec, PyTypeObject
 #endif
 
 /* PyObjectCallNoArg */
-static CYTHON_INLINE PyObject* __Pyx_PyObject_CallNoArg(PyObject *func) {
+  static CYTHON_INLINE PyObject* __Pyx_PyObject_CallNoArg(PyObject *func) {
     PyObject *arg[2] = {NULL, NULL};
     return __Pyx_PyObject_FastCall(func, arg + 1, 0 | __Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET);
 }
 
 /* PyObjectGetMethod */
-static int __Pyx_PyObject_GetMethod(PyObject *obj, PyObject *name, PyObject **method) {
+  static int __Pyx_PyObject_GetMethod(PyObject *obj, PyObject *name, PyObject **method) {
     PyObject *attr;
 #if CYTHON_UNPACK_METHODS && CYTHON_COMPILING_IN_CPYTHON && CYTHON_USE_PYTYPE_LOOKUP
     __Pyx_TypeName type_name;
@@ -40078,7 +39000,7 @@ try_unpack:
 }
 
 /* PyObjectCallMethod0 */
-static PyObject* __Pyx_PyObject_CallMethod0(PyObject* obj, PyObject* method_name) {
+  static PyObject* __Pyx_PyObject_CallMethod0(PyObject* obj, PyObject* method_name) {
     PyObject *method = NULL, *result = NULL;
     int is_method = __Pyx_PyObject_GetMethod(obj, method_name, &method);
     if (likely(is_method)) {
@@ -40094,7 +39016,7 @@ bad:
 }
 
 /* ValidateBasesTuple */
-#if CYTHON_COMPILING_IN_CPYTHON || CYTHON_COMPILING_IN_LIMITED_API || CYTHON_USE_TYPE_SPECS
+  #if CYTHON_COMPILING_IN_CPYTHON || CYTHON_COMPILING_IN_LIMITED_API || CYTHON_USE_TYPE_SPECS
 static int __Pyx_validate_bases_tuple(const char *type_name, Py_ssize_t dictoffset, PyObject *bases) {
     Py_ssize_t i, n;
 #if CYTHON_ASSUME_SAFE_MACROS
@@ -40179,7 +39101,7 @@ static int __Pyx_validate_bases_tuple(const char *type_name, Py_ssize_t dictoffs
 #endif
 
 /* PyType_Ready */
-static int __Pyx_PyType_Ready(PyTypeObject *t) {
+  static int __Pyx_PyType_Ready(PyTypeObject *t) {
 #if CYTHON_USE_TYPE_SPECS || !(CYTHON_COMPILING_IN_CPYTHON || CYTHON_COMPILING_IN_LIMITED_API) || defined(PYSTON_MAJOR_VERSION)
     (void)__Pyx_PyObject_CallMethod0;
 #if CYTHON_USE_TYPE_SPECS
@@ -40261,7 +39183,7 @@ static int __Pyx_PyType_Ready(PyTypeObject *t) {
 }
 
 /* SetVTable */
-static int __Pyx_SetVtable(PyTypeObject *type, void *vtable) {
+  static int __Pyx_SetVtable(PyTypeObject *type, void *vtable) {
     PyObject *ob = PyCapsule_New(vtable, 0, 0);
     if (unlikely(!ob))
         goto bad;
@@ -40279,7 +39201,7 @@ bad:
 }
 
 /* GetVTable */
-static void* __Pyx_GetVtable(PyTypeObject *type) {
+  static void* __Pyx_GetVtable(PyTypeObject *type) {
     void* ptr;
 #if CYTHON_COMPILING_IN_LIMITED_API
     PyObject *ob = PyObject_GetAttr((PyObject *)type, __pyx_n_s_pyx_vtable);
@@ -40299,7 +39221,7 @@ bad:
 }
 
 /* MergeVTables */
-#if !CYTHON_COMPILING_IN_LIMITED_API
+  #if !CYTHON_COMPILING_IN_LIMITED_API
 static int __Pyx_MergeVtables(PyTypeObject *type) {
     int i;
     void** base_vtables;
@@ -40352,7 +39274,7 @@ bad:
 #endif
 
 /* SetupReduce */
-#if !CYTHON_COMPILING_IN_LIMITED_API
+  #if !CYTHON_COMPILING_IN_LIMITED_API
 static int __Pyx_setup_reduce_is_named(PyObject* meth, PyObject* name) {
   int ret;
   PyObject *name_attr;
@@ -40463,7 +39385,7 @@ __PYX_GOOD:
 #endif
 
 /* TypeImport */
-#ifndef __PYX_HAVE_RT_ImportType_3_0_8
+  #ifndef __PYX_HAVE_RT_ImportType_3_0_8
 #define __PYX_HAVE_RT_ImportType_3_0_8
 static PyTypeObject *__Pyx_ImportType_3_0_8(PyObject *module, const char *module_name, const char *class_name,
     size_t size, size_t alignment, enum __Pyx_ImportType_CheckSize_3_0_8 check_size)
@@ -40543,12 +39465,12 @@ bad:
 #endif
 
 /* FetchSharedCythonModule */
-static PyObject *__Pyx_FetchSharedCythonABIModule(void) {
+  static PyObject *__Pyx_FetchSharedCythonABIModule(void) {
     return __Pyx_PyImport_AddModuleRef((char*) __PYX_ABI_MODULE_NAME);
 }
 
 /* FetchCommonType */
-static int __Pyx_VerifyCachedType(PyObject *cached_type,
+  static int __Pyx_VerifyCachedType(PyObject *cached_type,
                                const char *name,
                                Py_ssize_t basicsize,
                                Py_ssize_t expected_basicsize) {
@@ -40649,7 +39571,7 @@ bad:
 #endif
 
 /* PyVectorcallFastCallDict */
-#if CYTHON_METH_FASTCALL
+  #if CYTHON_METH_FASTCALL
 static PyObject *__Pyx_PyVectorcall_FastCallDict_kw(PyObject *func, __pyx_vectorcallfunc vc, PyObject *const *args, size_t nargs, PyObject *kw)
 {
     PyObject *res = NULL;
@@ -40705,7 +39627,7 @@ static CYTHON_INLINE PyObject *__Pyx_PyVectorcall_FastCallDict(PyObject *func, _
 #endif
 
 /* CythonFunctionShared */
-#if CYTHON_COMPILING_IN_LIMITED_API
+  #if CYTHON_COMPILING_IN_LIMITED_API
 static CYTHON_INLINE int __Pyx__IsSameCyOrCFunction(PyObject *func, void *cfunc) {
     if (__Pyx_CyFunction_Check(func)) {
         return PyCFunction_GetFunction(((__pyx_CyFunctionObject*)func)->func) == (PyCFunction) cfunc;
@@ -41707,7 +40629,7 @@ static CYTHON_INLINE void __Pyx_CyFunction_SetAnnotationsDict(PyObject *func, Py
 }
 
 /* CythonFunction */
-static PyObject *__Pyx_CyFunction_New(PyMethodDef *ml, int flags, PyObject* qualname,
+  static PyObject *__Pyx_CyFunction_New(PyMethodDef *ml, int flags, PyObject* qualname,
                                       PyObject *closure, PyObject *module, PyObject* globals, PyObject* code) {
     PyObject *op = __Pyx_CyFunction_Init(
         PyObject_GC_New(__pyx_CyFunctionObject, __pyx_CyFunctionType),
@@ -41720,7 +40642,7 @@ static PyObject *__Pyx_CyFunction_New(PyMethodDef *ml, int flags, PyObject* qual
 }
 
 /* CLineInTraceback */
-#ifndef CYTHON_CLINE_IN_TRACEBACK
+  #ifndef CYTHON_CLINE_IN_TRACEBACK
 static int __Pyx_CLineForTraceback(PyThreadState *tstate, int c_line) {
     PyObject *use_cline;
     PyObject *ptype, *pvalue, *ptraceback;
@@ -41763,7 +40685,7 @@ static int __Pyx_CLineForTraceback(PyThreadState *tstate, int c_line) {
 #endif
 
 /* CodeObjectCache */
-#if !CYTHON_COMPILING_IN_LIMITED_API
+  #if !CYTHON_COMPILING_IN_LIMITED_API
 static int __pyx_bisect_code_objects(__Pyx_CodeObjectCacheEntry* entries, int count, int code_line) {
     int start = 0, mid = 0, end = count - 1;
     if (end >= 0 && code_line > entries[end].code_line) {
@@ -41845,7 +40767,7 @@ static void __pyx_insert_code_object(int code_line, PyCodeObject* code_object) {
 #endif
 
 /* AddTraceback */
-#include "compile.h"
+  #include "compile.h"
 #include "frameobject.h"
 #include "traceback.h"
 #if PY_VERSION_HEX >= 0x030b00a6 && !CYTHON_COMPILING_IN_LIMITED_API
@@ -42063,8 +40985,8 @@ static void __Pyx_ReleaseBuffer(Py_buffer *view) {
 #endif
 
 
-/* MemviewSliceIsContig */
-static int
+  /* MemviewSliceIsContig */
+  static int
 __pyx_memviewslice_is_contig(const __Pyx_memviewslice mvs, char order, int ndim)
 {
     int i, index, step, start;
@@ -42086,7 +41008,7 @@ __pyx_memviewslice_is_contig(const __Pyx_memviewslice mvs, char order, int ndim)
 }
 
 /* OverlappingSlices */
-static void
+  static void
 __pyx_get_array_memory_extents(__Pyx_memviewslice *slice,
                                void **out_start, void **out_end,
                                int ndim, size_t itemsize)
@@ -42119,527 +41041,6 @@ __pyx_slices_overlap(__Pyx_memviewslice *slice1,
     __pyx_get_array_memory_extents(slice1, &start1, &end1, ndim, itemsize);
     __pyx_get_array_memory_extents(slice2, &start2, &end2, ndim, itemsize);
     return (start1 < end2) && (start2 < end1);
-}
-
-/* IsLittleEndian */
-static CYTHON_INLINE int __Pyx_Is_Little_Endian(void)
-{
-  union {
-    uint32_t u32;
-    uint8_t u8[4];
-  } S;
-  S.u32 = 0x01020304;
-  return S.u8[0] == 4;
-}
-
-/* BufferFormatCheck */
-static void __Pyx_BufFmt_Init(__Pyx_BufFmt_Context* ctx,
-                              __Pyx_BufFmt_StackElem* stack,
-                              __Pyx_TypeInfo* type) {
-  stack[0].field = &ctx->root;
-  stack[0].parent_offset = 0;
-  ctx->root.type = type;
-  ctx->root.name = "buffer dtype";
-  ctx->root.offset = 0;
-  ctx->head = stack;
-  ctx->head->field = &ctx->root;
-  ctx->fmt_offset = 0;
-  ctx->head->parent_offset = 0;
-  ctx->new_packmode = '@';
-  ctx->enc_packmode = '@';
-  ctx->new_count = 1;
-  ctx->enc_count = 0;
-  ctx->enc_type = 0;
-  ctx->is_complex = 0;
-  ctx->is_valid_array = 0;
-  ctx->struct_alignment = 0;
-  while (type->typegroup == 'S') {
-    ++ctx->head;
-    ctx->head->field = type->fields;
-    ctx->head->parent_offset = 0;
-    type = type->fields->type;
-  }
-}
-static int __Pyx_BufFmt_ParseNumber(const char** ts) {
-    int count;
-    const char* t = *ts;
-    if (*t < '0' || *t > '9') {
-      return -1;
-    } else {
-        count = *t++ - '0';
-        while (*t >= '0' && *t <= '9') {
-            count *= 10;
-            count += *t++ - '0';
-        }
-    }
-    *ts = t;
-    return count;
-}
-static int __Pyx_BufFmt_ExpectNumber(const char **ts) {
-    int number = __Pyx_BufFmt_ParseNumber(ts);
-    if (number == -1)
-        PyErr_Format(PyExc_ValueError,\
-                     "Does not understand character buffer dtype format string ('%c')", **ts);
-    return number;
-}
-static void __Pyx_BufFmt_RaiseUnexpectedChar(char ch) {
-  PyErr_Format(PyExc_ValueError,
-               "Unexpected format string character: '%c'", ch);
-}
-static const char* __Pyx_BufFmt_DescribeTypeChar(char ch, int is_complex) {
-  switch (ch) {
-    case '?': return "'bool'";
-    case 'c': return "'char'";
-    case 'b': return "'signed char'";
-    case 'B': return "'unsigned char'";
-    case 'h': return "'short'";
-    case 'H': return "'unsigned short'";
-    case 'i': return "'int'";
-    case 'I': return "'unsigned int'";
-    case 'l': return "'long'";
-    case 'L': return "'unsigned long'";
-    case 'q': return "'long long'";
-    case 'Q': return "'unsigned long long'";
-    case 'f': return (is_complex ? "'complex float'" : "'float'");
-    case 'd': return (is_complex ? "'complex double'" : "'double'");
-    case 'g': return (is_complex ? "'complex long double'" : "'long double'");
-    case 'T': return "a struct";
-    case 'O': return "Python object";
-    case 'P': return "a pointer";
-    case 's': case 'p': return "a string";
-    case 0: return "end";
-    default: return "unparsable format string";
-  }
-}
-static size_t __Pyx_BufFmt_TypeCharToStandardSize(char ch, int is_complex) {
-  switch (ch) {
-    case '?': case 'c': case 'b': case 'B': case 's': case 'p': return 1;
-    case 'h': case 'H': return 2;
-    case 'i': case 'I': case 'l': case 'L': return 4;
-    case 'q': case 'Q': return 8;
-    case 'f': return (is_complex ? 8 : 4);
-    case 'd': return (is_complex ? 16 : 8);
-    case 'g': {
-      PyErr_SetString(PyExc_ValueError, "Python does not define a standard format string size for long double ('g')..");
-      return 0;
-    }
-    case 'O': case 'P': return sizeof(void*);
-    default:
-      __Pyx_BufFmt_RaiseUnexpectedChar(ch);
-      return 0;
-    }
-}
-static size_t __Pyx_BufFmt_TypeCharToNativeSize(char ch, int is_complex) {
-  switch (ch) {
-    case '?': case 'c': case 'b': case 'B': case 's': case 'p': return 1;
-    case 'h': case 'H': return sizeof(short);
-    case 'i': case 'I': return sizeof(int);
-    case 'l': case 'L': return sizeof(long);
-    #ifdef HAVE_LONG_LONG
-    case 'q': case 'Q': return sizeof(PY_LONG_LONG);
-    #endif
-    case 'f': return sizeof(float) * (is_complex ? 2 : 1);
-    case 'd': return sizeof(double) * (is_complex ? 2 : 1);
-    case 'g': return sizeof(long double) * (is_complex ? 2 : 1);
-    case 'O': case 'P': return sizeof(void*);
-    default: {
-      __Pyx_BufFmt_RaiseUnexpectedChar(ch);
-      return 0;
-    }
-  }
-}
-typedef struct { char c; short x; } __Pyx_st_short;
-typedef struct { char c; int x; } __Pyx_st_int;
-typedef struct { char c; long x; } __Pyx_st_long;
-typedef struct { char c; float x; } __Pyx_st_float;
-typedef struct { char c; double x; } __Pyx_st_double;
-typedef struct { char c; long double x; } __Pyx_st_longdouble;
-typedef struct { char c; void *x; } __Pyx_st_void_p;
-#ifdef HAVE_LONG_LONG
-typedef struct { char c; PY_LONG_LONG x; } __Pyx_st_longlong;
-#endif
-static size_t __Pyx_BufFmt_TypeCharToAlignment(char ch, int is_complex) {
-  CYTHON_UNUSED_VAR(is_complex);
-  switch (ch) {
-    case '?': case 'c': case 'b': case 'B': case 's': case 'p': return 1;
-    case 'h': case 'H': return sizeof(__Pyx_st_short) - sizeof(short);
-    case 'i': case 'I': return sizeof(__Pyx_st_int) - sizeof(int);
-    case 'l': case 'L': return sizeof(__Pyx_st_long) - sizeof(long);
-#ifdef HAVE_LONG_LONG
-    case 'q': case 'Q': return sizeof(__Pyx_st_longlong) - sizeof(PY_LONG_LONG);
-#endif
-    case 'f': return sizeof(__Pyx_st_float) - sizeof(float);
-    case 'd': return sizeof(__Pyx_st_double) - sizeof(double);
-    case 'g': return sizeof(__Pyx_st_longdouble) - sizeof(long double);
-    case 'P': case 'O': return sizeof(__Pyx_st_void_p) - sizeof(void*);
-    default:
-      __Pyx_BufFmt_RaiseUnexpectedChar(ch);
-      return 0;
-    }
-}
-/* These are for computing the padding at the end of the struct to align
-   on the first member of the struct. This will probably the same as above,
-   but we don't have any guarantees.
- */
-typedef struct { short x; char c; } __Pyx_pad_short;
-typedef struct { int x; char c; } __Pyx_pad_int;
-typedef struct { long x; char c; } __Pyx_pad_long;
-typedef struct { float x; char c; } __Pyx_pad_float;
-typedef struct { double x; char c; } __Pyx_pad_double;
-typedef struct { long double x; char c; } __Pyx_pad_longdouble;
-typedef struct { void *x; char c; } __Pyx_pad_void_p;
-#ifdef HAVE_LONG_LONG
-typedef struct { PY_LONG_LONG x; char c; } __Pyx_pad_longlong;
-#endif
-static size_t __Pyx_BufFmt_TypeCharToPadding(char ch, int is_complex) {
-  CYTHON_UNUSED_VAR(is_complex);
-  switch (ch) {
-    case '?': case 'c': case 'b': case 'B': case 's': case 'p': return 1;
-    case 'h': case 'H': return sizeof(__Pyx_pad_short) - sizeof(short);
-    case 'i': case 'I': return sizeof(__Pyx_pad_int) - sizeof(int);
-    case 'l': case 'L': return sizeof(__Pyx_pad_long) - sizeof(long);
-#ifdef HAVE_LONG_LONG
-    case 'q': case 'Q': return sizeof(__Pyx_pad_longlong) - sizeof(PY_LONG_LONG);
-#endif
-    case 'f': return sizeof(__Pyx_pad_float) - sizeof(float);
-    case 'd': return sizeof(__Pyx_pad_double) - sizeof(double);
-    case 'g': return sizeof(__Pyx_pad_longdouble) - sizeof(long double);
-    case 'P': case 'O': return sizeof(__Pyx_pad_void_p) - sizeof(void*);
-    default:
-      __Pyx_BufFmt_RaiseUnexpectedChar(ch);
-      return 0;
-    }
-}
-static char __Pyx_BufFmt_TypeCharToGroup(char ch, int is_complex) {
-  switch (ch) {
-    case 'c':
-        return 'H';
-    case 'b': case 'h': case 'i':
-    case 'l': case 'q': case 's': case 'p':
-        return 'I';
-    case '?': case 'B': case 'H': case 'I': case 'L': case 'Q':
-        return 'U';
-    case 'f': case 'd': case 'g':
-        return (is_complex ? 'C' : 'R');
-    case 'O':
-        return 'O';
-    case 'P':
-        return 'P';
-    default: {
-      __Pyx_BufFmt_RaiseUnexpectedChar(ch);
-      return 0;
-    }
-  }
-}
-static void __Pyx_BufFmt_RaiseExpected(__Pyx_BufFmt_Context* ctx) {
-  if (ctx->head == NULL || ctx->head->field == &ctx->root) {
-    const char* expected;
-    const char* quote;
-    if (ctx->head == NULL) {
-      expected = "end";
-      quote = "";
-    } else {
-      expected = ctx->head->field->type->name;
-      quote = "'";
-    }
-    PyErr_Format(PyExc_ValueError,
-                 "Buffer dtype mismatch, expected %s%s%s but got %s",
-                 quote, expected, quote,
-                 __Pyx_BufFmt_DescribeTypeChar(ctx->enc_type, ctx->is_complex));
-  } else {
-    __Pyx_StructField* field = ctx->head->field;
-    __Pyx_StructField* parent = (ctx->head - 1)->field;
-    PyErr_Format(PyExc_ValueError,
-                 "Buffer dtype mismatch, expected '%s' but got %s in '%s.%s'",
-                 field->type->name, __Pyx_BufFmt_DescribeTypeChar(ctx->enc_type, ctx->is_complex),
-                 parent->type->name, field->name);
-  }
-}
-static int __Pyx_BufFmt_ProcessTypeChunk(__Pyx_BufFmt_Context* ctx) {
-  char group;
-  size_t size, offset, arraysize = 1;
-  if (ctx->enc_type == 0) return 0;
-  if (ctx->head->field->type->arraysize[0]) {
-    int i, ndim = 0;
-    if (ctx->enc_type == 's' || ctx->enc_type == 'p') {
-        ctx->is_valid_array = ctx->head->field->type->ndim == 1;
-        ndim = 1;
-        if (ctx->enc_count != ctx->head->field->type->arraysize[0]) {
-            PyErr_Format(PyExc_ValueError,
-                         "Expected a dimension of size %zu, got %zu",
-                         ctx->head->field->type->arraysize[0], ctx->enc_count);
-            return -1;
-        }
-    }
-    if (!ctx->is_valid_array) {
-      PyErr_Format(PyExc_ValueError, "Expected %d dimensions, got %d",
-                   ctx->head->field->type->ndim, ndim);
-      return -1;
-    }
-    for (i = 0; i < ctx->head->field->type->ndim; i++) {
-      arraysize *= ctx->head->field->type->arraysize[i];
-    }
-    ctx->is_valid_array = 0;
-    ctx->enc_count = 1;
-  }
-  group = __Pyx_BufFmt_TypeCharToGroup(ctx->enc_type, ctx->is_complex);
-  do {
-    __Pyx_StructField* field = ctx->head->field;
-    __Pyx_TypeInfo* type = field->type;
-    if (ctx->enc_packmode == '@' || ctx->enc_packmode == '^') {
-      size = __Pyx_BufFmt_TypeCharToNativeSize(ctx->enc_type, ctx->is_complex);
-    } else {
-      size = __Pyx_BufFmt_TypeCharToStandardSize(ctx->enc_type, ctx->is_complex);
-    }
-    if (ctx->enc_packmode == '@') {
-      size_t align_at = __Pyx_BufFmt_TypeCharToAlignment(ctx->enc_type, ctx->is_complex);
-      size_t align_mod_offset;
-      if (align_at == 0) return -1;
-      align_mod_offset = ctx->fmt_offset % align_at;
-      if (align_mod_offset > 0) ctx->fmt_offset += align_at - align_mod_offset;
-      if (ctx->struct_alignment == 0)
-          ctx->struct_alignment = __Pyx_BufFmt_TypeCharToPadding(ctx->enc_type,
-                                                                 ctx->is_complex);
-    }
-    if (type->size != size || type->typegroup != group) {
-      if (type->typegroup == 'C' && type->fields != NULL) {
-        size_t parent_offset = ctx->head->parent_offset + field->offset;
-        ++ctx->head;
-        ctx->head->field = type->fields;
-        ctx->head->parent_offset = parent_offset;
-        continue;
-      }
-      if ((type->typegroup == 'H' || group == 'H') && type->size == size) {
-      } else {
-          __Pyx_BufFmt_RaiseExpected(ctx);
-          return -1;
-      }
-    }
-    offset = ctx->head->parent_offset + field->offset;
-    if (ctx->fmt_offset != offset) {
-      PyErr_Format(PyExc_ValueError,
-                   "Buffer dtype mismatch; next field is at offset %" CYTHON_FORMAT_SSIZE_T "d but %" CYTHON_FORMAT_SSIZE_T "d expected",
-                   (Py_ssize_t)ctx->fmt_offset, (Py_ssize_t)offset);
-      return -1;
-    }
-    ctx->fmt_offset += size;
-    if (arraysize)
-      ctx->fmt_offset += (arraysize - 1) * size;
-    --ctx->enc_count;
-    while (1) {
-      if (field == &ctx->root) {
-        ctx->head = NULL;
-        if (ctx->enc_count != 0) {
-          __Pyx_BufFmt_RaiseExpected(ctx);
-          return -1;
-        }
-        break;
-      }
-      ctx->head->field = ++field;
-      if (field->type == NULL) {
-        --ctx->head;
-        field = ctx->head->field;
-        continue;
-      } else if (field->type->typegroup == 'S') {
-        size_t parent_offset = ctx->head->parent_offset + field->offset;
-        if (field->type->fields->type == NULL) continue;
-        field = field->type->fields;
-        ++ctx->head;
-        ctx->head->field = field;
-        ctx->head->parent_offset = parent_offset;
-        break;
-      } else {
-        break;
-      }
-    }
-  } while (ctx->enc_count);
-  ctx->enc_type = 0;
-  ctx->is_complex = 0;
-  return 0;
-}
-static int
-__pyx_buffmt_parse_array(__Pyx_BufFmt_Context* ctx, const char** tsp)
-{
-    const char *ts = *tsp;
-    int i = 0, number, ndim;
-    ++ts;
-    if (ctx->new_count != 1) {
-        PyErr_SetString(PyExc_ValueError,
-                        "Cannot handle repeated arrays in format string");
-        return -1;
-    }
-    if (__Pyx_BufFmt_ProcessTypeChunk(ctx) == -1) return -1;
-    ndim = ctx->head->field->type->ndim;
-    while (*ts && *ts != ')') {
-        switch (*ts) {
-            case ' ': case '\f': case '\r': case '\n': case '\t': case '\v':  continue;
-            default:  break;
-        }
-        number = __Pyx_BufFmt_ExpectNumber(&ts);
-        if (number == -1) return -1;
-        if (i < ndim && (size_t) number != ctx->head->field->type->arraysize[i]) {
-            PyErr_Format(PyExc_ValueError,
-                        "Expected a dimension of size %zu, got %d",
-                        ctx->head->field->type->arraysize[i], number);
-            return -1;
-        }
-        if (*ts != ',' && *ts != ')') {
-            PyErr_Format(PyExc_ValueError,
-                                "Expected a comma in format string, got '%c'", *ts);
-            return -1;
-        }
-        if (*ts == ',') ts++;
-        i++;
-    }
-    if (i != ndim) {
-        PyErr_Format(PyExc_ValueError, "Expected %d dimension(s), got %d",
-                            ctx->head->field->type->ndim, i);
-        return -1;
-    }
-    if (!*ts) {
-        PyErr_SetString(PyExc_ValueError,
-                        "Unexpected end of format string, expected ')'");
-        return -1;
-    }
-    ctx->is_valid_array = 1;
-    ctx->new_count = 1;
-    *tsp = ++ts;
-    return 0;
-}
-static const char* __Pyx_BufFmt_CheckString(__Pyx_BufFmt_Context* ctx, const char* ts) {
-  int got_Z = 0;
-  while (1) {
-    switch(*ts) {
-      case 0:
-        if (ctx->enc_type != 0 && ctx->head == NULL) {
-          __Pyx_BufFmt_RaiseExpected(ctx);
-          return NULL;
-        }
-        if (__Pyx_BufFmt_ProcessTypeChunk(ctx) == -1) return NULL;
-        if (ctx->head != NULL) {
-          __Pyx_BufFmt_RaiseExpected(ctx);
-          return NULL;
-        }
-        return ts;
-      case ' ':
-      case '\r':
-      case '\n':
-        ++ts;
-        break;
-      case '<':
-        if (!__Pyx_Is_Little_Endian()) {
-          PyErr_SetString(PyExc_ValueError, "Little-endian buffer not supported on big-endian compiler");
-          return NULL;
-        }
-        ctx->new_packmode = '=';
-        ++ts;
-        break;
-      case '>':
-      case '!':
-        if (__Pyx_Is_Little_Endian()) {
-          PyErr_SetString(PyExc_ValueError, "Big-endian buffer not supported on little-endian compiler");
-          return NULL;
-        }
-        ctx->new_packmode = '=';
-        ++ts;
-        break;
-      case '=':
-      case '@':
-      case '^':
-        ctx->new_packmode = *ts++;
-        break;
-      case 'T':
-        {
-          const char* ts_after_sub;
-          size_t i, struct_count = ctx->new_count;
-          size_t struct_alignment = ctx->struct_alignment;
-          ctx->new_count = 1;
-          ++ts;
-          if (*ts != '{') {
-            PyErr_SetString(PyExc_ValueError, "Buffer acquisition: Expected '{' after 'T'");
-            return NULL;
-          }
-          if (__Pyx_BufFmt_ProcessTypeChunk(ctx) == -1) return NULL;
-          ctx->enc_type = 0;
-          ctx->enc_count = 0;
-          ctx->struct_alignment = 0;
-          ++ts;
-          ts_after_sub = ts;
-          for (i = 0; i != struct_count; ++i) {
-            ts_after_sub = __Pyx_BufFmt_CheckString(ctx, ts);
-            if (!ts_after_sub) return NULL;
-          }
-          ts = ts_after_sub;
-          if (struct_alignment) ctx->struct_alignment = struct_alignment;
-        }
-        break;
-      case '}':
-        {
-          size_t alignment = ctx->struct_alignment;
-          ++ts;
-          if (__Pyx_BufFmt_ProcessTypeChunk(ctx) == -1) return NULL;
-          ctx->enc_type = 0;
-          if (alignment && ctx->fmt_offset % alignment) {
-            ctx->fmt_offset += alignment - (ctx->fmt_offset % alignment);
-          }
-        }
-        return ts;
-      case 'x':
-        if (__Pyx_BufFmt_ProcessTypeChunk(ctx) == -1) return NULL;
-        ctx->fmt_offset += ctx->new_count;
-        ctx->new_count = 1;
-        ctx->enc_count = 0;
-        ctx->enc_type = 0;
-        ctx->enc_packmode = ctx->new_packmode;
-        ++ts;
-        break;
-      case 'Z':
-        got_Z = 1;
-        ++ts;
-        if (*ts != 'f' && *ts != 'd' && *ts != 'g') {
-          __Pyx_BufFmt_RaiseUnexpectedChar('Z');
-          return NULL;
-        }
-        CYTHON_FALLTHROUGH;
-      case '?': case 'c': case 'b': case 'B': case 'h': case 'H': case 'i': case 'I':
-      case 'l': case 'L': case 'q': case 'Q':
-      case 'f': case 'd': case 'g':
-      case 'O': case 'p':
-        if ((ctx->enc_type == *ts) && (got_Z == ctx->is_complex) &&
-            (ctx->enc_packmode == ctx->new_packmode) && (!ctx->is_valid_array)) {
-          ctx->enc_count += ctx->new_count;
-          ctx->new_count = 1;
-          got_Z = 0;
-          ++ts;
-          break;
-        }
-        CYTHON_FALLTHROUGH;
-      case 's':
-        if (__Pyx_BufFmt_ProcessTypeChunk(ctx) == -1) return NULL;
-        ctx->enc_count = ctx->new_count;
-        ctx->enc_packmode = ctx->new_packmode;
-        ctx->enc_type = *ts;
-        ctx->is_complex = got_Z;
-        ++ts;
-        ctx->new_count = 1;
-        got_Z = 0;
-        break;
-      case ':':
-        ++ts;
-        while(*ts != ':') ++ts;
-        ++ts;
-        break;
-      case '(':
-        if (__pyx_buffmt_parse_array(ctx, &ts) < 0) return NULL;
-        break;
-      default:
-        {
-          int number = __Pyx_BufFmt_ExpectNumber(&ts);
-          if (number == -1) return NULL;
-          ctx->new_count = (size_t)number;
-        }
-    }
-  }
 }
 
 /* TypeInfoCompare */
@@ -42934,29 +41335,6 @@ __pyx_fail:
     }
 
 /* ObjectToMemviewSlice */
-  static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(PyObject *obj, int writable_flag) {
-    __Pyx_memviewslice result = { 0, 0, { 0 }, { 0 }, { 0 } };
-    __Pyx_BufFmt_StackElem stack[1];
-    int axes_specs[] = { (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED) };
-    int retcode;
-    if (obj == Py_None) {
-        result.memview = (struct __pyx_memoryview_obj *) Py_None;
-        return result;
-    }
-    retcode = __Pyx_ValidateAndInit_memviewslice(axes_specs, 0,
-                                                 PyBUF_RECORDS_RO | writable_flag, 1,
-                                                 &__Pyx_TypeInfo_nn_uint8_t, stack,
-                                                 &result, obj);
-    if (unlikely(retcode == -1))
-        goto __pyx_fail;
-    return result;
-__pyx_fail:
-    result.memview = NULL;
-    result.data = NULL;
-    return result;
-}
-
-/* ObjectToMemviewSlice */
   static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_ds_nn_int64_t(PyObject *obj, int writable_flag) {
     __Pyx_memviewslice result = { 0, 0, { 0 }, { 0 }, { 0 } };
     __Pyx_BufFmt_StackElem stack[1];
@@ -42968,29 +41346,6 @@ __pyx_fail:
     }
     retcode = __Pyx_ValidateAndInit_memviewslice(axes_specs, 0,
                                                  PyBUF_RECORDS_RO | writable_flag, 1,
-                                                 &__Pyx_TypeInfo_nn_int64_t, stack,
-                                                 &result, obj);
-    if (unlikely(retcode == -1))
-        goto __pyx_fail;
-    return result;
-__pyx_fail:
-    result.memview = NULL;
-    result.data = NULL;
-    return result;
-}
-
-/* ObjectToMemviewSlice */
-  static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_dsds_nn_int64_t(PyObject *obj, int writable_flag) {
-    __Pyx_memviewslice result = { 0, 0, { 0 }, { 0 }, { 0 } };
-    __Pyx_BufFmt_StackElem stack[1];
-    int axes_specs[] = { (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED), (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED) };
-    int retcode;
-    if (obj == Py_None) {
-        result.memview = (struct __pyx_memoryview_obj *) Py_None;
-        return result;
-    }
-    retcode = __Pyx_ValidateAndInit_memviewslice(axes_specs, 0,
-                                                 PyBUF_RECORDS_RO | writable_flag, 2,
                                                  &__Pyx_TypeInfo_nn_int64_t, stack,
                                                  &result, obj);
     if (unlikely(retcode == -1))
@@ -43024,6 +41379,52 @@ static CYTHON_INLINE int __pyx_memview_set_double(const char *itemp, PyObject *o
         return 0;
     *(double *) itemp = value;
     return 1;
+}
+
+/* ObjectToMemviewSlice */
+  static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_ds_nn_uint8_t(PyObject *obj, int writable_flag) {
+    __Pyx_memviewslice result = { 0, 0, { 0 }, { 0 }, { 0 } };
+    __Pyx_BufFmt_StackElem stack[1];
+    int axes_specs[] = { (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED) };
+    int retcode;
+    if (obj == Py_None) {
+        result.memview = (struct __pyx_memoryview_obj *) Py_None;
+        return result;
+    }
+    retcode = __Pyx_ValidateAndInit_memviewslice(axes_specs, 0,
+                                                 PyBUF_RECORDS_RO | writable_flag, 1,
+                                                 &__Pyx_TypeInfo_nn_uint8_t, stack,
+                                                 &result, obj);
+    if (unlikely(retcode == -1))
+        goto __pyx_fail;
+    return result;
+__pyx_fail:
+    result.memview = NULL;
+    result.data = NULL;
+    return result;
+}
+
+/* ObjectToMemviewSlice */
+  static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_dsds_nn_int64_t(PyObject *obj, int writable_flag) {
+    __Pyx_memviewslice result = { 0, 0, { 0 }, { 0 }, { 0 } };
+    __Pyx_BufFmt_StackElem stack[1];
+    int axes_specs[] = { (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED), (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED) };
+    int retcode;
+    if (obj == Py_None) {
+        result.memview = (struct __pyx_memoryview_obj *) Py_None;
+        return result;
+    }
+    retcode = __Pyx_ValidateAndInit_memviewslice(axes_specs, 0,
+                                                 PyBUF_RECORDS_RO | writable_flag, 2,
+                                                 &__Pyx_TypeInfo_nn_int64_t, stack,
+                                                 &result, obj);
+    if (unlikely(retcode == -1))
+        goto __pyx_fail;
+    return result;
+__pyx_fail:
+    result.memview = NULL;
+    result.data = NULL;
+    return result;
 }
 
 /* Declarations */

@@ -1,0 +1,177 @@
+--- a/library_corrtrack_parallel.py
++++ b/library_corrtrack_parallel.py
+@@ -10198,11 +10198,71 @@
+ 
+     def _sketch_norm_mode_code(self):
+         mode = (self.sketch_norm or "mean_l2").lower()
+-        if mode == "mean_l2":
++        # (2026-09-16) "unit_l2_window" (competitor arms: ParCorr/CSZ, CorrJoin,
++        # StatStream normalize the WINDOW before reducing) rides the mean_l2
++        # kernel path -- the kernels are untouched -- and is rescaled afterwards
++        # by _apply_unit_l2_window_norm. See docs/competitor_implementation_plan.md
++        # phase 0a and docs/implementation_log.md's 2026-09-16 (i) entry.
++        if mode in ("mean_l2", "unit_l2_window"):
+             return 1
+         if mode == "mean":
+             return 2
+         return 0
++
++    def _sketch_norm_is_unit_l2_window(self):
++        return (self.sketch_norm or "mean_l2").lower() == "unit_l2_window"
++
++    def _apply_unit_l2_window_norm(self, raw_matrix, norm_matrix):
++        """Rescale the sketch to the projection of the unit-L2-normalized window.
++
++        For any linear reduction R (random projection here; also PAA and DFT
++        for the CorrJoin/StatStream arms), R(x_hat) with
++        x_hat = (x - mean(x)) / ||x - mean(x)||_2 equals
++        (R(x) - mean(x) * R(1)) / ||x - mean(x)||_2. The numerator is exactly
++        what _mean_adjust_matrix already computes from the raw sketch and the
++        precomputed R(1) (= _random_vector_sums); the denominator is
++        sqrt(var_sum) from the raw window sums maintained in _newStream. So
++        this costs no new state and stays incremental. The identity it buys
++        is corr(x, y) = 1 - d^2(x_hat, y_hat) / 2, the one every pruning
++        competitor rests on (comparison plan §4.1, §3.1, §2.1).
++
++        This is also exactly what the CorrJoin authors' code does
++        (2-CorrJoin.R: paamN <- (paam - meanT) / tauT with
++        tauT = sqrt(sum x^2 - n*mean^2)) -- normalize AFTER the linear
++        reduction using the window's own statistics.
++
++        No-op (returns norm_matrix unchanged) for every other sketch_norm, so
++        the default "mean_l2" path is byte-identical.
++        """
++        if not self._sketch_norm_is_unit_l2_window():
++            return norm_matrix
++        if raw_matrix is None:
++            return norm_matrix
++        raw = np.asarray(raw_matrix, dtype=np.float64)
++        if raw.size == 0:
++            return norm_matrix
++        if raw.ndim == 1:
++            raw = raw[None, :]
++        n_series = raw.shape[0]
++        if (
++            self._raw_window_sums is None
++            or self._raw_window_sums_sq is None
++            or self.curr_window_size is None
++            or self.curr_window_size <= 0
++            or self._raw_window_sums.shape[0] < n_series
++        ):
++            return norm_matrix
++        adjusted = self._mean_adjust_matrix(raw)
++        n = float(self.curr_window_size)
++        sum1 = np.asarray(self._raw_window_sums[:n_series], dtype=np.float64)
++        sum2 = np.asarray(self._raw_window_sums_sq[:n_series], dtype=np.float64)
++        var_sum = np.maximum(sum2 - (sum1 * sum1) / n, 0.0)
++        denom = np.sqrt(var_sum)
++        out = np.zeros_like(adjusted)
++        valid = np.isfinite(denom) & (denom > 0.0)
++        if np.any(valid):
++            out[valid] = adjusted[valid] / denom[valid, None]
++        return out
+     
+     def _generate_randomVectors(self):
+         base_rng = np.random.RandomState(self.seed_randomVector)
+@@ -10734,6 +10794,7 @@
+                     )
+                 except Exception:
+                     pass
++        norm_matrix = self._apply_unit_l2_window_norm(raw_matrix, norm_matrix)
+         self._sketch_matrix = norm_matrix
+         series_ids = list(self.series_ids)
+         if len(series_ids) < n_series:
+@@ -10830,6 +10891,7 @@
+                             )
+                         except Exception:
+                             pass
++                norm_matrix = self._apply_unit_l2_window_norm(raw_matrix, norm_matrix)
+                 self._sketch_matrix = norm_matrix
+                 series_ids = list(self.series_ids)
+                 if len(series_ids) < n_series:
+@@ -11001,6 +11063,7 @@
+                     )
+                 except Exception:
+                     pass
++        norm_matrix = self._apply_unit_l2_window_norm(raw_matrix, norm_matrix)
+         self._sketch_matrix = norm_matrix
+         if t0 is not None:
+             self._profile_add("sketch.incremental_append_state", time.perf_counter() - t0)
+@@ -11104,7 +11167,7 @@
+ 
+     def _normalize_sketch(self, v):
+         mode = (self.sketch_norm or "mean_l2").lower()
+-        if mode == "mean_l2":
++        if mode in ("mean_l2", "unit_l2_window"):
+             return self._mean_l2_normalize_sketch(v)
+         if mode == "mean":
+             return self._mean_only_normalize_sketch(v)
+@@ -11118,7 +11181,7 @@
+         if arr.ndim == 1:
+             arr = arr[None, :]
+         mode = (self.sketch_norm or "mean_l2").lower()
+-        if mode == "mean_l2":
++        if mode in ("mean_l2", "unit_l2_window"):
+             adjusted = self._mean_adjust_matrix(arr)
+             norms = np.linalg.norm(adjusted, axis=1, keepdims=True)
+             out = np.zeros_like(adjusted)
+@@ -11339,6 +11402,59 @@
+         # Return copies so the caller can safely merge
+         return dict(self.sketches), list(self.partitions)
+ 
++def pearson_from_five_sums(n, sx, sy, sxx, syy, sxy, out_dtype=np.float64):
++    """Pearson correlation from the five sufficient statistics, vectorized.
++
++    (2026-09-16) Phase 0b of docs/competitor_implementation_plan.md. The
++    five sums (sum x, sum y, sum x^2, sum y^2, sum xy) over a common
++    support of length `n` are the algebraic core shared by exact_stomp,
++    CorrJoin (their Eq. 2 incremental update; and 2-CorrJoin.R's closing
++    `corr <- (n*xyMult - Sx*Sy) / sqrt((n*Sxx - Sx^2)(n*Syy - Sy^2))`),
++    BRAID (their Eqs. 5, 6, 11 per level and lag) and TSUBASA (their
++    Lemma 1 combines per-basic-window versions of these). Kept a plain
++    function over arrays so each consumer can shape its own accumulation.
++
++    Zero-variance (constant) windows on either side yield correlation 0.0,
++    matching the constant-window guard the exact baselines already apply.
++    Inputs broadcast; `n` may be a scalar or an array of per-pair lengths.
++    """
++    n = np.asarray(n, dtype=np.float64)
++    sx = np.asarray(sx, dtype=np.float64)
++    sy = np.asarray(sy, dtype=np.float64)
++    sxx = np.asarray(sxx, dtype=np.float64)
++    syy = np.asarray(syy, dtype=np.float64)
++    sxy = np.asarray(sxy, dtype=np.float64)
++    cov = n * sxy - sx * sy
++    var_x = np.maximum(n * sxx - sx * sx, 0.0)
++    var_y = np.maximum(n * syy - sy * sy, 0.0)
++    denom = np.sqrt(var_x * var_y)
++    out = np.zeros(np.broadcast(cov, denom).shape, dtype=out_dtype)
++    valid = np.isfinite(denom) & (denom > 0.0)
++    if np.any(valid):
++        with np.errstate(divide="ignore", invalid="ignore"):
++            res = np.where(valid, cov / np.where(valid, denom, 1.0), 0.0)
++        out[...] = np.clip(res, -1.0, 1.0)
++    return out
++
++
++def five_sums(x, y, axis=-1):
++    """Return (n, sum x, sum y, sum x^2, sum y^2, sum xy) along `axis`.
++
++    Companion to pearson_from_five_sums; see that docstring.
++    """
++    x = np.asarray(x, dtype=np.float64)
++    y = np.asarray(y, dtype=np.float64)
++    n = x.shape[axis]
++    return (
++        n,
++        x.sum(axis=axis),
++        y.sum(axis=axis),
++        (x * x).sum(axis=axis),
++        (y * y).sum(axis=axis),
++        (x * y).sum(axis=axis),
++    )
++
++
+ class Candidates_BF:
+     def __init__(self,window_size,window_step,n_lags,corr_threshold):       
+         self.verbose = None
