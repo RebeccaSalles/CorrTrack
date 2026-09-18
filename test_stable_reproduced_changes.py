@@ -4272,6 +4272,50 @@ class StableReproducedChangesTest(unittest.TestCase):
         self.assertEqual(res[0], res[1])
         self.assertGreater(len(res[0][0]), 0)
 
+    def test_ablation_all_pairs_backend_and_step_time_boxplot_fields(self):
+        # (2026-09-18) candidate_backend="all_pairs" (AllPairsGateIndex): sketch computed, no index,
+        # gates optional. With both gates off it must enumerate exactly the bruteforce pair universe
+        # (total_candidates equal, recall 1); each gate on its own can only shrink the candidate set.
+        # Every run record must carry the per-step latency boxplot ticks.
+        from library_corrtrack_parallel import _HAVE_COMPETITOR_KERNELS
+        if not _HAVE_COMPETITOR_KERNELS:
+            self.skipTest("competitor_kernels extension not built")
+        rng = np.random.default_rng(7)
+        m, N, W, step = 16, 700, 48, 6
+        X = np.cumsum(rng.standard_normal((m, N)), axis=1)
+        X[1::2] = 0.9 * X[0::2] + 0.1 * np.cumsum(rng.standard_normal((m // 2, N)), axis=1)
+        data = np.vstack([np.arange(N), X]); ids = [f"s{i}" for i in range(m)]
+        base = dict(window_size=W, window_step=step, basic_window=step, n_lags=12, corr_threshold=0.8, neg_corr=True,
+                    exec="sequential", parallel_sketch=False, parallel_candidates=False, parallel_validation=False, max_workers=0,
+                    monitor=False, track_min_dist=True, artifact_mode="final", artifact_buffer_max_rows=250000, artifact_merge_mode="merged",
+                    save_only_required_artifacts=True, save_maxlag_artifacts=False, verbose=False, testing=False, validation_metric="pearson")
+        with tempfile.TemporaryDirectory() as tmp:
+            bf, _, bf_flags = run_and_log_bruteforce("abl", data, ids, dict(base, baseline_mode="bruteforce"), os.path.join(tmp, "bf.csv"),
+                                                     metadata={"nodes": 0}, recall_by_window=True, verbose=False, testing=False)
+            out = {}
+            for name, over in (("sketch_only", dict(candidate_apply_dot_gamma_filter=False, candidate_apply_hamming_filter=False)),
+                               ("sketch_hamming", dict(candidate_apply_dot_gamma_filter=False, candidate_apply_hamming_filter=True)),
+                               ("sketch_dot", dict(candidate_apply_dot_gamma_filter=True, candidate_apply_hamming_filter=False))):
+                rec, _, flags = run_and_log_corrtrack("abl", data, ids, base, dict(n_vectors=24, seed=1, seed_toggle=2, preprocess=False,
+                                                                                 candidate_backend="all_pairs", **over),
+                                                      os.path.join(tmp, f"{name}.csv"), recall_by_window=True, verbose=False, testing=False)
+                mtr = CorrTrack.compute_metrics_bf(flags, bf_flags, windows=True, total_pairs_bf=bf["total_candidates"])
+                out[name] = (rec, mtr)
+        rec, mtr = out["sketch_only"]
+        self.assertEqual(rec["candidate_backend"], "all_pairs")
+        self.assertEqual(int(rec["total_candidates"]), int(bf["total_candidates"]))
+        self.assertAlmostEqual(float(mtr["recall"]), 1.0)
+        self.assertEqual(int(rec["correlated"]), int(bf["correlated"]))
+        for name in ("sketch_hamming", "sketch_dot"):
+            self.assertLessEqual(int(out[name][0]["total_candidates"]), int(bf["total_candidates"]), name)
+        for r in (bf, rec):
+            for k in ("n_steps", "step_time_min", "step_time_q1", "step_time_median", "step_time_q3", "step_time_max",
+                      "step_time_whisker_lo", "step_time_whisker_hi", "step_time_outliers", "step_time_mean"):
+                self.assertIn(k, r); self.assertIsNotNone(r[k], k)
+            self.assertLessEqual(r["step_time_min"], r["step_time_q1"]); self.assertLessEqual(r["step_time_q1"], r["step_time_median"])
+            self.assertLessEqual(r["step_time_median"], r["step_time_q3"]); self.assertLessEqual(r["step_time_q3"], r["step_time_max"])
+            self.assertLessEqual(r["step_time_whisker_lo"], r["step_time_q1"]); self.assertGreaterEqual(r["step_time_whisker_hi"], r["step_time_q3"])
+
     def test_thinbraid_tracks_exact_after_buffer_rolls_on_offset_mean_data(self):
         # (2026-09-17) Two defects found on real Motes data, both invisible on the
         # zero-mean, short synthetic streams used above: (1) the shared-projection

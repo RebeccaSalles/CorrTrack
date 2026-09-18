@@ -370,3 +370,77 @@ def corrjoin_double_filter(np.ndarray[np.float64_t, ndim=2, mode="c"] proj not N
                     out_a[n_out] = i; out_b[n_out] = j
                     n_out += 1
     return out_a[:n_out], out_b[:n_out], touched, n_bucket
+
+
+def all_pairs_gates(np.ndarray[np.float64_t, ndim=2, mode="c"] vectors not None,
+                    np.ndarray[np.uint8_t, ndim=1, mode="c"] alive not None,
+                    np.ndarray[np.int64_t, ndim=1, mode="c"] sid not None,
+                    np.ndarray[np.int64_t, ndim=1, mode="c"] time_ not None,
+                    np.ndarray[np.int64_t, ndim=1, mode="c"] recent not None,
+                    double gamma, bint signed_abs, bint apply_dot, bint apply_hamming, Py_ssize_t hamming_max_bits):
+    """Ablation backend (2026-09-18): NO index. Every recent query is paired with every alive entry
+    under the canonical pair rule, then CorrTrack's two candidate gates are applied exactly as
+    SignLSHBandIndex applies them: the sign-Hamming gate (bits where sign(vq) != sign(ve), or the
+    complement under signed_abs; pass if the best of the two <= hamming_max_bits) and the dot gate
+    (sketch dot product >= gamma, |.| under signed_abs). With both gates off it is "sketch + no
+    candidate search". Returns (a, b, touched, hamming_checks, dot_checks)."""
+    cdef Py_ssize_t N = vectors.shape[0]
+    cdef int D = <int>vectors.shape[1]
+    cdef Py_ssize_t R = recent.shape[0]
+    cdef double* vec_p = <double*>vectors.data
+    cdef uint8_t* alive_p = <uint8_t*>alive.data
+    cdef int64_t* sid_p = <int64_t*>sid.data
+    cdef int64_t* time_p = <int64_t*>time_.data
+    cdef int64_t* recent_p = <int64_t*>recent.data
+    cdef Py_ssize_t cap = 0, qi, e, n_out = 0, touched = 0, hchecks = 0, dchecks = 0
+    cdef int64_t q, q_sid, q_time
+    cdef int d, hpos, hneg, hbest
+    cdef double score
+    cdef bint sq, se
+    for qi in range(R):
+        if alive_p[recent_p[qi]]:
+            cap += N
+    cdef np.ndarray[np.int64_t, ndim=1] out_a = np.empty(cap, dtype=np.int64)
+    cdef np.ndarray[np.int64_t, ndim=1] out_b = np.empty(cap, dtype=np.int64)
+    with nogil:
+        for qi in range(R):
+            q = recent_p[qi]
+            if not alive_p[q]:
+                continue
+            q_sid = sid_p[q]; q_time = time_p[q]
+            for e in range(N):
+                if e == q or not alive_p[e]:
+                    continue
+                if sid_p[e] == q_sid and time_p[e] == q_time:
+                    continue
+                if time_p[e] > q_time or (time_p[e] == q_time and sid_p[e] < q_sid):
+                    continue
+                touched += 1
+                if apply_hamming:
+                    hchecks += 1
+                    hpos = 0; hneg = 0
+                    for d in range(D):
+                        sq = vec_p[q * D + d] >= 0.0
+                        se = vec_p[e * D + d] >= 0.0
+                        if sq != se:
+                            hpos += 1
+                        else:
+                            hneg += 1
+                    hbest = hpos
+                    if signed_abs and hneg < hbest:
+                        hbest = hneg
+                    if hbest > hamming_max_bits:
+                        continue
+                if apply_dot:
+                    dchecks += 1
+                    score = 0.0
+                    for d in range(D):
+                        score += vec_p[q * D + d] * vec_p[e * D + d]
+                    if signed_abs:
+                        if score < 0.0:
+                            score = -score
+                    if score < gamma:
+                        continue
+                out_a[n_out] = q; out_b[n_out] = e
+                n_out += 1
+    return out_a[:n_out], out_b[:n_out], touched, hchecks, dchecks

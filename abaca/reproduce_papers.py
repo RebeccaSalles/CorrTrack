@@ -320,11 +320,12 @@ def repro_filcorr(args):
     # case study
     data, ids = load_dataset(name="yellowstone_bp3_7")
     test = data.T[:, : args.T]
+    ys_lags = 1000     # the paper's 10 s at 100 Hz (the synthetic throughput sweep above uses --n-lags for cost)
     with tempfile.TemporaryDirectory() as tmp:
-        rec, _, _ = run_and_log_bruteforce("yellowstone", test, ids, dict(_base(2000, 200, args.n_lags, 0.5, neg_corr=True), baseline_mode="filcorr",
+        rec, _, _ = run_and_log_bruteforce("yellowstone", test, ids, dict(_base(2000, 200, ys_lags, 0.5, neg_corr=True), baseline_mode="filcorr",
                                                                         filcorr_fs=3.0, filcorr_ft=7.0, filcorr_sampling_rate=100.0),
                                            f"{tmp}/ys.csv", metadata={"nodes": 0}, recall_by_window=True, verbose=False, testing=False)
-    print(f"Yellowstone (28 stations, 3-7 Hz, W=2000, lag {args.n_lags}): {rec['correlated']} lagged pairs >= 0.5 over {rec['total_candidates']} pair-windows", flush=True)
+    print(f"Yellowstone (28 stations, 3-7 Hz, W=2000, lag {ys_lags}): {rec['correlated']} lagged pairs >= 0.5 over {rec['total_candidates']} pair-windows", flush=True)
     _save("filcorr", dict(experiment="FilCorr ICDM 2020 throughput vs naive and Yellowstone case study", paper="up to 4x more sensors than naive; beats ParCorr below ~700 streams",
                           n_lags=args.n_lags, rows=rows, yellowstone=dict(correlated=rec["correlated"], pair_windows=rec["total_candidates"])))
 

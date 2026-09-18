@@ -21,8 +21,8 @@ export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_TH
 cd "$REPO_DIR"; rm -f ./*.cpython-*.so; rm -rf build
 python setup_cython.py build_ext --inplace -j 4 > "$REPRO_OUT/build.log" 2>&1
 # Phase R inputs: the BRAID families at the paper's lengths (single-component sines, spike trains)
-python datasets/fetch/gen_braid_synthetic.py --family sines --m 64 --T 32768 --name braid_sines_m64 > /dev/null
-python datasets/fetch/gen_braid_synthetic.py --family spiketrains --m 32 --T 100000 --period 6500 --name braid_spiketrains_m32 > /dev/null
+python datasets/fetch/gen_braid_synthetic.py --family sines --m 64 --T 32768 --name braid_sines_m64 > /dev/null   # same-spectrum pairs, |R(0)| < 0.35
+python datasets/fetch/gen_braid_synthetic.py --family spiketrains --m 32 --T 100000 --period 6500 --max-lag 3000 --name braid_spiketrains_m32 > /dev/null   # the paper's lag is 2,841
 if [ "$EXPERIMENT" = "braid" ] || [ "$EXPERIMENT" = "all" ]; then
   python abaca/reproduce_papers.py braid --datasets braid_sines_m64,braid_spiketrains_m32,motes_humidity,motes_light,sunspots_daily --W 4096 --step 512 --n-lags 512 2>&1 | tee "$REPRO_OUT/braid.log"
 fi

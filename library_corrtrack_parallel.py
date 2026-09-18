@@ -247,10 +247,14 @@ RUN_RESULT_COLUMNS: Sequence[str] = (
     "monit_time",
     "runtime",
     "n_steps",
-    "step_time_p50",
-    "step_time_p90",
-    "step_time_p99",
+    "step_time_min",
+    "step_time_q1",
+    "step_time_median",
+    "step_time_q3",
     "step_time_max",
+    "step_time_whisker_lo",
+    "step_time_whisker_hi",
+    "step_time_outliers",
     "step_time_mean",
     "artifact_time",
     "correlated",
@@ -415,10 +419,14 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     "monit_time",
     "runtime",
     "n_steps",
-    "step_time_p50",
-    "step_time_p90",
-    "step_time_p99",
+    "step_time_min",
+    "step_time_q1",
+    "step_time_median",
+    "step_time_q3",
     "step_time_max",
+    "step_time_whisker_lo",
+    "step_time_whisker_hi",
+    "step_time_outliers",
     "step_time_mean",
     "optim_search_time",
     "optim_bootstrap_time",
@@ -1162,11 +1170,19 @@ def execute_corrtrack_pass(
     _st = np.asarray(step_times, dtype=np.float64)
     _warm = int(math.ceil(window_size / window_step)) if isinstance(window_size, (int, np.integer)) else 1
     _ss = _st[_warm:] if _st.shape[0] > _warm + 4 else _st
+    # boxplot ticks (user, 2026-09-18): min, Q1, median, Q3, max, the Tukey whisker ends
+    # (last observations inside Q1 - 1.5 IQR and Q3 + 1.5 IQR), the outlier count, and the mean
     record["n_steps"] = int(_st.shape[0])
-    for _q, _name in ((0.5, "p50"), (0.9, "p90"), (0.99, "p99")):
-        record[f"step_time_{_name}"] = float(np.quantile(_ss, _q)) if _ss.size else None
-    record["step_time_max"] = float(_ss.max()) if _ss.size else None
-    record["step_time_mean"] = float(_ss.mean()) if _ss.size else None
+    if _ss.size:
+        _q1, _q2, _q3 = (float(v) for v in np.quantile(_ss, (0.25, 0.5, 0.75)))
+        _iqr = _q3 - _q1
+        _lo_in = _ss[_ss >= _q1 - 1.5 * _iqr]; _hi_in = _ss[_ss <= _q3 + 1.5 * _iqr]
+        record.update(step_time_min=float(_ss.min()), step_time_q1=_q1, step_time_median=_q2, step_time_q3=_q3, step_time_max=float(_ss.max()),
+                      step_time_whisker_lo=float(_lo_in.min()) if _lo_in.size else _q1, step_time_whisker_hi=float(_hi_in.max()) if _hi_in.size else _q3,
+                      step_time_outliers=int(((_ss < _q1 - 1.5 * _iqr) | (_ss > _q3 + 1.5 * _iqr)).sum()), step_time_mean=float(_ss.mean()))
+    else:
+        record.update({k: None for k in ("step_time_min", "step_time_q1", "step_time_median", "step_time_q3", "step_time_max",
+                                         "step_time_whisker_lo", "step_time_whisker_hi", "step_time_outliers", "step_time_mean")})
 
     if artifact_active and getattr(corrtrack, "_artifact_save_maxlag", True):
         _t0 = time.time()
@@ -1800,8 +1816,8 @@ def _resolve_candidate_backend(value, default="auto"):
     # judged riskier than the cost of a little dead code.
     if key in {"flat"}:
         raise ValueError("candidate_backend='flat' has been removed")
-    if key in ("parcorr_grid", "statstream_grid", "corrjoin_double_filter"):
-        return key                      # (2026-09-17) competitor arms -- see ParCorrGridIndex / StatStreamGridIndex / CorrJoinDoubleFilterIndex
+    if key in ("parcorr_grid", "statstream_grid", "corrjoin_double_filter", "all_pairs"):
+        return key                      # (2026-09-17) competitor arms -- see ParCorrGridIndex / StatStreamGridIndex / CorrJoinDoubleFilterIndex; all_pairs = ablation (AllPairsGateIndex)
     if key not in {"brute_force", "auto", "lsh_sign_dot", "lsh_hamming_exact"}:
         key = default
     return key
@@ -1857,8 +1873,10 @@ _CANDIDATE_BACKEND_AXIS_ALIASES = {
     "cole_shasha_zhao": "parcorr_grid", "sketch_grid": "parcorr_grid",
     "statstream_grid": "statstream_grid", "dft_grid": "statstream_grid",
     "corrjoin_double_filter": "corrjoin_double_filter", "corrjoin_grid": "corrjoin_double_filter", "double_filter": "corrjoin_double_filter",
+    # (2026-09-18) ablation: sketch computed, no index, optional gates -- see AllPairsGateIndex
+    "all_pairs": "all_pairs", "no_index": "all_pairs", "sketch_all_pairs": "all_pairs",
 }
-_VALID_CANDIDATE_BACKEND_AXIS = {"auto", "lsh_approx", "hamming_exact", "brute_force", "parcorr_grid", "statstream_grid", "corrjoin_double_filter"}
+_VALID_CANDIDATE_BACKEND_AXIS = {"auto", "lsh_approx", "hamming_exact", "brute_force", "parcorr_grid", "statstream_grid", "corrjoin_double_filter", "all_pairs"}
 
 
 def _resolve_data_representation(value, validation_metric):
@@ -1915,6 +1933,8 @@ def _resolve_internal_dispatch(data_representation, candidate_backend, validatio
         )
     if be == "brute_force":
         return be, "brute_force"
+    if be == "all_pairs":
+        return be, "all_pairs"
 
     if rep == "sketch_dft":
         if be in ("auto", "statstream_grid"):
@@ -1984,7 +2004,7 @@ _INSTINCT_INDEX_BACKENDS = {"instinct"}
 # formerly shared this same marker -- all removed per the release-
 # restructuring cleanup (see docs/implementation_log.md's 2026-07-27
 # entries); corrtrack_release_backup2 preserves the pre-cleanup tree.
-_LSH_SIGN_DOT_BACKENDS = {"lsh_sign_dot", "lsh_hamming_exact", "parcorr_grid", "statstream_grid", "corrjoin_double_filter"}  # competitor arms share the index interface (2026-09-17)
+_LSH_SIGN_DOT_BACKENDS = {"lsh_sign_dot", "lsh_hamming_exact", "parcorr_grid", "statstream_grid", "corrjoin_double_filter", "all_pairs"}  # competitor arms share the index interface (2026-09-17)
 
 
 def _resolve_candidate_similarity(value, default="l2"):
@@ -14139,6 +14159,121 @@ class CorrJoinDoubleFilterIndex:
         }
 
 
+class AllPairsGateIndex:
+    """Ablation backend (2026-09-18): the sketch is computed, no index is built, every recent query
+    is paired with every alive entry, and CorrTrack's two candidate gates (sign-Hamming pre-gate,
+    dot >= gamma gate) can be switched on or off exactly as in SignLSHBandIndex. With both gates off
+    this is "sketch + no candidate search"; with an LSH index instead, the regular CorrTrack. Same
+    public interface as SignLSHBandIndex; the loop runs in competitor_kernels.all_pairs_gates.
+    Gates follow SignLSHBandIndex: hamming_max_bits = round(hamming_max_frac * n_vectors)."""
+
+    def __init__(self, n_vectors, initial_capacity=1024, n_lagged_windows=1, apply_dot_filter=True,
+                 apply_hamming_filter=True, hamming_max_frac=0.40):
+        if not _HAVE_COMPETITOR_KERNELS:
+            raise RuntimeError("candidate_backend='all_pairs' requires the compiled competitor_kernels extension")
+        self._n_vectors = int(n_vectors)
+        self.apply_dot_filter = bool(apply_dot_filter)
+        self.apply_hamming_filter = bool(apply_hamming_filter)
+        frac = 0.40 if hamming_max_frac is None else min(1.0, max(0.0, float(hamming_max_frac)))
+        self.hamming_max_bits = int(frac * self._n_vectors + 0.5)
+        self.n_lagged_windows = int(n_lagged_windows)
+        self.supports_neg_corr = "native"
+        cap = max(16, int(initial_capacity))
+        self._vectors = np.empty((cap, self._n_vectors), dtype=np.float64)
+        self._win = np.empty(cap, dtype=np.int64); self._sid = np.empty(cap, dtype=np.int64)
+        self._rank = np.empty(cap, dtype=np.int64); self._time = np.empty(cap, dtype=np.int64)
+        self._w = np.empty(cap, dtype=np.int64); self._alive = np.zeros(cap, dtype=bool)
+        self._count = 0; self._alive_count = 0; self._dead_count = 0
+        self.last_stats = {}
+
+    def _grow(self, need):
+        cap = self._vectors.shape[0]
+        if self._count + need <= cap:
+            return
+        new_cap = max(cap * 2, self._count + need)
+        def g(a, shape):
+            out = np.empty(shape, dtype=a.dtype); out[: self._count] = a[: self._count]; return out
+        self._vectors = g(self._vectors, (new_cap, self._n_vectors))
+        for name in ("_win", "_sid", "_rank", "_time", "_w"):
+            setattr(self, name, g(getattr(self, name), (new_cap,)))
+        alive = np.zeros(new_cap, dtype=bool); alive[: self._count] = self._alive[: self._count]; self._alive = alive
+
+    def notify_expected_n_series(self, observed_m):
+        return None
+
+    def clear_recent(self):
+        return None
+
+    def insert_many(self, values_in, window_idx_in, vectors_in=None, sid_idx_in=None,
+                    time_in=None, window_size_in=None, sid_rank_in=None):
+        win = np.asarray(window_idx_in, dtype=np.int64).ravel(); n = win.shape[0]
+        if n == 0:
+            return np.empty(0, dtype=np.int64)
+        vec = np.ascontiguousarray(vectors_in, dtype=np.float64).reshape(n, -1)
+        if vec.shape[1] != self._n_vectors:
+            raise ValueError(f"vector dim {vec.shape[1]} != n_vectors {self._n_vectors}")
+        self._grow(n)
+        i0, i1 = self._count, self._count + n
+        self._vectors[i0:i1] = vec; self._win[i0:i1] = win
+        self._sid[i0:i1] = np.asarray(sid_idx_in, dtype=np.int64).ravel()
+        self._rank[i0:i1] = np.asarray(sid_rank_in, dtype=np.int64).ravel() if sid_rank_in is not None else self._sid[i0:i1]
+        self._time[i0:i1] = np.asarray(time_in, dtype=np.int64).ravel()
+        self._w[i0:i1] = np.asarray(window_size_in, dtype=np.int64).ravel()
+        self._alive[i0:i1] = True
+        self._count = i1; self._alive_count += n
+        return np.arange(i0, i1, dtype=np.int64)
+
+    def drop_before_time(self, min_valid_time):
+        live = self._alive[: self._count]
+        stale = live & (self._time[: self._count] < int(min_valid_time))
+        n_stale = int(np.count_nonzero(stale))
+        if n_stale:
+            self._alive[: self._count][stale] = False
+            self._alive_count -= n_stale; self._dead_count += n_stale
+
+    def _find(self, recent_entry_ids, gamma, signed):
+        t0 = time.perf_counter()
+        recent = np.ascontiguousarray(np.asarray(recent_entry_ids, dtype=np.int64).ravel())
+        n = self._count
+        a, b, touched, hchecks, dchecks = _competitor_kernels.all_pairs_gates(
+            np.ascontiguousarray(self._vectors[:n]), np.ascontiguousarray(self._alive[:n].view(np.uint8)),
+            np.ascontiguousarray(self._sid[:n]), np.ascontiguousarray(self._time[:n]), recent,
+            float(gamma), bool(signed), bool(self.apply_dot_filter), bool(self.apply_hamming_filter), int(self.hamming_max_bits))
+        n_pairs = int(a.shape[0])
+        self.last_stats = {
+            "num_index_candidates": int(touched), "num_enumerated_candidates": int(touched),
+            "num_valid_index_candidates": int(touched), "num_unique_index_candidates": int(touched),
+            "num_duplicate_index_candidates": 0, "num_unique_pre_dot_pairs": int(touched), "num_duplicate_pre_dot_pairs": 0,
+            "num_dot_checks": int(dchecks), "num_distance_checks": int(hchecks), "num_after_similarity": n_pairs,
+            "num_after_dot": n_pairs, "num_pairs_before_dedupe": n_pairs, "num_pairs_after_dedupe": n_pairs, "num_rows": n_pairs,
+            "num_recent_queries": int(recent.shape[0]), "num_entries": int(self._alive_count), "num_blocks": 1,
+            "gamma": float(gamma), "tau": 0.0, "lsh_candidates_touched": int(touched), "lsh_dot_checks": int(dchecks),
+            "lsh_candidates_returned": n_pairs, "lsh_query_time": float(time.perf_counter() - t0),
+            "lsh_num_nodes_total": int(self._count), "lsh_num_nodes_alive": int(self._alive_count),
+            "lsh_dead_node_ratio": float(self._dead_count) / float(self._count) if self._count else 0.0,
+            "index_tier": "cython", "ablation_apply_dot_filter": self.apply_dot_filter, "ablation_apply_hamming_filter": self.apply_hamming_filter,
+        }
+        if n_pairs == 0:
+            return np.empty((0, 5), dtype=np.int64)
+        sid_a, sid_b, t_a, t_b = self._sid[a], self._sid[b], self._time[a], self._time[b]
+        rows = np.empty((n_pairs, 5), dtype=np.int64)
+        later_first = t_a >= t_b
+        rows[:, 0] = np.where(later_first, sid_a, sid_b); rows[:, 1] = np.where(later_first, sid_b, sid_a)
+        rows[:, 2] = np.where(later_first, t_a, t_b); rows[:, 3] = np.where(later_first, t_b, t_a)
+        eq = t_a == t_b
+        if np.any(eq):
+            swap = eq & (self._rank[a] > self._rank[b])
+            rows[swap, 0], rows[swap, 1] = sid_b[swap], sid_a[swap]
+        rows[:, 4] = self._w[a]
+        return rows
+
+    def find_pair_rows_full_cosine(self, recent_entry_ids, gamma, tau):
+        return self._find(recent_entry_ids, gamma, signed=False)
+
+    def find_pair_rows_full_cosine_signed(self, recent_entry_ids, gamma, tau):
+        return self._find(recent_entry_ids, gamma, signed=True)
+
+
 class Candidates:
     def __init__(self,n_lagged_windows,grid_dimension,cell_size,grid_max,freq_threshold,corr_threshold,n_vectors,sketch_std,n_grids,neg_corr,
                  sign_prefilter_scale=1.3,sign_prefilter_extra=1, seed=None, full_vector=False, candidate_backend=None,
@@ -14461,6 +14596,15 @@ class Candidates:
                 neg_corr=bool(self.neg_corr),
             )
             self._candidate_backend = "statstream_grid"
+        elif self._requested_candidate_backend == "all_pairs" and self._vector_match_enabled and not self.return_distances:
+            # (2026-09-18) ablation backend: sketch + optional gates, no index
+            self._lsh_index = AllPairsGateIndex(
+                n_vectors=int(self._vector_dim), initial_capacity=1024, n_lagged_windows=int(self.n_lagged_windows),
+                apply_dot_filter=bool(self.candidate_apply_dot_gamma_filter),
+                apply_hamming_filter=bool(self.candidate_apply_hamming_filter),
+                hamming_max_frac=(None if self.candidate_hamming_filter_max_frac is None else float(self.candidate_hamming_filter_max_frac)),
+            )
+            self._candidate_backend = "all_pairs"
         elif self._requested_candidate_backend == "corrjoin_double_filter" and self._vector_match_enabled and not self.return_distances:
             # (2026-09-17) CorrJoin -- see CorrJoinDoubleFilterIndex.
             self._lsh_index = CorrJoinDoubleFilterIndex(

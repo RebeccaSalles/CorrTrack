@@ -1,21 +1,20 @@
-"""CorrTrack ablation (user's request, 2026-09-17): show that each phase earns its place.
+"""CorrTrack ablation (user, 2026-09-17/18): all phases off, then on one at a time, so every phase
+shows what it buys against the plain all-pairs computation. One fixed parameter set for the whole
+ladder (the hyperopt best_params when given, else the defaults), the same span and the same
+bruteforce ground truth; per variant: recall, precision, counters, sk/cand/val times, wall, and
+the per-step latency boxplot ticks.
 
-Starting from the tuned configuration (hyperopt best_params, or defaults), one component is
-removed or replaced at a time and the arm is re-run on the same span against the same bruteforce
-ground truth; recall, counters, time and the per-step latency quantiles are reported next to the
-full system. Variants:
-
-  full               the tuned CorrTrack
-  no_gamma_filter    candidate_apply_dot_gamma_filter=False: every index hit goes to validation
-  no_hamming_filter  candidate_apply_hamming_filter=False: no sign-Hamming pre-gate before the dot
-  no_filters         both gates off: the raw LSH band retrieval alone
-  hamming_exact      candidate_backend=lsh_hamming_exact: the exact packed-Hamming index instead of banded LSH
-  no_hybrid / hybrid hybrid_validation toggled relative to the tuned value
-  n_vectors_half / n_vectors_double   sketch width halved / doubled (sensitivity; hyperopt covers the rest)
-  bruteforce         no candidate stage at all (reference; recall 1 by definition)
+  bruteforce        all phases off: plain all-pairs Pearson (the reference)
+  sketch_only       sketch computed, no candidate search: every pair goes through the shared validation
+  sketch_hamming    sketch + sign-Hamming gate only (no index)
+  sketch_dot        sketch + dot >= gamma gate only (no index)
+  sketch_both       sketch + both gates (no index)
+  lsh_hamming       sketch + LSH band index + Hamming gate only
+  lsh_dot           sketch + LSH band index + dot gate only
+  lsh_both          sketch + LSH band index + both gates (CorrTrack as run in the campaign)
 
     python abaca/ablation_corrtrack.py --dataset-config experiment_dataset_sp500.py --window-size 60 \
-        --window-step 5 --n-lags 20 --corr-threshold 0.9 --best-params <optim>/best_params_corrtrack.json --out ablation.json
+        --window-step 5 --n-lags 20 --corr-threshold 0.9 [--best-params <optim>/best_params_corrtrack.json] --out ablation.json
 """
 from __future__ import annotations
 
@@ -34,22 +33,23 @@ os.chdir(REPO)
 import corrtrack_run_bruteforce as bfmod  # noqa: E402
 from library_corrtrack_parallel import CorrTrack, run_and_log_bruteforce, run_and_log_corrtrack  # noqa: E402
 
-STEP_KEYS = ("n_steps", "step_time_p50", "step_time_p90", "step_time_p99", "step_time_max", "step_time_mean")
+STEP_KEYS = ("n_steps", "step_time_min", "step_time_q1", "step_time_median", "step_time_q3", "step_time_max",
+             "step_time_whisker_lo", "step_time_whisker_hi", "step_time_outliers", "step_time_mean")
+
+
+LADDER = {
+    "sketch_only": {"candidate_backend": "all_pairs", "candidate_apply_dot_gamma_filter": False, "candidate_apply_hamming_filter": False},
+    "sketch_hamming": {"candidate_backend": "all_pairs", "candidate_apply_dot_gamma_filter": False, "candidate_apply_hamming_filter": True},
+    "sketch_dot": {"candidate_backend": "all_pairs", "candidate_apply_dot_gamma_filter": True, "candidate_apply_hamming_filter": False},
+    "sketch_both": {"candidate_backend": "all_pairs", "candidate_apply_dot_gamma_filter": True, "candidate_apply_hamming_filter": True},
+    "lsh_hamming": {"candidate_backend": "lsh_sign_dot", "candidate_apply_dot_gamma_filter": False, "candidate_apply_hamming_filter": True},
+    "lsh_dot": {"candidate_backend": "lsh_sign_dot", "candidate_apply_dot_gamma_filter": True, "candidate_apply_hamming_filter": False},
+    "lsh_both": {"candidate_backend": "lsh_sign_dot", "candidate_apply_dot_gamma_filter": True, "candidate_apply_hamming_filter": True},
+}
 
 
 def variants(tuned: dict):
-    nv = int(tuned.get("n_vectors", 32))
-    hyb = bool(tuned.get("hybrid_validation", False))
-    return {
-        "full": {},
-        "no_gamma_filter": {"candidate_apply_dot_gamma_filter": False},
-        "no_hamming_filter": {"candidate_apply_hamming_filter": False},
-        "no_filters": {"candidate_apply_dot_gamma_filter": False, "candidate_apply_hamming_filter": False},
-        "hamming_exact": {"candidate_backend": "lsh_hamming_exact"},
-        ("hybrid" if not hyb else "no_hybrid"): {"hybrid_validation": not hyb},
-        "n_vectors_half": {"n_vectors": max(4, nv // 2)},
-        "n_vectors_double": {"n_vectors": nv * 2},
-    }
+    return dict(LADDER)
 
 
 def main() -> None:
@@ -96,7 +96,7 @@ def main() -> None:
                                                  metadata={"nodes": 0}, recall_by_window=True, verbose=False, testing=False)
         results["bruteforce"] = {"wall": time.perf_counter() - t0, "correlated": bf["correlated"], "total_candidates": bf["total_candidates"],
                                  "cand_time": bf["cand_time"], "val_time": bf["val_time"], **{k: bf.get(k) for k in STEP_KEYS}}
-        print(f"{'bruteforce':18s} wall={results['bruteforce']['wall']:.2f}s correlated={bf['correlated']} p50/p99 step={bf.get('step_time_p50')}/{bf.get('step_time_p99')}", flush=True)
+        print(f"{'bruteforce':18s} wall={results['bruteforce']['wall']:.2f}s correlated={bf['correlated']} step med/q3={bf.get('step_time_median')}/{bf.get('step_time_q3')}", flush=True)
         for name, over in todo.items():
             rp = dict(tuned, **over)
             t0 = time.perf_counter()
@@ -112,8 +112,8 @@ def main() -> None:
                              "correlated": rec["correlated"], "total_candidates": rec["total_candidates"], "tested": rec["tested"],
                              "sk_time": rec.get("sk_time"), "cand_time": rec["cand_time"], "val_time": rec["val_time"], **{k: rec.get(k) for k in STEP_KEYS}}
             r = results[name]
-            print(f"{name:18s} wall={r['wall']:.2f}s recall={r['recall']:.4f} cand={r['total_candidates']} cand_t={r['cand_time']:.3f} val_t={r['val_time']:.3f} "
-                  f"p50/p99 step={r['step_time_p50']:.5f}/{r['step_time_p99']:.5f}  {over}", flush=True)
+            print(f"{name:18s} wall={r['wall']:.2f}s recall={r['recall']:.4f} cand={r['total_candidates']} sk_t={r['sk_time']:.3f} cand_t={r['cand_time']:.3f} val_t={r['val_time']:.3f} "
+                  f"step med/q3={r['step_time_median']:.5f}/{r['step_time_q3']:.5f}", flush=True)
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         json.dump({"dataset": label, "config": vars(args), "tuned_source": src, "tuned": tuned, "variants": results}, open(args.out, "w"), indent=1, default=str)
