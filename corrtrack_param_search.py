@@ -7,7 +7,7 @@ import numpy as np
 from pathlib import Path
 from typing import Callable
 
-from library_corrtrack_parallel import CorrTrack_optimize, recommend_proxy_pair_row_budget
+from library_corrtrack_parallel import CorrTrack_optimize, recommend_proxy_pair_row_budget, estimate_proxy_series_subsample_cap
 
 
 def _load_module(config_path: Path, name: str):
@@ -481,6 +481,13 @@ def main():
     parser.add_argument("--preprocess", dest="preprocess_fixed", action="store_true", default=None,
                         help="(2026-09-18) tune on first-differenced data: PARAM_GRID['preprocess'] := [True] (the cell's returns/differences run)")
     parser.add_argument("--no-preprocess", dest="preprocess_fixed", action="store_false", help="PARAM_GRID['preprocess'] := [False]")
+    # (2026-09-19) proxy budget knobs from the command line, for the campaign's hyperopt cost/memory control
+    # (they default to the exec config's OPTIM_PROXY_* values)
+    parser.add_argument("--proxy-timing-repeats", type=int, default=None, help="OPTIM_PROXY_TIMING_REPEATS (timing repeats per setting; the tie-break only)")
+    parser.add_argument("--proxy-pair-row-ceiling", type=int, default=None, help="OPTIM_PROXY_PAIR_ROW_HARD_CEILING (reference rows across anchors; ~300 B each in memory)")
+    parser.add_argument("--proxy-series-subsample-max-pairs", type=int, default=None,
+                        help="OPTIM_PROXY_SERIES_SUBSAMPLE_MAX_PAIRS (per-anchor pair budget; more anchors fit the ceiling when it is smaller)")
+    parser.add_argument("--proxy-anchor-count", type=int, default=None, help="OPTIM_PROXY_ANCHOR_COUNT")
     args = parser.parse_args()
 
     cfg_exec = _load_module(args.exec_param_config, "experiment_exec")
@@ -554,7 +561,7 @@ def main():
     _validate_tuning_split(OPTIM_TUNING_MODE, TRAIN_RATIO)
     OPTIM_PROXY_CONFIG = {
         "anchor_count": _resolve_cfg_value(
-            None,
+            args.proxy_anchor_count,
             cfg_exec,
             "OPTIM_PROXY_ANCHOR_COUNT",
             DEFAULT_OPTIM_PROXY_ANCHOR_COUNT,
@@ -620,10 +627,16 @@ def main():
             DEFAULT_OPTIM_PROXY_ANCHOR_EXPAND_MAX_ROUNDS,
         ),
         "timing_repeats": _resolve_cfg_value(
-            None,
+            args.proxy_timing_repeats,
             cfg_exec,
             "OPTIM_PROXY_TIMING_REPEATS",
             DEFAULT_OPTIM_PROXY_TIMING_REPEATS,
+        ),
+        "series_subsample_max_pairs": _resolve_cfg_value(
+            args.proxy_series_subsample_max_pairs,
+            cfg_exec,
+            "OPTIM_PROXY_SERIES_SUBSAMPLE_MAX_PAIRS",
+            3_000_000,
         ),
         "candidate_rate_close_tolerance": _resolve_cfg_value(
             None,
@@ -633,7 +646,7 @@ def main():
         ),
     }
     OPTIM_PROXY_PAIR_ROW_HARD_CEILING = _resolve_cfg_value(
-        None,
+        args.proxy_pair_row_ceiling,
         cfg_exec,
         "OPTIM_PROXY_PAIR_ROW_HARD_CEILING",
         DEFAULT_OPTIM_PROXY_PAIR_ROW_HARD_CEILING,
@@ -683,11 +696,20 @@ def main():
                 # silently truncates anchor sampling at some scales while being needlessly
                 # small at others. Sized for OPTIM_PROXY_CONFIG's own max_anchor_count (the
                 # adaptive-expansion ceiling), bounded by OPTIM_PROXY_PAIR_ROW_HARD_CEILING.
+                # (2026-09-19) sized on the EFFECTIVE series count after the per-anchor series subsample
+                # (estimate_proxy_series_subsample_cap), which is what the reference actually builds; before,
+                # the pre-subsampling m made the budget and the "affords only N anchors" message pessimistic
+                _eff_n_var = estimate_proxy_series_subsample_cap(
+                    n_var, N_LAGS, WINDOW_STEP, OPTIM_PROXY_CONFIG["series_subsample_max_pairs"])
                 _proxy_max_pair_rows, _proxy_est_pairs_per_anchor, _proxy_anchors_affordable = recommend_proxy_pair_row_budget(
-                    n_var, N_LAGS, WINDOW_STEP,
+                    _eff_n_var, N_LAGS, WINDOW_STEP,
                     max_anchor_count=OPTIM_PROXY_CONFIG["max_anchor_count"],
                     hard_ceiling=OPTIM_PROXY_PAIR_ROW_HARD_CEILING,
                 )
+                if _eff_n_var < n_var:
+                    print(f"[proxy] {dataset_id}: reference built on a stratified subsample of {_eff_n_var} of {n_var} series "
+                          f"(series_subsample_max_pairs={OPTIM_PROXY_CONFIG['series_subsample_max_pairs']:,}); "
+                          f"{_proxy_anchors_affordable} anchors fit the {OPTIM_PROXY_PAIR_ROW_HARD_CEILING:,}-row ceiling")
                 dataset_proxy_config = dict(OPTIM_PROXY_CONFIG)
                 dataset_proxy_config["max_pair_rows"] = _proxy_max_pair_rows
                 dataset_proxy_config["distance_cache_max_rows"] = _proxy_max_pair_rows
@@ -701,7 +723,7 @@ def main():
                         f"({OPTIM_PROXY_PAIR_ROW_HARD_CEILING:,}) affords only "
                         f"{_proxy_anchors_affordable} of the requested "
                         f"{OPTIM_PROXY_CONFIG['max_anchor_count']} max anchors "
-                        f"({_proxy_est_pairs_per_anchor:,} pair rows/anchor at m={n_var}, "
+                        f"({_proxy_est_pairs_per_anchor:,} pair rows/anchor at effective m={_eff_n_var}, "
                         f"n_lags={N_LAGS}, window_step={WINDOW_STEP})."
                     )
 

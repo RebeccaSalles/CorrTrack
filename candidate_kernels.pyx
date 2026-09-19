@@ -7,6 +7,7 @@ cimport numpy as np
 from libc.math cimport sqrt, fabs, floor, ceil, log2, log, exp, lgamma, acos, atan2, cos, sin
 from libc.math cimport M_PI, NAN
 from libc.stdlib cimport malloc, calloc, realloc, free
+from libc.string cimport memset
 from libc.stdint cimport int64_t, uint64_t, uint8_t, int32_t
 from cython.parallel cimport prange, threadid
 
@@ -6071,6 +6072,477 @@ cdef class HybridValidationCache:
             "is_spiked": is_spiked_arr,
             "used_hybrid": used_hybrid_arr,
         }
+
+
+# ---------------------------------------------------------------------------------------------
+# (2026-09-19) IncrementalPairValidator: exact Pearson validation of numeric candidate rows with
+# O(step) updates for pairs that were candidates at a recent step.
+#
+# Motivation (pilot, sp500 m=492 W=60 step=5 L=5 T=0.9): CorrTrack validated 17.6M candidate
+# pair-windows from scratch at ~176 ns each (O(W) accumulation of nine sums) while the incremental
+# exact all-pairs baseline updates every pair-window in O(step), ~27 ns each. Most candidate pairs
+# recur from one step to the next (92-99.7% repeat rate in the 2026-09-13 profiling of
+# HybridValidationCache), so their nine sums can be rolled forward by removing the `age * step`
+# leaving points and adding the entering ones: 2 * age * step point reads instead of W.
+#
+# Design (third version; the first two, a hash table with parallel arrays and a 128-byte AoS hash
+# table, lost to the O(W) path at W = 60 because every probe was a DRAM miss, ~100 ns, more than the
+# 70 ns the full accumulation costs when the data sits in cache):
+#   * the state is a SORTED array of entries (key, t1, update count, nine sums), sorted by a
+#     composite key (s1, s2, lag in steps) with a per-run bit layout;
+#   * each step, the rows' keys are computed and the row indices are LSD radix-sorted on the key
+#     (passes of <= 11 bits, sequential reads, 2048-way scatter), then merged with the previous
+#     state by two sequential pointers: equal key -> roll the sums forward; otherwise -> full
+#     accumulation. The new state is written sequentially into a second buffer (double buffering);
+#     unmatched previous entries younger than max_age steps are carried over so a pair that skips
+#     a step can still be rolled (2 * age * step point reads). Everything is sequential memory
+#     except the data gathers the full path does too;
+#   * after `refresh_every` incremental updates an entry is re-accumulated in full, bounding
+#     floating-point drift (the correlated set must equal validate_corr_rows' bit for bit);
+#   * a row is rolled when the same key was seen `age` steps ago with 1 <= age <= max_age, both
+#     windows shifted by age * window_step, the leaving points still in the buffer, the same w, and
+#     2 * age * step < w; otherwise it is accumulated in full, with validate_corr_rows' arithmetic;
+#   * rows whose lag is not a multiple of window_step (never produced by CorrTrack's search) are
+#     validated in full and not cached.
+# Output has the shape of validate_corr_rows (accepted, corrs, dists, constants, spiked) plus the
+# number of rows rolled forward. Memory: 96 B per entry, two buffers; the Python side skips the cache
+# for a step whose row count exceeds `max_entries`, so the state is bounded and visible (peak RSS).
+# ---------------------------------------------------------------------------------------------
+cdef struct IPVEntry:
+    uint64_t key
+    int64_t t1
+    int32_t upd
+    int32_t w
+    double sx
+    double sy
+    double sxx
+    double syy
+    double sxxx
+    double syyy
+    double sxxxx
+    double syyyy
+    double sxy
+
+
+cdef inline int _bitlen(int64_t v) noexcept nogil:
+    cdef int b = 0
+    while v > 0:
+        v >>= 1
+        b += 1
+    return b
+
+
+cdef class IncrementalPairValidator:
+    cdef IPVEntry *_state          # sorted by key, _count entries
+    cdef IPVEntry *_next           # scratch buffer for the merge output
+    cdef Py_ssize_t _capacity      # entries per buffer
+    cdef Py_ssize_t _count
+    cdef int64_t _last_t1
+    cdef int _bits_s               # key layout of the current stream
+    cdef int _bits_lag
+    cdef int64_t _lag_offset       # lag index offset (n_lags / step + 1), so negative lags sort too
+    cdef int64_t _layout_m         # the n_series the layout was derived from
+    cdef uint64_t *_keys           # per-row scratch
+    cdef int64_t *_idx_a
+    cdef int64_t *_idx_b
+    cdef Py_ssize_t _scratch_rows
+    cdef public long rows_seen
+    cdef public long rows_rolled
+    cdef public long rows_full
+    cdef public long steps
+
+    def __cinit__(self, Py_ssize_t initial_capacity=4096):
+        self._state = self._next = NULL
+        self._keys = NULL
+        self._idx_a = self._idx_b = NULL
+        self._capacity = self._count = self._scratch_rows = 0
+        self._last_t1 = -1
+        self._bits_s = self._bits_lag = 0
+        self._lag_offset = 0
+        self._layout_m = -1
+        self.rows_seen = self.rows_rolled = self.rows_full = self.steps = 0
+        self._ensure_capacity(initial_capacity)
+
+    def __dealloc__(self):
+        free(self._state); free(self._next); free(self._keys); free(self._idx_a); free(self._idx_b)
+
+    cdef int _ensure_capacity(self, Py_ssize_t needed) except -1:
+        cdef Py_ssize_t cap
+        cdef IPVEntry *a
+        cdef IPVEntry *b
+        if needed <= self._capacity:
+            return 0
+        cap = 1024
+        while cap < needed:
+            cap <<= 1
+        a = <IPVEntry *>realloc(self._state, cap * sizeof(IPVEntry))
+        if a == NULL:
+            raise MemoryError("IncrementalPairValidator: allocation failed")
+        self._state = a
+        b = <IPVEntry *>realloc(self._next, cap * sizeof(IPVEntry))
+        if b == NULL:
+            raise MemoryError("IncrementalPairValidator: allocation failed")
+        self._next = b
+        self._capacity = cap
+        return 0
+
+    cdef int _ensure_scratch(self, Py_ssize_t n) except -1:
+        cdef Py_ssize_t cap
+        if n <= self._scratch_rows:
+            return 0
+        cap = 1024
+        while cap < n:
+            cap <<= 1
+        free(self._keys); free(self._idx_a); free(self._idx_b)
+        self._keys = <uint64_t *>malloc(cap * sizeof(uint64_t))
+        self._idx_a = <int64_t *>malloc(cap * sizeof(int64_t))
+        self._idx_b = <int64_t *>malloc(cap * sizeof(int64_t))
+        if self._keys == NULL or self._idx_a == NULL or self._idx_b == NULL:
+            self._scratch_rows = 0
+            raise MemoryError("IncrementalPairValidator: allocation failed")
+        self._scratch_rows = cap
+        return 0
+
+    cpdef clear(self):
+        """Forget every pair (e.g. after a reset of the stream); keeps the allocation."""
+        self._count = 0
+        self._last_t1 = -1
+        self._layout_m = -1
+
+    property entries:
+        def __get__(self):
+            return int(self._count)
+
+    property capacity:
+        def __get__(self):
+            return int(self._capacity)
+
+    def memory_bytes(self):
+        return int(self._capacity) * 2 * sizeof(IPVEntry) + int(self._scratch_rows) * 24
+
+    def validate_rows(self,
+                      double[:, ::1] data,
+                      long[:, ::1] rows,
+                      long base_index,
+                      long window_step,
+                      double corr_threshold,
+                      bint neg_corr,
+                      double std_thresh=1e-3,
+                      double kurt_thresh=5.0,
+                      int max_age=4,
+                      int refresh_every=32,
+                      long n_lags_hint=0):
+        """Validate numeric candidate rows [s1, s2, t1, t2, w] (absolute times; data starts at base_index).
+
+        Returns (accepted uint8, corrs, dists, constants uint8, spiked uint8, n_rolled): the first five as
+        validate_corr_rows; n_rolled is the number of rows updated incrementally from an earlier step.
+        """
+        cdef Py_ssize_t n_items = rows.shape[0]
+        cdef Py_ssize_t n_series = data.shape[0]
+        cdef Py_ssize_t n_cols = data.shape[1]
+        if rows.shape[1] < 5:
+            raise ValueError("rows must have at least five columns")
+        if window_step <= 0:
+            raise ValueError("window_step must be positive")
+        if max_age < 1:
+            max_age = 1
+        if refresh_every < 1:
+            refresh_every = 1
+        # key layout: fixed for the stream at the first call (a change of n_series resets the state)
+        cdef int64_t lag_offset
+        if self._layout_m != <int64_t>n_series:
+            self._count = 0
+            self._layout_m = <int64_t>n_series
+            self._bits_s = max(1, _bitlen(<int64_t>n_series))
+            lag_offset = (n_lags_hint // window_step) + 2 if n_lags_hint > 0 else 2
+            self._lag_offset = lag_offset
+            self._bits_lag = max(2, _bitlen(2 * lag_offset + 2))
+        cdef int bits_s = self._bits_s
+        cdef int bits_lag = self._bits_lag
+        lag_offset = self._lag_offset
+        cdef int total_bits = 2 * bits_s + bits_lag
+        cdef uint64_t lag_cap = (<uint64_t>1 << bits_lag)
+
+        self._ensure_scratch(n_items)
+        self._ensure_capacity(self._count + n_items)
+
+        cdef np.ndarray[np.uint8_t, ndim=1] accepted = np.zeros(n_items, dtype=np.uint8)
+        cdef np.ndarray[np.float64_t, ndim=1] corrs = np.empty(n_items, dtype=np.float64)
+        cdef np.ndarray[np.float64_t, ndim=1] dists = np.empty(n_items, dtype=np.float64)
+        cdef np.ndarray[np.uint8_t, ndim=1] constants = np.zeros(n_items, dtype=np.uint8)
+        cdef np.ndarray[np.uint8_t, ndim=1] spiked = np.zeros(n_items, dtype=np.uint8)
+        cdef uint8_t[:] accepted_view = accepted
+        cdef double[:] corr_view = corrs
+        cdef double[:] dist_view = dists
+        cdef uint8_t[:] const_view = constants
+        cdef uint8_t[:] spike_view = spiked
+
+        cdef uint64_t *keys = self._keys
+        cdef int64_t *idx_a = self._idx_a
+        cdef int64_t *idx_b = self._idx_b
+        cdef int64_t *src
+        cdef int64_t *dst
+        cdef int64_t *tmp_ptr
+        cdef IPVEntry *prev = self._state
+        cdef IPVEntry *out = self._next
+        cdef IPVEntry *e
+        cdef Py_ssize_t n_prev = self._count
+        cdef Py_ssize_t pi = 0, oi = 0
+        cdef int64_t last_t1 = self._last_t1
+        cdef int64_t min_t1 = last_t1 - <int64_t>max_age * window_step if last_t1 >= 0 else 0
+        cdef uint64_t NOKEY = <uint64_t>0xFFFFFFFFFFFFFFFF
+        cdef uint64_t key, prev_key
+        cdef int64_t counts[2052]
+        cdef int pass_bits, shift_bits, npass, pss
+        cdef Py_ssize_t i, j, r, b, nb
+        cdef long s1, s2, t1, t2, w, lag, lag_idx, start1, start2, prev_start1, prev_start2, age, shift, n_upd
+        cdef bint rolled, cacheable
+        cdef long rolled_total = 0, full_total = 0
+        cdef double sx, sy, sum_xy, sum_xx, sum_yy, sum_xxx, sum_yyy, sum_xxxx, sum_yyyy
+        cdef double xi, yi, ox, oy, ox2, oy2, xi2, yi2
+        cdef double mean_x, mean_y, var_x, var_y, denom, corr, dist_sq
+        cdef double mu4_x, mu4_y, varx, vary, kurt_x, kurt_y
+        cdef double nan_value = NAN
+        cdef double inf_value = np.inf
+        cdef bint is_const, is_spiked, is_corr
+
+        with nogil:
+            # 1. keys (NOKEY = not cacheable: invalid row or lag not a multiple of the step)
+            for r in range(n_items):
+                s1 = rows[r, 0]
+                s2 = rows[r, 1]
+                lag = rows[r, 2] - rows[r, 3]
+                w = rows[r, 4]
+                keys[r] = NOKEY
+                idx_a[r] = r
+                if s1 < 0 or s2 < 0 or s1 >= n_series or s2 >= n_series or w <= 0:
+                    continue
+                if lag % window_step != 0:
+                    continue
+                lag_idx = lag // window_step + lag_offset
+                if lag_idx < 0 or <uint64_t>lag_idx >= lag_cap:
+                    continue
+                keys[r] = ((((<uint64_t>s1) << bits_s) | <uint64_t>s2) << bits_lag) | <uint64_t>lag_idx
+            # 2. LSD radix sort of the row indices on the key (NOKEY rows sort last)
+            pass_bits = 11
+            npass = (total_bits + pass_bits - 1) // pass_bits
+            src = idx_a
+            dst = idx_b
+            for pss in range(npass):
+                shift_bits = pss * pass_bits
+                nb = 1 << pass_bits
+                for b in range(nb + 2):
+                    counts[b] = 0
+                for r in range(n_items):
+                    key = keys[src[r]]
+                    if key == NOKEY:
+                        b = nb
+                    else:
+                        b = <Py_ssize_t>((key >> shift_bits) & <uint64_t>(nb - 1))
+                    counts[b + 1] += 1
+                for b in range(nb + 1):
+                    counts[b + 1] += counts[b]
+                for r in range(n_items):
+                    key = keys[src[r]]
+                    if key == NOKEY:
+                        b = nb
+                    else:
+                        b = <Py_ssize_t>((key >> shift_bits) & <uint64_t>(nb - 1))
+                    dst[counts[b]] = src[r]
+                    counts[b] += 1
+                tmp_ptr = src
+                src = dst
+                dst = tmp_ptr
+            # src now holds the row indices in key order
+            # 3. merge with the previous sorted state
+            prev_key = NOKEY
+            for r in range(n_items):
+                i = src[r]
+                corr_view[i] = nan_value
+                dist_view[i] = inf_value
+                s1 = rows[i, 0]
+                s2 = rows[i, 1]
+                t1 = rows[i, 2]
+                t2 = rows[i, 3]
+                w = rows[i, 4]
+                start1 = t1 - base_index
+                start2 = t2 - base_index
+                if (w <= 0 or s1 < 0 or s2 < 0 or s1 >= n_series or s2 >= n_series
+                        or start1 < 0 or start2 < 0 or start1 + w > n_cols or start2 + w > n_cols):
+                    const_view[i] = <uint8_t>1
+                    continue
+                key = keys[i]
+                cacheable = key != NOKEY
+                rolled = False
+                n_upd = 0
+                e = NULL
+                if cacheable:
+                    # carry over the unmatched previous entries that are still young enough
+                    while pi < n_prev and prev[pi].key < key:
+                        if prev[pi].t1 >= min_t1:
+                            out[oi] = prev[pi]
+                            oi += 1
+                        pi += 1
+                    if key == prev_key and oi > 0:
+                        # the same key twice in one step: the entry just written holds this step's sums
+                        e = &out[oi - 1]
+                        if e.t1 == t1 and e.w == w:
+                            sx = e.sx; sy = e.sy; sum_xx = e.sxx; sum_yy = e.syy
+                            sum_xxx = e.sxxx; sum_yyy = e.syyy; sum_xxxx = e.sxxxx; sum_yyyy = e.syyyy; sum_xy = e.sxy
+                            rolled = True
+                        e = NULL
+                    elif pi < n_prev and prev[pi].key == key:
+                        e = &prev[pi]
+                        shift = t1 - e.t1
+                        if e.w == w and shift > 0 and shift % window_step == 0:
+                            age = shift // window_step
+                            prev_start1 = start1 - shift
+                            prev_start2 = start2 - shift
+                            n_upd = e.upd
+                            if (age <= max_age and 2 * shift < w and prev_start1 >= 0 and prev_start2 >= 0
+                                    and n_upd + age <= refresh_every):
+                                sx = e.sx
+                                sy = e.sy
+                                sum_xx = e.sxx
+                                sum_yy = e.syy
+                                sum_xxx = e.sxxx
+                                sum_yyy = e.syyy
+                                sum_xxxx = e.sxxxx
+                                sum_yyyy = e.syyyy
+                                sum_xy = e.sxy
+                                for j in range(shift):
+                                    ox = data[s1, prev_start1 + j]
+                                    oy = data[s2, prev_start2 + j]
+                                    xi = data[s1, start1 + w - shift + j]
+                                    yi = data[s2, start2 + w - shift + j]
+                                    ox2 = ox * ox
+                                    oy2 = oy * oy
+                                    xi2 = xi * xi
+                                    yi2 = yi * yi
+                                    sx += xi - ox
+                                    sy += yi - oy
+                                    sum_xx += xi2 - ox2
+                                    sum_yy += yi2 - oy2
+                                    sum_xxx += xi2 * xi - ox2 * ox
+                                    sum_yyy += yi2 * yi - oy2 * oy
+                                    sum_xxxx += xi2 * xi2 - ox2 * ox2
+                                    sum_yyyy += yi2 * yi2 - oy2 * oy2
+                                    sum_xy += xi * yi - ox * oy
+                                rolled = True
+                                n_upd += age
+                        pi += 1          # consumed (replaced by this step's entry)
+                if not rolled:
+                    n_upd = 0
+                    sx = sy = 0.0
+                    sum_xy = sum_xx = sum_yy = 0.0
+                    sum_xxx = sum_yyy = 0.0
+                    sum_xxxx = sum_yyyy = 0.0
+                    for j in range(w):
+                        xi = data[s1, start1 + j]
+                        yi = data[s2, start2 + j]
+                        sum_xy += xi * yi
+                        sx += xi
+                        sum_xx += xi * xi
+                        sum_xxx += xi * xi * xi
+                        sum_xxxx += xi * xi * xi * xi
+                        sy += yi
+                        sum_yy += yi * yi
+                        sum_yyy += yi * yi * yi
+                        sum_yyyy += yi * yi * yi * yi
+                    full_total += 1
+                else:
+                    rolled_total += 1
+                if cacheable and key != prev_key:
+                    e = &out[oi]
+                    oi += 1
+                    e.key = key
+                    e.t1 = t1
+                    e.upd = <int32_t>n_upd
+                    e.w = <int32_t>w
+                    e.sx = sx
+                    e.sy = sy
+                    e.sxx = sum_xx
+                    e.syy = sum_yy
+                    e.sxxx = sum_xxx
+                    e.syyy = sum_yyy
+                    e.sxxxx = sum_xxxx
+                    e.syyyy = sum_yyyy
+                    e.sxy = sum_xy
+                    prev_key = key
+                    if t1 > last_t1:
+                        last_t1 = t1
+
+                # the decision, identical to validate_corr_rows
+                mean_x = sx / w
+                mean_y = sy / w
+                var_x = sum_xx - (sx * sx) / w
+                var_y = sum_yy - (sy * sy) / w
+                if var_x < 0.0:
+                    var_x = 0.0
+                if var_y < 0.0:
+                    var_y = 0.0
+                is_const = (var_x <= (std_thresh * std_thresh) * w) or (var_y <= (std_thresh * std_thresh) * w)
+                if is_const:
+                    const_view[i] = <uint8_t>1
+                    continue
+                is_spiked = False
+                if w >= 4:
+                    varx = var_x / w
+                    if varx > 0.0:
+                        mu4_x = (sum_xxxx - 4.0 * mean_x * sum_xxx + 6.0 * (mean_x * mean_x) * sum_xx
+                                 - 4.0 * (mean_x * mean_x * mean_x) * sx + w * (mean_x * mean_x * mean_x * mean_x))
+                        kurt_x = (mu4_x / w) / (varx * varx) - 3.0
+                        if kurt_x > kurt_thresh:
+                            is_spiked = True
+                    vary = var_y / w
+                    if (not is_spiked) and vary > 0.0:
+                        mu4_y = (sum_yyyy - 4.0 * mean_y * sum_yyy + 6.0 * (mean_y * mean_y) * sum_yy
+                                 - 4.0 * (mean_y * mean_y * mean_y) * sy + w * (mean_y * mean_y * mean_y * mean_y))
+                        kurt_y = (mu4_y / w) / (vary * vary) - 3.0
+                        if kurt_y > kurt_thresh:
+                            is_spiked = True
+                if is_spiked:
+                    spike_view[i] = <uint8_t>1
+                    continue
+                denom = sqrt(var_x * var_y)
+                if denom == 0.0:
+                    corr = nan_value
+                else:
+                    corr = (sum_xy - (sx * sy) / w) / denom
+                    if corr > 1.0:
+                        corr = 1.0
+                    elif corr < -1.0:
+                        corr = -1.0
+                corr_view[i] = corr
+                dist_sq = sum_xx + sum_yy - 2.0 * sum_xy
+                if dist_sq < 0.0:
+                    dist_sq = 0.0
+                dist_view[i] = sqrt(dist_sq)
+                is_corr = False
+                if corr == corr:
+                    if neg_corr:
+                        is_corr = fabs(corr) >= corr_threshold
+                    else:
+                        is_corr = corr >= corr_threshold
+                if is_corr:
+                    accepted_view[i] = <uint8_t>1
+            # tail of the previous state: carry over the young entries
+            while pi < n_prev:
+                if prev[pi].t1 >= min_t1:
+                    out[oi] = prev[pi]
+                    oi += 1
+                pi += 1
+
+        # swap buffers
+        self._state = out
+        self._next = prev
+        self._count = oi
+        self._last_t1 = last_t1
+        self.rows_seen += n_items
+        self.rows_rolled += rolled_total
+        self.rows_full += full_total
+        self.steps += 1
+        return accepted, corrs, dists, constants, spiked, int(rolled_total)
 
 
 # (2026-07-30) Cython port of distance_corr_sketch.py's
