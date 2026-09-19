@@ -819,6 +819,54 @@ class StableReproducedChangesTest(unittest.TestCase):
         # the shared drift makes the level truth denser than the increment truth
         self.assertGreater(int(raw["n_gt"]), int(diff["n_gt"]))
 
+    def test_incremental_pair_validator_matches_validate_corr_rows(self):
+        # (2026-09-19) candidate_kernels.IncrementalPairValidator: exact roll-forward of repeated candidate
+        # pairs (sorted-merge state, leaving points from its own history when the buffer no longer holds
+        # them). Over a simulated stream with L = 1 (history path) and L = 3 (buffer path), with repeated,
+        # churned and duplicated rows, a row whose lag is not a multiple of the step, and forced refreshes,
+        # every output must equal validate_corr_rows' (accepted, constants, spiked exactly; corr to 1e-9).
+        import candidate_kernels as ck
+        rng = np.random.default_rng(11)
+        m, n = 40, 1200
+        data_full = np.cumsum(rng.normal(size=(m, n)), axis=1)
+        data_full[1] = data_full[0] + 0.05 * rng.normal(size=n)                 # a strongly correlated pair
+        data_full[2, :] = 3.0                                                     # a constant series
+        data_full[3, 600] += 200.0                                                # a spike
+        for W, step, L in ((48, 6, 1), (48, 6, 3), (30, 5, 1)):
+            v = ck.IncrementalPairValidator()
+            buf_cols = W + (L - 1) * step
+            keep = rng.choice(m * (m - 1) // 2, size=300, replace=False)
+            pairs_all = np.array([(a, b) for a in range(m) for b in range(a + 1, m)])
+            lag_of = rng.integers(0, L, size=len(pairs_all)) * step
+            n_rolled_total = 0
+            for s in range(0, 150):
+                start = s * step
+                if start + buf_cols > n:
+                    break
+                churn = rng.choice(len(pairs_all), size=40, replace=False)
+                idx = np.concatenate([keep, churn, keep[:5]])                     # duplicates on purpose
+                P = pairs_all[idx]
+                t1 = np.full(len(P), start + (L - 1) * step); t2 = t1 - lag_of[idx]
+                rows = np.column_stack([P[:, 0], P[:, 1], t1, t2, np.full(len(P), W)]).astype(np.int64)
+                if L > 1:
+                    rows[0, 3] = rows[0, 2] - 1                                    # lag not a multiple of the step
+                rows = np.ascontiguousarray(rows)
+                window = np.ascontiguousarray(data_full[:, start:start + buf_cols])
+                a1, c1, d1, k1, p1 = ck.validate_corr_rows(window, rows, start, 0.8, False)
+                a2, c2, d2, k2, p2, nr = v.validate_rows(window, rows, start, step, 0.8, False, 1e-3, 5.0, 4, 8, (L - 1) * step)
+                np.testing.assert_array_equal(a1, a2); np.testing.assert_array_equal(k1, k2); np.testing.assert_array_equal(p1, p2)
+                ok = np.isfinite(c1)
+                np.testing.assert_allclose(c1[ok], c2[ok], atol=1e-9, rtol=0)
+                np.testing.assert_allclose(d1[ok], d2[ok], atol=1e-7, rtol=0)
+                n_rolled_total += nr
+            self.assertGreater(n_rolled_total, 0, f"W={W} step={step} L={L}: nothing was rolled forward")
+            self.assertGreater(v.rows_rolled / max(1, v.rows_seen), 0.5)
+        # a hybrid_validation="auto" CorrTrack resolves by window size
+        _resolve_hybrid_validation_flag = library_corrtrack_parallel._resolve_hybrid_validation_flag
+        self.assertEqual(_resolve_hybrid_validation_flag("auto", 60), False)
+        self.assertEqual(_resolve_hybrid_validation_flag("auto", 168), True)
+        self.assertEqual(_resolve_hybrid_validation_flag("auto"), "auto")
+
     def test_kendall_tau_matches_scipy_exactly(self):
         # (2026-07-31) validation_metric="kendall" now routes through
         # candidate_kernels.kendall_tau_cy (Cython, no Python fallback) --

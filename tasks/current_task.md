@@ -2132,3 +2132,10 @@ running: pilot4 (one motes cell) through the snapshot's own wrappers after the t
 sync after the user's commit and rebuild the campaign snapshot. Probes queued on the pilot snapshot for the hyperopt
 cost at large m (raw space, unaffected by the fix): 3122888 (corrjoin_gas m5000 L1), 3122889 (berkeley m5000 L4),
 3122890 (corrjoin_gas m2500 L1), core=10 on PACK_HOSTS, out `~/corrtrack_abaca_results/probes/hyperopt_*`.
+### 2026-09-19 (f) incremental validation, hyperopt grid/memory, CSZ cap validity, N-way memory
+See log (f). **Uncommitted**: `candidate_kernels.pyx` (IncrementalPairValidator; rebuilt .so/.c), `library_corrtrack_parallel.py`
+(numeric path, "auto" flag, proxy reference per preprocess), `corrtrack_param_search.py` (proxy CLI knobs, effective-m
+budget), `experiment_run_param_grid_campaign.py` (new), `abaca/hyperopt_corrtrack.oar` (campaign grid + knobs), `abaca/nway_compare.py`
+(score-and-drop, npy transfer, partitioned metrics, memory projection), `abaca/nway_compare.oar` (TMPDIR), `abaca/campaign_competitors.py`
+(CALIB_SERIES 300), tests. Abaca not yet synced with (e)/(f): after the user's commit, `git pull`, rebuild the campaign snapshot.
+Open for the user: budget row (A-E + the memory cut: no (m=5000, L=5) rung for synthetic densities >= 0.05; Berkeley full-m at T >= 0.8).

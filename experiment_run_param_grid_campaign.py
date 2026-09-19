@@ -12,8 +12,13 @@ from experiment_run_param_grid import PARAM_GRID as _BASE
 
 PARAM_GRID = dict(_BASE)
 PARAM_GRID.update({
-    "n_vectors": [16, 32, 64],
-    "candidate_cosine_threshold_offset": [0.0, 0.05, 0.10, 0.15, 0.20],
+    # 2 x 4 x 5 x 2 = 80 settings: 150 took 40 min locally at m = 492 (8 took 7 min), the pick was
+    # n_vectors 64, offset 0.05, occupancy 8; n_vectors 16 and offset 0.15 never won in the pilots
+    "n_vectors": [32, 64],
+    "candidate_cosine_threshold_offset": [0.0, 0.05, 0.10, 0.20],
     "candidate_lsh_target_occupancy": [2.0, 3.0, 5.0, 8.0, 12.0],
     "candidate_hamming_filter_max_frac": [None, 0.40],
+    # (2026-09-19) incremental validation of repeated candidate pairs, on when W >= 120 (see
+    # HYBRID_VALIDATION_AUTO_MIN_WINDOW); exact, so not a searched axis
+    "hybrid_validation": ["auto"],
 })

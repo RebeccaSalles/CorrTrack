@@ -307,9 +307,12 @@ HOST_SUFFIX = ".sophia.grid5000.fr"
 
 # (2026-09-19) tuning budget: the pilot's parcorr stage (130 rows) took 30 min at 63 windows x 492 series and the
 # cost grows as m^2 x windows, so the CSZ protocol runs on at most CALIB_WINDOWS windows of at most CALIB_SERIES
-# series (seeded subset); the filter parameters are per-pair quantities (see tune_competitors.py --calib-series)
+# series (seeded subset); the filter parameters are per-pair quantities (see tune_competitors.py --calib-series).
+# Validity check (ASOS air temperature m=600, T=0.9, probes 3123165-70): the chosen settings of CSZ, CorrJoin and
+# StatStream are identical at 200 / 300 / 500 / 600 series and at 32 / 64 / 128 windows, ParCorr's differs by one
+# grid step of c at 200 series (1.0 vs 1.1); wall 9 / 16 / 35 / 47 min. 300 series x 64 windows is the setting.
 CALIB_WINDOWS = 64
-CALIB_SERIES = 500
+CALIB_SERIES = 300
 
 
 def pack_cores(m: int) -> int:

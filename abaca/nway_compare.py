@@ -43,7 +43,7 @@ sys.path.insert(0, REPO)
 os.chdir(REPO)
 
 import corrtrack_run_bruteforce as bfmod  # noqa: E402
-from library_corrtrack_parallel import CorrTrack, run_and_log_bruteforce, run_and_log_corrtrack, _HAVE_COMPETITOR_KERNELS  # noqa: E402
+from library_corrtrack_parallel import CorrTrack, run_and_log_bruteforce, run_and_log_corrtrack, _HAVE_COMPETITOR_KERNELS, NumericCorrelatedFlags, _canonicalize_rows, _rows_as_void_keys  # noqa: E402
 from abaca.dataset_profile import profile_dataset  # noqa: E402
 from abaca.resource_probe import run_isolated, idle_power  # noqa: E402
 import socket  # noqa: E402
@@ -55,6 +55,10 @@ NEG_NOT_AVAILABLE = {"parcorr", "csz", "corrjoin"}
 PURE_PYTHON_INDEX = {"parcorr", "csz", "statstream", "corrjoin"}
 # arms whose REPORTED correlation is approximate by design (their `correlated` is what they reported, not a TP count)
 APPROX_REPORT = {"braid", "thinbraid", "statstream"}
+# (2026-09-19) memory: correlated sets above this size travel child -> parent as memory-mapped .npy files; the
+# budget is the node's RAM minus headroom (mercantour3: 192 GB), used only to flag a cell in the log/JSON
+LARGE_SET_BYTES = int(float(os.environ.get("NWAY_LARGE_SET_GB", "1")) * 2**30)
+MEMORY_BUDGET_GB = float(os.environ.get("NWAY_MEMORY_BUDGET_GB", "150"))
 
 
 def _parse_set(items):
@@ -66,6 +70,73 @@ def _parse_set(items):
         except json.JSONDecodeError:
             out[k] = v
     return out
+
+
+def _metrics_partitioned(pred_flags, gt_flags, n_parts: int) -> dict:
+    """(2026-09-19, memory) recall / precision / F1 of two large correlated sets computed in `n_parts` partitions
+    by min(s1, s2) mod n_parts (invariant under the canonical pair order), so the 40-byte sort keys and their
+    unique/isin temporaries (~3x the sets) exist for one partition at a time. Same arithmetic as
+    CorrTrack.compute_metrics_bf_numeric for the positive-correlation case: unique canonical rows on both sides,
+    tp = |pred and gt|."""
+    p_rows, _ = pred_flags.correlated_rows(); g_rows, _ = gt_flags.correlated_rows()
+    p_rows = np.asarray(p_rows); g_rows = np.asarray(g_rows)
+    p_key = np.minimum(p_rows[:, 0], p_rows[:, 1]) % n_parts if p_rows.shape[0] else np.zeros(0, dtype=np.int64)
+    g_key = np.minimum(g_rows[:, 0], g_rows[:, 1]) % n_parts if g_rows.shape[0] else np.zeros(0, dtype=np.int64)
+    tp = n_p = n_g = 0
+    for k in range(n_parts):
+        pk = _rows_as_void_keys(_canonicalize_rows(np.ascontiguousarray(p_rows[p_key == k], dtype=np.int64))) if p_rows.shape[0] else np.zeros(0)
+        gk = _rows_as_void_keys(_canonicalize_rows(np.ascontiguousarray(g_rows[g_key == k], dtype=np.int64))) if g_rows.shape[0] else np.zeros(0)
+        pk = np.unique(pk) if pk.size else pk; gk = np.unique(gk) if gk.size else gk
+        n_p += int(pk.size); n_g += int(gk.size)
+        if pk.size and gk.size:
+            tp += int(np.count_nonzero(np.isin(pk, gk, assume_unique=True)))
+        del pk, gk
+    precision = tp / n_p if n_p else 0.0
+    recall = tp / n_g if n_g else (1.0 if n_p == 0 else 0.0)
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+    return {"precision": precision, "recall": recall, "f1_score": f1, "partitions": n_parts}
+
+
+def _score_against_bruteforce(arm: str, r: dict, flags, bf: dict, bf_flags) -> None:
+    """recall / precision / F1 of the arm's correlated set against bruteforce's, and the candidate-stage specificity."""
+    total_bytes = _correlated_set_bytes(flags) + _correlated_set_bytes(bf_flags)
+    if total_bytes > LARGE_SET_BYTES and hasattr(flags, "correlated_rows") and hasattr(bf_flags, "correlated_rows"):
+        n_parts = 1
+        while n_parts * LARGE_SET_BYTES < 3 * total_bytes:
+            n_parts *= 2
+        m = _metrics_partitioned(flags, bf_flags, max(8, n_parts))
+        r["metrics_partitions"] = m["partitions"]
+    else:
+        m = CorrTrack.compute_metrics_bf(flags, bf_flags, windows=True, total_pairs_bf=bf.get("total_candidates") or bf.get("tested"))
+    r.update(precision=m.get("precision"), recall=m.get("recall"), f1=m.get("f1_score"))
+    # (2026-09-18, user) candidate-stage specificity: of the pair-windows that are NOT correlated at T
+    # (the bruteforce universe minus its positives), the fraction the arm did not put forward as a
+    # candidate. FP = candidates - true positives; specificity = 1 - FP / (U - P). 1.0 means the
+    # candidate stage never wastes a validation. TP = recall * P (2026-09-19: for an arm that reports an
+    # approximate correlation, BRAID/ThinBRAID/StatStream, `correlated` is what it REPORTED, not its TP)
+    U = int(bf.get("total_candidates") or bf.get("tested") or 0); P = int(bf.get("correlated") or 0)
+    cand = int(r.get("total_candidates") or 0)
+    lower_bound = False
+    if cand >= U:                                   # no candidate stage: every negative is put forward
+        fp = U - P
+    elif arm in APPROX_REPORT:                      # reported TP <= candidate TP, so this FP is an upper bound
+        fp = max(cand - int(round((m.get("recall") or 0.0) * P)), 0); lower_bound = True
+    else:                                           # exact validation: the arm's correlated count is its TP
+        fp = max(cand - int(r.get("correlated") or 0), 0)
+    r.update(universe_pair_windows=U, positives=P, candidate_false_positives=fp, candidate_specificity_is_lower_bound=lower_bound,
+             candidate_specificity=(1.0 - fp / (U - P)) if U > P else None, candidate_fpr=(fp / (U - P)) if U > P else None)
+
+
+def _correlated_set_bytes(flags) -> int:
+    """size of a NumericCorrelatedFlags (rows + corrs) or a legacy dict, for the memory log."""
+    try:
+        rows, corrs = flags.correlated_rows()
+        return int(np.asarray(rows).nbytes + np.asarray(corrs).nbytes)
+    except Exception:  # noqa: BLE001
+        try:
+            return int(len(flags)) * 64
+        except Exception:  # noqa: BLE001
+            return 0
 
 
 def main() -> None:
@@ -170,6 +241,7 @@ def main() -> None:
     print(f"node: {node['hostname']} affinity_cores={node['affinity_cores']} idle_power_w={idle['idle_power_w']} energy_source={idle['energy_source']}", flush=True)
 
     results = {}
+    bf_flags = None
     with tempfile.TemporaryDirectory() as tmp:
         for arm in arms:
             if args.neg_corr and arm in NEG_NOT_AVAILABLE:
@@ -192,6 +264,12 @@ def main() -> None:
                     record, _, flags = run_and_log_corrtrack(label, test_data, ids_n_var, base, pattern_b[arm], f"{arm_dir}/{arm}.csv",
                                                              metadata={"nodes": 0, "alg": arm}, recall_by_window=True, corr_val=True,
                                                              monitor=bool(args.monitor), verbose=False, testing=False)
+                # (2026-09-19, memory) a large correlated set goes back to the parent as .npy files (memory-mapped
+                # there) instead of through the pipe, which would hold a pickled copy in both processes
+                if hasattr(flags, "correlated_rows") and _correlated_set_bytes(flags) > LARGE_SET_BYTES:
+                    rows_, corrs_ = flags.correlated_rows()
+                    np.save(f"{arm_dir}/correlated_rows.npy", np.asarray(rows_)); np.save(f"{arm_dir}/correlated_corrs.npy", np.asarray(corrs_))
+                    flags = ("npy", f"{arm_dir}/correlated_rows.npy", f"{arm_dir}/correlated_corrs.npy")
                 return record, flags
 
             t0 = time.perf_counter()
@@ -204,6 +282,8 @@ def main() -> None:
                 print(f"{arm:12s} ERROR {type(exc).__name__}: {str(exc).splitlines()[0]}", flush=True)
                 continue
             wall = time.perf_counter() - t0
+            if isinstance(flags, tuple) and flags and flags[0] == "npy":
+                flags = NumericCorrelatedFlags(np.load(flags[1], mmap_mode="r"), np.load(flags[2], mmap_mode="r"))
             r = {k: record.get(k) for k in ("correlated", "total_candidates", "tested", "candidate_precision", "sk_time", "cand_time", "val_time", "monit_time",
                                             "runtime", "artifact_time", "n_steps", "step_time_min", "step_time_q1", "step_time_median", "step_time_q3", "step_time_max",
                                             "step_time_whisker_lo", "step_time_whisker_hi", "step_time_outliers", "step_time_mean",
@@ -219,11 +299,27 @@ def main() -> None:
             r["other_time"] = max(float(record.get("runtime") or 0.0) - sum(phases.values()), 0.0)
             r["phase_fractions"] = {k: (v / record["runtime"]) for k, v in phases.items()} if record.get("runtime") else None
             # (2026-09-17) the competitor indexes run their hot loops in competitor_kernels when it is built
-            r.update(status="ok", wall=resources["wall_s"], wall_outer=wall, flags=flags,
+            r.update(status="ok", wall=resources["wall_s"], wall_outer=wall,
                      pure_python_index=(arm in PURE_PYTHON_INDEX and not _HAVE_COMPETITOR_KERNELS),
                      candidate_time_per_pair_window_us=(1e6 * record["cand_time"] / record["total_candidates"]) if record.get("total_candidates") else None,
-                     resources=resources)
+                     resources=resources, correlated_set_mb=_correlated_set_bytes(flags) / 2**20)
             results[arm] = r
+            # (2026-09-19, memory) the correlated sets live in memory: score each arm as soon as it finishes and
+            # drop its set, so the parent holds bruteforce's set plus ONE arm's at a time (not all eleven). The
+            # per-arm size is logged (correlated_set_mb) for the campaign's memory audit.
+            if arm == "bruteforce":
+                bf_flags = flags
+                set_gb = r["correlated_set_mb"] / 1024.0
+                # the parent will hold this set for the whole battery plus one arm's set and the metrics'
+                # sort temporaries (~3x the two sets); say so when it is large
+                r["memory_projection_gb"] = 3.0 * 2.0 * set_gb
+                print(f"bruteforce correlated set: {set_gb:.2f} GB ({r['correlated']} pair-windows); metrics projection ~{r['memory_projection_gb']:.1f} GB"
+                      + ("  ** ABOVE THE MEMORY BUDGET **" if r["memory_projection_gb"] > MEMORY_BUDGET_GB else ""), flush=True)
+            elif bf_flags is not None:
+                t_m = time.perf_counter()
+                _score_against_bruteforce(arm, r, flags, results["bruteforce"], bf_flags)
+                r["metrics_time"] = time.perf_counter() - t_m
+            del flags, record
             print(f"{arm:12s} done: wall={r['wall']:.2f}s correlated={r['correlated']} total={r['total_candidates']} tested={r['tested']} "
                   f"peak_rss={resources['peak_rss_mb']:.0f}MB (+{(resources['peak_rss_delta_mb'] or 0):.0f}) mean_rss={(resources['mean_rss_mb'] or 0):.0f}MB "
                   f"io_w={(resources['io_write_mb'] or 0):.1f}MB neg_corr_tag={r['supports_neg_corr']}", flush=True)
@@ -244,28 +340,6 @@ def main() -> None:
     profile["preprocess"] = bool(args.preprocess)
     print(f"\ndataset profile: density@T={profile.get('density_at_threshold')} low-freq energy share={profile['low_frequency_energy_share_mean']} "
           f"(white noise {profile['white_noise_reference']:.3f}) lag1 autocorr={profile['lag1_autocorr_mean']} constant windows={profile['constant_window_fraction']:.4f}", flush=True)
-    for arm, r in results.items():
-        if r.get("status") != "ok" or arm == "bruteforce":
-            continue
-        m = CorrTrack.compute_metrics_bf(r["flags"], bf["flags"], windows=True, total_pairs_bf=bf.get("total_candidates") or bf.get("tested"))
-        r.update(precision=m.get("precision"), recall=m.get("recall"), f1=m.get("f1_score"))
-        # (2026-09-18, user) candidate-stage specificity: of the pair-windows that are NOT correlated at T
-        # (the bruteforce universe minus its positives), the fraction the arm did not put forward as a
-        # candidate. FP = candidates - true positives; specificity = 1 - FP / (U - P). 1.0 means the
-        # candidate stage never wastes a validation. TP = recall * P (2026-09-19: for an arm that reports an
-        # approximate correlation, BRAID/ThinBRAID/StatStream, `correlated` is what it REPORTED, not its TP)
-        U = int(bf.get("total_candidates") or bf.get("tested") or 0); P = int(bf.get("correlated") or 0)
-        cand = int(r.get("total_candidates") or 0)
-        lower_bound = False
-        if cand >= U:                                   # no candidate stage: every negative is put forward
-            fp = U - P
-        elif arm in APPROX_REPORT:                      # reported TP <= candidate TP, so this FP is an upper bound
-            fp = max(cand - int(round((m.get("recall") or 0.0) * P)), 0); lower_bound = True
-        else:                                           # exact validation: the arm's correlated count is its TP
-            fp = max(cand - int(r.get("correlated") or 0), 0)
-        r.update(universe_pair_windows=U, positives=P, candidate_false_positives=fp, candidate_specificity_is_lower_bound=lower_bound,
-                 candidate_specificity=(1.0 - fp / (U - P)) if U > P else None, candidate_fpr=(fp / (U - P)) if U > P else None)
-
     print("\n=== SUMMARY ===")
     print(f"{'arm':12s} {'status':>6s} {'wall_s':>8s} {'speedup':>8s} {'correlated':>11s} {'total_cand':>11s} {'tested':>9s} {'recall':>7s} {'cand_prec':>9s} {'cand_spec':>9s} {'step_med_ms':>11s} {'step_q3_ms':>10s} {'peakMB':>7s} {'meanMB':>7s} {'neg_corr_tag':>14s} {'index':>6s}")
     for arm in arms:
@@ -288,7 +362,7 @@ def main() -> None:
           f"CSZ-protocol tuned arms: {tuned or 'none (paper defaults)'}")
     if args.out:
         out = {"dataset": label, "cell": args.cell, "dataset_profile": profile, "config": vars(args), "node": node, "corrtrack_params_source": ct_source, "competitor_params_tuned": tuned,
-               "arms": {a: {k: v for k, v in r.items() if k != "flags"} for a, r in results.items()}}
+               "arms": results}
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         json.dump(out, open(args.out, "w"), indent=1, default=str)
         print(f"wrote {args.out}")

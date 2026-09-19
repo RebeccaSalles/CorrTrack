@@ -6146,6 +6146,13 @@ cdef class IncrementalPairValidator:
     cdef int64_t *_idx_a
     cdef int64_t *_idx_b
     cdef Py_ssize_t _scratch_rows
+    # (2026-09-19) the leaving points: with n_lags < step the validation buffer no longer holds the
+    # values a rolled window drops, so the first max_age * step columns of the previous buffer are
+    # kept here (absolute time of column 0 in _hist_base)
+    cdef double *_hist
+    cdef Py_ssize_t _hist_series
+    cdef Py_ssize_t _hist_cols
+    cdef int64_t _hist_base
     cdef public long rows_seen
     cdef public long rows_rolled
     cdef public long rows_full
@@ -6155,6 +6162,9 @@ cdef class IncrementalPairValidator:
         self._state = self._next = NULL
         self._keys = NULL
         self._idx_a = self._idx_b = NULL
+        self._hist = NULL
+        self._hist_series = self._hist_cols = 0
+        self._hist_base = -1
         self._capacity = self._count = self._scratch_rows = 0
         self._last_t1 = -1
         self._bits_s = self._bits_lag = 0
@@ -6164,7 +6174,7 @@ cdef class IncrementalPairValidator:
         self._ensure_capacity(initial_capacity)
 
     def __dealloc__(self):
-        free(self._state); free(self._next); free(self._keys); free(self._idx_a); free(self._idx_b)
+        free(self._state); free(self._next); free(self._keys); free(self._idx_a); free(self._idx_b); free(self._hist)
 
     cdef int _ensure_capacity(self, Py_ssize_t needed) except -1:
         cdef Py_ssize_t cap
@@ -6208,6 +6218,7 @@ cdef class IncrementalPairValidator:
         self._count = 0
         self._last_t1 = -1
         self._layout_m = -1
+        self._hist_base = -1
 
     property entries:
         def __get__(self):
@@ -6218,7 +6229,7 @@ cdef class IncrementalPairValidator:
             return int(self._capacity)
 
     def memory_bytes(self):
-        return int(self._capacity) * 2 * sizeof(IPVEntry) + int(self._scratch_rows) * 24
+        return int(self._capacity) * 2 * sizeof(IPVEntry) + int(self._scratch_rows) * 24 + int(self._hist_series) * int(self._hist_cols) * 8
 
     def validate_rows(self,
                       double[:, ::1] data,
@@ -6265,6 +6276,24 @@ cdef class IncrementalPairValidator:
 
         self._ensure_scratch(n_items)
         self._ensure_capacity(self._count + n_items)
+        cdef Py_ssize_t hist_cols_needed = <Py_ssize_t>max_age * window_step
+        if hist_cols_needed > n_cols:
+            hist_cols_needed = n_cols
+        if self._hist_series != n_series or self._hist_cols != hist_cols_needed:
+            free(self._hist)
+            self._hist = <double *>malloc(n_series * hist_cols_needed * sizeof(double)) if n_series * hist_cols_needed > 0 else NULL
+            if self._hist == NULL and n_series * hist_cols_needed > 0:
+                self._hist_series = self._hist_cols = 0
+                raise MemoryError("IncrementalPairValidator: allocation failed")
+            self._hist_series = n_series
+            self._hist_cols = hist_cols_needed
+            self._hist_base = -1          # the layout changed: no usable history this step
+        cdef double *hist = self._hist
+        cdef Py_ssize_t hist_cols = self._hist_cols
+        cdef int64_t hist_base = self._hist_base
+        # history usable for absolute times in [hist_base, hist_base + hist_cols) that precede base_index
+        cdef bint have_hist = hist_base >= 0 and hist_base + hist_cols >= base_index
+        cdef int64_t tau
 
         cdef np.ndarray[np.uint8_t, ndim=1] accepted = np.zeros(n_items, dtype=np.uint8)
         cdef np.ndarray[np.float64_t, ndim=1] corrs = np.empty(n_items, dtype=np.float64)
@@ -6399,8 +6428,11 @@ cdef class IncrementalPairValidator:
                             prev_start1 = start1 - shift
                             prev_start2 = start2 - shift
                             n_upd = e.upd
-                            if (age <= max_age and 2 * shift < w and prev_start1 >= 0 and prev_start2 >= 0
-                                    and n_upd + age <= refresh_every):
+                            # the leaving points [prev_t, prev_t + shift) come from the buffer when still
+                            # there, else from the history of the previous buffer
+                            if (age <= max_age and 2 * shift < w and n_upd + age <= refresh_every
+                                    and (prev_start1 >= 0 or (have_hist and t1 - shift >= hist_base))
+                                    and (prev_start2 >= 0 or (have_hist and t2 - shift >= hist_base))):
                                 sx = e.sx
                                 sy = e.sy
                                 sum_xx = e.sxx
@@ -6411,8 +6443,16 @@ cdef class IncrementalPairValidator:
                                 sum_yyyy = e.syyyy
                                 sum_xy = e.sxy
                                 for j in range(shift):
-                                    ox = data[s1, prev_start1 + j]
-                                    oy = data[s2, prev_start2 + j]
+                                    tau = t1 - shift + j
+                                    if tau >= base_index:
+                                        ox = data[s1, tau - base_index]
+                                    else:
+                                        ox = hist[s1 * hist_cols + (tau - hist_base)]
+                                    tau = t2 - shift + j
+                                    if tau >= base_index:
+                                        oy = data[s2, tau - base_index]
+                                    else:
+                                        oy = hist[s2 * hist_cols + (tau - hist_base)]
                                     xi = data[s1, start1 + w - shift + j]
                                     yi = data[s2, start2 + w - shift + j]
                                     ox2 = ox * ox
@@ -6532,7 +6572,13 @@ cdef class IncrementalPairValidator:
                     out[oi] = prev[pi]
                     oi += 1
                 pi += 1
+            # keep the first columns of this buffer: they are the points the next step's windows drop
+            if hist_cols > 0:
+                for i in range(n_series):
+                    for j in range(hist_cols):
+                        hist[i * hist_cols + j] = data[i, j]
 
+        self._hist_base = <int64_t>base_index
         # swap buffers
         self._state = out
         self._next = prev

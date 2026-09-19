@@ -95,6 +95,7 @@ try:
     _cy_validate_corr_rows = getattr(_cand_kernels, "validate_corr_rows", None)
     _cy_validate_corr_rows_nonlinear = getattr(_cand_kernels, "validate_corr_rows_nonlinear", None)
     _cy_hybrid_cache_cls = getattr(_cand_kernels, "HybridValidationCache", None)
+    _cy_incremental_validator_cls = getattr(_cand_kernels, "IncrementalPairValidator", None)
     _cy_kendall_tau = getattr(_cand_kernels, "kendall_tau_cy", None)
     _cy_spearman_rho = getattr(_cand_kernels, "spearman_rho_cy", None)
     _cy_distance_correlation_1d_fast = getattr(_cand_kernels, "distance_correlation_1d_fast_cy", None)
@@ -126,6 +127,7 @@ except Exception:  # pragma: no cover
     _cy_validate_corr_rows = None
     _cy_validate_corr_rows_nonlinear = None
     _cy_hybrid_cache_cls = None
+    _cy_incremental_validator_cls = None
     _cy_kendall_tau = None
     _cy_spearman_rho = None
     _cy_distance_correlation_1d_fast = None
@@ -2579,6 +2581,22 @@ def _is_missing_param_value(value):
         return False
 
 
+# (2026-09-19) hybrid_validation="auto": the incremental validator (IncrementalPairValidator) pays a
+# sorted-merge bookkeeping of ~45 ns per candidate row and saves the O(W) accumulation for the rows it
+# rolls forward; measured on real cells it loses at W = 60 (validation 0.39 -> 0.63 s on sp500) and
+# wins from W = 168 up (USCRN 0.16 -> 0.11 s, 0.59 -> 0.43 s; motes W = 2880 0.03 -> 0.02 s), all with
+# identical correlated sets. "auto" enables it when window_size >= this many points.
+HYBRID_VALIDATION_AUTO_MIN_WINDOW = 120
+
+
+def _resolve_hybrid_validation_flag(value, window_size=None):
+    if isinstance(value, str) and value.strip().lower() == "auto":
+        if window_size is None:
+            return "auto"
+        return int(window_size) >= HYBRID_VALIDATION_AUTO_MIN_WINDOW
+    return _coerce_to_bool(value, default=False)
+
+
 def _resolve_hybrid_validation_kwargs(defaults=None, overrides=None):
     defaults = defaults or {}
     overrides = overrides or {}
@@ -2591,7 +2609,7 @@ def _resolve_hybrid_validation_kwargs(defaults=None, overrides=None):
         return _HYBRID_VALIDATION_DEFAULTS.get(name)
 
     return {
-        "hybrid_validation": _coerce_to_bool(pick("hybrid_validation"), default=False),
+        "hybrid_validation": _resolve_hybrid_validation_flag(pick("hybrid_validation")),
         "hybrid_validation_min_repeat_rate": pick("hybrid_validation_min_repeat_rate"),
         "hybrid_validation_disable_rate": pick("hybrid_validation_disable_rate"),
         "hybrid_validation_ema_alpha": pick("hybrid_validation_ema_alpha"),
@@ -4514,7 +4532,7 @@ class CorrTrack:
         # window sizes. Only clearly worth enabling after measuring it help
         # on the specific workload at hand. See docs/implementation_log.md.
         self.validation_current_window_cache = _coerce_to_bool(validation_current_window_cache, default=False)
-        self.hybrid_validation = _coerce_to_bool(hybrid_validation, default=False)
+        self.hybrid_validation = _resolve_hybrid_validation_flag(hybrid_validation, window_size)
         self.hybrid_validation_min_repeat_rate = _to_float_safe(hybrid_validation_min_repeat_rate)
         if self.hybrid_validation_min_repeat_rate is None:
             self.hybrid_validation_min_repeat_rate = 0.25
@@ -4531,6 +4549,18 @@ class CorrTrack:
         if min_candidates is None:
             min_candidates = 256
         self.hybrid_validation_min_candidates = max(1, int(min_candidates))
+        # (2026-09-19) the numeric-rows path of hybrid validation is candidate_kernels.IncrementalPairValidator
+        # (sorted-merge state, O(step) roll-forward of repeated candidate pairs, no Python per row; see its
+        # header comment). hybrid_validation_max_age: how many steps back a pair may have been seen and still
+        # be rolled forward (2 * age * step point reads); hybrid_validation_refresh_every: full
+        # re-accumulation after this many incremental updates (drift bound); hybrid_validation_max_entries:
+        # above this many candidate rows in a step the cache is skipped (memory bound, 96 B per entry, two
+        # buffers). The EMA gate of the legacy pair path does not apply here: a miss costs a sequential
+        # merge step, not a table probe.
+        self.hybrid_validation_max_age = 4
+        self.hybrid_validation_refresh_every = 32
+        self.hybrid_validation_max_entries = 4_000_000
+        self._incremental_validator = None
         # Parameters lags
         self.window_size = window_size
 
@@ -7169,82 +7199,55 @@ class CorrTrack:
             self.min_dist = np.inf
             self.pair_min_dist = None
 
-        if getattr(self, "hybrid_validation", False):
-            hybrid_min_candidates = int(getattr(self, "hybrid_validation_min_candidates", 256) or 0)
-            cache = getattr(self, "_hybrid_validation_cache", None)
-            if (
-                cache is not None
-                and _cy_hybrid_cache_cls is not None
-                and (hybrid_min_candidates <= 0 or n_pairs >= hybrid_min_candidates)
-            ):
-                try:
-                    result = cache.validate_pairs(
-                        np.ascontiguousarray(self._get_validation_window_data(), dtype=np.float64),
-                        rows[:, 0],
-                        rows[:, 1],
-                        rows[:, 2],
-                        rows[:, 3],
-                        rows[:, 4],
-                        int(self.window_index[0]),
-                        int(self.window_step),
-                        float(self.corr_threshold),
-                        bool(self.neg_corr),
-                        float(getattr(self, "hybrid_validation_min_repeat_rate", 0.25)),
-                        float(getattr(self, "hybrid_validation_disable_rate", 0.125)),
-                        float(getattr(self, "hybrid_validation_ema_alpha", 0.25)),
-                        int(getattr(self, "hybrid_validation_min_candidates", 256)),
-                        1e-3,
-                        5.0,
-                        **self._current_window_cache_kwargs(),
-                    )
-                except Exception:
-                    result = None
-                if result is not None and "ok" in result:
-                    # (2026-09-13) Vectorized consumption of the Cython cache's bulk
-                    # numpy arrays -- was a per-candidate Python for-loop unpacking a
-                    # freshly Cython-built list of tuples (itself already the dominant
-                    # cost of validate_pairs's Python-visible return value), found by
-                    # profiling to inflate validation_time ~15x over hybrid_validation
-                    # disabled despite a 92-99% cache hit rate. See candidate_kernels.pyx's
-                    # matching comment.
-                    active = bool(result.get("active", False))
-                    self._hybrid_validation_active = active
-                    self._hybrid_validation_rate_ema = float(result.get("repeat_rate_ema", 0.0))
-                    if active:
-                        self.hybrid_validation_attempts += int(result.get("repeat_count", 0) or 0)
-                        self.hybrid_validation_steps_active += 1
-                    ok_mask = np.asarray(result["ok"], dtype=bool)
-                    tested = int(ok_mask.sum())
-                    if tested:
-                        is_corr = np.asarray(result["is_corr"], dtype=bool) & ok_mask
-                        corr = np.asarray(result["corr"], dtype=np.float64)
-                        dist = np.asarray(result["dist"], dtype=np.float64)
-                        is_const = np.asarray(result["is_const"], dtype=bool) & ok_mask
-                        used_hybrid = np.asarray(result["used_hybrid"], dtype=bool) & ok_mask
-                        self.hybrid_validation_hits += int(used_hybrid.sum())
-                        self.constant_candidates += int(is_const.sum())
-                        if track_min_dist:
-                            valid_idx = np.flatnonzero(ok_mask)
-                            local_pos = int(np.argmin(dist[valid_idx]))
-                            local_min_dist = float(dist[valid_idx[local_pos]])
-                            if local_min_dist < self.min_dist:
-                                self.min_dist = local_min_dist
-                                self.pair_min_dist = self._numeric_row_to_pair(rows[valid_idx[local_pos]])
-                        if np.any(is_corr):
-                            self._record_correlated_numeric(
-                                rows[is_corr],
-                                corr[is_corr],
-                                retain_validated=retain_validated,
-                            )
-                        self.tested_candidates += tested
-                        self.validated_candidates += int(is_corr.sum())
-                    else:
-                        self.tested_candidates += 0
-                    return
-            if hybrid_min_candidates <= 0 or n_pairs >= hybrid_min_candidates:
-                self._reset_hybrid_validation_runtime()
-            else:
-                self._hybrid_validation_active = False
+        if getattr(self, "hybrid_validation", False) and _cy_incremental_validator_cls is not None:
+            # (2026-09-19) Cython-only incremental validation of the numeric rows (replaces the
+            # HybridValidationCache path here; that class stays for the legacy pair path).
+            max_entries = int(getattr(self, "hybrid_validation_max_entries", 4_000_000) or 0)
+            if max_entries <= 0 or n_pairs <= max_entries:
+                ipv = getattr(self, "_incremental_validator", None)
+                if ipv is None:
+                    ipv = _cy_incremental_validator_cls()
+                    self._incremental_validator = ipv
+                _prof = getattr(self, "profile_enabled", False)
+                t0 = time.perf_counter() if _prof else None
+                accepted_mask, corrs, dists, _constants, _spiked, n_rolled = ipv.validate_rows(
+                    np.ascontiguousarray(self._get_validation_window_data(), dtype=np.float64),
+                    rows,
+                    int(self.window_index[0]),
+                    int(self.window_step),
+                    float(self.corr_threshold),
+                    bool(self.neg_corr),
+                    1e-3,
+                    5.0,
+                    int(getattr(self, "hybrid_validation_max_age", 4)),
+                    int(getattr(self, "hybrid_validation_refresh_every", 32)),
+                    int(self.n_lags or 0),
+                )
+                if t0 is not None:
+                    self._profile_add("val.numeric_rows_kernel_incremental", time.perf_counter() - t0)
+                self.hybrid_validation_attempts += n_pairs
+                self.hybrid_validation_hits += int(n_rolled)
+                self.hybrid_validation_steps_active += 1
+                self._hybrid_validation_active = True
+                accepted_mask = np.asarray(accepted_mask, dtype=np.uint8)
+                corrs = np.asarray(corrs, dtype=np.float64)
+                dists = np.asarray(dists, dtype=np.float64)
+                if track_min_dist and dists.size:
+                    finite = np.isfinite(dists)
+                    if finite.any():
+                        finite_idx = np.flatnonzero(finite)
+                        local_idx = int(finite_idx[int(np.argmin(dists[finite_idx]))])
+                        local_dist = float(dists[local_idx])
+                        if local_dist < self.min_dist:
+                            self.min_dist = local_dist
+                            self.pair_min_dist = self._numeric_row_to_pair(rows[local_idx])
+                accepted_idx = np.flatnonzero(accepted_mask != 0)
+                if accepted_idx.size:
+                    self._record_correlated_numeric(rows[accepted_idx], corrs[accepted_idx], retain_validated=retain_validated)
+                self.tested_candidates += n_pairs
+                self.validated_candidates += int(accepted_idx.size)
+                return
+            self._hybrid_validation_active = False
 
         if _cy_validate_corr_rows is None:
             ids_by_idx = self._ids_by_numeric_index()

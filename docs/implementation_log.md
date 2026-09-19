@@ -9075,3 +9075,60 @@ AU +1.26M, CN +0.39M, DE +1.12M rows already merged); resumes 01:30 via `gaps_fi
 then the final pivot + screen. Interim screen (186 countries, m=175, hourly): raw density
 0.212 / avg degree 171 of 175, diff 0.0037 / 166 of 175; same conclusion as the 196-station
 screen, hourly ASOS is a near-complete graph in both spaces. Next: daily aggregation screen.
+
+### 2026-09-19 (f) [competitor campaign thread] incremental validation (Cython, exact), hyperopt grid and memory, CSZ cap validity, N-way memory
+User's three requests after the pilot discussion: (b) a Cython-only incremental validation path; the hyperopt memory
+investigation and the CSZ cap validity; the budget decision deferred. Plus the question whether the in-memory
+correlated sets would OOM in the planned campaign.
+
+**(b) `candidate_kernels.IncrementalPairValidator`** (new; `library_corrtrack_parallel.py` numeric path uses it when
+`hybrid_validation` is on). Exact Pearson validation of numeric candidate rows with the nine sums of a pair that was a
+candidate up to `max_age` (4) steps ago rolled forward in O(age x step) instead of O(W); full re-accumulation every
+`refresh_every` (32) updates bounds the drift. Three designs were measured:
+  1. hash table with parallel arrays, two probes per row: 147 ns/row vs 69 ns for validate_corr_rows at W=60 (bench);
+  2. one 128-byte AoS hash table, single probe, prefetch, slot-ordered processing: 184 ns/row (every probe a DRAM miss);
+  3. SORTED-MERGE state: per step an LSD radix sort of the rows on a packed (s1, s2, lag/step) key (passes of 11 bits),
+     then a sequential merge with the previous sorted state; unmatched young entries carried over; the first
+     max_age x step columns of the previous buffer kept as history (with n_lags < step the buffer no longer holds the
+     points a rolled window drops). All sequential memory. Kept.
+  Real cells, tuned or n_vectors 64, correlated sets IDENTICAL (symmetric difference 0, |corr diff| <= 3e-12):
+  USCRN temperature W=168 s=12 L=1 T=0.9: validation 0.16 -> 0.11 s (70% rows rolled); L=3 T=0.8: 0.59 -> 0.43 s
+  (76%); motes W=2880: 0.03 -> 0.02 s (85%); sp500 W=60 s=5 L=5 T=0.9: 0.39 -> 0.63 s (64% rolled, SLOWER: the
+  bookkeeping, ~45 ns/row, exceeds what a 60-point accumulation costs from cache). Hence
+  `hybrid_validation="auto"` = on when W >= `HYBRID_VALIDATION_AUTO_MIN_WINDOW` (120); the campaign grid sets "auto";
+  default elsewhere unchanged (False). Test `test_incremental_pair_validator_matches_validate_corr_rows` (L=1 history
+  path, L=3 buffer path, duplicates, non-multiple lag, forced refreshes). The per-row cost of the O(W) path at W=60 is
+  ~70 to 80 ns, i.e. within 3x of the incremental all-pairs baseline's 27 ns per pair-window; an exact validation of
+  scattered candidates cannot go much below that, which is a statement for the paper (the pruning stage, not the
+  validation, is where CorrTrack's advantage over exact_stomp has to come from at small W).
+**Hyperopt grid.** The campaign hyperopt searched only n_vectors x hamming (8 settings) at offset 0.20 / occupancy 3.
+`experiment_run_param_grid_campaign.py` (new): offset {0, 0.05, 0.10, 0.20} x occupancy {2, 3, 5, 8, 12} x n_vectors
+{32, 64} x hamming {None, 0.4}, hybrid_validation "auto"; `--proxy-timing-repeats 1`. The 150-setting variant took 40 min
+locally at m=492 (8 settings: 7 min) and picked n_vectors 64, offset 0.05, occupancy 8: CorrTrack on raw sp500 T=0.9
+then runs in 4.7 s (8.47M candidates, val 0.70 s) against 8.5 s with the 8-point grid, i.e. FASTER than exact_stomp
+(6.7 s) where it was 1.3x slower. 80 settings should take ~20 min.
+**Hyperopt memory.** Probes 3122888-90 (m=2500 and 5000, L=1 and 4): 6.3 to 6.6 GB and 5 to 15 min whatever m. The
+memory is the proxy reference (20M rows x ~300 B of Python tuples/dict), bounded by OPTIM_PROXY_PAIR_ROW_HARD_CEILING;
+the series subsample (3M pairs per anchor) kept only 6 anchors inside it at m >= 2500. Now: CLI knobs
+`--proxy-pair-row-ceiling`, `--proxy-series-subsample-max-pairs` (1M in the campaign: ~20 anchors), `--proxy-anchor-
+count`, `--proxy-timing-repeats`; the budget message uses the EFFECTIVE (post-subsample) m. No disk persistence is
+used by the hyperopt or by the runs (confirmed with the other thread); the 6.5 GB fits the core=2 packing (19 GB share).
+Two probe results to keep in mind: corrjoin_gas at T=0.9 has training density 0.21 and the best recall over the grid
+was 0.32 (LSH pruning cannot reach 0.95 on data where a fifth of all pairs correlate; the hyperopt keeps the best
+setting and flags it), Berkeley m=5000 L=4 reached 0.85.
+**CSZ cap validity** (ASOS air temperature m=600, T=0.9; probes 3123165-70): chosen settings identical at 200 / 300 /
+500 / 600 series and 32 / 64 / 128 windows for CSZ ({c 0.4, f 0.6, N 36, k 4}), CorrJoin ({4, 84, 2}) and StatStream
+({32, 1, bw 6}); ParCorr c 1.0 at 200 vs 1.1 otherwise. Wall 9 / 16 / 35 / 47 min. Campaign: CALIB_SERIES 300.
+**N-way memory** (user's question: everything in memory, would the campaign OOM?). Yes for some cells as it was:
+nway kept all eleven arms' correlated sets until the end, the child sent its set through a pipe (pickled copy in both
+processes) and the metrics build 40-byte sort keys (~3x the sets). Now: each arm is scored as soon as it finishes and
+its set dropped (bruteforce's + one live); sets above NWAY_LARGE_SET_GB (1 GB) travel as memory-mapped .npy files in
+$TMPDIR (set to the run dir on the NFS results filesystem, not the node's 16 GB /tmp); metrics of large sets are
+computed in partitions by min(s1, s2) mod K (identical results on the smoke); the bruteforce set size and a memory
+projection are logged (`correlated_set_mb`, `memory_projection_gb`, flagged above NWAY_MEMORY_BUDGET_GB = 150).
+What no harness change fixes: the set itself, 28 B per correlated pair-window, held by the child during its run.
+Projection (n_obs 5,000 for the synthetic family): synthetic density 0.2 at m=5000 L=5 -> 5.0e9 pair-windows = 131 GB
+per set; density 0.1 -> 65 GB; 0.05 -> 33 GB; density 0.2 at m=5000 L=1 or m=2500 L=4 -> 26 GB. Real data at T=0.7:
+Berkeley full-m (18,520) ~80 GB, statstream_rw m=5000 L=5 ~50 GB, Berkeley m=5000 L=4 ~23 GB, corrjoin_gas m=5000
+~20 GB. Everything else is under 15 GB. Recommendation for the budget decision: drop the (m=5000, L=5) rung for
+synthetic densities >= 0.05 (48 cells), and run Berkeley full-m at T >= 0.8 only.

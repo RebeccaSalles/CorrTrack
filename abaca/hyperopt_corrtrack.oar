@@ -60,7 +60,16 @@ print(" ".join(out))
 PY
 )
 # shellcheck disable=SC2086
+# (2026-09-19) campaign grid (offset x occupancy x n_vectors x hamming, hybrid_validation auto), one timing repeat
+# (timing is the tie-break only), and the proxy memory knobs: the reference rows cost ~300 B each, so the
+# 20M-row ceiling is ~6 GB whatever m; a 1M-pair per-anchor series subsample buys 20 anchors inside it
+PARAM_GRID_CONFIG="${PARAM_GRID_CONFIG:-experiment_run_param_grid_campaign.py}"
+PROXY_TIMING_REPEATS="${PROXY_TIMING_REPEATS:-1}"
+PROXY_PAIR_ROW_CEILING="${PROXY_PAIR_ROW_CEILING:-20000000}"
+PROXY_SERIES_SUBSAMPLE_MAX_PAIRS="${PROXY_SERIES_SUBSAMPLE_MAX_PAIRS:-1000000}"
 command time -v -o "$OUT_DIR/time_v.txt" python corrtrack_param_search.py --dataset-config "$DATASET_CONFIG" --result-folder "$OUT_DIR" \
+  --param-grid-config "$PARAM_GRID_CONFIG" --proxy-timing-repeats "$PROXY_TIMING_REPEATS" \
+  --proxy-pair-row-ceiling "$PROXY_PAIR_ROW_CEILING" --proxy-series-subsample-max-pairs "$PROXY_SERIES_SUBSAMPLE_MAX_PAIRS" \
   --window-size "$WINDOW_SIZE" --window-step "$WINDOW_STEP" --basic-window "$BASIC_WINDOW" --n-lags "$N_LAGS" --corr-threshold "$THR" \
   --sequential --no-verbose "${NEG_CORR_FLAG:---no-neg-corr}" $PREPROCESS_FLAG $HYPER_ARGS 2>&1 | tee "$OUT_DIR/hyperopt.log"
 RC=${PIPESTATUS[0]}

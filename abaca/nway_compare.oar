@@ -78,6 +78,9 @@ else
   cp "$SNAPSHOT/SNAPSHOT_OK" "$RUN_DIR/SNAPSHOT_OK"
 fi
 
+# (2026-09-19) temporary files (artifact CSVs, large correlated sets as .npy) on the results filesystem, not the
+# node's 16 GB /tmp
+export TMPDIR="$RUN_DIR/tmp"; mkdir -p "$TMPDIR"
 echo "== N-way comparison =="
 # shellcheck disable=SC2086
 python abaca/nway_compare.py --dataset-config "$DATASET_CONFIG" --arms "$ARMS" \
@@ -86,6 +89,7 @@ python abaca/nway_compare.py --dataset-config "$DATASET_CONFIG" --arms "$ARMS" \
   $NEG_CORR_FLAG $PREPROCESS_FLAG $EXTRA_ARGS ${RUN_NAME:+--cell "$RUN_NAME"} --out "$RUN_DIR/nway.json" 2>&1 | tee "$RUN_DIR/nway.log"
 COMPARE_RC=${PIPESTATUS[0]}
 
+rm -rf "$TMPDIR"
 echo "== summary =="
 echo "build_rc=$BUILD_RC pytest_rc=$PYTEST_RC compare_rc=$COMPARE_RC"
 echo "artifacts under $RUN_DIR"
