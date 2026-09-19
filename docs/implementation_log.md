@@ -8864,3 +8864,214 @@ with that sentence, counters remain the headline.
   50 / 100 (counts identical); naive_numpy is faster than bruteforce at these tiny sizes (harness
   overhead). This is the table that explains TSUBASA's ">= 10x over naive" and FilCorr's "4x more
   sensors": their naive is our naive_python tier, ours is 2 orders of magnitude faster.
+
+### 2026-09-19 status: v3 rerun 74/76, both FilCorr sweeps complete, ASOS complete
+- v3 (AoS kernel): 54/56 m=500 cells + 20/20 FilCorr cells done, 0 failures; pending
+  `m5v3_sp500_07_raw`, `m5v3_acwi_cap_07_raw` (densest raw cells, started last). No-monitor sweep
+  20/20. (g)-kernel set complete and archived (76 files). First v3 submission had been dead on
+  arrival (job scripts without the exec bit, "Permission denied" after 5s); resubmitted 23:35,
+  cost ~30 min of queue time, no data touched.
+- Tables: `docs/tables_m500_and_filcorr_sweep_2026-09-19.md` (builder `scratchpad/build_tables.py`;
+  m=500 diff, m=500 raw, FilCorr sweep monitored, FilCorr sweep monitoring off; last column of
+  the m=500 tables is the (g)->(i) kernel speedup change per cell). Effect of the AoS kernel:
+  differenced m=500 cells move within noise (+-0.3x); dense raw cells gain (streamflow 0.80
+  hamming 1.80->2.54, acwi 0.80 1.10->1.45, sp500_sub263 0.70 0.87->1.03, sp500 0.80 1.02->1.28).
+  global_weather 0.70 FilCorr 2coef monit_time 57.1s (pre) -> 9.6s (g) -> 1.9s (i).
+- ASOS: SE retry succeeded (12,149,805 rows, 53 stations, full 2011-2026, 9 minutes at 04:00);
+  TR 55 stations, UN 27 stations. All 199 country files present. Pivot + degree screen on the
+  complete set submitted as job 3122021 (`pivot_screen_job.sh`, isolated repo).
+
+### 2026-09-19 (b) ASOS: header bug in the bisection merge found via the pivot; night gap retry scheduled
+`pivot_asos_wide.py` (job 3122021) skipped 13 countries with "bad columns" (AU, BR, CN, DE, ES,
+FR, IR, KR, NL, NO, RU, TR, UN): their files start with a data row. Cause: `fetch_recursive`
+strips the header from the right half of every bisection before concatenating, also when the
+left half returned "" (slice given up), so no header survives. Fixed (return the right half
+whole when the left is empty). Pivot now assigns the six known column names when a file lacks
+the header, so the existing files are usable as they are. 18 countries have logged dropped
+slices (the 13 plus GB, IN, IT, JP, MX); `fetch_gaps_retry.py` re-fetches them with the Sweden
+recipe (curl 900s, 3h budget, sequential, keeps the old file unless the retry has at least as
+many rows), started by `gaps_retry_watch.sh` at 01:30 on 2026-09-20 (frontend nohup), which
+then submits `pivot_screen_job.sh` for the final pivot + degree screen. Job 3122021 continues
+and yields an interim 186-country screen.
+
+### 2026-09-19 (c) [competitor campaign thread] W-robustness cells, generator split, frontend at d0e3378, Phase R reruns, pilot emitted
+- `abaca/campaign_competitors.py`: W-robustness check added to `cells()` (decided 2026-09-17 in place of a W sweep):
+  sp500 at (W,step) = (30,3) and (120,12) (half and double the quarter horizon) and uscrn2020_temperature at (84,6)
+  and (336,24) (half and double the week), W/step = 10 kept, anchor m, L in {1, L_max}, all four T, both spaces;
+  ks/ke = paper's 15/30 when W allows, else the largest of 14/28, 12/24, ... dividing W. 64 cells. Manifest now
+  1601 cells x 6 jobs = 9,606 jobs. Stems verified unique; no rule violation (n_lags multiple of step, ks/ke divide W).
+- Synthetic generators no longer inlined at the top of the submit script (they had made it 70 KB and would run the
+  bruteforce-verified m = 5,000 generations on the frontend). `--emit X.sh` now also writes `X_generate.sh` with only
+  the generators the selected cells need (403 commands for the full manifest, 0 for the real-data pilot), to be run
+  as one OAR job before the submit script. Checked: `--select` of a synthetic stem yields exactly its generator.
+- Abaca frontend `~/corrtrack_release_dev` brought to d0e3378 (stale `competitor_kernels.c/.so` removed, the other
+  session's local `monitor_kernels.pyx` edits kept as `git stash` stash@{0}, scp'd docs/tasks backed up to
+  `~/corrtrack_abaca_results/backup_docs_scp_2026-09-19`). Phase R reruns submitted (`abaca/reproduce_papers.oar`):
+  3122029 braid (SpikeTrains at `--max-lag 3000`), 3122030 parcorr (calibration protocol), 3122031 csz (130-row
+  design), 3122032 filcorr (Yellowstone at lag 1000); all p1, running at 11:00. Results land in
+  `tmp_artifacts/reproduce_*.json`; the Phase R table in `docs/competitor_implementation_plan.md` s3a is to be
+  updated from them.
+- `abaca/pilot_submit.sh` emitted on the frontend (6 cells: motes_temperature m27 L0 T0.9, sp500 m492 L20 T0.9,
+  global_asos_air_temperature m600 L0 T0.9, each raw and diff; 36 jobs), NOT executed yet. Purpose: check the JSON
+  shape, the hyperopt -> tune -> nway dependency chain and the walltime fit before the full submission. The ASOS
+  cell will use whatever `global_asos_air_temperature.npz` is present; the complete pivot (job 3122021, companion
+  thread) may change the station set, so that cell is a plumbing test only.
+- Not done yet: results aggregator (JSON -> tables/figures), full campaign submission, side experiments (ablation,
+  parallel scaling, naive baseline), monitoring/anomaly experiment design.
+
+### 2026-09-19 (d) [competitor campaign thread] per-arm resources and energy, one build per campaign, node partition, feeder, aggregator
+User's requests: per-phase and total time, peak and mean RSS, disk, energy, for every method; help choosing the
+queue depth and node count; everything needed before the runs.
+- `abaca/resource_probe.py` (new): `run_isolated(fn, ...)` runs fn in a forked child and returns its result plus
+  `rss_before_mb, peak_rss_mb, peak_rss_delta_mb, mean_rss_mb (50 ms sampler, time-weighted), mean_rss_delta_mb,
+  io_read_mb, io_write_mb (/proc/self/io of the child, which starts at zero), artifact_mb, cpu_user_s, cpu_sys_s,
+  wall_s, t_start_epoch, t_end_epoch, energy_j / energy_dram_j / mean_power_w (Intel RAPL powercap when readable)`.
+  Checked locally: a 2000x2000 float64 array shows as +30.5 MB peak delta and 30.5 MB written; a child exception
+  surfaces as RuntimeError with the child traceback. In-process fallback `measure()` keeps the same fields.
+- `abaca/nway_compare.py`: every arm through `run_isolated` (flag `--no-isolate` for debugging, `--rss-interval`);
+  record now also carries `runtime`, `artifact_time`, `other_time` (runtime minus the four phase clocks),
+  `phase_fractions`, `wall` (child) and `wall_outer` (parent, includes the fork/pickle overhead), `resources`; the
+  JSON carries `node` (hostname, OAR job id, affinity cores, thread env, idle power when RAPL is readable) and
+  `cell` (`--cell`, the campaign stem). Summary table gains peakMB / meanMB (deltas). Specificity fix: for an arm
+  with no candidate stage (candidates = universe) FP = U - P (specificity 0 by definition); for an approximate
+  reporter (BRAID, ThinBRAID, StatStream) TP = recall x P and the value is flagged `candidate_specificity_is_lower_bound`;
+  exact validators keep TP = correlated. (Before, ThinBRAID showed -0.02 because its reported count was taken as TP.)
+- Energy on Abaca: probe job 3122061 on mercantour3-9: `/sys/class/powercap/intel-rapl:*/energy_uj` Permission
+  denied (package-0/1 and dram domains exist), perf_event_paranoid 3, msr root-only, no wattmeter in the reference
+  API. kwollect works with a monitor job type: `-t "monitor=prom_.*default_metrics"` gives CPU/memory only; `-t
+  "monitor=prom_.*"` (job 3122064) exposes `prom_node_hwmon_power_average_watt` (ACPI meter acpi000d, 2 s averaging,
+  one sample per 15 s) and `prom_node_ipmi_power_watts` (BMC, 56 W steps, lags ~1 min). `abaca/kwollect_power.py`
+  fetches the series per OAR job and `aggregate_campaign.py --power` integrates it over each arm's interval; the
+  N-way jobs are submitted with `-t "monitor=prom_.*"`: the narrower types `prom_node_(ipmi|hwmon)_power.*`,
+  `prom_node_hwmon.*`, `prom_node_ipmi.*|prom_node_hwmon.*` recorded nothing (jobs 3122066/68/69). Burn probe 3122070
+  (90 s idle, 150 s of 20 busy cores, 90 s idle) on mercantour3-7: hwmon 64 W idle -> 240-248 W within one 15 s
+  sample of burn_start, back to 65-69 W within one sample of burn_end; IPMI follows with ~1 min lag and coarse
+  steps. The API accepts `metrics=` with `job_id=`, so the fetch stays at 2 series x 4 samples/min per job.
+- `abaca/prepare_snapshot.oar` (new) + `abaca/_snapshot_enter.sh` (new, sourced by the three wrappers): one build and
+  test run per campaign in `$RESULTS_ROOT/snapshots/<sha>[_tag]`; jobs run from it with `SNAPSHOT=`; CPU-model check
+  against the build host; `datasets/competitor` symlinked to the clone. The old per-job rebuild in the shared clone
+  (a race between concurrent jobs) is kept only for standalone runs without SNAPSHOT.
+- OAR wrappers: `#OAR -l` and `#OAR -p` removed from every header (a header -l plus a command-line -l is a MOLDABLE
+  request; `oarstat -fj 3122029` shows both and walltime 12:0:0, so the Phase R reruns run under 12 h, not 24 h);
+  `RUN_NAME` -> `$RESULTS_ROOT/nway/<stem>_<tag>/`; hyperopt and tune run under `command time -v` (`time_v.txt`, peak
+  RSS and wall of the job printed at the end).
+- `abaca/campaign_competitors.py`: SNAPSHOT token in every job, `RUN_NAME`, `-n h_/t_/n_<stem>_<tag>` job names, node
+  partition `PACK_HOSTS` (mercantour3-1,4,5,6; core=2/4/10 by m) and `NWAY_HOSTS` (11 hosts; host=1; monitor type),
+  `-p "cluster='mercantour3'"` in `submit()`, generators to `<stem>_generate.sh` run from the snapshot. 1601 cells,
+  9,606 jobs, 403 generator commands.
+- `abaca/campaign_feeder.py` (new): bounded-queue submission (`--max-waiting`, `--max-total`, `--blocks-per-round`,
+  `--poll`, `--only`, `--skip-done`, `--dry-run`), resumable through `<script>.state`.
+- `abaca/aggregate_campaign.py` (new): runs.csv / cells.csv / tuning.csv, summary_by_{T,m,L,space,dataset,neg}.md
+  (median and IQR over cells with n), failures.md, optional kwollect energy per arm and per cell.
+- `abaca/ablation_corrtrack.py`, `abaca/parallel_scaling.py`: variants through `run_isolated` (resources per variant;
+  parallel scaling records the median run's resources, the median CPU total and the max peak delta over repeats).
+- `test_abaca_tools.py` (new, 5 tests): isolated accounting (memory, I/O, error propagation), feeder split of an
+  emitted script (6 submits per cell, 2 host jobs + 4 core jobs, RUN_NAME, SNAPSHOT), stem parsing, power integration,
+  summary table. All pass locally; `prepare_snapshot.oar` runs it with the other two files.
+- Smokes (motes m27, T 0.9, untuned): N-way 11 arms ok with resources; ablation 2 variants; parallel scaling seq +
+  thr2. Peak deltas at this size are 6 to 18 MB (ThinBRAID the largest).
+- Pilot, first attempt (snapshot d0e337877e3d_pilot, job 3122084: kernels built in ~1 min, 165 tests passed on the
+  node once the snapshot leaf kept the clone's name, `config_folder()` uses the tree's basename): 36 jobs fed at
+  12:09 (feeder, 6 cells). Two defects found and fixed: (1) `nway_compare.py` crashed when a tuned
+  `best_params_<arm>.json` carried `preprocess` (`dict(..., **bp, preprocess=...)` duplicate keyword); the file's value
+  is now dropped and the cell's wins; (2) the snapshot had an empty `tmp_artifacts`, where `competitor_loader`
+  resolves the legacy npz inputs (sp500, acwi, ...): now a symlink to the clone's, like `datasets/competitor`.
+  Observed before the stop: the motes hyperopt ran to completion in about two minutes (max RSS 267 MB, `time -v`).
+  Pilot jobs deleted, outputs removed, snapshot rebuilt (job 3122168) and the pilot re-fed.
+- Pilot, second attempt (12:28, 36 jobs; snapshot rebuilt as 3122168 with `tmp_artifacts` symlinked): motes cells
+  ran end to end. Chain verified: hyperopt (21 s, max RSS 267 MB at m=27) -> tune (parcorr, csz, statstream,
+  corrjoin, all written) -> N-way loads `best_params_corrtrack.json` and the four tuned files, 11 arms ok,
+  resources per arm in the JSON (`nway/motes_temperature_m27_W2880_s288_L0_T0.9_{pos,neg,diff_pos,diff_neg}`).
+  Third defect: `tune_competitors.py` rejected the `--set corrjoin_ks/ke` tokens the campaign passes in EXTRA_ARGS
+  (nway's fallback knobs); it now accepts and logs them (the protocol tunes those factors). sp500/ASOS cells
+  resubmitted (pilot2, 24 jobs) with the snapshot's copy of the file patched (recorded in its SNAPSHOT_OK).
+- Pilot timings at m ~ 500: hyperopt 5 to 8 min, max RSS 6.3 GB (sp500 m492 L5; ASOS m600 L1). Tuning: the
+  parcorr stage alone took 30 min on sp500 (63 windows x 492 series, 130 rows), and the ASOS tune (403 windows x
+  600 series) had not finished parcorr after 35 min; the cost grows as m^2 x windows, so at m = 5000 the protocol
+  would take days per job. New caps in `tune_competitors.py`: `--calib-windows N` (span W + N step) and
+  `--calib-series K` (seeded subset; CSZ filter parameters are per-pair quantities, stated with the results);
+  the campaign passes CALIB_WINDOWS=64, CALIB_SERIES=500 (`tune_competitors.oar` tokens). ASOS cells resubmitted
+  with the caps (pilot3, 12 jobs); the sp500 tune jobs were left uncapped to time the full protocol once.
+- Cost model check (k_bf = 1.058e-7 s per m^2 L n_steps; arms factor over bruteforce ~13 for the 11-arm battery,
+  ~4 for bruteforce + the pruning arms; pos + neg runs): the manifest as emitted is ~20,400 node-hours, 89% of it the
+  synthetic family (n_obs = 20,000 -> 1,652 windows at m = 5,000, L = 5) and 80 runs above the 48 h walltime.
+  Options costed for the user (log (d), reply): synthetic n_obs 5,000 (402 windows, the median of the real sets)
+  -> ~6,800 h; plus the five heavy all-pairs arms only below m = 2,500 -> ~2,300 h; plus the neg_corr run only at
+  L = 1 -> ~1,400 h. The pilot's N-way timings will replace the arms factor.
+- Pilot calibration (sp500 m492 W60 s5 L5 T0.9, neg run, mercantour3): bruteforce 34 s (k_bf = 1.2e-7 s per m^2 L
+  n_steps, as before), exact_stomp 6.8 s, filcorr 6.7 s, braid 23.6 s, thinbraid 62 s, corrtrack 12.5 s (recall
+  0.907, cand. precision 0.088, specificity 0.859, peak +200 MB), statstream 18.3 s (recall 0.903); the battery is
+  4.8x bruteforce without the four N/A arms, so ~8x for a pos run and ~5.5x for a neg run. On the differenced
+  sp500 (density 2.9e-5 at T=0.9) CorrTrack is slower than bruteforce (69 s vs 36 s: 1.5M candidates for 5,085
+  positives). Re-costed manifest: current design ~12,000 node-hours (80 runs above their walltime, longest 55 h);
+  synthetic n_obs 5,000 -> ~4,000 h (longest 33 h); + heavy all-pairs arms only below m = 2,500 -> ~1,600 h; +
+  neg_corr run only at L = 1 -> ~1,100 h. Decision left to the user (reply of 2026-09-19).
+- Pilot, remaining cells (all 36 + 24 + 12 jobs finished by 14:56). Capped tuning at m = 600 (500-series subset, 64
+  windows): 32 to 39 min per pos job, 1 to 3 min per neg job (statstream only); hyperopt 6 to 9 min, 6.6 GB;
+  N-way 6 to 9 min per job at m = 600, L = 1, 1,446 windows (bruteforce 77 s, battery ~6.5x). sp500 pos run at
+  m = 492, L = 5: bruteforce 33 s, corrtrack 8.5 s (recall 0.910, specificity 0.910), parcorr 28.8 s (0.955),
+  csz 29.6 s (0.979), statstream 11.3 s (0.900), thinbraid 62.8 s (0.938, approximate), exact_stomp 6.7 s.
+- Two more findings. (1) The uncapped sp500 tune jobs (3122221/3122233, 2 h) wrote all their files but exited 2 with
+  `tune_competitors.oar: line 61: unexpected EOF`: I had scp'd the edited wrapper into the clone while they were
+  running, and bash reads a script incrementally. The emitted campaign now calls the SNAPSHOT's copies of the
+  wrappers (`-S "$SNAPSHOT/abaca/<w>.oar"`, `_snapshot_enter.sh` sourced from the wrapper's own directory), so
+  nothing a job executes can change under it. (2) StatStream on hourly temperature: recall 0.043 on the ASOS raw
+  cell and 0.03 at every setting of its tuning grid, while the same candidates validated exactly give recall 1.0
+  (USCRN m150: exact 1.000 vs approx 0.117). The cause is the approximate correlation StatStream reports, built
+  from `statstream_bw_coeffs` = 2 DFT coefficients per basic window (the paper's choice for random walks): with
+  3 / 4 / 6 coefficients (6 = the full spectrum of a 12-point basic window) recall is 0.41 / 0.60 / 0.92 on the
+  same cell. It is the method's own parameter, so the CSZ protocol now tunes it too (levels {2, 3, 4, 6, b/2}
+  capped at b/2; grid 96 settings, full factorial): on USCRN the tuner picks 6 and reaches recall 0.976 with
+  precision 0.999. The paper can report both: as published (2 coefficients) StatStream misses most hourly
+  temperature correlations; tuned, it recovers them at the cost of a 3x larger digest.
+- `nway_compare.py`: `--set statstream_report|statstream_bw_coeffs|statstream_tolerance` now reach the arm.
+- Final pilot check (pilot4, 15:09): one motes cell through the rebuilt snapshot (job 3122383, 165 tests) with the
+  snapshot's own wrappers: 6 jobs, all exit 0, `snapshot:` line in every log, tune picks `statstream_bw_coeffs` = 4
+  (recall 0.957 on the calibration span). The pipeline is ready; the campaign snapshot is to be built from the
+  committed tree after the user's commit and the budget decision.
+
+### 2026-09-19 (e) [competitor campaign thread] hyperopt scored differenced grids against the raw-space truth; fixed
+User's question: why did tuned CorrTrack lose in time on the pilot's differenced sp500 cell (69 s vs 36 s bruteforce,
+6.7 s exact_stomp) when the m = 500 tables of the other thread show it winning at T = 0.9?
+- Cause, from the hyperopt's own best_params: the differenced cells were tuned to `n_vectors` 16 with 1,600 LSH bands,
+  and the record reports proxy recall 0.27 (sp500) and 0.43 (ASOS) with `corr_prop` 0.0101, IDENTICAL to the raw
+  cells. `CorrTrack_optimize._prepare_proxy_anchor_reference` computed the Pearson labels of the anchor pairs on the
+  raw `train_data` whatever the grid's `preprocess`; the settings sketched differenced windows, so every differenced
+  grid was scored against the wrong truth and the selection was arbitrary. The default grid has `preprocess: [False]`,
+  so the path was never exercised before this campaign's `--preprocess` runs.
+- Fix (`library_corrtrack_parallel.py`): `_prepare_proxy_anchor_reference(preprocess=False)` differences the series
+  exactly as `Sketches._preprocess_data` does for a window with `last_origin` (d[t] = x[t] - x[t-1], d[0] = 0) before
+  labelling; `_run_proxy_anchor_options` builds one reference per preprocess value present in the grid and scores
+  each task against its own. Test `test_proxy_anchor_reference_labels_follow_preprocess` (two random walks with a
+  shared drift: level truth dense, increment truth sparse; every label checked against np.corrcoef of the windowed
+  series in the right space). 166 tests pass.
+- Effect, locally, same cell (sp500 m492 W60 s5 L5 T0.9, differenced): the fixed hyperopt (6.8 min) now reports
+  corr_prop 1.2e-4 (the differenced training density), recall 0.989, and picks n_vectors 64 / 31 bands. N-way with
+  those parameters: CorrTrack 1.70 s vs bruteforce 15.6 s (9.2x) and exact_stomp 4.9 s (2.9x faster than STOMP),
+  recall 0.986, candidate specificity 0.998; before the fix 69 s (0.52x). Consistent with the other thread's
+  m = 444 differenced table (7.8x at T = 0.9).
+- What remains true: in the RAW space at T = 0.9 (density 1.2%), tuned CorrTrack at m ~ 500 is 3.9x faster than
+  bruteforce but 1.3x slower than exact_stomp (8.5 s vs 6.7 s): it validates 17.6M candidates from scratch (O(W) per
+  pair-window, ~176 ns each) while the incremental all-pairs updates 176M pair-windows in O(step) each (~27 ns).
+  With W/step = 12 an incremental exact baseline is ~6x cheaper per pair than a from-scratch validation, so a
+  pruning method wins only when candidates / universe is well below 1/6 (T >= 0.9 in the differenced space; the
+  sparse regime) or when the O(m^2 L) pair state of the incremental method becomes the constraint. This is the
+  honest positioning for the paper; the other thread's raw table shows the same near-tie (STOMP 2.12x vs CorrTrack
+  2.45x on sp500 raw T 0.9).
+- The pilot's differenced results (sp500 diff pos/neg, ASOS diff pos/neg, motes diff) were produced with the broken
+  hyperopt and are void; the campaign snapshot must include this fix.
+
+### 2026-09-19 (c) v3 rerun complete: 56 m=500 + 20 FilCorr cells on the AoS kernel, 0 failures
+Final tables in `docs/tables_m500_and_filcorr_sweep_2026-09-19.md` (76 monitored cells on
+the (i) kernel + 20 monitoring-off cells). Kernel effect on CorrTrack speedup vs brute force,
+per cell, (i)/(g): differenced, median 1.00 (hamming) / 1.01 (lsh), range 0.76-1.15, i.e. noise;
+raw, median 1.10 / 1.08, up to 1.41 (streamflow 0.80 hamming) and 1.32 (lsh), the dense cells
+where monitor time was still a visible share. Against the pre-optimization kernel, (i)/(pre):
+median 1.03 (diff) and 1.20 / 1.18 (raw), max 1.82. Densest cells now break even: sp500 0.70 raw
+hamming 0.88 -> 1.10, acwi 0.70 raw 0.93 -> 0.99. Offset picks unchanged for hamming (56/56);
+lsh changed in 13/56 cells, all between adjacent grid points with equal recall pass, i.e.
+timing-noise ties. ASOS gap fill halted by the user at 18:09 (daytime quarters ~9 min each,
+AU +1.26M, CN +0.39M, DE +1.12M rows already merged); resumes 01:30 via `gaps_fill_night.sh`,
+then the final pivot + screen. Interim screen (186 countries, m=175, hourly): raw density
+0.212 / avg degree 171 of 175, diff 0.0037 / 166 of 175; same conclusion as the 196-station
+screen, hourly ASOS is a near-complete graph in both spaces. Next: daily aggregation screen.

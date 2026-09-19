@@ -32,6 +32,7 @@ os.chdir(REPO)
 
 import corrtrack_run_bruteforce as bfmod  # noqa: E402
 from library_corrtrack_parallel import CorrTrack, run_and_log_bruteforce, run_and_log_corrtrack  # noqa: E402
+from abaca.resource_probe import run_isolated  # noqa: E402
 
 STEP_KEYS = ("n_steps", "step_time_min", "step_time_q1", "step_time_median", "step_time_q3", "step_time_max",
              "step_time_whisker_lo", "step_time_whisker_hi", "step_time_outliers", "step_time_mean")
@@ -93,25 +94,26 @@ def main() -> None:
         todo = {k: v for k, v in todo.items() if k in args.variants.split(",")}
     results = {}
     with tempfile.TemporaryDirectory() as tmp:
-        t0 = time.perf_counter()
-        bf, _, bf_flags = run_and_log_bruteforce(label, test_data, ids_n_var, dict(base, baseline_mode="bruteforce"), f"{tmp}/bf.csv",
-                                                 metadata={"nodes": 0}, recall_by_window=True, verbose=False, testing=False)
-        results["bruteforce"] = {"wall": time.perf_counter() - t0, "correlated": bf["correlated"], "total_candidates": bf["total_candidates"],
-                                 "cand_time": bf["cand_time"], "val_time": bf["val_time"], **{k: bf.get(k) for k in STEP_KEYS}}
+        # (2026-09-19) every variant in its own forked child: phase times, peak / mean RSS, I/O, CPU, energy (abaca/resource_probe.py)
+        os.makedirs(f"{tmp}/bf", exist_ok=True)
+        (bf, _, bf_flags), bf_res = run_isolated(run_and_log_bruteforce, label, test_data, ids_n_var, dict(base, baseline_mode="bruteforce"), f"{tmp}/bf/bf.csv",
+                                                 metadata={"nodes": 0}, recall_by_window=True, verbose=False, testing=False, artifact_dir=f"{tmp}/bf")
+        results["bruteforce"] = {"wall": bf_res["wall_s"], "correlated": bf["correlated"], "total_candidates": bf["total_candidates"],
+                                 "cand_time": bf["cand_time"], "val_time": bf["val_time"], "runtime": bf.get("runtime"), **{k: bf.get(k) for k in STEP_KEYS}, "resources": bf_res}
         print(f"{'bruteforce':18s} wall={results['bruteforce']['wall']:.2f}s correlated={bf['correlated']} step med/q3={bf.get('step_time_median')}/{bf.get('step_time_q3')}", flush=True)
         for name, over in todo.items():
             rp = dict(tuned, **over)
-            t0 = time.perf_counter()
+            os.makedirs(f"{tmp}/{name}", exist_ok=True)
             try:
-                rec, _, flags = run_and_log_corrtrack(label, test_data, ids_n_var, base, rp, f"{tmp}/{name}.csv", metadata={"nodes": 0, "alg": name},
-                                                      recall_by_window=True, corr_val=True, monitor=False, verbose=False, testing=False)
+                (rec, _, flags), res = run_isolated(run_and_log_corrtrack, label, test_data, ids_n_var, base, rp, f"{tmp}/{name}/{name}.csv", metadata={"nodes": 0, "alg": name},
+                                                    recall_by_window=True, corr_val=True, monitor=False, verbose=False, testing=False, artifact_dir=f"{tmp}/{name}")
             except Exception as exc:  # noqa: BLE001
-                results[name] = {"status": "ERROR", "reason": f"{type(exc).__name__}: {exc}", "overrides": over}
-                print(f"{name:18s} ERROR {exc}", flush=True)
+                results[name] = {"status": "ERROR", "reason": f"{type(exc).__name__}: {str(exc).splitlines()[0]}", "overrides": over}
+                print(f"{name:18s} ERROR {str(exc).splitlines()[0]}", flush=True)
                 continue
             m = CorrTrack.compute_metrics_bf(flags, bf_flags, windows=True, total_pairs_bf=bf["total_candidates"])
             U, P = int(bf["total_candidates"]), int(bf["correlated"]); fp = max(int(rec["total_candidates"]) - int(rec["correlated"]), 0)
-            results[name] = {"status": "ok", "overrides": over, "wall": time.perf_counter() - t0, "recall": m.get("recall"), "precision": m.get("precision"),
+            results[name] = {"status": "ok", "overrides": over, "wall": res["wall_s"], "resources": res, "runtime": rec.get("runtime"), "recall": m.get("recall"), "precision": m.get("precision"),
                              "candidate_precision": rec.get("candidate_precision"), "candidate_specificity": (1.0 - fp / (U - P)) if U > P else None,
                              "correlated": rec["correlated"], "total_candidates": rec["total_candidates"], "tested": rec["tested"],
                              "sk_time": rec.get("sk_time"), "cand_time": rec["cand_time"], "val_time": rec["val_time"], **{k: rec.get(k) for k in STEP_KEYS}}

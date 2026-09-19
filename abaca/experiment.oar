@@ -1,12 +1,13 @@
 #!/bin/bash
 # Generic wrapper for the side experiments (ablation ladder, parallel scaling, naive baseline, monitoring):
-#   oarsub -q abaca -p mercantour3 -l host=1,walltime=12:00:00 -S "./abaca/experiment.oar SCRIPT=abaca/ablation_corrtrack.py ARGS=--dataset-config+experiment_dataset_sp500.py+--window-size+60+..."
+#   oarsub -q abaca -p "cluster='mercantour3'" -l host=1,walltime=12:00:00 -S "./abaca/experiment.oar SCRIPT=abaca/ablation_corrtrack.py ARGS=--dataset-config+experiment_dataset_sp500.py+--window-size+60+..."
 # '+' in ARGS stands for a space. Output JSON goes to $RESULTS_ROOT/<script stem>_<jobid>/out.json unless ARGS has --out.
 #
 #OAR -n corrtrack-experiment
 #OAR -q abaca
-#OAR -p cluster='mercantour3'
-#OAR -l host=1,walltime=12:00:00
+# (2026-09-19) no #OAR -l / -p here: a header -l plus a command-line -l makes a MOLDABLE job (OAR picks either;
+# the Phase R reruns got the header's 12 h instead of the requested 24 h). Resources and host properties are
+# given on the oarsub command line only, e.g. -p "cluster='mercantour3'" -l host=1,walltime=24:00:00
 #OAR -O abaca/logs/OAR.%jobid%.out
 #OAR -E abaca/logs/OAR.%jobid%.err
 set -uo pipefail

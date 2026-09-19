@@ -18319,7 +18319,7 @@ class CorrTrack_optimize:
         picks = picks[:cap]
         return np.sort(order[picks].astype(np.int64))
 
-    def _prepare_proxy_anchor_reference(self):
+    def _prepare_proxy_anchor_reference(self, preprocess=False):
         """Build the sampled anchor/pair truth table for proxy hyperopt.
 
         The sampling unit is an anchor start position. For each anchor we build
@@ -18327,6 +18327,16 @@ class CorrTrack_optimize:
         windows at the anchor against historical windows inside `n_lags`, with
         same-window and reversed duplicates removed. Exact Pearson labels are
         computed once and reused for every sketch hyperparameter setting.
+
+        (2026-09-19) `preprocess`: the labels are computed in the space the
+        candidate settings sketch. With preprocess=True CorrTrack differences
+        each window against the value before its start (Sketches._preprocess_data,
+        `last_origin`; the first window mirrors its first column), which is the
+        series d[t] = x[t] - x[t-1] with d[0] = 0, windowed. Before this the
+        reference was always the raw-space correlation, so a differenced grid was
+        scored against the wrong truth (pilot 2026-09-19: reported recall 0.27 and
+        0.43 for settings that reach 0.98 in the full run, and a pathological
+        n_vectors=16 / 1600-band selection that ran 2x slower than bruteforce).
         """
 
         n_series_total = max(0, int(self.train_data.shape[0]) - 1)
@@ -18345,6 +18355,8 @@ class CorrTrack_optimize:
 
         proxy_ids_full = self._proxy_ids()
         values_full = np.asarray(self.train_data[1 : 1 + n_series_total, :], dtype=np.float64)
+        if preprocess:
+            values_full = np.diff(np.concatenate([values_full[:, :1], values_full], axis=1), axis=1)
         window_size = int(self.window_size)
 
         # (2026-09-08) Subsample series for calibration when the full population would make
@@ -19834,18 +19846,22 @@ class CorrTrack_optimize:
             total_tasks = len(tasks)
             completed = 0
             with CSVStreamWriter(output_csv, OPTIM_RESULT_COLUMNS) as writer:
-                self._proxy_reference = self._prepare_proxy_anchor_reference()
                 try:
-                    grouped = defaultdict(list)
-                    for task in tasks:
-                        grouped[self._proxy_cache_group_key(task[1])].append(task)
                     task_records = {}
-                    for group_tasks in grouped.values():
-                        records = self._run_proxy_anchor_cached_group(group_tasks, dataset_id)
-                        if records is None:
-                            records = [self._run_corrtrack_proxy_anchor_mean_timed(task) for task in group_tasks]
-                        for task, record in zip(group_tasks, records):
-                            task_records[int(task[0])] = record
+                    # (2026-09-19) one reference per preprocess value in the grid: the truth must live in
+                    # the space the settings sketch (see _prepare_proxy_anchor_reference)
+                    for pre_value in sorted({bool(task[1].get("preprocess", False)) for task in tasks}):
+                        self._proxy_reference = self._prepare_proxy_anchor_reference(preprocess=pre_value)
+                        grouped = defaultdict(list)
+                        for task in tasks:
+                            if bool(task[1].get("preprocess", False)) == pre_value:
+                                grouped[self._proxy_cache_group_key(task[1])].append(task)
+                        for group_tasks in grouped.values():
+                            records = self._run_proxy_anchor_cached_group(group_tasks, dataset_id)
+                            if records is None:
+                                records = [self._run_corrtrack_proxy_anchor_mean_timed(task) for task in group_tasks]
+                            for task, record in zip(group_tasks, records):
+                                task_records[int(task[0])] = record
                     ordered_records = [task_records[idx] for idx in sorted(task_records)]
 
                     for record in ordered_records:

@@ -63,7 +63,7 @@ def divisors(n, lo, hi):
     return [d for d in range(lo, hi + 1) if n % d == 0]
 
 
-def parameter_grid(arm, W):
+def parameter_grid(arm, W, b=None):
     if arm in ("parcorr", "csz"):
         return {
             "n_vectors": [30, 36, 48, 60],
@@ -72,7 +72,13 @@ def parameter_grid(arm, W):
             "parcorr_f": [round(0.1 * i, 1) for i in range(1, 11)],
         }
     if arm == "statstream":
-        return {"statstream_n_coeffs": [4, 8, 12, 16, 24, 32], "statstream_index_dims": [1, 2, 3, 4]}
+        # (2026-09-19) statstream_bw_coeffs: DFT coefficients kept per basic window for the approximate
+        # correlation StatStream REPORTS (the paper fixes 2 for random walks). On hourly temperature (USCRN,
+        # W=168, b=12) 2 coefficients give recall 0.12, 6 (the full spectrum of a 12-point basic window)
+        # 0.92, with the same candidates; it is the method's own knob, so the protocol tunes it, up to b/2.
+        half = max(1, int(b or 12) // 2)
+        bw = sorted({min(v, half) for v in (2, 3, 4, 6, half)})
+        return {"statstream_n_coeffs": [4, 8, 12, 16, 24, 32], "statstream_index_dims": [1, 2, 3, 4], "statstream_bw_coeffs": bw}
     if arm == "corrjoin":
         ds = divisors(W, 4, W // 2)
         return {"corrjoin_ks": ds, "corrjoin_ke": ds, "corrjoin_kb": [2, 3, 4]}
@@ -155,7 +161,8 @@ def run_params_for(arm, s, seed=2468):
                     parcorr_c=float(s["parcorr_c"]), parcorr_f=float(s["parcorr_f"]), parcorr_neighbor_probe=(arm == "csz"))
     if arm == "statstream":
         return dict(common, data_representation="sketch_dft", candidate_backend="statstream_grid",
-                    statstream_n_coeffs=int(s["statstream_n_coeffs"]), statstream_index_dims=int(s["statstream_index_dims"]))
+                    statstream_n_coeffs=int(s["statstream_n_coeffs"]), statstream_index_dims=int(s["statstream_index_dims"]),
+                    statstream_bw_coeffs=int(s.get("statstream_bw_coeffs", 2)))
     if arm == "corrjoin":
         return dict(common, data_representation="sketch_paa_svd", candidate_backend="corrjoin_double_filter",
                     corrjoin_ks=int(s["corrjoin_ks"]), corrjoin_ke=int(s["corrjoin_ke"]), corrjoin_kb=int(s["corrjoin_kb"]))
@@ -250,13 +257,26 @@ def main() -> None:
     ap.add_argument("--n-obs", type=int, default=None)
     ap.add_argument("--train-ratio", type=float, default=None)
     ap.add_argument("--calib-obs", type=int, default=None, help="cap the calibration span (rows) for tuning cost")
+    ap.add_argument("--calib-windows", type=int, default=None,
+                    help="(2026-09-19) cap the calibration span at W + N step rows (N windows); the pilot showed the 130-row "
+                         "design at 403 windows x 600 series takes hours per arm, and it scales with m^2 x windows")
+    ap.add_argument("--calib-series", type=int, default=None,
+                    help="(2026-09-19) tune on a seeded random subset of at most K series (the first row stays the time axis). "
+                         "The CSZ filter parameters describe per-pair geometry (cell size, fraction of hits, coefficients), so "
+                         "the recall target is per pair and does not depend on m to first order; stated with the results")
+    ap.add_argument("--calib-seed", type=int, default=20260919)
     ap.add_argument("--target-recall", type=float, default=None, help="default: exec config TARGET_RECALL (0.95)")
     ap.add_argument("--full-factorial-max", type=int, default=200)
     ap.add_argument("--refine-rounds", type=int, default=3)
     ap.add_argument("--bootstrap-blocks", type=int, default=8)
     ap.add_argument("--bootstrap-repeats", type=int, default=1000)
+    ap.add_argument("--set", action="append", default=[],
+                    help="accepted for command-line compatibility with nway_compare.py (the campaign passes the paper defaults of "
+                         "corrjoin_ks/ke there); the protocol tunes those factors itself, so the values are only logged here")
     ap.add_argument("--out-dir", default=None)
     args = ap.parse_args()
+    if args.set:
+        print(f"knob overrides from the command line ({args.set}) are not applied: the CSZ protocol tunes these factors", flush=True)
     target = args.target_recall if args.target_recall is not None else float(psmod.DEFAULT_TARGET_RECALL)
     arms = [a.strip() for a in args.arms.split(",") if a.strip()]
     if args.neg_corr:
@@ -278,12 +298,23 @@ def main() -> None:
     calib, ids_n_var = psmod.prepare_training_data(data, ids, n_obs, n_var, train_ratio)   # same span as CorrTrack's hyperopt
     if args.calib_obs is not None and calib.shape[1] > args.calib_obs:
         calib = calib[:, : args.calib_obs]
+    if args.calib_windows is not None:
+        cap = args.window_size + args.calib_windows * args.window_step
+        if calib.shape[1] > cap:
+            calib = calib[:, :cap]
+    calib_series_note = ""
+    if args.calib_series is not None and len(ids_n_var) > args.calib_series:
+        rng = np.random.default_rng(args.calib_seed)
+        keep = np.sort(rng.choice(len(ids_n_var), size=args.calib_series, replace=False))
+        calib = np.vstack([calib[:1], calib[1:][keep]])          # row 0 is the time axis
+        ids_n_var = [ids_n_var[i] for i in keep]
+        calib_series_note = f" (random subset of {args.calib_series} series, seed {args.calib_seed})"
     slug = bfmod._dataset_slug(country, var)
     dataset_id = f"{slug}_{n_var}_{n_obs}"
     bfmod.WINDOW_SIZE, bfmod.WINDOW_STEP, bfmod.N_LAGS, bfmod.CORR_THRESHOLD, bfmod.EXEC_MODE = args.window_size, args.window_step, args.n_lags, args.corr_threshold, "sequential"
     out_dir = Path(args.out_dir) if args.out_dir else Path("correlation") / bfmod.RESULT_FOLDER / dataset_id / bfmod.config_folder() / "optim"
     out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"dataset {dataset_id}: calibration span {calib.shape[1]} rows x {len(ids_n_var)} series (train_ratio={train_ratio}); "
+    print(f"dataset {dataset_id}: calibration span {calib.shape[1]} rows x {len(ids_n_var)} series{calib_series_note} (train_ratio={train_ratio}); "
           f"W={args.window_size} step={args.window_step} n_lags={args.n_lags} T={args.corr_threshold} target recall {target}; out {out_dir}", flush=True)
 
     global PREPROCESS
@@ -301,7 +332,7 @@ def main() -> None:
         ev = Evaluator(dataset_id, calib, ids_n_var, base, tmp, gt_flags, gt_rec["total_candidates"])
 
         for arm in arms:
-            grid = parameter_grid(arm, args.window_size)
+            grid = parameter_grid(arm, args.window_size, args.basic_window or args.window_step)
             n_full = int(np.prod([len(v) for v in grid.values()]))
             all_valid = [dict(zip(grid, c)) for c in itertools.product(*grid.values())]
             all_valid = [s for s in all_valid if valid_setting(arm, s)]
@@ -354,7 +385,7 @@ def main() -> None:
 
             best_params = run_params_for(arm, chosen["setting"])
             best_params.update(_tuning=dict(protocol="Cole-Shasha-Zhao KDD 2005 section 5.4", target_recall=target, status=status, preprocess=bool(args.preprocess),
-                                            calibration_rows=int(calib.shape[1]), recall=chosen["recall"], precision=chosen["precision"],
+                                            calibration_rows=int(calib.shape[1]), calibration_series=len(ids_n_var), recall=chosen["recall"], precision=chosen["precision"],
                                             total_candidates=chosen["total_candidates"], bootstrap=boots))
             json.dump(best_params, open(out_dir / f"best_params_{arm}.json", "w"), indent=1)
             json.dump(dict(arm=arm, dataset=dataset_id, protocol=vars(args), target_recall=target, design=design_kind,

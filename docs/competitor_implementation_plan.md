@@ -415,6 +415,43 @@ nway JSON carries the dataset profile (`abaca/dataset_profile.py`) and the metri
 entry (g). **Open for the user**: W/step policy (log (f) table), `--points`, pilot cells.
 Nothing submitted; Abaca at 9e983d3 with datasets synced.
 
+### 3b (ii). Execution mechanics on Abaca (2026-09-19)
+
+Per-arm accounting (user's request): every arm of every battery runs in a forked child
+(`abaca/resource_probe.py: run_isolated`) so its numbers are its own: phase times
+(`sk_time`, `cand_time`, `val_time`, `monit_time`, `other_time`, `runtime` without artifact I/O,
+`wall`), peak RSS (`ru_maxrss` of the child) and mean RSS (50 ms sampler), both also as deltas over
+the shared baseline (dataset + interpreter inherited at fork), storage I/O (`/proc/self/io`),
+artifact size, CPU user/sys, and the arm's absolute interval. Energy: RAPL is root-only on the
+mercantour nodes, so the in-process reading is None; the N-way jobs are submitted with
+`-t "monitor=prom_.*"` and `abaca/kwollect_power.py` pulls the node's ACPI power meter
+series (15 s samples; idle 64 W, 20-core burn 245 W, one-sample response, probe 3122070) for `aggregate_campaign.py --power`, which integrates it over each
+arm's interval and subtracts the node's idle power. To be stated: 15 s resolution, so per-arm energy
+is quotable for arms running well over a minute, per-cell energy otherwise. The same accounting is
+in `ablation_corrtrack.py` and `parallel_scaling.py`; the hyperopt and tuning jobs record their own
+peak RSS and wall through GNU `time -v`.
+
+One build per campaign: `abaca/prepare_snapshot.oar` copies the tree at the current commit to
+`$RESULTS_ROOT/snapshots/<sha>[_tag]`, builds the kernels once (`-march=native`; the wrappers refuse a
+node whose CPU model differs), runs the three test files, writes `SNAPSHOT_OK`. Every job runs from the
+snapshot (`SNAPSHOT=` token; `abaca/_snapshot_enter.sh`); nothing rebuilds in the shared clone any more
+(the old per-job `rm *.so; build; pytest` was a race between concurrent jobs and 5 min per job).
+`datasets/competitor` inside the snapshot is a symlink to the clone's, so the generated synthetic sets
+(`campaign_submit_generate.sh`, one OAR job run from the snapshot) are visible to all.
+
+Node partition on mercantour3 (15 usable hosts, 20 cores / 192 GB each): the N-way jobs take a whole host
+(`NWAY_HOSTS`, 11 hosts by default); the hyperopt and tuning jobs are packed by cores on `PACK_HOSTS`
+(4 hosts; 2 / 4 / 10 cores per job for m <= 1250 / <= 2500 / larger, a memory share), so whole-host
+jobs are never starved by core-level ones. OAR lesson: a `#OAR -l` in the script header plus a
+command-line `-l` makes a moldable job (either may be chosen; the Phase R reruns got the header's 12 h);
+resources and properties are now on the command line only. Results land in
+`$RESULTS_ROOT/{hyperopt,tuned,nway}/<stem>_<pos|neg>/` (`RUN_NAME`), the N-way JSON carries `cell`.
+
+Submission: `abaca/campaign_feeder.py` feeds the emitted script cell by cell while our Waiting jobs are
+below `--max-waiting` (resumable through `<script>.state`, `--skip-done`). Aggregation:
+`abaca/aggregate_campaign.py` -> `runs.csv`, `cells.csv`, `tuning.csv`, `summary_by_{T,m,L,space,dataset,neg}.md`,
+`failures.md`, each number with its cell count.
+
 ## 4. Order of work
 
 Track A and Track B touch **disjoint code** (`baseline_mode` dispatch versus the

@@ -24,6 +24,7 @@ os.chdir(REPO)
 
 import corrtrack_run_bruteforce as bfmod  # noqa: E402
 from library_corrtrack_parallel import CorrTrack, run_and_log_bruteforce, run_and_log_corrtrack  # noqa: E402
+from abaca.resource_probe import run_isolated  # noqa: E402
 
 STEP_KEYS = ("n_steps", "step_time_min", "step_time_q1", "step_time_median", "step_time_q3", "step_time_max",
              "step_time_whisker_lo", "step_time_whisker_hi", "step_time_outliers", "step_time_mean")
@@ -73,22 +74,27 @@ def main() -> None:
         for arm in ("bruteforce", "corrtrack"):
             for exec_mode, workers in variants:
                 key = "seq" if exec_mode == "sequential" else f"thr{workers}"
-                walls, rec, flags = [], None, None
+                walls, rec, flags, reslist = [], None, None, []
+                os.makedirs(f"{tmp}/{arm}_{key}", exist_ok=True)
                 for _ in range(max(1, args.repeats)):
-                    t0 = time.perf_counter()
+                    # (2026-09-19) forked child per run: the thread pool's memory and CPU time are the run's own (abaca/resource_probe.py)
                     if arm == "bruteforce":
-                        rec, _, flags = run_and_log_bruteforce(label, test_data, ids_n_var, dict(base_for(exec_mode, workers), baseline_mode="bruteforce"),
-                                                               f"{tmp}/{arm}_{key}.csv", metadata={"nodes": 0}, recall_by_window=True, verbose=False, testing=False)
+                        (rec, _, flags), res = run_isolated(run_and_log_bruteforce, label, test_data, ids_n_var, dict(base_for(exec_mode, workers), baseline_mode="bruteforce"),
+                                                            f"{tmp}/{arm}_{key}/{arm}.csv", metadata={"nodes": 0}, recall_by_window=True, verbose=False, testing=False,
+                                                            artifact_dir=f"{tmp}/{arm}_{key}")
                     else:
-                        rec, _, flags = run_and_log_corrtrack(label, test_data, ids_n_var, base_for(exec_mode, workers), tuned, f"{tmp}/{arm}_{key}.csv",
-                                                              metadata={"nodes": 0, "alg": arm}, recall_by_window=True, corr_val=True, monitor=False, verbose=False, testing=False)
-                    walls.append(time.perf_counter() - t0)
+                        (rec, _, flags), res = run_isolated(run_and_log_corrtrack, label, test_data, ids_n_var, base_for(exec_mode, workers), tuned, f"{tmp}/{arm}_{key}/{arm}.csv",
+                                                            metadata={"nodes": 0, "alg": arm}, recall_by_window=True, corr_val=True, monitor=False, verbose=False, testing=False,
+                                                            artifact_dir=f"{tmp}/{arm}_{key}")
+                    walls.append(res["wall_s"]); reslist.append(res)
                 if arm == "bruteforce" and key == "seq":
                     bf_flags_ref = flags
                 m = CorrTrack.compute_metrics_bf(flags, bf_flags_ref, windows=True, total_pairs_bf=None) if bf_flags_ref is not None else {}
                 r = {"exec": exec_mode, "workers": workers, "wall_median": sorted(walls)[len(walls) // 2], "walls": walls, "recall_vs_seq_bf": m.get("recall"),
                      "correlated": rec["correlated"], "sk_time": rec.get("sk_time"), "cand_time": rec["cand_time"], "val_time": rec["val_time"],
-                     "runtime": rec.get("runtime"), **{k: rec.get(k) for k in STEP_KEYS}}
+                     "runtime": rec.get("runtime"), **{k: rec.get(k) for k in STEP_KEYS},
+                     "resources": reslist[len(reslist) // 2], "cpu_total_s_median": sorted(x["cpu_user_s"] + x["cpu_sys_s"] for x in reslist)[len(reslist) // 2],
+                     "peak_rss_delta_mb_max": max((x["peak_rss_delta_mb"] or 0) for x in reslist)}
                 results[arm][key] = r
                 seq = results[arm].get("seq")
                 sp = (seq["wall_median"] / r["wall_median"]) if seq and r["wall_median"] else float("nan")

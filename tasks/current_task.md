@@ -2083,7 +2083,52 @@ When `m5v2_*` = 56, `fcv2_*` = 20, `fcnm_*` = 20: pull the JSONs from `~/corrtra
 FilCorr-sweep (monitored) and FilCorr-sweep (no monitor) tables, diff against `_pre_monitor_opt_2026-09-18/`.
 User chose the third rerun on the (i) kernel: `m5v3_*`/`fcv3_*` (70 submitted, 6 deferred via
 `~/corrtrack_abaca_results/rerun_v3_jobs/defer_launch.sh` on the frontend; log `defer_launch.log`). (g) results
-archived in `tmp_artifacts/_g_kernel_2026-09-18/`. Final tables come from the v3 JSONs (76 monitored) + 20 `_nomon`.
+archived in `tmp_artifacts/_g_kernel_2026-09-18/`. Final tables come from the v3 JSONs (76 monitored) + 20 `_nomon`. -> v3 complete 2026-09-19 21:15 (76/76 + 20 nomon); final tables in docs/tables_m500_and_filcorr_sweep_2026-09-19.md. ASOS gap fill resumes 01:30 (gaps_fill_night.sh), then pivot+screen.
 Sweden ASOS: `global_asos/se_retry_watch.sh` on the frontend retries SE with a 900s curl timeout one hour after
 `MISSING_COUNTRIES_REFETCH_DONE`; check `se_retry_watch.log` / `fetch_missing.log` for `SE_RETRY_DONE`, then rerun
 `pivot_asos_wide.py` and `screen_global_asos_degree.py` (`screen_asos_job.sh`).
+
+## 2026-09-19 (c) [competitor campaign thread] -- W-robustness cells; generator split; Phase R reruns queued; pilot emitted, not run
+Branch: `dev` (repo `corrtrack_release_dev`), Abaca frontend at d0e3378. **Uncommitted (this thread)**: `abaca/campaign_competitors.py`,
+`docs/implementation_log.md` (c), this file. See log 2026-09-19 (c).
+Abaca: Phase R reruns 3122029 (braid) 3122030 (parcorr) 3122031 (csz) 3122032 (filcorr). `abaca/pilot_submit.sh` (36 jobs) and
+`abaca/campaign_submit.sh` + `abaca/campaign_submit_generate.sh` (9,606 jobs, 403 generator commands) emitted on the frontend.
+### Next exact step
+1. `ssh sophia.g5k; cd ~/corrtrack_release_dev; bash abaca/pilot_submit.sh` (after the user's go); watch `oarstat -u`, then
+   inspect `$RESULTS_ROOT/<stem>/{hyperopt,tune,nway}` JSONs and fit walltimes.
+2. Read `tmp_artifacts/reproduce_{braid,parcorr,csz,filcorr}*.json` when 3122029..32 finish; update the Phase R table.
+3. Write the aggregator `abaca/aggregate_campaign.py` (per-cell JSON -> long table -> recall/precision/specificity/speedup/
+   step-latency figures by T, m, L, space, dataset profile).
+4. Wait for the complete ASOS pivot (companion thread, job 3122021 then the 2026-09-20 gap retry) and set `global_asos_*` m_max.
+5. Full campaign: `oarsub -q abaca -l host=1,walltime=24:00:00 "bash abaca/campaign_submit_generate.sh"` then
+   `bash abaca/campaign_submit.sh` in per-dataset batches.
+
+## 2026-09-19 (d) [competitor campaign thread] -- per-arm resources/energy, snapshot build, node partition, feeder, aggregator
+Branch `dev`. **Uncommitted (this thread)**: `abaca/{resource_probe,campaign_feeder,aggregate_campaign,kwollect_power}.py` (new),
+`abaca/prepare_snapshot.oar`, `abaca/_snapshot_enter.sh` (new), `abaca/{nway_compare,campaign_competitors,ablation_corrtrack,parallel_scaling}.py`,
+`abaca/{nway_compare,hyperopt_corrtrack,tune_competitors,reproduce_papers,experiment}.oar`, `test_abaca_tools.py` (new),
+`docs/competitor_implementation_plan.md` s3b(ii), `docs/implementation_log.md` (c)(d), this file. See log 2026-09-19 (d).
+Abaca: same files scp'd to `~/corrtrack_release_dev` (uncommitted there too); snapshot job 3122067 (TAG=pilot) running;
+probes 3122061 (RAPL: root-only), 3122062/64/65/66/68/69/70 (kwollect monitor types).
+### Runbook (in order)
+1. `oarsub -q abaca -p "cluster='mercantour3'" -l host=1,walltime=1:00:00 -S "./abaca/prepare_snapshot.oar TAG=<tag>"` -> SNAPSHOT dir
+2. `export SNAPSHOT=$HOME/corrtrack_abaca_results/snapshots/<sha>_<tag>/corrtrack_release_dev`
+3. `python abaca/campaign_competitors.py --emit abaca/campaign_submit.sh` (also writes `_generate.sh`)
+4. `oarsub -q abaca -p "cluster='mercantour3'" -l host=1,walltime=24:00:00 "SNAPSHOT=$SNAPSHOT bash abaca/campaign_submit_generate.sh"`
+5. `nohup python3 abaca/campaign_feeder.py abaca/campaign_submit.sh --max-waiting 60 --poll 120 > abaca/logs/feeder.log 2>&1 &`
+6. `python abaca/kwollect_power.py --results-root ~/corrtrack_abaca_results --out ~/corrtrack_abaca_results/power.json`
+7. `python abaca/aggregate_campaign.py --power ~/corrtrack_abaca_results/power.json`
+### Pilot state at hand-over (2026-09-19 ~15:00)
+motes 4 cells complete (all arms ok, tuned files loaded). sp500 neg runs complete (see log); sp500 pos N-way waits on
+the uncapped tune jobs 3122221/3122233 (parcorr 30 min, csz running). ASOS cells resubmitted with CALIB_WINDOWS=64
+CALIB_SERIES=500 (pilot3: 3122288..3122299). Pilot snapshot `snapshots/d0e337877e3d_pilot/corrtrack_release_dev`
+carries two post-build patches (tune_competitors.py), listed in its SNAPSHOT_OK; the campaign snapshot must be
+built from the committed tree. Open decisions for the user: synthetic n_obs (20000 -> 5000?), heavy all-pairs arms
+above m = 2,500, neg_corr run at L > 1, PACK/NWAY host counts, feeder limits.
+All pilot jobs finished; results under `~/corrtrack_abaca_results/{hyperopt,tuned,nway}/<stem>_<tag>/`. Last verification
+running: pilot4 (one motes cell) through the snapshot's own wrappers after the third snapshot rebuild (job 3122383).
+### 2026-09-19 (e) hyperopt preprocess fix
+`library_corrtrack_parallel.py` (proxy reference in the sketched space), test added; **uncommitted**. Not yet on Abaca:
+sync after the user's commit and rebuild the campaign snapshot. Probes queued on the pilot snapshot for the hyperopt
+cost at large m (raw space, unaffected by the fix): 3122888 (corrjoin_gas m5000 L1), 3122889 (berkeley m5000 L4),
+3122890 (corrjoin_gas m2500 L1), core=10 on PACK_HOSTS, out `~/corrtrack_abaca_results/probes/hyperopt_*`.

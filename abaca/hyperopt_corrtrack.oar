@@ -3,12 +3,13 @@
 # Writes <OUT_DIR>/<dataset_id>/<repo>/<config_folder>/optim/best_params_corrtrack.json; the N-way
 # job finds it through HYPEROPT_DIR=<OUT_DIR>. Parameters as KEY=VALUE arguments (see nway_compare.oar).
 #
-#   oarsub -S "./abaca/hyperopt_corrtrack.oar DATASET_CONFIG=experiment_dataset_motes_temperature.py THR=0.9 OUT_DIR=$HOME/corrtrack_abaca_results/hyperopt/motes_T0.9"
+#   oarsub -q abaca -p "cluster='mercantour3'" -l host=1,walltime=12:00:00 -S "./abaca/hyperopt_corrtrack.oar DATASET_CONFIG=experiment_dataset_motes_temperature.py THR=0.9 OUT_DIR=$HOME/corrtrack_abaca_results/hyperopt/motes_T0.9"
 #
 #OAR -n corrtrack-hyperopt
 #OAR -q abaca
-#OAR -p cluster='mercantour3'
-#OAR -l host=1,walltime=12:00:00
+# (2026-09-19) no #OAR -l / -p here: a header -l plus a command-line -l makes a MOLDABLE job (OAR picks either;
+# the Phase R reruns got the header's 12 h instead of the requested 24 h). Resources and host properties are
+# given on the oarsub command line only, e.g. -p "cluster='mercantour3'" -l host=1,walltime=24:00:00
 #OAR -O abaca/logs/OAR.%jobid%.out
 #OAR -E abaca/logs/OAR.%jobid%.err
 
@@ -36,9 +37,13 @@ echo "job=${OAR_JOB_ID:-manual} host=$(hostname) date=$(date --iso-8601=seconds)
 source "$CONDA_ROOT/etc/profile.d/conda.sh"
 conda activate "$CONDA_ENV"
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
-cd "$REPO_DIR"
-rm -f ./*.cpython-*.so; rm -rf build
-python setup_cython.py build_ext --inplace -j 4 > "$OUT_DIR/build.log" 2>&1
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/_snapshot_enter.sh"   # the wrapper's own copy (snapshot or clone)
+cd "$WORK_DIR"
+if [ "$DO_BUILD" = "1" ]; then
+  rm -f ./*.cpython-*.so; rm -rf build
+  python setup_cython.py build_ext --inplace -j 4 > "$OUT_DIR/build.log" 2>&1
+fi
 # EXTRA_ARGS carries --n-series/--n-obs (understood by corrtrack_param_search.py); --set knobs are for nway only
 HYPER_ARGS=$(python - "$EXTRA_ARGS" <<'PY'
 import sys, shlex
@@ -55,8 +60,9 @@ print(" ".join(out))
 PY
 )
 # shellcheck disable=SC2086
-python corrtrack_param_search.py --dataset-config "$DATASET_CONFIG" --result-folder "$OUT_DIR" \
+command time -v -o "$OUT_DIR/time_v.txt" python corrtrack_param_search.py --dataset-config "$DATASET_CONFIG" --result-folder "$OUT_DIR" \
   --window-size "$WINDOW_SIZE" --window-step "$WINDOW_STEP" --basic-window "$BASIC_WINDOW" --n-lags "$N_LAGS" --corr-threshold "$THR" \
   --sequential --no-verbose "${NEG_CORR_FLAG:---no-neg-corr}" $PREPROCESS_FLAG $HYPER_ARGS 2>&1 | tee "$OUT_DIR/hyperopt.log"
 RC=${PIPESTATUS[0]}
+echo "max_rss_kb=$(sed -n 's/.*Maximum resident set size (kbytes): //p' "$OUT_DIR/time_v.txt")"
 echo "hyperopt_rc=$RC best_params=$(find "$OUT_DIR" -name best_params_corrtrack.json | head -1)"

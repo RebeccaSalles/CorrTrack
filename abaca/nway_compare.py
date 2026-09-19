@@ -45,13 +45,16 @@ os.chdir(REPO)
 import corrtrack_run_bruteforce as bfmod  # noqa: E402
 from library_corrtrack_parallel import CorrTrack, run_and_log_bruteforce, run_and_log_corrtrack, _HAVE_COMPETITOR_KERNELS  # noqa: E402
 from abaca.dataset_profile import profile_dataset  # noqa: E402
-import resource  # noqa: E402
+from abaca.resource_probe import run_isolated, idle_power  # noqa: E402
+import socket  # noqa: E402
 
 ALL_ARMS = ("bruteforce", "exact_stomp", "filcorr", "tsubasa", "braid", "thinbraid", "corrtrack", "parcorr", "csz", "statstream", "corrjoin")
 PATTERN_A = {"bruteforce": "bruteforce", "exact_stomp": "exact_stomp", "filcorr": "filcorr", "tsubasa": "tsubasa", "braid": "braid", "thinbraid": "braid"}
 SYNC_ONLY = {"tsubasa", "corrjoin"}
 NEG_NOT_AVAILABLE = {"parcorr", "csz", "corrjoin"}
 PURE_PYTHON_INDEX = {"parcorr", "csz", "statstream", "corrjoin"}
+# arms whose REPORTED correlation is approximate by design (their `correlated` is what they reported, not a TP count)
+APPROX_REPORT = {"braid", "thinbraid", "statstream"}
 
 
 def _parse_set(items):
@@ -92,8 +95,11 @@ def main() -> None:
                     help="directory holding best_params_<arm>.json from abaca/tune_competitors.py (CSZ protocol); "
                          "when a file exists for an arm its knobs replace the paper defaults")
     ap.add_argument("--set", action="append", default=[], help="competitor knob override key=value (json), e.g. parcorr_c=0.5")
+    ap.add_argument("--no-isolate", action="store_true", help="run the arms in-process (debugging); memory figures are then monotone across arms")
+    ap.add_argument("--rss-interval", type=float, default=0.05, help="RSS sampling interval (s) for the mean-RSS figure")
     ap.add_argument("--out", default=None, help="JSON output path")
     ap.add_argument("--label", default=None)
+    ap.add_argument("--cell", default=None, help="campaign cell name, stored in the JSON for the aggregator")
     args = ap.parse_args()
     knobs = _parse_set(args.set)
     arms = list(ALL_ARMS) if args.arms == "all" else [a.strip() for a in args.arms.split(",") if a.strip()]
@@ -136,7 +142,8 @@ def main() -> None:
         "csz": dict(common, data_representation="sketch_proj", candidate_backend="parcorr_grid", parcorr_k=knobs.get("parcorr_k", 2),
                     parcorr_f=knobs.get("parcorr_f", 0.7), parcorr_c=knobs.get("parcorr_c", 0.7), parcorr_neighbor_probe=True),
         "statstream": dict(common, data_representation="sketch_dft", candidate_backend="statstream_grid",
-                           statstream_n_coeffs=knobs.get("statstream_n_coeffs", 16), statstream_index_dims=knobs.get("statstream_index_dims", 4)),
+                           statstream_n_coeffs=knobs.get("statstream_n_coeffs", 16), statstream_index_dims=knobs.get("statstream_index_dims", 4),
+                           **{k: knobs[k] for k in ("statstream_report", "statstream_bw_coeffs", "statstream_tolerance") if k in knobs}),
         "corrjoin": dict(common, data_representation="sketch_paa_svd", candidate_backend="corrjoin_double_filter",
                          corrjoin_ks=knobs.get("corrjoin_ks", 15), corrjoin_ke=knobs.get("corrjoin_ke", 30), corrjoin_kb=knobs.get("corrjoin_kb", 3)),
     }
@@ -145,7 +152,8 @@ def main() -> None:
         for arm in pattern_b:
             f = Path(args.competitor_params) / f"best_params_{arm}.json"
             if f.exists():
-                bp = {k: v for k, v in json.load(open(f)).items() if not k.startswith("_")}
+                # the tuned file may carry its own preprocess (the tuning ran in the cell's space); the cell's value wins
+                bp = {k: v for k, v in json.load(open(f)).items() if not k.startswith("_") and k != "preprocess"}
                 pattern_b[arm] = dict(pattern_b[arm], **bp, preprocess=bool(args.preprocess))
                 tuned[arm] = str(f)
     pattern_a_extra = {
@@ -153,6 +161,13 @@ def main() -> None:
         "braid": dict(braid_b=knobs.get("braid_b", 16), braid_gamma=knobs.get("braid_gamma", 0.4), braid_thin=False, braid_report_mode=knobs.get("braid_report_mode", "all_lags")),
         "thinbraid": dict(braid_b=knobs.get("braid_b", 16), braid_gamma=knobs.get("braid_gamma", 0.4), braid_thin=True, braid_thin_d0=knobs.get("braid_thin_d0", 400), braid_report_mode=knobs.get("braid_report_mode", "all_lags")),
     }
+
+    # (2026-09-19) energy: node package power at rest, measured once per battery; None when RAPL is not readable
+    idle = idle_power(2.0) if not args.no_isolate else {"idle_power_w": None, "energy_source": None, "rapl_domains": []}
+    node = {"hostname": socket.gethostname(), "cpu_count": os.cpu_count(), "oar_job_id": os.environ.get("OAR_JOB_ID"),
+            "cpuset": os.environ.get("OAR_CPUSET"), "affinity_cores": len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else None,
+            "threads": {k: os.environ.get(k) for k in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")}, **idle}
+    print(f"node: {node['hostname']} affinity_cores={node['affinity_cores']} idle_power_w={idle['idle_power_w']} energy_source={idle['energy_source']}", flush=True)
 
     results = {}
     with tempfile.TemporaryDirectory() as tmp:
@@ -165,37 +180,53 @@ def main() -> None:
                 results[arm] = {"status": "N/A", "reason": "synchronous-only method, n_lags > 0"}
                 print(f"{arm:12s} N/A (synchronous only)", flush=True)
                 continue
-            t0 = time.perf_counter()
-            try:
+            arm_dir = f"{tmp}/{arm}"
+            os.makedirs(arm_dir, exist_ok=True)
+
+            def _run_arm(arm=arm, arm_dir=arm_dir):
                 if arm in PATTERN_A:
                     cfg = dict(base, baseline_mode=PATTERN_A[arm], **pattern_a_extra.get(arm, {}))
-                    record, _, flags = run_and_log_bruteforce(label, test_data, ids_n_var, cfg, f"{tmp}/{arm}.csv", metadata={"nodes": 0},
+                    record, _, flags = run_and_log_bruteforce(label, test_data, ids_n_var, cfg, f"{arm_dir}/{arm}.csv", metadata={"nodes": 0},
                                                               recall_by_window=True, verbose=False, testing=False)
                 else:
-                    record, _, flags = run_and_log_corrtrack(label, test_data, ids_n_var, base, pattern_b[arm], f"{tmp}/{arm}.csv",
+                    record, _, flags = run_and_log_corrtrack(label, test_data, ids_n_var, base, pattern_b[arm], f"{arm_dir}/{arm}.csv",
                                                              metadata={"nodes": 0, "alg": arm}, recall_by_window=True, corr_val=True,
                                                              monitor=bool(args.monitor), verbose=False, testing=False)
-            except Exception as exc:  # noqa: BLE001 - one failing arm must not kill the battery
-                results[arm] = {"status": "ERROR", "reason": f"{type(exc).__name__}: {exc}"}
-                print(f"{arm:12s} ERROR {type(exc).__name__}: {exc}", flush=True)
+                return record, flags
+
+            t0 = time.perf_counter()
+            try:
+                # (2026-09-19, user) every arm in its own forked child: peak/mean RSS, storage I/O and
+                # CPU time are the arm's own (abaca/resource_probe.py); one failing arm must not kill the battery
+                (record, flags), resources = run_isolated(_run_arm, artifact_dir=arm_dir, isolate=not args.no_isolate, interval=args.rss_interval)
+            except Exception as exc:  # noqa: BLE001
+                results[arm] = {"status": "ERROR", "reason": f"{type(exc).__name__}: {str(exc).splitlines()[0]}", "traceback": str(exc)}
+                print(f"{arm:12s} ERROR {type(exc).__name__}: {str(exc).splitlines()[0]}", flush=True)
                 continue
             wall = time.perf_counter() - t0
             r = {k: record.get(k) for k in ("correlated", "total_candidates", "tested", "candidate_precision", "sk_time", "cand_time", "val_time", "monit_time",
-                                            "n_steps", "step_time_min", "step_time_q1", "step_time_median", "step_time_q3", "step_time_max",
+                                            "runtime", "artifact_time", "n_steps", "step_time_min", "step_time_q1", "step_time_median", "step_time_q3", "step_time_max",
                                             "step_time_whisker_lo", "step_time_whisker_hi", "step_time_outliers", "step_time_mean",
                                             "candidate_search_entries_touched", "candidate_search_blocks_touched", "lsh_candidates_touched",
                                             "supports_neg_corr", "n_vectors", "candidate_backend", "data_representation",
                                             "parcorr_k", "parcorr_f", "parcorr_c", "parcorr_cell_size", "statstream_n_coeffs", "statstream_index_dims",
                                             "statstream_eps", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2",
                                             "braid_b", "braid_gamma", "braid_thin", "filcorr_fs", "filcorr_ft")}
-            # process peak RSS (MB) after the arm: monotone across arms, so report the increment as a coarse memory signal
-            rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+            # phase times (s): sk/cand/val/monit are the arm's own stage clocks, runtime the in-loop time with
+            # artifact I/O subtracted, other = runtime - sum(phases) (bookkeeping), wall the child's total
+            # (setup + run + artifact I/O), wall_outer the parent's view including the fork/pickle overhead
+            phases = {k: float(record.get(k) or 0.0) for k in ("sk_time", "cand_time", "val_time", "monit_time")}
+            r["other_time"] = max(float(record.get("runtime") or 0.0) - sum(phases.values()), 0.0)
+            r["phase_fractions"] = {k: (v / record["runtime"]) for k, v in phases.items()} if record.get("runtime") else None
             # (2026-09-17) the competitor indexes run their hot loops in competitor_kernels when it is built
-            r.update(status="ok", wall=wall, flags=flags, pure_python_index=(arm in PURE_PYTHON_INDEX and not _HAVE_COMPETITOR_KERNELS), peak_rss_mb_after=rss,
-                     candidate_time_per_pair_window_us=(1e6 * record["cand_time"] / record["total_candidates"]) if record.get("total_candidates") else None)
+            r.update(status="ok", wall=resources["wall_s"], wall_outer=wall, flags=flags,
+                     pure_python_index=(arm in PURE_PYTHON_INDEX and not _HAVE_COMPETITOR_KERNELS),
+                     candidate_time_per_pair_window_us=(1e6 * record["cand_time"] / record["total_candidates"]) if record.get("total_candidates") else None,
+                     resources=resources)
             results[arm] = r
-            print(f"{arm:12s} done: wall={wall:.2f}s correlated={r['correlated']} total={r['total_candidates']} tested={r['tested']} "
-                  f"neg_corr_tag={r['supports_neg_corr']}", flush=True)
+            print(f"{arm:12s} done: wall={r['wall']:.2f}s correlated={r['correlated']} total={r['total_candidates']} tested={r['tested']} "
+                  f"peak_rss={resources['peak_rss_mb']:.0f}MB (+{(resources['peak_rss_delta_mb'] or 0):.0f}) mean_rss={(resources['mean_rss_mb'] or 0):.0f}MB "
+                  f"io_w={(resources['io_write_mb'] or 0):.1f}MB neg_corr_tag={r['supports_neg_corr']}", flush=True)
 
     bf = results["bruteforce"]
     try:
@@ -220,15 +251,23 @@ def main() -> None:
         r.update(precision=m.get("precision"), recall=m.get("recall"), f1=m.get("f1_score"))
         # (2026-09-18, user) candidate-stage specificity: of the pair-windows that are NOT correlated at T
         # (the bruteforce universe minus its positives), the fraction the arm did not put forward as a
-        # candidate. FP = candidates - true positives (validation is exact, so the arm's correlated count is
-        # its TP); specificity = 1 - FP / (U - P). 1.0 means the candidate stage never wastes a validation.
+        # candidate. FP = candidates - true positives; specificity = 1 - FP / (U - P). 1.0 means the
+        # candidate stage never wastes a validation. TP = recall * P (2026-09-19: for an arm that reports an
+        # approximate correlation, BRAID/ThinBRAID/StatStream, `correlated` is what it REPORTED, not its TP)
         U = int(bf.get("total_candidates") or bf.get("tested") or 0); P = int(bf.get("correlated") or 0)
-        tp = int(r.get("correlated") or 0); fp = max(int(r.get("total_candidates") or 0) - tp, 0)
-        r.update(universe_pair_windows=U, positives=P, candidate_false_positives=fp,
+        cand = int(r.get("total_candidates") or 0)
+        lower_bound = False
+        if cand >= U:                                   # no candidate stage: every negative is put forward
+            fp = U - P
+        elif arm in APPROX_REPORT:                      # reported TP <= candidate TP, so this FP is an upper bound
+            fp = max(cand - int(round((m.get("recall") or 0.0) * P)), 0); lower_bound = True
+        else:                                           # exact validation: the arm's correlated count is its TP
+            fp = max(cand - int(r.get("correlated") or 0), 0)
+        r.update(universe_pair_windows=U, positives=P, candidate_false_positives=fp, candidate_specificity_is_lower_bound=lower_bound,
                  candidate_specificity=(1.0 - fp / (U - P)) if U > P else None, candidate_fpr=(fp / (U - P)) if U > P else None)
 
     print("\n=== SUMMARY ===")
-    print(f"{'arm':12s} {'status':>6s} {'wall_s':>8s} {'speedup':>8s} {'correlated':>11s} {'total_cand':>11s} {'tested':>9s} {'recall':>7s} {'cand_prec':>9s} {'cand_spec':>9s} {'step_med_ms':>11s} {'step_q3_ms':>10s} {'neg_corr_tag':>14s} {'index':>6s}")
+    print(f"{'arm':12s} {'status':>6s} {'wall_s':>8s} {'speedup':>8s} {'correlated':>11s} {'total_cand':>11s} {'tested':>9s} {'recall':>7s} {'cand_prec':>9s} {'cand_spec':>9s} {'step_med_ms':>11s} {'step_q3_ms':>10s} {'peakMB':>7s} {'meanMB':>7s} {'neg_corr_tag':>14s} {'index':>6s}")
     for arm in arms:
         r = results[arm]
         if r["status"] != "ok":
@@ -240,12 +279,15 @@ def main() -> None:
         spec = f"{r['candidate_specificity']:.4f}" if r.get("candidate_specificity") is not None else "    -    "
         p50 = f"{1e3 * r['step_time_median']:.3f}" if r.get('step_time_median') is not None else "-"
         p99 = f"{1e3 * r['step_time_q3']:.3f}" if r.get('step_time_q3') is not None else "-"
+        rs = r.get("resources", {})
+        pk = f"{rs['peak_rss_delta_mb']:.0f}" if rs.get("peak_rss_delta_mb") is not None else "-"
+        mn = f"{rs['mean_rss_delta_mb']:.0f}" if rs.get("mean_rss_delta_mb") is not None else "-"
         print(f"{arm:12s} {'ok':>6s} {r['wall']:8.2f} {sp:7.2f}x {r['correlated']:11d} {r['total_candidates']:11d} {r['tested']:9d} {rec:>7s} {prec:>9s} {spec:>9s} {p50:>11s} {p99:>10s} "
-              f"{str(r['supports_neg_corr']):>14s} {'py' if r['pure_python_index'] else 'cy/np':>6s}")
+              f"{pk:>7s} {mn:>7s} {str(r['supports_neg_corr']):>14s} {'py' if r['pure_python_index'] else 'cy/np':>6s}")
     print(f"\ncorrtrack params: {ct_source}; competitor knob overrides: {knobs or 'none'}; "
           f"CSZ-protocol tuned arms: {tuned or 'none (paper defaults)'}")
     if args.out:
-        out = {"dataset": label, "dataset_profile": profile, "config": vars(args), "corrtrack_params_source": ct_source, "competitor_params_tuned": tuned,
+        out = {"dataset": label, "cell": args.cell, "dataset_profile": profile, "config": vars(args), "node": node, "corrtrack_params_source": ct_source, "competitor_params_tuned": tuned,
                "arms": {a: {k: v for k, v in r.items() if k != "flags"} for a, r in results.items()}}
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         json.dump(out, open(args.out, "w"), indent=1, default=str)

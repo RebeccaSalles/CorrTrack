@@ -2,12 +2,13 @@
 # CorrTrack N-way competitor comparison on one competitor-paper dataset (phase 0f sets).
 # Generalizes fourway_compare.oar: pick the dataset config and the protocol with env vars.
 #
-#   oarsub -S "./abaca/nway_compare.oar DATASET_CONFIG=experiment_dataset_motes_temperature.py N_LAGS=480 THR=0.9"
+#   oarsub -q abaca -p "cluster='mercantour3'" -l host=1,walltime=12:00:00 -S "./abaca/nway_compare.oar DATASET_CONFIG=experiment_dataset_motes_temperature.py N_LAGS=480 THR=0.9"
 #
 #OAR -n corrtrack-nway
 #OAR -q abaca
-#OAR -p cluster='mercantour3'
-#OAR -l host=1,walltime=12:00:00
+# (2026-09-19) no #OAR -l / -p here: a header -l plus a command-line -l makes a MOLDABLE job (OAR picks either;
+# the Phase R reruns got the header's 12 h instead of the requested 24 h). Resources and host properties are
+# given on the oarsub command line only, e.g. -p "cluster='mercantour3'" -l host=1,walltime=24:00:00
 #OAR -O abaca/logs/OAR.%jobid%.out
 #OAR -E abaca/logs/OAR.%jobid%.err
 
@@ -49,7 +50,8 @@ if [ -z "$BEST_PARAMS" ]; then
 fi
 
 STEM="$(basename "$DATASET_CONFIG" .py)_W${WINDOW_SIZE}_s${WINDOW_STEP}_L${N_LAGS}_T${THR}${NEG_CORR_FLAG:+_neg}"
-RUN_DIR="$RESULTS_ROOT/nway_${OAR_JOB_ID:-manual}_$STEM"
+RUN_NAME="${RUN_NAME:-}"                    # campaign cell name (<stem>_pos|_neg); the result then lands in nway/<RUN_NAME>/
+if [ -n "$RUN_NAME" ]; then RUN_DIR="$RESULTS_ROOT/nway/$RUN_NAME"; else RUN_DIR="$RESULTS_ROOT/nway_${OAR_JOB_ID:-manual}_$STEM"; fi
 mkdir -p "$RUN_DIR"
 
 echo "== CorrTrack Abaca N-way comparison =="
@@ -60,23 +62,28 @@ echo "repo=$REPO_DIR env=$CONDA_ENV run_dir=$RUN_DIR dataset=$DATASET_CONFIG arm
 source "$CONDA_ROOT/etc/profile.d/conda.sh"
 conda activate "$CONDA_ENV"
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
-cd "$REPO_DIR"
-
-echo "== build kernels (node-specific, -march=native) =="
-rm -f ./*.cpython-*.so; rm -rf build
-python setup_cython.py build_ext --inplace -j 4 2>&1 | tee "$RUN_DIR/build.log"
-BUILD_RC=${PIPESTATUS[0]}
-
-echo "== regression suite =="
-python -m pytest test_stable_reproduced_changes.py -q 2>&1 | tee "$RUN_DIR/pytest.log"
-PYTEST_RC=${PIPESTATUS[0]}
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/_snapshot_enter.sh"   # the wrapper's own copy (snapshot or clone)
+cd "$WORK_DIR"
+BUILD_RC=0; PYTEST_RC=0
+if [ "$DO_BUILD" = "1" ]; then
+  echo "== build kernels (node-specific, -march=native) =="
+  rm -f ./*.cpython-*.so; rm -rf build
+  python setup_cython.py build_ext --inplace -j 4 2>&1 | tee "$RUN_DIR/build.log"
+  BUILD_RC=${PIPESTATUS[0]}
+  echo "== regression suite =="
+  python -m pytest test_stable_reproduced_changes.py -q 2>&1 | tee "$RUN_DIR/pytest.log"
+  PYTEST_RC=${PIPESTATUS[0]}
+else
+  cp "$SNAPSHOT/SNAPSHOT_OK" "$RUN_DIR/SNAPSHOT_OK"
+fi
 
 echo "== N-way comparison =="
 # shellcheck disable=SC2086
 python abaca/nway_compare.py --dataset-config "$DATASET_CONFIG" --arms "$ARMS" \
   --window-size "$WINDOW_SIZE" --window-step "$WINDOW_STEP" --basic-window "$BASIC_WINDOW" --n-lags "$N_LAGS" --corr-threshold "$THR" \
   ${COMPETITOR_PARAMS:+--competitor-params "$COMPETITOR_PARAMS"} ${BEST_PARAMS:+--best-params "$BEST_PARAMS"} \
-  $NEG_CORR_FLAG $PREPROCESS_FLAG $EXTRA_ARGS --out "$RUN_DIR/nway.json" 2>&1 | tee "$RUN_DIR/nway.log"
+  $NEG_CORR_FLAG $PREPROCESS_FLAG $EXTRA_ARGS ${RUN_NAME:+--cell "$RUN_NAME"} --out "$RUN_DIR/nway.json" 2>&1 | tee "$RUN_DIR/nway.log"
 COMPARE_RC=${PIPESTATUS[0]}
 
 echo "== summary =="

@@ -2,12 +2,13 @@
 # CSZ-protocol tuning of the pruning competitor arms on one dataset config (abaca/tune_competitors.py).
 # Output dir is shared with the N-way run through COMPETITOR_PARAMS.
 #
-#   oarsub -S "./abaca/tune_competitors.oar DATASET_CONFIG=experiment_dataset_motes_temperature.py THR=0.9 OUT_DIR=$HOME/corrtrack_abaca_results/tuned/motes_T0.9"
+#   oarsub -q abaca -p "cluster='mercantour3'" -l host=1,walltime=12:00:00 -S "./abaca/tune_competitors.oar DATASET_CONFIG=experiment_dataset_motes_temperature.py THR=0.9 OUT_DIR=$HOME/corrtrack_abaca_results/tuned/motes_T0.9"
 #
 #OAR -n corrtrack-tune
 #OAR -q abaca
-#OAR -p cluster='mercantour3'
-#OAR -l host=1,walltime=12:00:00
+# (2026-09-19) no #OAR -l / -p here: a header -l plus a command-line -l makes a MOLDABLE job (OAR picks either;
+# the Phase R reruns got the header's 12 h instead of the requested 24 h). Resources and host properties are
+# given on the oarsub command line only, e.g. -p "cluster='mercantour3'" -l host=1,walltime=24:00:00
 #OAR -O abaca/logs/OAR.%jobid%.out
 #OAR -E abaca/logs/OAR.%jobid%.err
 
@@ -28,6 +29,8 @@ N_LAGS="${N_LAGS:-0}"
 THR="${THR:-0.7}"
 NEG_CORR_FLAG="${NEG_CORR_FLAG:-}"
 CALIB_OBS="${CALIB_OBS:-5000}"
+CALIB_WINDOWS="${CALIB_WINDOWS:-}"          # (2026-09-19) cap the calibration span at W + N step rows
+CALIB_SERIES="${CALIB_SERIES:-}"            # (2026-09-19) tune on a seeded random subset of K series
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 EXTRA_ARGS="${EXTRA_ARGS//+/ }"             # '+' stands for a space inside the single EXTRA_ARGS token
 PREPROCESS="${PREPROCESS:-0}"                 # 1: the cell runs on first differences (all arms, the truth, the tuning)
@@ -41,11 +44,18 @@ echo "job=${OAR_JOB_ID:-manual} host=$(hostname) date=$(date --iso-8601=seconds)
 source "$CONDA_ROOT/etc/profile.d/conda.sh"
 conda activate "$CONDA_ENV"
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
-cd "$REPO_DIR"
-rm -f ./*.cpython-*.so; rm -rf build
-python setup_cython.py build_ext --inplace -j 4 > "$OUT_DIR/build.log" 2>&1
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/_snapshot_enter.sh"   # the wrapper's own copy (snapshot or clone)
+cd "$WORK_DIR"
+if [ "$DO_BUILD" = "1" ]; then
+  rm -f ./*.cpython-*.so; rm -rf build
+  python setup_cython.py build_ext --inplace -j 4 > "$OUT_DIR/build.log" 2>&1
+fi
 # shellcheck disable=SC2086
-python abaca/tune_competitors.py --dataset-config "$DATASET_CONFIG" --arms "$ARMS" \
+command time -v -o "$OUT_DIR/time_v.txt" python abaca/tune_competitors.py --dataset-config "$DATASET_CONFIG" --arms "$ARMS" \
   --window-size "$WINDOW_SIZE" --window-step "$WINDOW_STEP" --basic-window "$BASIC_WINDOW" --n-lags "$N_LAGS" --corr-threshold "$THR" \
-  --calib-obs "$CALIB_OBS" $NEG_CORR_FLAG $PREPROCESS_FLAG $EXTRA_ARGS --out-dir "$OUT_DIR" 2>&1 | tee "$OUT_DIR/tune.log"
-echo "tune_rc=${PIPESTATUS[0]} out=$OUT_DIR"
+  --calib-obs "$CALIB_OBS" ${CALIB_WINDOWS:+--calib-windows "$CALIB_WINDOWS"} ${CALIB_SERIES:+--calib-series "$CALIB_SERIES"} \
+  $NEG_CORR_FLAG $PREPROCESS_FLAG $EXTRA_ARGS --out-dir "$OUT_DIR" 2>&1 | tee "$OUT_DIR/tune.log"
+RC=${PIPESTATUS[0]}
+echo "max_rss_kb=$(sed -n 's/.*Maximum resident set size (kbytes): //p' "$OUT_DIR/time_v.txt")"
+echo "tune_rc=$RC out=$OUT_DIR"

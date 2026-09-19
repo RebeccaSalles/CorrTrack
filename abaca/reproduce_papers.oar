@@ -4,8 +4,9 @@
 #
 #OAR -n corrtrack-phaseR
 #OAR -q abaca
-#OAR -p cluster='mercantour3'
-#OAR -l host=1,walltime=24:00:00
+# (2026-09-19) no #OAR -l / -p here: a header -l plus a command-line -l makes a MOLDABLE job (OAR picks either;
+# the Phase R reruns got the header's 12 h instead of the requested 24 h). Resources and host properties are
+# given on the oarsub command line only, e.g. -p "cluster='mercantour3'" -l host=1,walltime=24:00:00
 #OAR -O abaca/logs/OAR.%jobid%.out
 #OAR -E abaca/logs/OAR.%jobid%.err
 set -uo pipefail

@@ -786,6 +786,39 @@ class StableReproducedChangesTest(unittest.TestCase):
         self.assertGreater(record["proxy_search_index_candidates"], 0)
         self.assertGreaterEqual(record["proxy_search_objective_rate"], record["proxy_candidate_rate"])
 
+    def test_proxy_anchor_reference_labels_follow_preprocess(self):
+        # (2026-09-19) the proxy hyperopt truth must live in the space the settings sketch: with
+        # preprocess=True the labels are Pearson correlations of the DIFFERENCED windows (d[t] = x[t] -
+        # x[t-1], d[0] = 0, the same rule as Sketches._preprocess_data with last_origin). Before the fix
+        # the reference was always raw-space and a differenced grid was scored against the wrong truth.
+        rng = np.random.default_rng(7)
+        n = 64
+        walk_a = np.cumsum(rng.normal(size=n)); walk_b = np.cumsum(rng.normal(size=n))
+        # two random walks whose LEVELS are highly correlated (shared drift) but whose increments are not
+        drift = np.linspace(0, 40, n)
+        values = np.vstack([walk_a + drift, walk_b + drift, rng.normal(size=n)])
+        train_data = np.vstack([np.arange(n), values])
+        ids = np.array(["a", "b", "c"])
+        optimizer = CorrTrack_optimize(
+            train_data, ids, window_size=16, window_step=16, n_lags=0, corr_threshold=0.9, recall_by_window=True, alg="nD",
+            neg_corr=False, corr_val=False, exec="sequential", parallel_sketch=False, parallel_candidates=False,
+            parallel_validation=False, candidate_similarity="cosine", candidate_cosine_threshold=-1.0,
+            proxy_config={"anchor_count": 4, "max_pair_rows": 1000, "bootstrap_enabled": False},
+        )
+        raw = optimizer._prepare_proxy_anchor_reference(preprocess=False)
+        diff = optimizer._prepare_proxy_anchor_reference(preprocess=True)
+        self.assertEqual(list(raw["pair_keys"]), list(diff["pair_keys"]))
+        d_values = np.diff(np.concatenate([values[:, :1], values], axis=1), axis=1)
+        for space, ref, vals in (("raw", raw, values), ("diff", diff, d_values)):
+            for key, gt in zip(ref["pair_keys"], ref["truth"]):
+                sid_a, sid_b, t_a, t_b, w = key
+                ia, ib = list(ids).index(sid_a), list(ids).index(sid_b)
+                xa = vals[ia, int(t_a): int(t_a) + int(w)]; xb = vals[ib, int(t_b): int(t_b) + int(w)]
+                r = np.corrcoef(xa, xb)[0, 1]
+                self.assertEqual(bool(gt), bool(np.isfinite(r) and r >= 0.9), msg=f"{space} {key} r={r:.3f}")
+        # the shared drift makes the level truth denser than the increment truth
+        self.assertGreater(int(raw["n_gt"]), int(diff["n_gt"]))
+
     def test_kendall_tau_matches_scipy_exactly(self):
         # (2026-07-31) validation_metric="kendall" now routes through
         # candidate_kernels.kendall_tau_cy (Cython, no Python fallback) --

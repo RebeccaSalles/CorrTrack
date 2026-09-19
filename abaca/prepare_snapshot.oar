@@ -1,0 +1,83 @@
+#!/bin/bash
+# Build one frozen, tested working copy of the repository for a campaign (2026-09-19).
+#
+# Why: every job used to `rm -f *.so; python setup_cython.py build_ext --inplace` in the SHARED
+# clone and run the 151-test suite. With tens of jobs per node that is a race (one job deletes
+# the .so another is importing) and ~5 min of build+tests per job, 9,606 times. A campaign now
+# runs from one snapshot: the tree at the current commit copied to
+# $RESULTS_ROOT/snapshots/<git sha>[_<tag>]/<clone name>, kernels built once on a mercantour3 node
+# (-march=native; the cluster is homogeneous, Xeon Silver 4114, and the job wrappers verify
+# the CPU model before using it), suite run once, SNAPSHOT_OK written. The npz inputs are a
+# symlink to the clone's datasets/competitor, so a re-fetch or a later generation is seen by all.
+#
+#   oarsub -q abaca -p "cluster='mercantour3'" -l host=1,walltime=1:00:00 -S "./abaca/prepare_snapshot.oar TAG=campaign1"
+#
+#OAR -n corrtrack-snapshot
+#OAR -q abaca
+# (2026-09-19) no #OAR -l / -p here: a header -l plus a command-line -l makes a MOLDABLE job (OAR picks either;
+# the Phase R reruns got the header's 12 h instead of the requested 24 h). Resources and host properties are
+# given on the oarsub command line only, e.g. -p "cluster='mercantour3'" -l host=1,walltime=24:00:00
+#OAR -O abaca/logs/OAR.%jobid%.out
+#OAR -E abaca/logs/OAR.%jobid%.err
+set -uo pipefail
+for kv in "$@"; do export "${kv?}"; done
+CONDA_ROOT="${CONDA_ROOT:-$HOME/miniforge3}"
+CONDA_ENV="${CONDA_ENV:-corrtrack}"
+REPO_DIR="${REPO_DIR:-$HOME/corrtrack_release_dev}"
+RESULTS_ROOT="${RESULTS_ROOT:-$HOME/corrtrack_abaca_results}"
+TAG="${TAG:-}"
+SKIP_TESTS="${SKIP_TESTS:-0}"
+
+cd "$REPO_DIR"
+SHA=$(git rev-parse --short=12 HEAD 2>/dev/null || echo nogit)
+DIRTY=$(git status --porcelain --untracked-files=no -- '*.py' '*.pyx' 2>/dev/null | wc -l)
+# the leaf keeps the clone's name: corrtrack_run_corrtrack.config_folder() (and a test) use the tree's basename
+SNAP="${SNAPSHOT:-$RESULTS_ROOT/snapshots/${SHA}${TAG:+_$TAG}/$(basename "$REPO_DIR")}"
+echo "== CorrTrack campaign snapshot =="
+echo "job=${OAR_JOB_ID:-manual} host=$(hostname) date=$(date --iso-8601=seconds) sha=$SHA dirty_tracked_py=$DIRTY -> $SNAP"
+rm -f "$SNAP/SNAPSHOT_OK"
+mkdir -p "$SNAP"
+# the tree: sources, configs, docs; not .git, not the builds, not the artifacts, not the 1.1 GB of npz inputs
+rsync -a --delete --exclude .git --exclude build --exclude '__pycache__' --exclude '*.so' --exclude '*.c' \
+      --exclude tmp_artifacts --exclude abaca/logs --exclude 'datasets/competitor' \
+      "$REPO_DIR/" "$SNAP/"
+# the inputs (npz files and the generated configs under datasets/competitor) are the clone's own
+# directory through a symlink, so files generated after the snapshot (campaign_submit_generate.sh run
+# from the snapshot) land in the clone and are seen by every job
+rm -rf "$SNAP/datasets/competitor"
+ln -sfn "$REPO_DIR/datasets/competitor" "$SNAP/datasets/competitor"
+# tmp_artifacts too: several legacy npz inputs (sp500, acwi, ...) are resolved from there by competitor_loader
+mkdir -p "$REPO_DIR/tmp_artifacts"
+rm -rf "$SNAP/tmp_artifacts"
+ln -sfn "$REPO_DIR/tmp_artifacts" "$SNAP/tmp_artifacts"
+mkdir -p "$SNAP/abaca/logs"
+
+# shellcheck disable=SC1091
+source "$CONDA_ROOT/etc/profile.d/conda.sh"
+conda activate "$CONDA_ENV"
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+cd "$SNAP"
+echo "== build kernels (-march=native on $(lscpu | sed -n 's/^Model name: *//p')) =="
+python setup_cython.py build_ext --inplace -j 4 2>&1 | tee build.log
+BUILD_RC=${PIPESTATUS[0]}
+ls -1 ./*.cpython-*.so
+python -c "import competitor_kernels, candidate_kernels, sketch_kernels, monitor_kernels, partition_kernels; print('kernels import ok')" || BUILD_RC=1
+
+PYTEST_RC=0
+if [ "$SKIP_TESTS" != "1" ]; then
+  echo "== regression suite =="
+  python -m pytest test_stable_reproduced_changes.py test_synth_density.py test_abaca_tools.py -q 2>&1 | tee pytest.log
+  PYTEST_RC=${PIPESTATUS[0]}
+fi
+if [ "$BUILD_RC" = "0" ] && [ "$PYTEST_RC" = "0" ]; then
+  {
+    echo "sha=$SHA"; echo "tag=$TAG"; echo "built_on=$(hostname)"; echo "date=$(date --iso-8601=seconds)"
+    echo "cpu_model=$(lscpu | sed -n 's/^Model name: *//p' | sed 's/  */ /g')"
+    echo "python=$(python -c 'import sys; print(sys.version.split()[0])')"; echo "numpy=$(python -c 'import numpy; print(numpy.__version__)')"
+    echo "conda_env=$CONDA_ENV"; echo "dirty_tracked_py=$DIRTY"
+  } > SNAPSHOT_OK
+  echo "SNAPSHOT_OK written: $SNAP"; cat SNAPSHOT_OK
+else
+  echo "snapshot NOT usable: build_rc=$BUILD_RC pytest_rc=$PYTEST_RC" >&2
+  exit 2
+fi
