@@ -3307,6 +3307,26 @@ def _canonicalize_rows(rows):
     return out
 
 
+def _proxy_canonical_pair_rows(rows):
+    """(2026-09-20) Canonical order of proxy pair rows [sidx1, sidx2, t1, t2] (int64), the numeric twin of
+    CorrTrack_optimize._normalize_window_pair_key: the later window first; at equal times the smaller
+    series index first; for a series paired with itself the later time first."""
+    r = np.array(rows, dtype=np.int64, copy=True).reshape((-1, 4))
+    if r.shape[0] == 0:
+        return r
+    swap = (r[:, 2] < r[:, 3]) | ((r[:, 2] == r[:, 3]) & (r[:, 0] > r[:, 1]))
+    if np.any(swap):
+        sw = r[swap]
+        r[swap, 0], r[swap, 1], r[swap, 2], r[swap, 3] = sw[:, 1], sw[:, 0], sw[:, 3], sw[:, 2]
+    return r
+
+
+def _proxy_rows_as_keys(rows):
+    """32-byte void keys of canonical proxy pair rows (sortable, comparable; searchsorted-friendly)."""
+    r = np.ascontiguousarray(np.asarray(rows, dtype=np.int64).reshape((-1, 4)))
+    return r.view(np.dtype((np.void, 32))).reshape(-1)
+
+
 def _rows_as_void_keys(rows):
     """View an (N, 5) int64 rows array as a 1-D array of opaque per-row keys, so numpy
     set operations (np.isin / np.unique) treat each whole row as one hashable element."""
@@ -18376,6 +18396,7 @@ class CorrTrack_optimize:
             proxy_ids = [proxy_ids_full[int(i)] for i in series_idx]
             values = values_full[series_idx]
         else:
+            series_idx = None
             proxy_ids = proxy_ids_full
             values = values_full
         n_series = int(values.shape[0])
@@ -18444,11 +18465,14 @@ class CorrTrack_optimize:
             return mask
 
         anchors = []
-        pair_keys = []
-        pair_anchor_ids = []
-        truth = []
-        truth_sign = []
-        key_to_indices = defaultdict(list)
+        # (2026-09-20) numeric reference: per (anchor, current series) one chunk of canonical pair rows
+        # [sidx1, sidx2, t1, t2] (int64), anchor ids and signs; concatenated once at the end. The previous
+        # per-row Python loop built a tuple key, a dict entry and two list items per pair (~300 B per row,
+        # 6 GB at the 20M-row ceiling, and minutes of interpreter time); the arrays cost 40 B per row.
+        row_chunks = []
+        anchor_chunks = []
+        sign_chunks = []
+        n_rows_total = 0
         unique_starts = set()
         max_rows_reached = False
         neg_corr = bool(self.neg_corr)
@@ -18515,69 +18539,110 @@ class CorrTrack_optimize:
                 pos_mask = finite & (corr_arr >= corr_threshold)
                 neg_mask = finite & neg_corr & (corr_arr <= -corr_threshold)
 
-                sid_current = proxy_ids[s_current]
-                for idx in range(y_rows.shape[0]):
-                    s_other = int(so_flat[idx])
-                    lag_start = int(lag_flat[idx])
-                    if pos_mask[idx]:
-                        gt, sign = True, 1
-                    elif neg_mask[idx]:
-                        gt, sign = True, -1
-                    else:
-                        gt, sign = False, 0
-                    pair_key = self._normalize_window_pair_key(
-                        (
-                            sid_current,
-                            proxy_ids[s_other],
-                            anchor_time,
-                            lag_times[lag_start],
-                            window_size,
-                        )
-                    )
-                    row_idx = len(pair_keys)
-                    pair_keys.append(pair_key)
-                    pair_anchor_ids.append(current_anchor_id)
-                    truth.append(gt)
-                    truth_sign.append(sign)
-                    key_to_indices[pair_key].append(row_idx)
-                    if len(pair_keys) >= int(self.proxy_max_pair_rows):
-                        max_rows_reached = True
-                        break
-                if max_rows_reached:
+                n_chunk = int(y_rows.shape[0])
+                room = int(self.proxy_max_pair_rows) - n_rows_total
+                if room <= 0:
+                    max_rows_reached = True
                     break
-                    if max_rows_reached:
-                        break
+                if n_chunk > room:
+                    n_chunk = room
+                    max_rows_reached = True
+                t2_arr = np.fromiter((lag_times[int(v)] for v in lag_flat[:n_chunk]), dtype=np.int64, count=n_chunk) \
+                    if len(lag_times) > 1 else np.full(n_chunk, int(lag_times[int(lag_starts[0])]), dtype=np.int64)
+                chunk = np.empty((n_chunk, 4), dtype=np.int64)
+                chunk[:, 0] = s_current
+                chunk[:, 1] = so_flat[:n_chunk]
+                chunk[:, 2] = anchor_time
+                chunk[:, 3] = t2_arr
+                row_chunks.append(_proxy_canonical_pair_rows(chunk))
+                anchor_chunks.append(np.full(n_chunk, current_anchor_id, dtype=np.int64))
+                sign = np.zeros(n_chunk, dtype=np.int8)
+                sign[pos_mask[:n_chunk]] = 1
+                sign[neg_mask[:n_chunk] & ~pos_mask[:n_chunk]] = -1
+                sign_chunks.append(sign)
+                n_rows_total += n_chunk
                 if max_rows_reached:
                     break
             if max_rows_reached:
                 break
 
-        if not pair_keys:
+        if n_rows_total == 0:
             raise ValueError("Proxy-anchor hyperopt produced no valid pair rows")
 
+        pair_rows = np.concatenate(row_chunks, axis=0)
+        pair_anchor_ids = np.concatenate(anchor_chunks)
+        truth_sign = np.concatenate(sign_chunks)
+        truth = truth_sign != 0
         if max_rows_reached:
-            anchors = [a for a in anchors if a["anchor_id"] in set(pair_anchor_ids)]
+            present = set(np.unique(pair_anchor_ids).tolist())
+            anchors = [a for a in anchors if a["anchor_id"] in present]
+        # sorted key view for the candidate matching (searchsorted on 32-byte void keys; duplicates adjacent)
+        keys = _proxy_rows_as_keys(pair_rows)
+        order = np.argsort(keys, kind="stable")
+        keys_sorted = keys[order]
 
         return {
             "proxy_ids": proxy_ids,
+            # (2026-09-20) rows of train_data (0 = the time axis) behind proxy_ids: the sketch/candidate side must see
+            # exactly the series the reference was built on. Before, the subsampled reference was matched against
+            # sketches of ALL series under the subsampled ids (misaligned: proxy recall 0.32 instead of 0.95 on
+            # sp500 with a 20,000-pair subsample; the m >= 2,500 probes of 2026-09-19 were affected).
+            "train_rows": np.concatenate([[0], np.asarray(series_idx, dtype=np.int64) + 1]) if series_idx is not None else None,
             "anchors": anchors,
             "unique_starts": sorted(unique_starts),
-            "pair_keys": pair_keys,
-            "pair_anchor_ids": np.asarray(pair_anchor_ids, dtype=np.int64),
-            "truth": np.asarray(truth, dtype=bool),
-            "truth_sign": np.asarray(truth_sign, dtype=np.int8),
-            "key_to_indices": dict(key_to_indices),
+            "pair_rows": pair_rows,
+            "pair_keys_sorted": keys_sorted,
+            "pair_order": order,
+            "pair_anchor_ids": pair_anchor_ids,
+            "truth": truth,
+            "truth_sign": truth_sign,
+            "window_size": int(window_size),
             "anchor_count_requested": int(self.proxy_anchor_count_requested),
             "anchor_count": int(len(anchors)),
             "max_pair_rows": int(self.proxy_max_pair_rows),
-            "n_pairs": int(len(pair_keys)),
+            "n_pairs": int(pair_rows.shape[0]),
             "n_gt": int(np.sum(truth)),
             "warning": "proxy pair row cap reached; anchors were truncated" if max_rows_reached else "",
         }
 
+    def _proxy_train_view(self, reference):
+        """train_data restricted to the reference's series (row 0 = time axis)."""
+        rows = reference.get("train_rows") if reference is not None else None
+        if rows is None:
+            return self.train_data
+        return self.train_data[np.asarray(rows, dtype=np.int64)]
+
+    @staticmethod
+    def _proxy_reference_pair_keys(reference):
+        """Legacy tuple view (id1, id2, t1, t2, w) of the numeric reference rows (only the retired cached-distance path)."""
+        ids = list(reference["proxy_ids"]); w = int(reference.get("window_size", 0))
+        return [(str(ids[a]), str(ids[b]), int(t1), int(t2), w) for a, b, t1, t2 in reference["pair_rows"].tolist()]
+
+    @staticmethod
+    def _proxy_rows_to_candidate_mask(reference, cand_rows):
+        """Rows of the reference matched by the candidate rows [sidx1, sidx2, t1, t2] (any order; canonicalized here)."""
+        n_pairs = int(reference["n_pairs"])
+        mask = np.zeros(n_pairs, dtype=bool)
+        if cand_rows is None or len(cand_rows) == 0:
+            return mask
+        ck = np.unique(_proxy_rows_as_keys(_proxy_canonical_pair_rows(np.asarray(cand_rows, dtype=np.int64).reshape((-1, 4)))))
+        keys_sorted = reference["pair_keys_sorted"]
+        lo = np.searchsorted(keys_sorted, ck, side="left")
+        hi = np.searchsorted(keys_sorted, ck, side="right")
+        hit = hi > lo
+        if not np.any(hit):
+            return mask
+        # every reference row sharing a matched key (duplicates are adjacent in the sorted view)
+        starts = lo[hit]; ends = hi[hit]
+        idx = np.concatenate([np.arange(a, b) for a, b in zip(starts.tolist(), ends.tolist())]) if starts.size < 4096 else \
+            np.repeat(starts, ends - starts) + (np.arange((ends - starts).sum()) - np.repeat(np.cumsum(ends - starts) - (ends - starts), ends - starts))
+        mask[reference["pair_order"][idx]] = True
+        return mask
+
     def _proxy_partitions_for_corrtrack(self, corrtrack, reference):
         partitions_by_start = {}
         proxy_ids = reference["proxy_ids"]
+        train_view = self._proxy_train_view(reference)
         for start_idx in reference["unique_starts"]:
             sketcher = Sketches(
                 self.window_size,
@@ -18595,11 +18660,11 @@ class CorrTrack_optimize:
             )
             if corrtrack.preprocess and int(start_idx) > 0:
                 try:
-                    sketcher.last_origin = np.asarray(self.train_data[1:, int(start_idx) - 1], dtype=np.float64)
+                    sketcher.last_origin = np.asarray(train_view[1:, int(start_idx) - 1], dtype=np.float64)
                 except Exception:
                     sketcher.last_origin = None
             data_step = np.array(
-                self.train_data[:, int(start_idx) : int(start_idx) + int(self.window_size)],
+                train_view[:, int(start_idx) : int(start_idx) + int(self.window_size)],
                 dtype=object,
                 copy=True,
             )
@@ -18682,20 +18747,25 @@ class CorrTrack_optimize:
         numeric_rows = getattr(anchor_ct, "_candidate_numeric_rows", None)
         if numeric_rows is not None:
             rows = np.asarray(numeric_rows, dtype=np.int64).reshape((-1, 5))
-            if rows.size:
-                proxy_ids = list(self._proxy_reference["proxy_ids"])
-                candidate_keys = set()
-                for sid1_idx, sid2_idx, t1, t2, w in rows:
-                    sid1_idx = int(sid1_idx)
-                    sid2_idx = int(sid2_idx)
-                    sid1 = proxy_ids[sid1_idx] if 0 <= sid1_idx < len(proxy_ids) else str(sid1_idx)
-                    sid2 = proxy_ids[sid2_idx] if 0 <= sid2_idx < len(proxy_ids) else str(sid2_idx)
-                    candidate_keys.add(
-                        self._normalize_window_pair_key((sid1, sid2, int(t1), int(t2), int(w)))
-                    )
-                return (candidate_keys, search_stats) if return_stats else candidate_keys
-        candidate_keys = set(anchor_ct.candidates.keys())
-        return (candidate_keys, search_stats) if return_stats else candidate_keys
+            # (2026-09-20) numeric candidate rows [sidx1, sidx2, t1, t2] (the window size is the reference's);
+            # no per-row Python object
+            cand = np.ascontiguousarray(rows[:, :4]) if rows.size else np.zeros((0, 4), dtype=np.int64)
+            return (cand, search_stats) if return_stats else cand
+        cand = self._proxy_tuple_keys_to_rows(anchor_ct.candidates.keys())
+        return (cand, search_stats) if return_stats else cand
+
+    def _proxy_tuple_keys_to_rows(self, keys):
+        """Legacy tuple keys (id1, id2, t1, t2, w) with string ids -> numeric rows over the proxy series indices."""
+        proxy_ids = list(self._proxy_reference["proxy_ids"])
+        index = {str(sid): i for i, sid in enumerate(proxy_ids)}
+        out = []
+        for key in keys:
+            id1, id2, t1, t2, _w = key
+            i1 = index.get(str(id1)); i2 = index.get(str(id2))
+            if i1 is None or i2 is None:
+                continue
+            out.append((i1, i2, int(t1), int(t2)))
+        return np.asarray(out, dtype=np.int64).reshape((-1, 4))
 
     def _proxy_multichannel_candidate_keys_for_anchor(self, corrtrack, anchor, feature_kwargs, return_stats=False):
         """(2026-07-31) Sibling to _proxy_candidate_keys_for_anchor for
@@ -18756,10 +18826,11 @@ class CorrTrack_optimize:
         is_dist_corr = bool(anchor_ct.distance_corr_sketch_multichannel_backend)
 
         final_rows = None
+        train_view = self._proxy_train_view(self._proxy_reference)
         for start_idx in lag_starts:
             start_idx = int(start_idx)
             data_step = np.array(
-                self.train_data[:, start_idx:start_idx + int(self.window_size)],
+                train_view[:, start_idx:start_idx + int(self.window_size)],
                 dtype=object,
                 copy=True,
             )
@@ -18787,17 +18858,10 @@ class CorrTrack_optimize:
         if final_rows is not None:
             rows = np.asarray(final_rows, dtype=np.int64).reshape((-1, 5))
             if rows.size:
-                candidate_keys = set()
-                for sid1_idx, sid2_idx, t1, t2, w in rows:
-                    sid1_idx = int(sid1_idx)
-                    sid2_idx = int(sid2_idx)
-                    sid1 = proxy_ids[sid1_idx] if 0 <= sid1_idx < len(proxy_ids) else str(sid1_idx)
-                    sid2 = proxy_ids[sid2_idx] if 0 <= sid2_idx < len(proxy_ids) else str(sid2_idx)
-                    candidate_keys.add(
-                        self._normalize_window_pair_key((sid1, sid2, int(t1), int(t2), int(w)))
-                    )
-                return (candidate_keys, search_stats) if return_stats else candidate_keys
-        return (set(), search_stats) if return_stats else set()
+                cand = np.ascontiguousarray(rows[:, :4])            # (2026-09-20) numeric, see _proxy_candidate_keys_for_anchor
+                return (cand, search_stats) if return_stats else cand
+        empty = np.zeros((0, 4), dtype=np.int64)
+        return (empty, search_stats) if return_stats else empty
 
     def _proxy_counts_by_anchor(self, reference, candidate_mask):
         truth = reference["truth"]
@@ -19278,7 +19342,7 @@ class CorrTrack_optimize:
         distances = np.full((n_pairs, n_grids), np.inf, dtype=np.float64)
         distance_cache = {}
         full_distance_entries = 0
-        for row_idx, pair_key in enumerate(reference.get("pair_keys", [])):
+        for row_idx, pair_key in enumerate(self._proxy_reference_pair_keys(reference)):
             cached = distance_cache.get(pair_key)
             if cached is not None:
                 distances[row_idx, :] = cached
@@ -19700,7 +19764,7 @@ class CorrTrack_optimize:
             sketch_time = time.perf_counter() - t_sketch
 
             t_candidates = time.perf_counter()
-            candidate_keys = set()
+            candidate_chunks = []
             search_stats_total = self._empty_proxy_search_stats()
             for anchor in reference.get("anchors", []):
                 anchor_keys, anchor_search_stats = self._proxy_candidate_keys_for_anchor(
@@ -19710,15 +19774,15 @@ class CorrTrack_optimize:
                     feature_kwargs,
                     return_stats=True,
                 )
-                candidate_keys.update(anchor_keys)
+                if isinstance(anchor_keys, (set, list)):                # multichannel path still yields tuple keys
+                    anchor_keys = self._proxy_tuple_keys_to_rows(anchor_keys)
+                if anchor_keys is not None and len(anchor_keys):
+                    candidate_chunks.append(np.asarray(anchor_keys, dtype=np.int64).reshape((-1, 4)))
                 self._merge_proxy_search_stats(search_stats_total, anchor_search_stats)
             candidate_time = time.perf_counter() - t_candidates
 
-            candidate_mask = np.zeros(int(reference["n_pairs"]), dtype=bool)
-            key_to_indices = reference["key_to_indices"]
-            for pair_key in candidate_keys:
-                for row_idx in key_to_indices.get(self._normalize_window_pair_key(pair_key), ()):
-                    candidate_mask[int(row_idx)] = True
+            candidate_mask = self._proxy_rows_to_candidate_mask(
+                reference, np.concatenate(candidate_chunks, axis=0) if candidate_chunks else None)
 
             counts_by_anchor = self._proxy_counts_by_anchor(reference, candidate_mask)
             summary = self._proxy_bootstrap_summary(counts_by_anchor)

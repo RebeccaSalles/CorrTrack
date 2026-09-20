@@ -780,6 +780,11 @@ class StableReproducedChangesTest(unittest.TestCase):
             feature_kwargs,
         )
         self.assertGreater(len(candidate_keys), 0)
+        # (2026-09-20) numeric candidate rows and a numeric reference: every candidate row of this anchor is a
+        # reference row (the proxy universe is the same candidate universe the search sees)
+        self.assertEqual(np.asarray(candidate_keys).shape[1], 4)
+        mask = optimizer._proxy_rows_to_candidate_mask(optimizer._proxy_reference, candidate_keys)
+        self.assertGreater(int(mask.sum()), 0)
         record = optimizer._run_corrtrack_proxy_anchor((0, param_combo, "smoke"))
         self.assertEqual(record["status"], "success")
         self.assertGreater(record["cand_w"], 0)
@@ -807,15 +812,18 @@ class StableReproducedChangesTest(unittest.TestCase):
         )
         raw = optimizer._prepare_proxy_anchor_reference(preprocess=False)
         diff = optimizer._prepare_proxy_anchor_reference(preprocess=True)
-        self.assertEqual(list(raw["pair_keys"]), list(diff["pair_keys"]))
+        np.testing.assert_array_equal(raw["pair_rows"], diff["pair_rows"])
         d_values = np.diff(np.concatenate([values[:, :1], values], axis=1), axis=1)
+        w = raw["window_size"]
         for space, ref, vals in (("raw", raw, values), ("diff", diff, d_values)):
-            for key, gt in zip(ref["pair_keys"], ref["truth"]):
-                sid_a, sid_b, t_a, t_b, w = key
-                ia, ib = list(ids).index(sid_a), list(ids).index(sid_b)
+            for (ia, ib, t_a, t_b), gt in zip(ref["pair_rows"].tolist(), ref["truth"]):
                 xa = vals[ia, int(t_a): int(t_a) + int(w)]; xb = vals[ib, int(t_b): int(t_b) + int(w)]
                 r = np.corrcoef(xa, xb)[0, 1]
-                self.assertEqual(bool(gt), bool(np.isfinite(r) and r >= 0.9), msg=f"{space} {key} r={r:.3f}")
+                self.assertEqual(bool(gt), bool(np.isfinite(r) and r >= 0.9), msg=f"{space} {(ia, ib, t_a, t_b)} r={r:.3f}")
+        # the sorted key view and the row matching: every reference row matches itself, a foreign row nothing
+        mask = optimizer._proxy_rows_to_candidate_mask(raw, raw["pair_rows"][:, [1, 0, 3, 2]])   # swapped order canonicalizes back
+        self.assertTrue(bool(mask.all()))
+        self.assertFalse(optimizer._proxy_rows_to_candidate_mask(raw, np.array([[0, 1, 10**6, 10**6]])).any())
         # the shared drift makes the level truth denser than the increment truth
         self.assertGreater(int(raw["n_gt"]), int(diff["n_gt"]))
 
@@ -866,6 +874,40 @@ class StableReproducedChangesTest(unittest.TestCase):
         self.assertEqual(_resolve_hybrid_validation_flag("auto", 60), False)
         self.assertEqual(_resolve_hybrid_validation_flag("auto", 168), True)
         self.assertEqual(_resolve_hybrid_validation_flag("auto"), "auto")
+
+    def test_proxy_series_subsample_aligns_sketches_with_reference(self):
+        # (2026-09-20) with series_subsample_max_pairs binding, the reference is built on a stratified subset of
+        # the series; the sketch/candidate side must be built on the SAME rows (reference["train_rows"]). Before
+        # the fix the sketches covered all series under the subset's ids and the proxy recall collapsed.
+        rng = np.random.default_rng(3)
+        m, n = 60, 400
+        base = np.cumsum(rng.normal(size=(6, n)), axis=1)
+        values = np.vstack([base[i % 6] + 0.2 * np.cumsum(rng.normal(size=n)) for i in range(m)])
+        train_data = np.vstack([np.arange(n), values])
+        ids = np.array([f"s{i}" for i in range(m)])
+        optimizer = CorrTrack_optimize(
+            train_data, ids, window_size=40, window_step=8, n_lags=16, corr_threshold=0.9, recall_by_window=True, alg="nD",
+            neg_corr=False, corr_val=False, exec="sequential", parallel_sketch=False, parallel_candidates=False,
+            parallel_validation=False, candidate_similarity="cosine", candidate_cosine_threshold=0.7,
+            proxy_config={"anchor_count": 4, "max_pair_rows": 200000, "bootstrap_enabled": False, "series_subsample_max_pairs": 800},
+        )
+        ref = optimizer._prepare_proxy_anchor_reference(preprocess=False)
+        optimizer._proxy_reference = ref
+        self.assertIsNotNone(ref["train_rows"])
+        self.assertLess(len(ref["proxy_ids"]), m)
+        self.assertEqual(len(ref["train_rows"]), len(ref["proxy_ids"]) + 1)
+        combo = {"n_vectors": 64, "seed": 2468, "seed_toggle": 1357, "preprocess": False, "candidate_backend": "lsh_sign_dot",
+                 "candidate_cosine_threshold_offset": 0.2, "candidate_lsh_target_occupancy": 3.0, "candidate_apply_hamming_filter": False,
+                 "candidate_apply_dot_gamma_filter": True}
+        ct, fk = optimizer._proxy_build_corrtrack_from_combo(combo)
+        parts = optimizer._proxy_partitions_for_corrtrack(ct, ref)
+        cand = np.concatenate([np.asarray(optimizer._proxy_candidate_keys_for_anchor(ct, parts, a, fk)).reshape((-1, 4)) for a in ref["anchors"]])
+        self.assertGreater(cand.shape[0], 0)
+        mask = optimizer._proxy_rows_to_candidate_mask(ref, cand)
+        # every candidate row is a reference row (same universe, same series), and the truth is mostly recovered
+        self.assertEqual(int(mask.sum()), int(np.unique(library_corrtrack_parallel._proxy_rows_as_keys(library_corrtrack_parallel._proxy_canonical_pair_rows(cand))).size))
+        recall = float((mask & ref["truth"]).sum() / max(1, ref["truth"].sum()))
+        self.assertGreater(recall, 0.8, f"proxy recall {recall:.3f} with a series subsample")
 
     def test_kendall_tau_matches_scipy_exactly(self):
         # (2026-07-31) validation_metric="kendall" now routes through

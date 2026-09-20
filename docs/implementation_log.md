@@ -9132,3 +9132,41 @@ per set; density 0.1 -> 65 GB; 0.05 -> 33 GB; density 0.2 at m=5000 L=1 or m=250
 Berkeley full-m (18,520) ~80 GB, statstream_rw m=5000 L=5 ~50 GB, Berkeley m=5000 L=4 ~23 GB, corrjoin_gas m=5000
 ~20 GB. Everything else is under 15 GB. Recommendation for the budget decision: drop the (m=5000, L=5) rung for
 synthetic densities >= 0.05 (48 cells), and run Berkeley full-m at T >= 0.8 only.
+
+### 2026-09-20 (g) [competitor campaign thread] numeric proxy reference (no Python per pair), subsample alignment bug, budget tool
+User: "we want to avoid Python everywhere, including in the hyperopt/tuning phases"; and asked for time AND memory
+projections split into final runs / hyperopt / tuning, to be used for the budget decision from now on.
+- `CorrTrack_optimize._prepare_proxy_anchor_reference` built one Python tuple key (string ids), a dict entry and two
+  list items per pair row in a per-row loop (~300 B and ~1 us per row: 6 GB and most of the 20 to 40 min at the
+  20M-row ceiling). Now numeric end to end: per (anchor, current series) one int64 chunk of canonical rows
+  [sidx1, sidx2, t1, t2] (`_proxy_canonical_pair_rows`, the numeric twin of `_normalize_window_pair_key`), anchor
+  ids and signs, concatenated once; a sorted 32-byte void-key view (`_proxy_rows_as_keys`, `pair_keys_sorted`,
+  `pair_order`) for matching. `_proxy_candidate_keys_for_anchor` (and the multichannel sibling) return the search's
+  numeric rows [sidx1, sidx2, t1, t2] instead of a set of string tuples; `_proxy_rows_to_candidate_mask` matches by
+  two searchsorted calls and marks every reference row of a hit key (duplicates adjacent). The retired
+  cached-distance path rebuilds tuple keys lazily (`_proxy_reference_pair_keys`). Tests updated (candidate rows are
+  reference rows; the matching accepts swapped row order and rejects a foreign row).
+- Measured, sp500 m=492 L=5 T=0.9, campaign grid (80 settings), 20 anchors: **3.6 min and 2.6 GB** (was ~20 min and
+  6.1 GB), same pick (n_vectors 64, offset 0.05, occupancy 8, recall 0.964).
+- Bug found by the first measurement (proxy recall 0.28 at every setting): with `series_subsample_max_pairs` binding
+  the reference is built on a stratified SUBSET of the series, but `_proxy_partitions_for_corrtrack` and the
+  multichannel path sketched ALL series of train_data under the subset's ids, so candidate rows and reference rows
+  referred to different series. Never visible before because the 3M-pair default did not bind below m ~ 1,400: the
+  m = 2,500 and 5,000 hyperopt probes of 2026-09-19 (corrjoin_gas recall 0.32, Berkeley 0.85) are void. Fix: the
+  reference carries `train_rows` (time axis + the subset's rows); both sketch paths use `_proxy_train_view`. Test
+  `test_proxy_series_subsample_aligns_sketches_with_reference` (subsample binding: every candidate row is a
+  reference row, proxy recall > 0.8; 0.32 -> 0.987 on the sp500 debug case).
+- `abaca/campaign_budget.py` (new): the projection tool. One calibration block (k_bf, battery factors, hyperopt
+  minutes by grid size and GB, tuning minutes and GB, 28 B per correlated pair-window, densities measured or
+  assumed per dataset/space/T) and the design options A to E plus C-mem / D-mem (memory cut: no (m=5000, L=5)
+  synthetic rung at density >= 0.05, Berkeley full-m at T >= 0.8). Reports node-hours and days per pool (N-way hosts
+  vs pack hosts), peak N-way memory, runs above the memory budget and above 60 GB, longest run, runs above 48 h,
+  and the per-cell table. Hyperopt probes with the numeric reference queued on Abaca (probe2 snapshot) to set the
+  minutes at m = 5,000.
+- Hyperopt probes with the numeric reference and the fixed subsample (probe2 snapshot, campaign grid 80 settings,
+  core=2, 20 anchors): sp500 m492 L5 5.0 min / 2.6 GB (pick n_vectors 64, offset 0.10, occupancy 5, recall 0.972);
+  ASOS m600 L1 9.9 min / 3.0 GB (111 anchors; recall 0.971); Berkeley m5000 L4 3.7 min / 3.3 GB (recall 0.992,
+  was 0.85 with the misaligned subsample); corrjoin_gas m5000 L1 11.8 min / 3.6 GB (recall 0.998, was 0.32). The
+  budget tool uses 12 min and 4 GB per hyperopt. Lesson recorded in the tool: oarsub must run from the clone (the
+  first probe batch went to Error: "Cannot create .stdout in /home/rpontess", the -O/-E paths are relative).
+- `docs/campaign_budget_2026-09-20.md`: the projection tables for the user's decision (all options, 11 + 4 hosts).

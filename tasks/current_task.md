@@ -2139,3 +2139,8 @@ budget), `experiment_run_param_grid_campaign.py` (new), `abaca/hyperopt_corrtrac
 (score-and-drop, npy transfer, partitioned metrics, memory projection), `abaca/nway_compare.oar` (TMPDIR), `abaca/campaign_competitors.py`
 (CALIB_SERIES 300), tests. Abaca not yet synced with (e)/(f): after the user's commit, `git pull`, rebuild the campaign snapshot.
 Open for the user: budget row (A-E + the memory cut: no (m=5000, L=5) rung for synthetic densities >= 0.05; Berkeley full-m at T >= 0.8).
+### 2026-09-20 (g) numeric proxy reference, subsample alignment fix, budget tool
+See log (g). **Uncommitted**: `library_corrtrack_parallel.py`, `test_stable_reproduced_changes.py`, `abaca/campaign_budget.py` (new),
+`docs/campaign_budget_2026-09-20.md` (new), docs/tasks, plus everything listed under (f). Abaca: probe2 snapshot holds the
+current tree (dirty); the campaign snapshot is still to be built from the committed tree. Budget decision pending (user).
+`python abaca/campaign_budget.py [--nway-hosts N --pack-hosts K --option X --cells]` is the tool to refresh the tables.
