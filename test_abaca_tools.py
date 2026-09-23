@@ -55,9 +55,10 @@ def test_feeder_splits_emitted_script_into_cells(tmp_path):
     assert [b[0] for b in blocks] == ["motes_temperature_m27_W2880_s288_L0_T0.9", "sp500_m492_W60_s5_L20_T0.9_diff"]
     assert header.count("submit()") == 1 and "SNAPSHOT" in header
     for stem, block in blocks:
-        assert block.count("submit ") == 6 and block.count(f"RUN_NAME={stem}_pos") == 1 and block.count(f"RUN_NAME={stem}_neg") == 1
-        assert block.count("H=$H_JOB T=$T_JOB N=$N_JOB") == 2
-        assert block.count("-l host=1") == 2 and block.count("-l core=") == 4 and block.count("monitor=") == 2
+        assert block.count("$(submit ") == 8 and block.count(f"RUN_NAME={stem}_pos") == 1 and block.count(f"RUN_NAME={stem}_neg") == 1
+        assert block.count("H=$H_JOB H2=$H2_JOB T=$T_JOB N=$N_JOB") == 2
+        assert block.count("experiment_run_param_grid_campaign_hamming.py") == 2 and block.count("HYPEROPT_HAMMING_DIR=") == 2
+        assert block.count("-l host=1") == 2 and block.count("-l core=") == 6 and block.count("monitor=") == 2
         assert "SNAPSHOT=$SNAPSHOT" in block
     gen = (tmp_path / "s_generate.sh").read_text()
     assert "gen_density_targeted" not in gen                            # real-data cells need no generator

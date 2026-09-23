@@ -304,12 +304,19 @@ def corrjoin_double_filter(np.ndarray[np.float64_t, ndim=2, mode="c"] proj not N
                            np.ndarray[np.int64_t, ndim=1, mode="c"] order not None,
                            np.ndarray[np.int64_t, ndim=1, mode="c"] sorted_keys not None,
                            np.ndarray[np.int64_t, ndim=2, mode="c"] offsets not None,
-                           double eps1, double eps2):
+                           double eps1, double eps2,
+                           np.ndarray[np.int64_t, ndim=1, mode="c"] queries=None):
     """CorrJoin's two filters (PACMMOD 2023 Alg. 1 / the authors' BucketingFilter): over the m
     alive series of the current window, grid of side eps1 on the kb-dim SVD projections `proj`,
     3^kb neighbourhood, exact eps1-ball on the projection, then the eps2 Euclidean test on the
     PAA_ke block `ke_block`. `order`/`sorted_keys`: rows 0..m-1 sorted by packed cell key.
-    Returns (a, b, touched, n_after_bucketing) with a < b local row indices."""
+
+    `queries` (2026-09-23, lagged extension): row indices to probe FROM. None (the synchronous
+    case) probes every row and returns each unordered pair once via the `j <= i` rule, exactly as
+    before. When given, only those rows are probed, every met row is returned (`j != i`) and the
+    caller applies the canonical later-first rule across times -- the same query semantics the
+    ParCorr / StatStream indexes use when the index holds several windows.
+    Returns (a, b, touched, n_after_bucketing) with local row indices."""
     cdef Py_ssize_t m = proj.shape[0]
     cdef int kb = <int>proj.shape[1]
     cdef int ke = <int>ke_block.shape[1]
@@ -321,15 +328,21 @@ def corrjoin_double_filter(np.ndarray[np.float64_t, ndim=2, mode="c"] proj not N
     cdef int64_t* order_p = <int64_t*>order.data
     cdef int64_t* keys_p = <int64_t*>sorted_keys.data
     cdef int64_t* off_p = <int64_t*>offsets.data
-    cdef Py_ssize_t i, oi, lo, hi, kk, cap = 0, n_out = 0, touched = 0, n_bucket = 0
+    cdef Py_ssize_t i, qi, oi, lo, hi, kk, cap = 0, n_out = 0, touched = 0, n_bucket = 0
     cdef int64_t j, key
     cdef int64_t nc[5]
     cdef int d
     cdef double dist, diff
     if kb > 5:
         raise ValueError("corrjoin_double_filter supports kb <= 5")
+    cdef bint all_rows = queries is None
+    cdef np.ndarray[np.int64_t, ndim=1, mode="c"] q_arr = (
+        np.arange(m, dtype=np.int64) if all_rows else queries)
+    cdef int64_t* q_p = <int64_t*>q_arr.data
+    cdef Py_ssize_t n_q = q_arr.shape[0]
     with nogil:
-        for i in range(m):
+        for qi in range(n_q):
+            i = q_p[qi]
             for oi in range(n_off):
                 for d in range(kb):
                     nc[d] = cells_p[i * kb + d] + off_p[oi * kb + d]
@@ -340,7 +353,8 @@ def corrjoin_double_filter(np.ndarray[np.float64_t, ndim=2, mode="c"] proj not N
     cdef np.ndarray[np.int64_t, ndim=1] out_a = np.empty(cap, dtype=np.int64)
     cdef np.ndarray[np.int64_t, ndim=1] out_b = np.empty(cap, dtype=np.int64)
     with nogil:
-        for i in range(m):
+        for qi in range(n_q):
+            i = q_p[qi]
             for oi in range(n_off):
                 for d in range(kb):
                     nc[d] = cells_p[i * kb + d] + off_p[oi * kb + d]
@@ -349,7 +363,7 @@ def corrjoin_double_filter(np.ndarray[np.float64_t, ndim=2, mode="c"] proj not N
                 hi = _lower_bound(keys_p, m, key + 1)
                 for kk in range(lo, hi):
                     j = order_p[kk]
-                    if j <= i:
+                    if (j <= i) if all_rows else (j == i):
                         continue
                     touched += 1
                     dist = 0.0

@@ -9170,3 +9170,370 @@ projections split into final runs / hyperopt / tuning, to be used for the budget
   budget tool uses 12 min and 4 GB per hyperopt. Lesson recorded in the tool: oarsub must run from the clone (the
   first probe batch went to Error: "Cannot create .stdout in /home/rpontess", the -O/-E paths are relative).
 - `docs/campaign_budget_2026-09-20.md`: the projection tables for the user's decision (all options, 11 + 4 hosts).
+
+### 2026-09-20 ASOS: network-wide requests are the bottleneck; switched to per-station fetching
+Quarter-level gap fill ran 01:30-22:00: round 1 completed on all 18 countries (files grew, e.g.
+RU 0.32M -> 2.0M rows, DE 2.9M, AU 2.9M/98 stations), but at ~13 min per network-quarter, day
+or night, the ~1000 remaining quarters meant over a week. A single station over the full
+2011-2026 span answers in 9-50s (`fetch_best_station.py`: AU/YSRI 43s, BR/SBCG 25s, DE/ETAD
+54s), so the server cost is per network-wide request, not per row. Replaced the filler with
+`fetch_all_stations.py` (station list from the network geojson, archive_end < 2011 skipped,
+stations already covering >= 55/63 quarters skipped, merge + rewrite every 20 stations), run by
+`stations_run.sh` as 3 workers over station-balanced country groups (1,883 stations total,
+expected ~6h), chained into `pivot_screen_job.sh`. `fetch_best_station.py` (one full-span
+station per gap country, what the degree screen actually uses) runs alongside. The screen
+should then be rerun hourly and daily-aggregated.
+- Budget tool: side experiments added (Phase R, ablation ladder on the anchors of the real sets + the 2% synthetic
+  family, parallel scaling on m >= 2000 anchors, naive baseline, monitoring/anomalies, and the three feature
+  experiments F1 step sweep incl. step = 1, F2 dynamic W/step, F3 multiple window sizes) with the complete-figure
+  table (campaign option + side); a "what every option contains" section. Feature experiments planned in
+  `docs/competitor_implementation_plan.md` s3c.
+
+### 2026-09-20 (b) Competitor arms added to the m=500 protocol (48 cells submitted)
+`~/corrtrack_abaca_results/m500_competitors.py <dataset> <thr> <preprocess>` (scratchpad copy
+`m500_competitors.py`): same cuts, W/STEP/N_LAGS, neg_corr=True, monitor=True and brute-force
+truth as `hamming_exact_compare_m500.py`, datasets streamflow, sp500, wikipedia, smartmeter,
+global_weather, acwi_capweighted (sp500_sub263 skipped per user), thr {0.70, 0.80, 0.90, 0.95},
+both spaces = 48 cells (`cmp_*` jobs, `comp_jobs/`). Arms follow the N-way runner's section 8
+policies: braid (b in {8, 16, 32}, gamma 0.4, all_lags), thinbraid (d0 in {200, 400, 800} at the
+picked b), statstream (n_coeffs in {4, 8, W//2} by Lemma 7 2n <= W, index_dims in {2, 4},
+approximate reporting rule); parcorr, csz, corrjoin N/A (no negative correlation), tsubasa and
+corrjoin N/A (synchronous only). Pick rule = the tables' CorrTrack rule (fastest with recall
+>= 0.95 on the cell, else best recall), stated in `_meta.pick_rule`; the campaign's CSZ
+calibration-span protocol is stricter and is not what these tables use. Per-arm counters
+(total_candidates, tested, candidate_precision, phase times) kept in the JSON. Smoke on a
+40x500 wikipedia cut, both spaces: braid recall 1.0 / precision 1.0 at 0.3-0.4x BF, thinbraid
+recall 0.78-0.90, statstream recall 1.0 / precision 0.94. Abaca checkout stays at d0e3378
+(uncommitted `abaca/*` edits from the other session block a pull; the three newer commits do
+not touch these arms at W < 120). Output `tmp_artifacts/m500_competitors_<ds>_thr<XXX>[_raw].json`;
+tables to be rebuilt with competitor columns when the cells land.
+
+### 2026-09-21 m=500 tables moved to the campaign protocol (user decision)
+User: CorrTrack tuned by its own hyperopt, competitors by the CSZ protocol, monitoring off for
+every arm (some arms have imperfect precision, so monitor cost would be theirs alone), recall /
+precision / specificity for all arms, hyperopt and tuning time tracked; Phase R jobs not run for
+now. The 47 finished `cmp_*` cells (oracle pick, monitoring on, log entry (b) of 2026-09-20) are
+kept as `tmp_artifacts/m500_competitors_*.json` but are not the protocol of record; the one
+still running was cancelled. New pieces:
+- `experiment_dataset_{streamflow,sp500,wikipedia,smartmeter,global_weather,acwi_capweighted}_m500.py`:
+  dataset configs on the m=500 cuts (loader resolves `tmp_artifacts/<x>_m500/<x>_m500.npz`; the
+  weather cut is `weather_m500`), OBS_MODE count, N_SERIES/N_OBS = the cut.
+- `abaca/campaign_m500_tables.py`: emits the 48 cells (6 sets x 4 T x raw/diff, W/step/n_lags of
+  the tables, neg_corr=True only) through `campaign_competitors.emit`, dropping the `_pos` runs.
+- `abaca/campaign_feeder.py`: expected job count and done-check follow the runs present in each
+  block (was hard-wired to six jobs / two runs), backwards compatible.
+Protocol consequences to state next to the table: TRAIN_RATIO 0.3, so hyperopt and CSZ tuning
+use the first 30% of the cut (calibration span capped at 64 windows x 300 series by the campaign
+constants) and the comparison runs on the last 70% (1,938 of 2,768 rows; smartmeter 19,354 of
+27,649); BRAID/ThinBRAID keep paper defaults (not covered by the CSZ tuner); under neg_corr=True
+parcorr, csz, corrjoin are N/A and tsubasa N/A for lags. First tune job (streamflow 0.7 raw):
+StatStream's best calibration recall was 0.74 (no feasible setting at target 0.95), 2 min wall.
+Snapshot `d0e337877e3d_probe2` (the other session's, d0e3378 + its uncommitted `abaca/*` edits;
+the six configs copied into it, no rebuild needed). Feeder: `abaca/logs/feeder_m500.log`,
+state `abaca/m500_tables_submit.sh.state`; results `~/corrtrack_abaca_results/{hyperopt,tuned,nway}/<stem>_neg/`,
+tuning walls in each job's `time_v.txt`. Table build: `abaca/aggregate_campaign.py` over the
+`nway/*_neg/nway.json` files, plus reported-set specificity derived from recall, precision,
+positives and universe.
+
+### 2026-09-21 (h) [competitor campaign thread] Grid'5000 account locked for aggressive ssh usage; my share of the cause
+Two of this thread's background watchers were among the pollers: `until ssh sophia.g5k 'oarstat -j 3122067 | grep -qE
+" (R|W|L) p1"'; do :; done` (no sleep; the condition never became true once the job was Terminated, so it spun for
+hours) and a 60 s loop on jobs 3122068-70 whose stop condition matched the "T" of Terminated (`grep " R \| W \| L \| T "`)
+and therefore never stopped. Both killed from the other session at ~14:00. Rules now in CLAUDE.md ("Cluster access
+rules") and in memory: no cluster poll more often than every 10 to 15 min, never a loop without a sleep, no automatic
+retry of a failed ssh, one ControlMaster connection (added to ~/.ssh/config), stop every watcher before ending a
+session. No ssh to g5k until the user confirms the unlock; then a storage cleanup (snapshots, mmap transfers, Phase R
+and pilot outputs, abaca/logs; the m=500 tables campaign, snapshot d0e337877e3d_m500tables, 432 jobs, untouched)
+before any new submission.
+
+### 2026-09-21 (b) Account locked; three capability tables; full-span evaluation; both CorrTrack backends
+- 14:00: Grid'5000 account rpontess locked by the admins ("utilisation de l'access ssh trop
+  aggressive"). Cause: background ssh polling loops from both Claude sessions (this one: two
+  20 s loops running since 09-18 plus 1-2 min loops; the other: an `until ssh ...; do :; done`
+  loop without sleep). All killed. Rules now in `/home/rsalles/CLAUDE.md` ("Cluster access
+  rules") and memory `feedback_cluster_ssh_polling`; `~/.ssh/config` has ControlMaster on
+  sophia.g5k. Team admin also asked for storage clean-up (zenith at 98% since before 09-10; my
+  own heavy items are in home: global ASOS pivot ~16 GB as float64, country CSVs growing to
+  10-15 GB, three build snapshots).
+- Protocol changes (user): (1) every arm evaluated on the WHOLE cut, tuning on the first
+  TRAIN_RATIO: `--eval-span {holdout,full}` in `abaca/nway_compare.py` (recorded in the JSON
+  `config`), `EVAL_SPAN` in `nway_compare.oar`; the 48 neg-lagged holdout results of the morning
+  are archived in `~/corrtrack_abaca_results/nway_holdout_2026-09-21/`. (2) Three capability
+  tables, each tuned at its own (n_lags, neg_corr): S sync positive (n_lags=0, all arms), L
+  lagged positive, N lagged negative; both spaces each; `abaca/campaign_m500_tables.py --tables`.
+  (3) CorrTrack with both backends as in the m=500 sweeps: the campaign grid fixed
+  `candidate_backend=lsh_approx`, so a second grid `experiment_run_param_grid_campaign_hamming.py`
+  (lsh_hamming_exact, 8 settings) feeds a second hyperopt job (`hh_*`, OUT_DIR
+  `hyperopt_hamming/<stem>_<tag>`) and a new N-way arm `corrtrack_hamming`
+  (`--best-params-hamming`, `BEST_PARAMS_HAMMING` / `HYPEROPT_HAMMING_DIR`). Smoke on a 40x600
+  wikipedia cut: hyperopt picks lsh_hamming_exact / n_vectors 64 / offset 0.05; N-way records
+  `corrtrack` (lsh_sign_dot) and `corrtrack_hamming` (lsh_hamming_exact) with their own sources.
+  `campaign_feeder.py` now expects one job id per `submit` line of the block.
+- Campaign state at the lock: snapshot `d0e337877e3d_m500tables` (eval-span patch, no hamming
+  arm); 96 blocks / 432 jobs feeding (15 fed at 12:10), results under `nway/*_m500_*` with the
+  lsh backend only. First full-span cell (streamflow 0.70 diff, table S): exact arms 8-13 s,
+  CorrTrack 17.7 s (0.73x BF at n_lags=0), StatStream recall 0.025 (calibration said 0.74; to be
+  flagged to the other session, its port).
+### Runbook once the account is unlocked
+1. `du -sh ~/corrtrack_abaca_results/* ~/corrtrack_release_dev/tmp_artifacts/global_asos*`; store the
+   ASOS pivot as float32 compressed, gzip the country CSVs after the final pivot, delete snapshots
+   `_pilot` and `_probe2` (and `_m500tables` after step 3), delete `cmp_*` outputs if not needed.
+2. Check the ASOS per-station workers (`stations_w{1,2,3}.log`) and the campaign feeder state;
+   do not restart any poller.
+3. Apply `scratchpad/patch_hamming_arm.py` on the Abaca working copy (anchored replacements), copy
+   `experiment_run_param_grid_campaign_hamming.py`, the six `_m500` configs, the driver and the
+   feeder; build snapshot `TAG=m500tables2`; then either `--phase2` (hamming hyperopt + N-way only,
+   reusing the lsh hyperopt and CSZ outputs of the running campaign for the cells that finished) or
+   the full 576-job script for cells without outputs.
+4. Tables from `nway/*_m500_*/nway.json`: S/L/N x raw/diff, per arm recall, precision, reported-set
+   specificity (from recall, precision, positives, universe), candidate specificity, speedup vs the
+   same job's bruteforce, hyperopt (lsh, hamming) and CSZ tuning walls from the jobs' `time_v.txt`.
+
+### 2026-09-21 (i) [competitor campaign thread] CorrTrack with both candidate backends in every cell
+User: the campaign must always run both `hamming_dot` (lsh_hamming_exact + dot gate) and `lsh_dot` (lsh_sign_dot +
+dot gate), either may win at very high thresholds. The other thread had already added the arm `corrtrack_hamming`
+to `abaca/nway_compare.py` (`--best-params-hamming`, refuses to run untuned), `nway_compare.oar`
+(`HYPEROPT_HAMMING_DIR` / `BEST_PARAMS_HAMMING`) and the grid `experiment_run_param_grid_campaign_hamming.py`
+(lsh_hamming_exact, offset x n_vectors, 8 settings), and generalised the feeder's job count. This thread completed
+the chain: `campaign_competitors.py` emits a second hyperopt job per run (`hh_<stem>_<tag>`, OUT_DIR
+`hyperopt_hamming/`), the N-way job depends on all three (`-a H -a H2 -a T`), the echo line carries `H2=`; the
+step=1 Yellowstone cell lists the arm; `aggregate_campaign.py` reads both hyperopt outputs into tuning.csv;
+`campaign_budget.py` adds 0.3 bruteforce to the battery factors and 4 min per run of hyperopt. 1601 cells x 8 jobs
+= 12,808 jobs. Complete figure (11 + 4 hosts): A 49.8 d, B 18.0, C 9.3, D 7.1, E 13.1, C-mem 7.3, D-mem 5.8;
+pack pool 1.1 to 1.4 days. `docs/campaign_budget_2026-09-20.md` regenerated.
+
+### 2026-09-21 (c) Account unlocked; clean-up, redeploy, campaign resumed
+Home quota at the unlock: 21.1 GB of 24.4 GB soft (limit 97 GB); `global_asos/countries` CSVs
+12 GB (to be gzipped when the per-station fill ends), tmp_artifacts 4.8 GB, snapshots 359 MB,
+all results < 40 MB. Deleted snapshots `_pilot` and `_probe2` and the cancelled `cmp_*` outputs.
+The lock had killed the feeder (55/96 blocks fed; 85 N-way runs, 106 hyperopt, 105 tuning
+outputs survived on disk) and two of the three ASOS workers (w1 done, BR done with 150
+stations); workers restarted (they skip complete stations). Hamming-arm patch applied on the
+Abaca working copy; snapshot `d0e337877e3d_m500tables2` built (168 tests). Submission split by
+`scratchpad/split_submit.py`: 105 runs with existing lsh hyperopt + CSZ tuning -> phase 2 (hamming
+hyperopt + N-way), 39 runs -> full chain; one chained feeder (`abaca/logs/feeder_m500_v3.log`,
+poll 600 s, local oarstat only). Results overwrite `nway/<stem>_<tag>/nway.json` with both
+CorrTrack arms on the full span.
+
+### 2026-09-22 Campaign 132/144 + 12 resubmitted (NFS temp-dir cleanup); ASOS fetcher v2
+- All 144 hamming hyperopts done; 132 N-way runs carry both CorrTrack arms. 12 dense runs
+  (acwi/sp500/streamflow L15 at T 0.7-0.8, smartmeter/sp500 L0 T0.95 diff) ran every arm then
+  failed at `tempfile.TemporaryDirectory.__exit__` (NFS cannot unlink the still-mapped .npy
+  correlated sets), and the JSON write sits after the `with`. `ignore_cleanup_errors=True`
+  applied to the clone and, pure-Python and with no job running, to the snapshot copy
+  (`d0e337877e3d_m500tables2`); the wrapper's `rm -rf "$TMPDIR"` cleans up after exit. 12 N-way
+  jobs resubmitted (`abaca/m500_v3_resubmit12.sh`, no dependencies). Scale of these cells: acwi
+  0.70 neg has 223.8M correlated of 1.25G tested (17.9%); ThinBRAID peak RSS 14.6 GB, 10.4 GB
+  written; StatStream 462 s.
+- ASOS: v1 workers died on the frontend from memory (whole country file in a dict; BR 11.5M
+  rows), twice. `fetch_all_stations.py` v2: streaming coverage pass, one file per station under
+  `countries/<net>_stations/`, `pivot_asos_wide.py` merges them (later rows win on station,
+  valid). Workers at 47-80 MB RSS, 4-13 s per station at 07:40.
+
+### 2026-09-22 (b) Transfer mode made uniform: memory mode for all 144 cells
+The quota email clarified the failure: the 25 GB soft quota is in its 7-day grace (usage read at
+31.7 GB during the dense runs); what returned EDQUOT was the 100 GB hard limit hit by up to 12
+concurrent dense N-way jobs each writing 6-45 GB of .npy scratch. Home now 11.6 GB (country CSVs
+gzipped 13 GB -> 2.8 GB; fetcher and pivot read .gz). In `nway_compare.py` an arm's set above
+NWAY_LARGE_SET_GB (default 1 GB) is written as .npy INSIDE the timed `_run_arm`, so its wall and
+speedup carry an NFS write proportional to the output size, while sets below go through the pipe
+after the measurement. Scan of the 136 finished cells: 89 fully in memory mode, 44 with only
+ThinBRAID in file mode (its reported set is 3-10 GB even on sparse cells), 3 with every arm in
+file mode. All 47 + the 8 failed cells resubmitted as N-way-only jobs with NWAY_LARGE_SET_GB=200
+(`abaca/m500_v3_rerun_mem47.sh`, `m500_v3_resubmit_mem.sh`); the driver now sets it by default.
+Result: every cell of the six tables measured with the same transfer mode and no scratch on home.
+
+### 2026-09-22 (c) Campaign complete: 143/144 cells, uniform memory mode
+All 55 memory-mode reruns landed; every cell of the six tables now measures each arm with the
+same transfer mode (no NFS write inside the timed region). The 144th cell
+(smartmeter L0 T=0.95 differenced, pos) is not runnable under the protocol: its calibration span
+contains zero correlated pairs (hyperopt CSV: proxy_n_gt=0, proxy_feasible=False,
+proxy_underpowered=True for all 80 settings), so no CorrTrack setting is selectable and
+nway_compare refuses to run the arm untuned. Marked with that reason in the table rather than
+left blank; its T=0.9 sibling already sits at density 2.6e-07. Tables rebuilt with medians per
+threshold (pooling T mixes densities two orders of magnitude apart, user 2026-09-22):
+docs/campaign_m500_tables_interim_2026-09-22.md, builder scratchpad/build_campaign_tables.py.
+Headline per threshold (median over datasets, speedup vs BF at the tuned recall):
+table L differenced CT-lsh 4.30x (T=0.7) -> 12.71x (0.95), CT-ham 3.67x -> 11.28x, FilCorr flat
+at 4.3-4.5x, STOMP 3.7-3.8x; table S CT 0.88-1.5x, always under FilCorr's 1.7x; table N raw
+CT 1.4-1.6x at T=0.7 (FilCorr 4.2x wins) -> 5.9-6.2x at 0.95. StatStream recall 0.00 on every
+differenced cell and 0.09-0.70 on raw, decreasing with T: its port needs the other session's
+check before those rows are quoted.
+
+### 2026-09-22 (j) [competitor campaign thread] StatStream's zero recall on differenced data: the reporting rule, not a bug
+Flagged by the other thread's mini campaign ("StatStream's zero recall on differenced data needs a look before its
+rows are used"). Investigated on USCRN hourly temperature (W=168, b=12, m=153, T=0.8), same candidates throughout:
+
+| reporting | candidates | reported | recall | precision |
+|---|---|---|---|---|
+| exact validation (our kernel) | 2,483,511 | 81,269 | 1.0000 | 1.0000 |
+| approx, 2 coefficients (the paper's) | 2,483,511 | 3,014 | 0.0370 | 0.9983 |
+| approx, 6 (= b/2, the old tuning cap) | 2,483,511 | 81,364 | 0.9586 | 0.9574 |
+| approx, 7 (= b/2+1, lossless) | 2,483,511 | 88,219 | 0.9935 | 0.9152 |
+
+Raw levels, same cell: 1.0000 exact, 0.2540 at 2 coefficients, 1.0000 at 7.
+- **Not a bug.** The candidate index is unaffected (exact validation on its own survivors gives recall 1.0), the
+  digests are built from the same buffer validation reads (`_get_validation_window_data`, differenced when
+  preprocess=True), and at the lossless digest size the rule reproduces the exact answer. Nothing in our port is
+  space-dependent.
+- **Cause**, quantified: StatStream's reported correlation is the digest inner product, so it is scaled by the
+  share of each basic window's energy the kept coefficients carry. On this data the first AC coefficient carries
+  74% of a 12-point block's energy in raw levels but 52% in first differences (three: 86% vs 70%), so
+  corr_approx ~ 0.52 x 0.8 = 0.42 never passes the rule's `corr_approx > T - t` (t = 0.0005) and almost nothing is
+  reported. Raising the tolerance is not the fix (it would need t ~ 0.38 and destroy precision); the digest size is.
+  This is the "uncooperative data" story: the paper calibrated 2 coefficients on random walks, whose spectrum is
+  concentrated at the bottom (~1/f^2); first differences are white-noise-like and flat.
+- **Change**: the CSZ protocol's grid for `statstream_bw_coeffs` was capped at b/2, one coefficient short of the
+  lossless b/2+1 that rfft returns (the Nyquist term was never reachable). Cap raised to b/2+1 in
+  `abaca/tune_competitors.py`; the default stays the paper's 2 for untuned runs.
+- **For the paper**: report both readings, as published (2 coefficients, near-zero recall on differenced hourly
+  data) and tuned by its own protocol (recall ~0.99 at a 3.5x larger digest, precision 0.92 because the rule then
+  admits pairs just below T). StatStream rows from any run predating this grid change must not be quoted on
+  differenced cells: the arm was reporting at the paper's default with no tuned alternative available.
+- Confirmed after the grid change: the CSZ protocol on the differenced USCRN cell (T=0.8, 120 settings) now picks
+  `statstream_bw_coeffs` = 7 (the lossless size) with calibration recall 0.996, bootstrap lower bound 0.994 (>= the
+  0.95 target, status ok) and precision 0.74 on the calibration span. The digest grid grew 96 -> 120 settings, so the
+  budget tool's tuning minutes go 16 -> 18 (pos) and 3 -> 3.5 (neg).
+
+### 2026-09-22 (d) Table apparatus: caption, legend, footnote markers; one wrong footnote corrected
+docs/campaign_m500_tables_interim_2026-09-22.md gained a title, caption, a 16-row configuration
+legend and per-cell markers: `*` recall below the 0.95 target (StatStream 141/141 cells, median
+recall 0.025, its CSZ tuning reporting no feasible setting in 140/142; ThinBRAID 133/143; CSZ
+25/95; ParCorr 15/95; and CorrTrack itself 11/143 lsh and 5/143 hamming, lowest 0.76/0.73, in the
+densest raw cells), `†` published defaults not tuned (BRAID, ThinBRAID), `‡` the capability is
+ours not the authors' (ParCorr and CSZ lags in class L; FilCorr negative correlation in class N,
+which the runs record as supports_neg_corr=enabled_by_us and which matters because FilCorr is the
+arm that beats CorrTrack in class N raw), `¶` specified but never evaluated by the authors
+(StatStream lags in L; BRAID, ThinBRAID, StatStream negatives in N, supports_neg_corr=specified),
+`§` emits an approximate decision rather than an exactly validated set. The first `§` wording
+claimed the precision and specificity of those arms were bounds; checked against the data and
+corrected: the tables' specificity is computed from the reported set intersected with the truth
+(TP/reported reproduces the recorded precision to six decimals for every arm), so it is exact.
+Only `candidate_specificity` in the JSON is a bound for approximate arms, and it is not shown.
+BRAID additionally turns out to be exact on these lag grids (precision 1.000, zero false
+positives), so `§` now says the freedom can be used rather than that it always is.
+
+### 2026-09-22 (e) Overnight synthetic campaign launched (28 cells, 112 jobs)
+User: a smaller synthetic counterpart of the m=500 tables, overnight, under 10 h, varying the
+dataset parameters instead of using real data. `abaca/campaign_synth_overnight.py`: one factor at
+a time around a baseline chosen to match the real tables (m = 500, L = 6, which is the modal lag
+setting of the m=500 experiment since five of its six datasets run n_lags 15 at step 3, T = 0.9,
+target density 0.01), axes m {125, 250, 500, 1000}, L {1, 3, 6, 11}, T {0.7, 0.8, 0.9, 0.95},
+density {0.002, 0.01, 0.02, 0.05, 0.1}, base process ar1 (stationary) and rw (nonstationary,
+--allow-spurious so the spurious fraction is recorded), W = 60, step = 6, n = 6000 (991 windows),
+positive correlation only for now (L = 1 gives the synchronous comparison), raw space. 28 cells x
+4 jobs, 3 h walltime cap each, results isolated under `synth_overnight/`.
+Generator: no fix from the other session exists yet (newest commit touching it is a20570f of
+2026-09-18; origin/dev has nothing newer and neither tree has uncommitted changes), so tonight's
+data comes from that version, recorded here for attribution; a smoke at m = 60 gave verified
+density 0.0209 and 0.0219 against a target of 0.02, and the 28 files land between 0.0020 and
+0.0913. If the fix changes the data the campaign is regenerated.
+Two self-inflicted delays, both now checked before submitting: the generation script was
+submitted without the exec bit (exit 126, as with the v3 jobs on 09-21) and without the
+`for kv in "$@"; do export` loop the .oar wrappers use for KEY=VALUE parameters; and this driver
+recreated the hamming hyperopt job that `campaign_competitors.emit` has emitted itself since
+2026-09-21 18:12, so every cell carried two identical hh_ jobs and the feeder refused the block.
+The same duplication is present in the m=500 v3 submissions, where it cost a duplicate hyperopt
+job per cell writing the same OUT_DIR; results were not affected but the waste is recorded.
+
+### 2026-09-23 Overnight synthetic campaign did not run: host pinning deadlock
+The 28 cells were fed at 23:43 and sat Waiting for 10.5 hours with nothing Running. Cause: the
+campaign inherits `campaign_competitors.py`'s split of mercantour3 into PACK_HOSTS (1, 4, 5, 6,
+for the packed hyperopt and tuning jobs) and NWAY_HOSTS (the other 11), a 2026-09-19 measure to
+stop core-level jobs from starving whole-host ones. Overnight other users held 13 of the 16
+hosts, including all four PACK hosts, so every hyperopt and tuning job was blocked, and since the
+N-way jobs depend on them, hosts 3, 11 and 13 stayed idle all night. Fixed by dropping the host
+subsets from this campaign's submit script (`sed` on the emitted file, backup kept as .bak); the
+`submit()` helper still pins `cluster='mercantour3'`, so every cell keeps running on identical
+hardware, which is what the runtime-scaling curves require. Relaunched 10:13; 9 jobs running
+within three minutes. The same pinning is still in `campaign_competitors.py` for the other
+session's campaign and is worth revisiting there: it only helps when the group owns the cluster.
+
+### 2026-09-23 (a) [competitor campaign thread] StatStream index docstring corrected (stale reporting description)
+While answering the supervisors' questions on the comparison design: `StatStreamGridIndex`'s docstring still said the
+harness's exact validation does StatStream's final check "so precision is exact". That has not been the shipped
+behaviour since 2026-09-18: the default is the paper's own rule (`statstream_report="approx"`, corr_approx > T - t from
+the per-basic-window digests), with "exact" kept as the ablation. Docstring corrected; no code change.
+
+### 2026-09-23 (b) [competitor campaign thread] lags enabled for TSUBASA and CorrJoin; one consistent lag policy
+User's decision after the supervisors' questions: the lag rule must be the same for every arm whose own test
+is time-agnostic, disclosed per arm rather than refused for some and silently allowed for others. Plan §0d (ii)
+records the policy; the tier now travels in the rows as `supports_lags` (native / specified / enabled_by_us),
+beside `supports_neg_corr`, for both integration patterns.
+- **CorrJoin**: constructor refusal lifted; `CorrJoinDoubleFilterIndex.find_pair_rows_full_cosine` gains the
+  lagged path (probe from the current window's entries, canonical later-first rule, same-window skip), and
+  `competitor_kernels.corrjoin_double_filter` an optional `queries` subset (None keeps the synchronous loop and
+  its `j <= i` dedup bit-identical). The one degree of freedom, disclosed: the SVD basis comes from the current
+  window's series, the retained windows are projected onto it. USCRN W=96 step=12 n_lags=36 T=0.8 m=60:
+  recall 1.000, precision 1.000, 101,824 candidates of 2,068,522 pair-windows (specificity 0.989).
+- **TSUBASA**: constructor refusal lifted, replaced by an ALIGNMENT guard (`window_step % basic_window != 0`
+  raises: the probed lags would not shift whole segments and Lemma 1 would not apply). Its verify stage is now a
+  per-lag loop mirroring exact_stomp's (full m x m mask for lag > 0, upper triangle at lag 0), fed by
+  cross-segment sketches `_cross_segment_sketch(later_seg, lag)` cached per (segment, lag) and built from a
+  centred-segment cache; eviction extended to the lag horizon. Same cell: recall 1.000, precision 1.000 (exact,
+  as it must be). Cost, recorded in the plan: the sketch state grows with the number of probed lags.
+- `abaca/nway_compare.py`: `SYNC_ONLY` is empty, no arm is N/A on a lagged run, and `supports_lags` is in the
+  recorded columns. Two tests updated (they pinned the refusals) and one added,
+  `test_lagged_extension_of_tsubasa_and_corrjoin_matches_bruteforce` (both arms reproduce the bruteforce lagged
+  pair set exactly on a fixture with planted lags 0/6/12/18; CorrJoin still prunes; the alignment guard raises).
+  169 tests pass.
+- Campaign updated for the two newly lagged arms (same day): the reduced arm lists are now named constants
+  (`LARGE_M_LAGGED_ARMS`, `FULL_M_ARMS`) and carry `corrtrack_hamming`, which they had silently dropped since the
+  second CorrTrack backend was added; TSUBASA leaves the m > 2,000 LAGGED cells for the same reason plain BRAID
+  does (its lagged extension caches one m x m cross-segment sketch per (live segment, probed lag): ~14 GB at
+  m = 5,000, W/b = 14, L = 5) and stays in every synchronous cell and every smaller lagged one. A guard in the arm
+  (`lagged_cross_cache_max_gb`, 8 GB) refuses such a configuration with the arithmetic rather than exhausting the
+  node. Measured at campaign scale (sp500 m=492 W=60 step=5 L=5 T=0.9 raw): bruteforce 13.11 s, TSUBASA 16.43 s
+  (1.25x, exact, peak +236 MB), CorrJoin 3.70 s (0.28x, recall 1.000, candidate precision 0.678, specificity
+  0.994) -- CorrJoin is now one of the strongest lagged pruning arms. Budget factors updated to 9.8 / 7.1 (pos /
+  neg, corrjoin being N/A on neg) and 3.8 / 2.5 for the light battery; TSUBASA's lagged cache added to the memory
+  projection. Complete figure, 11 + 4 hosts: A 59.2 d, B 21.1, C 9.7, D 7.5, E 15.2, C-mem 7.6, D-mem 6.1.
+
+### 2026-09-23 (c) [competitor campaign thread] the naive-baseline comparison corrected: it was measured without lags
+The user challenged the 2026-09-23 (a) table, where the incremental arm looked SLOWER than the plain one although
+every earlier experiment shows it faster. The objection was right and the cause is the regime: that run had
+n_lags = 0, where the incremental arm has nothing to amortize (it maintains per-lag dot matrices and pays a full
+initialization). `abaca/naive_baseline.py` gained `--n-lags` (both naive tiers now enumerate the same lagged
+universe the harness arms do, and the per-pair-window normalization counts it) and the measurement was repeated
+on sp500 W=60 step=5 T=0.9, per pair-window:
+
+| m | lags | naive python | bruteforce (BF plain) | exact_stomp (BF incremental) | naive numpy (BLAS, counts only) |
+|---|---|---|---|---|---|
+| 100 | none | 31,134 ns | 99 | 142 | 59 |
+| 200 | none | - | 68 | 63 | 36 |
+| 400 | none | - | 67 | 63 | 32 |
+| 100 | L=5 | 30,792 ns | 63 | 40 | 33 |
+| 200 | L=5 | - | 75 | 25 | 29 |
+| 400 | L=5 | - | 76 | 27 | 27 |
+
+So: with lags the incremental arm is 2.8 to 3.0x the plain one (consistent with the m=500 tables' 1.37 to 3.38x),
+without lags they are level; the earlier table simply was not in the regime where the incremental form pays off.
+The interpreted per-pair naive is ~30 us per pair-window throughout, i.e. 300 to 500x our plain bruteforce.
+**Second correction, for the paper**: a VECTORIZED naive (one BLAS correlation matrix per step and lag) is in the
+same tier as our arms -- 27 ns/pair-window against exact_stomp's 27 at m = 400 lagged -- so it is not a weaker
+baseline arithmetically. It is not usable as a baseline ARM because it only counts: it emits no pairs (so recall
+and precision cannot be computed against it), applies none of the near-constant / spike guards, keeps no state
+and has no lag search of its own (the lagged version above is ours, written for this comparison). The honest claim
+is therefore: the speedups the competitor papers report against "naive" are largely a Python-overhead artifact;
+against a competent vectorized baseline the exact arms sit in the same tier, and that is the baseline the campaign
+uses.
+
+### 2026-09-23 (d) [competitor campaign thread] `exact_stomp` renamed to `bf_incremental`
+User's decision after the supervisors' questions: the old name suggested we had reimplemented STOMP (Zhu et al.'s
+matrix profile), which we had not. The arm is our strongest exact all-pairs baseline: every pair-window computed
+exactly, with the cross term of each (pair, lag) rolled forward in O(window_step) instead of recomputed in
+O(window_size). It borrows the matrix-profile literature's incremental sliding dot-product update, and the
+attribution now sits on the update in the class docstring, not on the arm.
+- Canonical id `bf_incremental` everywhere (library dispatch, `abaca/*`, configs, tests, both plan documents);
+  class `Candidates_BF_ExactSTOMP` -> `Candidates_BF_Incremental` (FilCorr, TSUBASA and BRAID subclass it).
+- Nothing old breaks: `_resolve_baseline_mode` keeps `exact_stomp` / `stomp` / `exact` / `incremental*` as
+  aliases, `Candidates_BF_ExactSTOMP` remains as a module-level class alias for the sibling working copies,
+  `abaca/nway_compare.py --arms exact_stomp` is mapped, and `abaca/aggregate_campaign.py` normalizes the old arm
+  id when reading result files written before today, so a mixed results tree aggregates into one table.
+- A silent trap found and fixed while renaming: `_resolve_baseline_mode` falls back to `bruteforce` for any
+  unrecognized mode, so the first pass of the rename (which rewrote the alias KEY as well) turned `exact_stomp`
+  into `bruteforce` without any error. Caught by resolving every spelling explicitly; the campaign's own
+  `--baseline-mode` values are now covered by that check.
+- The N-way summary column was widened from 12 to 17 characters for `bf_incremental` and `corrtrack_hamming`.
+- 169 tests pass; the lagged battery reruns unchanged (USCRN W=96 step=12 n_lags=36: bf_incremental recall 1.000,
+  1.11x bruteforce; TSUBASA and CorrJoin recall 1.000).

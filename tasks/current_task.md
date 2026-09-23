@@ -2144,3 +2144,40 @@ See log (g). **Uncommitted**: `library_corrtrack_parallel.py`, `test_stable_repr
 `docs/campaign_budget_2026-09-20.md` (new), docs/tasks, plus everything listed under (f). Abaca: probe2 snapshot holds the
 current tree (dirty); the campaign snapshot is still to be built from the committed tree. Budget decision pending (user).
 `python abaca/campaign_budget.py [--nway-hosts N --pack-hosts K --option X --cells]` is the tool to refresh the tables.
+Feature experiments F1 (step sweep), F2 (dynamic W/step), F3 (multi window) planned in plan s3c; scripts not written yet
+(`abaca/step_sweep.py`, `abaca/dynamic_window.py`, `abaca/multi_window.py`); F2 needs an lsh-backend test of update_window_size/step first.
+
+## 2026-09-21 -- m=500 tables under the campaign protocol (48 cells, 144 jobs feeding). See log 2026-09-21.
+New: 6 `experiment_dataset_*_m500.py`, `abaca/campaign_m500_tables.py`, feeder fix. Feeder running on the frontend
+(`abaca/logs/feeder_m500.log`). Next: when `~/corrtrack_abaca_results/nway/*_m500_*_neg/nway.json` are in, run
+`abaca/aggregate_campaign.py` on them and build the two m=500 tables with all arms (recall, precision, specificity,
+speedup, hyperopt/tuning wall from `time_v.txt`). ASOS: per-station fill (3 workers) + best-station fetch running,
+chained pivot+screen; then hourly and daily-aggregated screens.
+
+## 2026-09-21 (b) -- ACCOUNT LOCKED (ssh polling). Do not poll the cluster. See log 2026-09-21 (b) and its runbook.
+Local, ready to deploy: eval-span option, three-table driver, hamming hyperopt grid + `corrtrack_hamming` arm, feeder fix,
+`scratchpad/patch_hamming_arm.py`, submit scripts `scratchpad/m500_tables_v3_{submit,phase2}.sh`. Emails drafted for the
+Grid'5000 support and the team admin. Next: when unlocked, follow the runbook (clean-up first, then snapshot, then feed).
+### 2026-09-22 (j) StatStream on differenced data
+Investigated (log (j)): the reporting rule, not a bug; tuning grid for `statstream_bw_coeffs` now reaches the lossless
+b/2+1. **Uncommitted**: `abaca/tune_competitors.py`, docs. The other thread's mini-campaign StatStream rows on differenced
+cells are not quotable (tuned before the grid change).
+### 2026-09-23 (b) lags for TSUBASA and CorrJoin
+Plan §0d (ii) is the consistent lag policy; `supports_lags` travels with every row. **Uncommitted**:
+`library_corrtrack_parallel.py`, `competitor_kernels.pyx` (+ rebuilt .c/.so), `abaca/nway_compare.py`,
+`abaca/naive_baseline.py` (per-pair-window column), `test_stable_reproduced_changes.py`, docs. Next: the
+`exact_stomp` -> `bf_incremental` rename the user approved (alias kept for old result files), then the campaign
+re-emit (lagged cells now carry 12 arms, so the budget's battery factor needs a re-measure).
+### 2026-09-23 (c) campaign updated for the lagged arms; naive-baseline table corrected
+Manifest re-emitted (1,601 cells, 12,808 jobs; arm lists named and carrying corrtrack_hamming; TSUBASA out of the
+m > 2,000 lagged cells with a guard in the arm). Budget factors re-measured: complete figure C-mem 7.6 d, D-mem 6.1 d
+on 11 + 4 hosts. **Uncommitted**: `abaca/{campaign_competitors,campaign_budget,naive_baseline,nway_compare}.py`,
+`library_corrtrack_parallel.py`, `competitor_kernels.pyx` (+ .c/.so), `test_stable_reproduced_changes.py`, docs.
+Still pending: the `exact_stomp` -> `bf_incremental` rename, and the user's budget-row and host-split decision.
+### 2026-09-23 (d) rename exact_stomp -> bf_incremental
+Done across library, abaca, configs, tests and both plan docs, with aliases for the old id (dispatch, arm flag,
+class, aggregator). **Uncommitted** (this thread, cumulative): `library_corrtrack_parallel.py`, `competitor_kernels.pyx`
+(+ .c/.so), `corrtrack_param_search.py`, `experiment_run_param_grid_campaign.py`, `experiment_run_exec_param.py`,
+`corrtrack_run_bruteforce.py`, `abaca/{nway_compare,campaign_competitors,campaign_budget,campaign_feeder,aggregate_campaign,
+naive_baseline,resource_probe,kwollect_power,fourway_compare,sparse_fourway_compare}.py`, `abaca/*.oar`,
+`test_stable_reproduced_changes.py`, `test_abaca_tools.py`, docs. Awaiting the user's budget row and host split.

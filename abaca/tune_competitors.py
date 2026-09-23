@@ -72,12 +72,17 @@ def parameter_grid(arm, W, b=None):
             "parcorr_f": [round(0.1 * i, 1) for i in range(1, 11)],
         }
     if arm == "statstream":
-        # (2026-09-19) statstream_bw_coeffs: DFT coefficients kept per basic window for the approximate
-        # correlation StatStream REPORTS (the paper fixes 2 for random walks). On hourly temperature (USCRN,
-        # W=168, b=12) 2 coefficients give recall 0.12, 6 (the full spectrum of a 12-point basic window)
-        # 0.92, with the same candidates; it is the method's own knob, so the protocol tunes it, up to b/2.
-        half = max(1, int(b or 12) // 2)
-        bw = sorted({min(v, half) for v in (2, 3, 4, 6, half)})
+        # (2026-09-19, refined 2026-09-22) statstream_bw_coeffs: DFT coefficients kept per basic window for the
+        # approximate correlation StatStream REPORTS (the paper fixes 2, tuned on random walks). The reported
+        # value is scaled by the share of the basic window's energy the kept coefficients carry, so on data whose
+        # spectrum is not concentrated at the bottom the rule misses most true pairs: USCRN hourly temperature,
+        # W=168, b=12, T=0.8, same candidates, recall 0.037 (differenced) / 0.254 (raw) at 2 coefficients against
+        # 0.993 / 1.000 at the LOSSLESS size b/2+1 (rfft returns b/2+1 coefficients; the old cap of b/2 dropped
+        # the Nyquist term and stopped at recall 0.959 / 0.948). Grid up to b/2+1 so the lossless setting is
+        # reachable; precision falls as the size grows (0.915 at b/2+1 vs 0.998 at 2) because corr_approx > T - t
+        # then also admits pairs just below T, which is the paper's own trade-off.
+        full = max(1, int(b or 12) // 2 + 1)
+        bw = sorted({min(v, full) for v in (2, 3, 4, 6, full)})
         return {"statstream_n_coeffs": [4, 8, 12, 16, 24, 32], "statstream_index_dims": [1, 2, 3, 4], "statstream_bw_coeffs": bw}
     if arm == "corrjoin":
         ds = divisors(W, 4, W // 2)

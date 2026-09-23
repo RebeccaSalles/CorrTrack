@@ -194,6 +194,7 @@ RUN_RESULT_COLUMNS: Sequence[str] = (
     "candidate_lsh_n_bands_tolerance",
     # (2026-09-16/17) competitor-arm knobs and the negative-correlation disclosure tag
     "supports_neg_corr",
+    "supports_lags",
     "parcorr_k",
     "parcorr_f",
     "parcorr_c",
@@ -354,6 +355,7 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     "candidate_lsh_n_bands_tolerance",
     # (2026-09-16/17) competitor-arm knobs and the negative-correlation disclosure tag
     "supports_neg_corr",
+    "supports_lags",
     "parcorr_k",
     "parcorr_f",
     "parcorr_c",
@@ -1025,7 +1027,7 @@ def execute_corrtrack_pass(
     )
     # (2026-07-06) Part 1 -- see docs/implementation_log.md.
     record["candidate_lsh_n_bands"] = getattr(corrtrack, "candidate_lsh_n_bands", None)
-    for _pk in ("parcorr_k", "parcorr_f", "parcorr_c", "parcorr_neighbor_probe", "parcorr_cell_size", "supports_neg_corr", "statstream_n_coeffs", "statstream_index_dims", "statstream_apply_dft_filter", "statstream_eps", "statstream_report", "statstream_tolerance", "statstream_bw_coeffs", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2"):
+    for _pk in ("parcorr_k", "parcorr_f", "parcorr_c", "parcorr_neighbor_probe", "parcorr_cell_size", "supports_neg_corr", "supports_lags", "statstream_n_coeffs", "statstream_index_dims", "statstream_apply_dft_filter", "statstream_eps", "statstream_report", "statstream_tolerance", "statstream_bw_coeffs", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2"):
         record[_pk] = getattr(corrtrack, _pk, None)
     record["candidate_apply_dot_gamma_filter"] = getattr(corrtrack, "candidate_apply_dot_gamma_filter", None)
     record["candidate_hamming_threshold"] = getattr(corrtrack, "candidate_hamming_threshold", None)
@@ -1245,10 +1247,22 @@ def execute_corrtrack_pass(
 
 _BASELINE_SUPPORTS_NEG_CORR = {
     "bruteforce": "native",
-    "exact_stomp": "native",
+    "bf_incremental": "native",
     "filcorr": "enabled_by_us",
     "braid": "specified",
     "tsubasa": "native",
+}
+
+# (2026-09-23) the same disclosure vocabulary for the lag capability: "native" = the paper searches lags
+# and evaluates it, "enabled_by_us" = the extension is ours (TSUBASA, whose Lemma 1 holds between segments
+# shifted by whole basic windows; see Candidates_BF_TSUBASA). The arm sets it itself when it depends on the
+# configuration, and this table is the fallback for the ones that do not.
+_BASELINE_SUPPORTS_LAGS = {
+    "bruteforce": "native",
+    "bf_incremental": "native",
+    "filcorr": "native",          # lagged correlation IS FilCorr's problem statement
+    "braid": "native",            # lag search is BRAID's whole contribution
+    "tsubasa": "native",          # synchronous runs only; a lagged run is tagged enabled_by_us below
 }
 
 
@@ -1317,6 +1331,12 @@ def run_and_log_bruteforce(
     # BRAID's Definition 1 uses |R(l)| but never ran a negative-correlation experiment;
     # TSUBASA's Alg. 2 tests |c| > theta in every experiment.
     corrtrack.supports_neg_corr = _BASELINE_SUPPORTS_NEG_CORR.get(baseline_mode, "native")
+    # the Pattern A arm's own capability, not the host CorrTrack's: TSUBASA is synchronous as published,
+    # so a lagged run of it is our extension (Candidates_BF_TSUBASA's lagged note)
+    _lag_tier = _BASELINE_SUPPORTS_LAGS.get(baseline_mode, "native")
+    if baseline_mode == "tsubasa" and int(base_config.get("n_lags") or 0) > 0:
+        _lag_tier = "enabled_by_us"
+    corrtrack.supports_lags = _lag_tier
     if baseline_mode == "filcorr":
         corrtrack.filcorr_fs = _to_float_safe(base_config.get("filcorr_fs", 0.0)) or 0.0
         corrtrack.filcorr_ft = _to_float_safe(base_config.get("filcorr_ft", 0.5)) or 0.5
@@ -1524,7 +1544,7 @@ def run_and_log_corrtrack(
     )
     # (2026-07-06) Part 1 -- see docs/implementation_log.md.
     record["candidate_lsh_n_bands"] = getattr(corrtrack, "candidate_lsh_n_bands", None)
-    for _pk in ("parcorr_k", "parcorr_f", "parcorr_c", "parcorr_neighbor_probe", "parcorr_cell_size", "supports_neg_corr", "statstream_n_coeffs", "statstream_index_dims", "statstream_apply_dft_filter", "statstream_eps", "statstream_report", "statstream_tolerance", "statstream_bw_coeffs", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2"):
+    for _pk in ("parcorr_k", "parcorr_f", "parcorr_c", "parcorr_neighbor_probe", "parcorr_cell_size", "supports_neg_corr", "supports_lags", "statstream_n_coeffs", "statstream_index_dims", "statstream_apply_dft_filter", "statstream_eps", "statstream_report", "statstream_tolerance", "statstream_bw_coeffs", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2"):
         record[_pk] = getattr(corrtrack, _pk, None)
     record["candidate_apply_dot_gamma_filter"] = getattr(corrtrack, "candidate_apply_dot_gamma_filter", None)
     record["candidate_hamming_threshold"] = getattr(corrtrack, "candidate_hamming_threshold", None)
@@ -2121,12 +2141,18 @@ def _resolve_baseline_mode(value, default="bruteforce"):
         "bf": "bruteforce",
         "brute": "bruteforce",
         "brute_force": "bruteforce",
-        "exact": "exact_stomp",
-        "stomp": "exact_stomp",
-        "exact_stomp_baseline": "exact_stomp",
-        "incremental": "exact_stomp",
-        "incremental_bf": "exact_stomp",
-        "incremental_bruteforce": "exact_stomp",
+        # (2026-09-23, user) the arm is `bf_incremental`; `exact_stomp` and its spellings stay accepted so
+        # older configs and result files keep working. The name changed because the arm is NOT a
+        # reimplementation of STOMP (Zhu et al.'s matrix profile): it borrows that literature's incremental
+        # sliding dot-product update and applies it all-pairs across series and lags, as this project's
+        # strongest exact baseline. The attribution belongs on the update, not on the arm.
+        "exact": "bf_incremental",
+        "stomp": "bf_incremental",
+        "exact_stomp": "bf_incremental",
+        "exact_stomp_baseline": "bf_incremental",
+        "incremental": "bf_incremental",
+        "incremental_bf": "bf_incremental",
+        "incremental_bruteforce": "bf_incremental",
         "fil_corr": "filcorr",
         "fillcorr": "filcorr",
         "fil-corr": "filcorr",
@@ -2137,7 +2163,7 @@ def _resolve_baseline_mode(value, default="bruteforce"):
         "braid_baseline": "braid",
     }
     key = aliases.get(key, key)
-    if key not in {"bruteforce", "exact_stomp", "filcorr", "tsubasa", "braid"}:
+    if key not in {"bruteforce", "bf_incremental", "filcorr", "tsubasa", "braid"}:
         key = default
     return key
 
@@ -4351,8 +4377,14 @@ class CorrTrack:
                     "anti-correlated pairs before its |corr| acceptance, so negative correlation is not "
                     "reachable in the published method. Run with neg_corr=False; N/A on neg_corr=True runs (plan §0d)."
                 )
-            if int(n_lags) != 0:
-                raise ValueError("candidate_backend='corrjoin_double_filter': CorrJoin is synchronous (comparison plan §3.2); run with n_lags=0.")
+            # (2026-09-23, user) lagged extension, disclosed: CorrJoin's paper is synchronous (its Alg. 1
+            # iterates over co-temporal windows), but nothing in its two filters refers to the two windows
+            # sharing a timestamp -- both are Euclidean tests on per-window normalized projections. The index
+            # therefore keeps entries alive across the lag horizon and probes the current window against them,
+            # the same extension ParCorr / CSZ get, with the same parameters and no new mechanism. The one
+            # degree of freedom is the SVD basis: it is taken from the CURRENT window's series (their svdFunc,
+            # unchanged) and the retained windows are projected onto that basis. Reported as supports_lags
+            # "enabled_by_us" so the disclosure travels with the numbers (plan §0d's vocabulary).
             W = int(window_size)
             for name, k in (("corrjoin_ks", self.corrjoin_ks), ("corrjoin_ke", self.corrjoin_ke)):
                 if k < 1 or W % k != 0:
@@ -4369,6 +4401,19 @@ class CorrTrack:
             self.supports_neg_corr = "specified"
         else:
             self.supports_neg_corr = "native"
+        # (2026-09-23) the lag tier, same vocabulary and the same purpose: the disclosure travels with the
+        # numbers. The three grid arms are synchronous as published (ParCorr lists lags as future work,
+        # CSZ's problem statement claims them with no algorithm, CorrJoin's Alg. 1 is co-temporal), so on a
+        # lagged run their rows say the capability is ours; StatStream specifies its timestamped grid but
+        # never evaluated it; CorrTrack's own lag search is evaluated in its paper.
+        if int(n_lags) == 0:
+            self.supports_lags = "native"
+        elif self._internal_dispatch in ("parcorr_grid", "corrjoin_double_filter"):
+            self.supports_lags = "enabled_by_us"
+        elif self._internal_dispatch == "statstream_grid":
+            self.supports_lags = "specified"
+        else:
+            self.supports_lags = "native"
         # (2026-07-28) The ordinal representation is a CorrTrack-level
         # dispatch concept, not a Candidates-level index backend --
         # Candidates itself is always constructed with a real index backend
@@ -4629,7 +4674,7 @@ class CorrTrack:
         self.sketch_nodes = []
         self.grid_nodes = []
         self.brute_force_nodes = []
-        self.exact_stomp_bf_node = None
+        self.bf_incremental_node = None
         self.filcorr_bf_node = None
         self.tsubasa_bf_node = None   # (2026-09-16) see Candidates_BF_TSUBASA
         self.braid_bf_node = None     # (2026-09-16) see Candidates_BF_BRAID
@@ -9442,7 +9487,7 @@ class CorrTrack:
             return np.ascontiguousarray(np.vstack(row_parts), dtype=np.int64)
         return np.empty((0, 5), dtype=np.int64)
     
-    def run_bf_exact_stomp(self, new_data_step, ids, verbose, testing, corr_val=True, monitor=True):
+    def run_bf_incremental(self, new_data_step, ids, verbose, testing, corr_val=True, monitor=True):
         self.verbose = verbose
         self.testing = testing
 
@@ -9457,8 +9502,8 @@ class CorrTrack:
         if getattr(self, "_step_observer_enabled", False):
             self._validated_step = {}
 
-        if self.exact_stomp_bf_node is None:
-            self.exact_stomp_bf_node = Candidates_BF_ExactSTOMP(
+        if self.bf_incremental_node is None:
+            self.bf_incremental_node = Candidates_BF_Incremental(
                 self.window_size,
                 self.window_step,
                 self.n_lags,
@@ -9467,7 +9512,7 @@ class CorrTrack:
                 preprocess=self.preprocess,
             )
 
-        accepted_rows, accepted_corrs, n_pairs, timing = self.exact_stomp_bf_node.run(
+        accepted_rows, accepted_corrs, n_pairs, timing = self.bf_incremental_node.run(
             self._curr_window_step(),
             self.ids,
             verbose=verbose,
@@ -9506,7 +9551,7 @@ class CorrTrack:
 
     def run_bf_filcorr(self, new_data_step, ids, verbose, testing, corr_val=True, monitor=True):
         """FilCorr competitor baseline dispatch -- see Candidates_BF_FilCorr.
-        Structurally identical to run_bf_exact_stomp (same bookkeeping/monitor
+        Structurally identical to run_bf_incremental (same bookkeeping/monitor
         wiring); only the per-step candidate-search node differs."""
         self.verbose = verbose
         self.testing = testing
@@ -9574,7 +9619,7 @@ class CorrTrack:
 
     def run_bf_tsubasa(self, new_data_step, ids, verbose, testing, corr_val=True, monitor=True):
         """TSUBASA competitor baseline dispatch -- see Candidates_BF_TSUBASA.
-        (2026-09-16) Structurally identical to run_bf_filcorr / run_bf_exact_stomp
+        (2026-09-16) Structurally identical to run_bf_filcorr / run_bf_incremental
         (same bookkeeping/monitor wiring); only the per-step node differs.
         Pattern A of docs/competitor_implementation_plan.md."""
         self.verbose = verbose
@@ -9641,7 +9686,7 @@ class CorrTrack:
 
     def run_bf_braid(self, new_data_step, ids, verbose, testing, corr_val=True, monitor=True):
         """BRAID / ThinBRAID competitor baseline dispatch -- see Candidates_BF_BRAID.
-        (2026-09-16) Structurally identical to run_bf_filcorr / run_bf_exact_stomp
+        (2026-09-16) Structurally identical to run_bf_filcorr / run_bf_incremental
         (same bookkeeping/monitor wiring); only the per-step node differs.
         Pattern A of docs/competitor_implementation_plan.md."""
         self.verbose = verbose
@@ -9712,8 +9757,8 @@ class CorrTrack:
 
     def run_bf(self, new_data_step, ids, verbose, testing, corr_val=True, monitor=True):
         _bf_mode = _resolve_baseline_mode(getattr(self, "baseline_mode", "bruteforce"))
-        if _bf_mode == "exact_stomp":
-            self.run_bf_exact_stomp(
+        if _bf_mode == "bf_incremental":
+            self.run_bf_incremental(
                 new_data_step,
                 ids,
                 verbose=verbose,
@@ -12171,7 +12216,7 @@ def pearson_from_five_sums(n, sx, sy, sxx, syy, sxy, out_dtype=np.float64):
 
     (2026-09-16) Phase 0b of docs/competitor_implementation_plan.md. The
     five sums (sum x, sum y, sum x^2, sum y^2, sum xy) over a common
-    support of length `n` are the algebraic core shared by exact_stomp,
+    support of length `n` are the algebraic core shared by bf_incremental,
     CorrJoin (their Eq. 2 incremental update; and 2-CorrJoin.R's closing
     `corr <- (n*xyMult - Sx*Sy) / sqrt((n*Sxx - Sx^2)(n*Syy - Sy^2))`),
     BRAID (their Eqs. 5, 6, 11 per level and lag) and TSUBASA (their
@@ -12375,8 +12420,24 @@ class Candidates_BF:
             self.ref_indices = None
 
 
-class Candidates_BF_ExactSTOMP:
-    """Exact online baseline using rolling lagged dot-product matrices."""
+class Candidates_BF_Incremental:
+    """Exact online all-pairs baseline using rolling lagged dot-product matrices (arm `bf_incremental`).
+
+    The strict baseline of this project's comparison: every pair-window is computed exactly, but the
+    cross term of each (pair, lag) is rolled forward in O(window_step) instead of recomputed in
+    O(window_size), so it is the fastest exact all-pairs form we know how to write and the one a
+    pruning method has to beat. Its five sufficient statistics are shared with the FilCorr, TSUBASA
+    and BRAID arms, which subclass it.
+
+    (2026-09-23) Renamed from `exact_stomp` / `Candidates_BF_ExactSTOMP` (the old names are still
+    accepted: `_resolve_baseline_mode`'s alias table and the module-level class alias below). The
+    incremental sliding dot-product update it uses is the idea behind STOMP in the matrix-profile
+    literature (Zhu et al.), and the attribution belongs there; the old name overstated it, since this
+    arm does not compute a matrix profile of one series' subsequences but all pairs across series at
+    every probed lag. Our contribution is the baseline itself, not the update: see
+    abaca/naive_baseline.py for what it is worth against the interpreted per-pair "naive" the
+    competitor papers measure against (300 to 500x) and against a vectorized BLAS one (the same tier).
+    """
 
     def __init__(self, window_size, window_step, n_lags, corr_threshold, neg_corr=False,
                 preprocess=False):
@@ -12737,11 +12798,15 @@ def _filcorr_band_indices(window_size, fs, ft, sampling_rate, remove_dc=True):
     return lb, ub
 
 
-class Candidates_BF_FilCorr(Candidates_BF_ExactSTOMP):
+# (2026-09-23) the pre-rename name, kept so sibling working copies and older scripts keep importing
+Candidates_BF_ExactSTOMP = Candidates_BF_Incremental
+
+
+class Candidates_BF_FilCorr(Candidates_BF_Incremental):
     """FilCorr competitor baseline (Zhong, Souza, Mueen -- ICDM 2020): Pearson
     correlation over band-pass-filtered windows, computed through Parseval's
     identity directly on FFT coefficients (`O(B)` per pair, `B` = band width,
-    vs `O(window_size)` for the raw-domain `Candidates_BF_ExactSTOMP`/bruteforce
+    vs `O(window_size)` for the raw-domain `Candidates_BF_Incremental`/bruteforce
     baselines):
 
         corr = Re(sum_k Wx[k] * conj(Wy[k])) / (sqrt(sum|Wx|^2) * sqrt(sum|Wy|^2))
@@ -12753,7 +12818,7 @@ class Candidates_BF_FilCorr(Candidates_BF_ExactSTOMP):
     real band-pass filter computes a genuinely different quantity (see
     `Candidates_BF_FilCorr.__init__`'s docstring reference).
 
-    Reuses `Candidates_BF_ExactSTOMP`'s streaming window buffer
+    Reuses `Candidates_BF_Incremental`'s streaming window buffer
     (`_newStream`/`_curr_startTime`/`_time_to_pos`) and its raw-window
     constant/spike guards (`_window_prefixes`/`_window_stats` -- these operate
     on the UNFILTERED window and are independent of the band, so keeping them
@@ -12764,7 +12829,7 @@ class Candidates_BF_FilCorr(Candidates_BF_ExactSTOMP):
     `n_lags` reachability window -- see `__init__`'s note) feeds a fully
     vectorized (n_series x n_series) Parseval correlation matrix per lag via
     REAL matmuls (`Wx_re @ Wy_re.T + Wx_im @ Wy_im.T`, not a complex one --
-    see `run`'s note), mirroring `Candidates_BF_ExactSTOMP.run`'s own
+    see `run`'s note), mirroring `Candidates_BF_Incremental.run`'s own
     vectorized dot-product matrix shape and BLAS tier.
 
     (2026-09-11, comparability pass) NOT `algo.py`'s O(B)-per-slide
@@ -12778,7 +12843,7 @@ class Candidates_BF_FilCorr(Candidates_BF_ExactSTOMP):
     docs/implementation_log.md's 2026-09-11 (d) entry for the real numbers
     that motivated this (before: FilCorr's val_time barely beat a naive
     complex-matmul version; after: brought in line with -- see that entry for
-    the actual comparison against bruteforce/exact_stomp).
+    the actual comparison against bruteforce/bf_incremental).
 
     Math ported from the colleague's `v2/fillcorr/algo.py`
     (`feat/v2-engine` branch); the streaming/windowing/CorrTrack-baseline
@@ -12798,7 +12863,7 @@ class Candidates_BF_FilCorr(Candidates_BF_ExactSTOMP):
             self.window_size, self.filcorr_fs, self.filcorr_ft, self.filcorr_sampling_rate
         )
         # (2026-09-11) Exact-Parseval correction, found by a real end-to-end
-        # verification test against Candidates_BF_ExactSTOMP's raw Pearson at
+        # verification test against Candidates_BF_Incremental's raw Pearson at
         # full band (fs=0, ft=0.5) -- two distinct issues, both only matter at
         # (or past) Nyquist, i.e. for a "full band" request (ft >= 0.5*f); any
         # narrower band is unaffected (see below) and this project's own
@@ -12828,7 +12893,7 @@ class Candidates_BF_FilCorr(Candidates_BF_ExactSTOMP):
         # (2k=m has no integer solution) so this weighting is a no-op there.
         #
         # Verified (see test_filcorr_competitor.py): key-for-key and
-        # |corr diff| < 1e-9 against Candidates_BF_ExactSTOMP's raw Pearson at
+        # |corr diff| < 1e-9 against Candidates_BF_Incremental's raw Pearson at
         # full band, for both even and odd window sizes.
         m = self.window_size
         f = self.filcorr_sampling_rate if self.filcorr_sampling_rate > 0 else 1.0
@@ -12848,7 +12913,7 @@ class Candidates_BF_FilCorr(Candidates_BF_ExactSTOMP):
         # Found by measuring, not assuming (see docs/implementation_log.md's
         # 2026-09-11 (d) entry): the real-decomposition fix above barely
         # moved val_time (13.99s -> 13.82s on the real benchmark), while
-        # `exact_stomp`'s own incremental dot-product cache (`_dot_by_lag`)
+        # `bf_incremental`'s own incremental dot-product cache (`_dot_by_lag`)
         # got a 4.9x val_time win over plain bruteforce on the SAME data --
         # tracing where the time actually went showed each window's FFT was
         # being recomputed from scratch up to ~n_lags/window_step times (once
@@ -12930,7 +12995,7 @@ class Candidates_BF_FilCorr(Candidates_BF_ExactSTOMP):
             return {}, 0, empty_timing
 
         # Raw-window guards (constant / spiked) -- same semantics as
-        # Candidates_BF_ExactSTOMP, computed on the UNFILTERED window; the
+        # Candidates_BF_Incremental, computed on the UNFILTERED window; the
         # band-pass filter is applied only to the correlation itself below.
         prefixes = self._window_prefixes()
         _sx, _sx2, _var_x, curr_nonconst, curr_spiked = self._window_stats(prefixes, curr_pos)
@@ -12954,12 +13019,12 @@ class Candidates_BF_FilCorr(Candidates_BF_ExactSTOMP):
         # (zgemm) does ~4x the real-valued FLOPs of the two real GEMMs (dgemm)
         # actually needed here, since only the real part is ever used. This
         # halves-to-quarters the dominant cost and puts FilCorr on the SAME
-        # BLAS-matmul footing `Candidates_BF_ExactSTOMP.run` itself uses
+        # BLAS-matmul footing `Candidates_BF_Incremental.run` itself uses
         # (`curr_window @ hist_window.T`, one real matmul) -- the fair
         # comparison this project's own benchmarking discipline calls for
         # (see docs/implementation_log.md's 2026-09-11 (d) entry), not a
         # hand-written/`prange`-parallel kernel that would hand FilCorr a
-        # multi-core edge `exact_stomp` doesn't also get.
+        # multi-core edge `bf_incremental` doesn't also get.
         Wx_re, Wx_im = self._band_fft_at(curr_start)
         sxx = np.einsum("ik,ik->i", Wx_re, Wx_re) + np.einsum("ik,ik->i", Wx_im, Wx_im)
 
@@ -13060,7 +13125,7 @@ class Candidates_BF_FilCorr(Candidates_BF_ExactSTOMP):
         return accepted, total_pairs, timing
 
 
-class Candidates_BF_TSUBASA(Candidates_BF_ExactSTOMP):
+class Candidates_BF_TSUBASA(Candidates_BF_Incremental):
     """TSUBASA competitor baseline (Xu, Liu, Nargesian -- SIGMOD 2022).
 
     Exact all-pairs Pearson correlation over the current window, recovered
@@ -13068,8 +13133,8 @@ class Candidates_BF_TSUBASA(Candidates_BF_ExactSTOMP):
     window. Integration follows `Candidates_BF_FilCorr` exactly (Pattern A of
     docs/competitor_implementation_plan.md): same window buffer, same
     constant/spike guards, same accept rule and 5-column output, so it is
-    interchangeable with `bruteforce` / `exact_stomp` / `filcorr` as a
-    ground-truth arm. Its distinct claim versus `exact_stomp` is "per-pair
+    interchangeable with `bruteforce` / `bf_incremental` / `filcorr` as a
+    ground-truth arm. Its distinct claim versus `bf_incremental` is "per-pair
     precomputed segment sketches" versus "rolling lagged dot products"; it is
     NOT a pruning method (their own conclusion lists threshold pruning as
     future work), so `total_candidates == tested_candidates == all pairs`.
@@ -13113,33 +13178,122 @@ class Candidates_BF_TSUBASA(Candidates_BF_ExactSTOMP):
                  neg_corr=False, preprocess=False):
         super().__init__(window_size, window_step, n_lags, corr_threshold,
                          neg_corr=neg_corr, preprocess=preprocess)
-        if int(n_lags) != 0:
-            raise ValueError(
-                "baseline_mode='tsubasa' has no lag support (TSUBASA reads both series on "
-                "the same query window; SIGMOD 2022). Run it with n_lags=0, or report N/A "
-                "on lagged runs -- see docs/competitor_implementation_plan.md §0d."
-            )
         self.basic_window = int(basic_window)
         if self.basic_window <= 0:
             raise ValueError("basic_window must be positive for baseline_mode='tsubasa'")
+        # (2026-09-23, user) lagged extension, disclosed. TSUBASA is synchronous as published (both
+        # series are read on the same query window), but its Lemma 1 is an ANOVA decomposition over
+        # ALIGNED segments and nothing in it requires the two series' segments to carry the same
+        # timestamp: for a lag l the decomposition holds verbatim between x's segment at absolute
+        # position p and y's segment at p - l, each series' delta still taken against its own window
+        # mean. So the extension is bookkeeping, not a new mechanism: the per-pair cross term becomes
+        # a CROSS-segment sketch, cached per (later segment, lag) and reused by every query window
+        # containing it, exactly as the same-segment sketch is in the synchronous case. Two honest
+        # consequences, both recorded: (a) the lag must be a multiple of basic_window, else the
+        # segments do not align and their decomposition does not apply -- refused rather than faked;
+        # (b) the sketch state grows by the number of probed lags, which is the price of keeping
+        # TSUBASA's own reuse property and is visible in peak RSS.
+        # the probed lags are the multiples of window_step up to n_lags, so they all shift whole
+        # segments exactly when window_step is a multiple of basic_window
+        if self.n_lags > 0 and self.window_step % self.basic_window != 0:
+            raise ValueError(
+                f"baseline_mode='tsubasa': with n_lags={self.n_lags} the probed lags are multiples of "
+                f"window_step={self.window_step}, which must therefore be a multiple of basic_window="
+                f"{self.basic_window}. TSUBASA's Lemma 1 decomposes a window into basic-window segments, so a "
+                "lagged pair only stays expressible in its own sketches when the lag shifts whole segments "
+                "(docs/competitor_implementation_plan.md §0d; run aligned, or report N/A)."
+            )
         self.supports_neg_corr = "native"   # their Algorithm 2: abs(c) > theta
-        self.supports_lags = False
+        self.supports_lags = "native" if int(n_lags) == 0 else "enabled_by_us"
         self._grid_origin = None            # absolute time of the first observation
         self._segment_cache = {}            # seg_start_time -> (B, mean(m,), M2(m,), CS(m,m))
+        self._cross_cache = {}              # (later_seg_start, lag) -> CS_cross(m, m), lagged runs only
+        # safety net for the lagged cache: one m x m matrix per (live segment, probed lag). The campaign
+        # keeps TSUBASA out of the large-m lagged cells for this reason; the guard stops a hand-run
+        # configuration from silently exhausting the node instead of saying why.
+        self.lagged_cross_cache_max_gb = 8.0
+        self._cross_budget_checked = False
+        self._centred_cache = {}            # seg_start_time -> centred segment (m, B), feeds the cross sketches
         self._segments_built = 0
+        self._cross_built = 0
 
     # state: the base dump_state/load_state persist __dict__, which covers
     # _grid_origin and the segment cache.
 
     # ---- sketching -----------------------------------------------------
-    def _segment_sketch(self, data, pos, length):
-        """(B, mean, M2, CS) for data[:, pos:pos+length], centred per row."""
+    def _segment_sketch(self, data, pos, length, seg_start=None):
+        """(B, mean, M2, CS) for data[:, pos:pos+length], centred per row.
+
+        (2026-09-23) On lagged runs the centred segment is kept too (`_centred_cache`): the
+        cross-segment sketches of every probed lag are built from it, so a segment's raw values are
+        centred once no matter how many lags reference it."""
         seg = np.asarray(data[:, pos:pos + length], dtype=np.float64)
         mean = seg.mean(axis=1)
         centred = seg - mean[:, None]
         m2 = np.einsum("ij,ij->i", centred, centred)
         cs = centred @ centred.T
+        if seg_start is not None and self.n_lags > 0:
+            self._centred_cache[int(seg_start)] = centred
         return int(length), mean, m2, cs
+
+    def _window_guards_at(self, prefixes, pos):
+        """(nonconst, spiked) of the window starting at buffer position `pos` -- the raw-window guards
+        bf_incremental applies to its history window, reused unchanged for the lagged side."""
+        _sy, _sy2, _var_y, nonconst, spiked = self._window_stats(prefixes, pos)
+        return nonconst, spiked
+
+    def _lagged_window_terms(self, data, segs, seg_starts, seg_pos, seg_full, curr_pos, lag, m, track_min_dist=True):
+        """Per-segment terms of Lemma 1 for the pair (current window, window `lag` earlier).
+
+        Returns (lengths, means_x, cross, means_y, m2_y) where `cross[j]` is the (m, m) cross-segment
+        sketch between x's segment j and y's segment j (the same segment shifted back by `lag`), or
+        None when the lagged window is not fully inside the buffer. At lag 0 the cross terms are the
+        cached same-segment CS and the y terms are the x terms, so the synchronous result is unchanged."""
+        lengths = np.array([sk[0] for sk in segs], dtype=np.float64)
+        means_x = np.stack([sk[1] for sk in segs], axis=0)
+        if lag == 0:
+            return lengths, means_x, [sk[3] for sk in segs], means_x, [sk[2] for sk in segs]
+        cross, means_y, m2_y = [], [], []
+        for j, (Bj, _mean_xj, _m2_xj, _cs_j) in enumerate(segs):
+            ypos = seg_pos[j] - lag
+            if ypos < 0 or ypos + Bj > data.shape[1]:
+                return None
+            y_start = seg_starts[j] - lag
+            sk_y = self._segment_cache.get(y_start) if seg_full[j] else None
+            if sk_y is not None and sk_y[0] == Bj:
+                mean_yj, m2_yj = sk_y[1], sk_y[2]
+            else:
+                seg_y = np.asarray(data[:, ypos:ypos + Bj], dtype=np.float64)
+                mean_yj = seg_y.mean(axis=1)
+                cy = seg_y - mean_yj[:, None]
+                m2_yj = np.einsum("ij,ij->i", cy, cy)
+            cs = self._cross_segment_sketch(seg_starts[j], lag) if seg_full[j] else None
+            if cs is None:
+                zx = self._centred_cache.get(seg_starts[j])
+                if zx is None or zx.shape[1] != Bj:
+                    seg_x = np.asarray(data[:, seg_pos[j]:seg_pos[j] + Bj], dtype=np.float64)
+                    zx = seg_x - seg_x.mean(axis=1)[:, None]
+                seg_y = np.asarray(data[:, ypos:ypos + Bj], dtype=np.float64)
+                cs = zx @ (seg_y - seg_y.mean(axis=1)[:, None]).T
+            cross.append(cs)
+            means_y.append(mean_yj)
+            m2_y.append(m2_yj)
+        return lengths, means_x, cross, np.stack(means_y, axis=0), m2_y
+
+    def _cross_segment_sketch(self, later_start, lag):
+        """CS between the segment at `later_start` and the one `lag` earlier: centred_x @ centred_y.T,
+        the lagged twin of the per-segment CS of Lemma 1. Cached per (later segment, lag)."""
+        key = (int(later_start), int(lag))
+        cs = self._cross_cache.get(key)
+        if cs is None:
+            zx = self._centred_cache.get(int(later_start))
+            zy = self._centred_cache.get(int(later_start) - int(lag))
+            if zx is None or zy is None or zx.shape != zy.shape:
+                return None
+            cs = zx @ zy.T
+            self._cross_cache[key] = cs
+            self._cross_built += 1
+        return cs
 
     def _segments_for_window(self, curr_start, curr_pos):
         """Yield (seg_start_time, pos, length, is_full) covering the current window,
@@ -13159,9 +13313,15 @@ class Candidates_BF_TSUBASA(Candidates_BF_ExactSTOMP):
             t = b
 
     def _evict_segment_cache(self, curr_start):
-        cutoff = int(curr_start)
+        # a segment stays reachable while any probed window can still contain it: the current window
+        # start minus the lag horizon on lagged runs, the current window start otherwise
+        cutoff = int(curr_start) - int(self.n_lags)
         for key in [k for k in self._segment_cache if k + self.basic_window <= cutoff]:
             del self._segment_cache[key]
+        for key in [k for k in self._centred_cache if k + self.basic_window <= cutoff]:
+            del self._centred_cache[key]
+        for key in [k for k in self._cross_cache if k[0] + self.basic_window <= cutoff]:
+            del self._cross_cache[key]
 
     # ---- main ----------------------------------------------------------
     def run(self, new_data_step, ids, verbose=True, testing=False, track_min_dist=True, numeric_rows=True):
@@ -13184,7 +13344,7 @@ class Candidates_BF_TSUBASA(Candidates_BF_ExactSTOMP):
         data = np.asarray(self._current_data(), dtype=np.float64)
         m = data.shape[0]
 
-        # raw-window guards, identical to exact_stomp / filcorr
+        # raw-window guards, identical to bf_incremental / filcorr
         prefixes = self._window_prefixes()
         _sx, _sx2, _var_x, nonconst, spiked = self._window_stats(prefixes, curr_pos)
         if not np.any(nonconst):
@@ -13196,15 +13356,21 @@ class Candidates_BF_TSUBASA(Candidates_BF_ExactSTOMP):
 
         # --- summarize: segment sketches (cached for full segments) ---
         segs = []
+        seg_starts = []
+        seg_pos = []
+        seg_full = []
         for seg_start, pos, length, is_full in self._segments_for_window(curr_start, curr_pos):
             if is_full:
                 sk = self._segment_cache.get(seg_start)
                 if sk is None:
-                    sk = self._segment_sketch(data, pos, length)
+                    sk = self._segment_sketch(data, pos, length, seg_start=seg_start)
                     self._segment_cache[seg_start] = sk
                     self._segments_built += 1
             else:
                 sk = self._segment_sketch(data, pos, length)   # partial head/tail: from raw
+            seg_starts.append(int(seg_start))
+            seg_pos.append(int(pos))
+            seg_full.append(bool(is_full))
             segs.append(sk)
         self._evict_segment_cache(curr_start)
         candidate_time = time.perf_counter() - candidate_t0
@@ -13212,62 +13378,111 @@ class Candidates_BF_TSUBASA(Candidates_BF_ExactSTOMP):
         # --- verify: Lemma 1 (length-weighted, see class docstring) ---
         val_t0 = time.perf_counter()
         W = float(self.window_size)
-        lengths = np.array([sk[0] for sk in segs], dtype=np.float64)
-        means = np.stack([sk[1] for sk in segs], axis=0)              # (ns, m)
-        xbar = (lengths[:, None] * means).sum(axis=0) / W             # (m,)
-        delta = means - xbar[None, :]                                  # (ns, m)
-        denom_terms = np.zeros(m, dtype=np.float64)
-        numer = np.zeros((m, m), dtype=np.float64)
-        sumsq = np.zeros(m, dtype=np.float64)                          # for raw distance
-        sumxy = np.zeros((m, m), dtype=np.float64)
-        for j, (Bj, mean_j, m2_j, cs_j) in enumerate(segs):
-            dj = delta[j]
-            denom_terms += m2_j + Bj * dj * dj
-            numer += cs_j + Bj * np.outer(dj, dj)
-            if track_min_dist:
-                sumsq += m2_j + Bj * mean_j * mean_j
-                sumxy += cs_j + Bj * np.outer(mean_j, mean_j)
-        denom = np.sqrt(np.outer(denom_terms, denom_terms))
-        corr = np.divide(numer, denom, out=np.full_like(numer, np.nan), where=denom > 0.0)
-        corr = np.clip(corr, -1.0, 1.0)
-
-        pair_mask = nonconst[:, None] & nonconst[None, :] & np.triu(np.ones((m, m), dtype=bool), k=1)
-        total_pairs = int(np.count_nonzero(pair_mask))
+        upper_mask = np.triu(np.ones((m, m), dtype=bool), k=1)
+        total_pairs = 0
         min_dist, min_pair = np.inf, None
-        if track_min_dist and total_pairs:
-            dist_sq = sumsq[:, None] + sumsq[None, :] - 2.0 * sumxy
-            min_dist, min_pair = self._min_pair_from_mask(
-                np.sqrt(np.maximum(dist_sq, 0.0)), pair_mask, curr_start, curr_start)
+        accepted_rows, accepted_corrs, accepted_map = [], [], {}
+        # (2026-09-23) lag 0 is the published synchronous case; lag > 0 pairs the current window with the
+        # window `lag` earlier through the cross-segment sketches (see the class docstring's lagged note).
+        # The loop mirrors Candidates_BF_Incremental.run's, so the pair universe and the row format match.
+        if self.n_lags > 0 and not self._cross_budget_checked:
+            self._cross_budget_checked = True
+            n_live_segs = int(math.ceil((self.window_size + self.n_lags) / float(self.basic_window))) + 1
+            n_probes = len(range(self.window_step, int(self.n_lags) + 1, self.window_step))
+            est_gb = n_live_segs * n_probes * float(m) * float(m) * 8.0 / 2 ** 30
+            if est_gb > float(self.lagged_cross_cache_max_gb):
+                raise ValueError(
+                    f"baseline_mode='tsubasa': the lagged extension would hold about {est_gb:.1f} GB of "
+                    f"cross-segment sketches ({n_live_segs} live segments x {n_probes} probed lags x "
+                    f"{m}^2 doubles), above lagged_cross_cache_max_gb={self.lagged_cross_cache_max_gb}. "
+                    "Keeping one sketch per (segment, lag) is what preserves TSUBASA's own reuse property, so "
+                    "the cost is the method's, not the harness's (plan §0d (ii)): run this cell synchronously, "
+                    "report N/A, or raise the cap deliberately."
+                )
+        for lag in range(0, int(self.n_lags) + 1, self.window_step):
+            hist_start = curr_start - lag
+            if lag and (curr_pos - lag < 0):
+                continue
+            y = self._lagged_window_terms(data, segs, seg_starts, seg_pos, seg_full, curr_pos, lag, m,
+                                          track_min_dist=track_min_dist)
+            if y is None:
+                continue
+            lengths, means_x, cross, means_y, m2_y = y
+            xbar = (lengths[:, None] * means_x).sum(axis=0) / W
+            delta_x = means_x - xbar[None, :]
+            ybar = (lengths[:, None] * means_y).sum(axis=0) / W
+            delta_y = means_y - ybar[None, :]
+            denom_x = np.zeros(m, dtype=np.float64)
+            denom_y = np.zeros(m, dtype=np.float64)
+            numer = np.zeros((m, m), dtype=np.float64)
+            sumsq_x = np.zeros(m, dtype=np.float64)
+            sumsq_y = np.zeros(m, dtype=np.float64)
+            sumxy = np.zeros((m, m), dtype=np.float64)
+            for j, (Bj, mean_xj, m2_xj, _cs_j) in enumerate(segs):
+                dxj, dyj = delta_x[j], delta_y[j]
+                denom_x += m2_xj + Bj * dxj * dxj
+                denom_y += m2_y[j] + Bj * dyj * dyj
+                numer += cross[j] + Bj * np.outer(dxj, dyj)
+                if track_min_dist:
+                    sumsq_x += m2_xj + Bj * mean_xj * mean_xj
+                    sumsq_y += m2_y[j] + Bj * means_y[j] * means_y[j]
+                    sumxy += cross[j] + Bj * np.outer(mean_xj, means_y[j])
+            denom = np.sqrt(np.outer(denom_x, denom_y))
+            corr = np.divide(numer, denom, out=np.full_like(numer, np.nan), where=denom > 0.0)
+            corr = np.clip(corr, -1.0, 1.0)
 
-        accept = pair_mask & (~spiked[:, None]) & (~spiked[None, :])
-        if self.neg_corr:
-            accept &= np.abs(corr) >= self.corr_threshold
-        else:
-            accept &= corr >= self.corr_threshold
-        rows, cols = np.nonzero(accept)
+            if lag:
+                hist_nonconst, hist_spiked = self._window_guards_at(prefixes, curr_pos - lag)
+            else:
+                hist_nonconst, hist_spiked = nonconst, spiked
+            pair_mask = nonconst[:, None] & hist_nonconst[None, :]
+            if lag == 0:
+                pair_mask &= upper_mask                 # synchronous: each unordered pair once
+            n_pairs_lag = int(np.count_nonzero(pair_mask))
+            total_pairs += n_pairs_lag
+            if n_pairs_lag == 0:
+                continue
+            if track_min_dist:
+                dist_sq = sumsq_x[:, None] + sumsq_y[None, :] - 2.0 * sumxy
+                step_min, step_pair = self._min_pair_from_mask(
+                    np.sqrt(np.maximum(dist_sq, 0.0)), pair_mask, curr_start, hist_start)
+                if step_pair is not None and step_min < min_dist:
+                    min_dist, min_pair = step_min, step_pair
+            accept = pair_mask & (~spiked[:, None]) & (~hist_spiked[None, :])
+            if self.neg_corr:
+                accept &= np.abs(corr) >= self.corr_threshold
+            else:
+                accept &= corr >= self.corr_threshold
+            rows, cols = np.nonzero(accept)
+            if not rows.size:
+                continue
+            if numeric_rows:
+                accepted_rows.append(np.column_stack([
+                    rows.astype(np.int64, copy=False), cols.astype(np.int64, copy=False),
+                    np.full(rows.size, curr_start, dtype=np.int64),
+                    np.full(rows.size, hist_start, dtype=np.int64),
+                    np.full(rows.size, self.window_size, dtype=np.int64)]))
+                accepted_corrs.append(corr[rows, cols].astype(np.float64, copy=False))
+            else:
+                for s_idx, k_idx in zip(rows, cols):
+                    accepted_map[self._pair_for_indices(s_idx, k_idx, curr_start, hist_start)] = float(corr[s_idx, k_idx])
         validation_time = time.perf_counter() - val_t0
 
         timing = {"candidate_time": max(candidate_time, 0.0),
                   "validation_time": max(validation_time, 0.0),
                   "min_dist": min_dist, "pair_min_dist": min_pair}
         if numeric_rows:
-            if rows.size:
-                row_arr = np.column_stack([
-                    rows.astype(np.int64, copy=False), cols.astype(np.int64, copy=False),
-                    np.full(rows.size, curr_start, dtype=np.int64),
-                    np.full(rows.size, curr_start, dtype=np.int64),
-                    np.full(rows.size, self.window_size, dtype=np.int64)])
-                corr_arr = corr[rows, cols].astype(np.float64, copy=False)
+            if accepted_rows:
+                row_arr = np.concatenate(accepted_rows, axis=0)
+                corr_arr = np.concatenate(accepted_corrs)
             else:
                 row_arr = np.empty((0, 5), dtype=np.int64)
                 corr_arr = np.empty((0,), dtype=np.float64)
             return np.ascontiguousarray(row_arr), np.ascontiguousarray(corr_arr), total_pairs, timing
-        accepted = {self._pair_for_indices(s_idx, k_idx, curr_start, curr_start): float(corr[s_idx, k_idx])
-                    for s_idx, k_idx in zip(rows, cols)}
-        return accepted, total_pairs, timing
+        return accepted_map, total_pairs, timing
 
 
-class Candidates_BF_BRAID(Candidates_BF_ExactSTOMP):
+class Candidates_BF_BRAID(Candidates_BF_Incremental):
     """BRAID / ThinBRAID competitor baseline (Sakurai, Papadimitriou, Faloutsos --
     SIGMOD 2005; Sakurai, Faloutsos, Papadimitriou -- TKDD 2010).
 
@@ -13293,11 +13508,11 @@ class Candidates_BF_BRAID(Candidates_BF_ExactSTOMP):
       * BRAID's lag correlation (Eq. 2) is over the common part of ONE growing
         stream, max lag m = n/2. This harness compares TWO full windows,
         curr = x[t-W, t) against hist = y[t-W-l, t-l), exactly as
-        `Candidates_BF_ExactSTOMP` does, with a fixed `n_lags`. The five sums are
+        `Candidates_BF_Incremental` does, with a fixed `n_lags`. The five sums are
         therefore rolling window sums at each level, rolled the same way
-        exact_stomp rolls `_dot_by_lag` (subtract the outgoing block columns,
+        bf_incremental rolls `_dot_by_lag` (subtract the outgoing block columns,
         add the incoming) whenever `window_step` is a multiple of the level's
-        block width, and recomputed otherwise -- exact_stomp's own
+        block width, and recomputed otherwise -- bf_incremental's own
         `can_increment` policy. Smoothing blocks are anchored to absolute time
         so they are stable as the window slides.
       * The lag domain here is integer and small (<= n_lags), so the fitted
@@ -13306,7 +13521,7 @@ class Candidates_BF_BRAID(Candidates_BF_ExactSTOMP):
         interpolator are orthogonal to the method.
 
     Output modes (`report_mode`):
-      "all_lags": for every harness lag (multiples of window_step, as exact_stomp)
+      "all_lags": for every harness lag (multiples of window_step, as bf_incremental)
                   emit (pair, lag) with |R_hat(lag)| >= corr_threshold. This is the
                   common-denominator pair set the four-way comparison uses.
       "braid":    their Definition 1 -- per pair, the EARLIEST local maximum of
@@ -13318,7 +13533,7 @@ class Candidates_BF_BRAID(Candidates_BF_ExactSTOMP):
 
     Anchor: with 2*b > n_lags, level 0 alone covers every lag exactly (no
     smoothing, no interpolation; the spline passes through its knots), so
-    "all_lags" must reproduce the exact_stomp / bruteforce lagged pair set.
+    "all_lags" must reproduce the bf_incremental / bruteforce lagged pair set.
     """
 
     def __init__(self, window_size, window_step, n_lags, corr_threshold, neg_corr=False,
@@ -13694,6 +13909,9 @@ class ParCorrGridIndex:
         self.neighbor_probe = bool(neighbor_probe)
         self.n_lagged_windows = int(n_lagged_windows)
         self.supports_neg_corr = "not_available"
+        # (2026-09-23) lags: the grid retains windows across the horizon and the same-cell vote is
+        # time-agnostic, so a lagged run is the "keep entries alive" extension, ours and disclosed
+        self.supports_lags = "enabled_by_us"
         # (2026-09-17) vote loop in competitor_kernels.parcorr_probe when built (sorted-key grids,
         # one nogil loop over grids x probes x postings); the Python postings path is the reference
         self.use_cython = bool(_HAVE_COMPETITOR_KERNELS) if use_cython is None else bool(use_cython and _HAVE_COMPETITOR_KERNELS)
@@ -13944,9 +14162,13 @@ class StatStreamGridIndex:
       * a query probes its own cell and the 3^h_idx **neighbouring** cells, so any pair
         within distance eps is found -- this is what makes the grid false-negative-free
         (their Theorem 2);
-      * survivors pass the n-approximate filter ||X_hat - Y_hat||_2n <= eps (the paper
-        then estimates the correlation from the coefficients; here the harness's shared
-        exact validation does the final check instead, so precision is exact);
+      * survivors pass the n-approximate filter ||X_hat - Y_hat||_2n <= eps, and the paper
+        then ESTIMATES the correlation from the digest coefficients, reporting every pair with
+        corr_approx > T - t (their sections 3.4 and 5.2). That estimate is what this arm reports
+        by default since 2026-09-18 (`statstream_report="approx"`, the rule that every arm emits
+        its own designed output); `statstream_report="exact"` routes the survivors through the
+        harness's shared exact validation instead, which is what the arm did before that date and
+        is kept as the ablation of the reporting rule;
       * negative correlation (Lemma 3): also probe the cell of -X_hat and test
         ||X_hat + Y_hat|| <= eps. Specified by the paper, never evaluated there ([S]);
         enabled under neg_corr=True as *their* specification and *our* evaluation
@@ -14189,7 +14411,10 @@ class CorrJoinDoubleFilterIndex:
         self.use_cython = bool(_HAVE_COMPETITOR_KERNELS) if use_cython is None else bool(use_cython and _HAVE_COMPETITOR_KERNELS)
         self.n_lagged_windows = int(n_lagged_windows)
         self.supports_neg_corr = "not_available"
-        self.supports_lags = False
+        # (2026-09-23) see CorrTrack.__init__'s note: the filters are time-agnostic, so lags are the
+        # "keep entries alive and probe from the current window" extension, ours and disclosed as such
+        self.supports_lags = "enabled_by_us"
+        self.last_lagged_query = False
         cap = max(16, int(initial_capacity))
         self._vectors = np.empty((cap, self._n_vectors), dtype=np.float64)
         self._win = np.empty(cap, dtype=np.int64); self._sid = np.empty(cap, dtype=np.int64)
@@ -14261,10 +14486,23 @@ class CorrJoinDoubleFilterIndex:
         if m < 2:
             self.last_stats = self._stats(stats, m, 0, t0); return np.empty((0, 5), dtype=np.int64)
         V = self._vectors[alive_idx]
+        # (2026-09-23) lagged runs: the index holds several windows, so the probe set is the CURRENT
+        # window's entries and the basis comes from them alone (their per-window svdFunc), while the
+        # retained windows are projected onto that basis. With one window alive this is exactly the
+        # synchronous path it replaces, and `q_local=None` keeps the kernel's original dedup.
+        recent = np.asarray(recent_entry_ids, dtype=np.int64).ravel()
+        recent = recent[self._alive[recent]] if recent.size else recent
+        pos_of = {int(g): i for i, g in enumerate(alive_idx.tolist())}
+        q_local = np.fromiter((pos_of[int(g)] for g in recent.tolist() if int(g) in pos_of), dtype=np.int64)
+        lagged = bool(np.unique(self._time[alive_idx]).size > 1)
+        self.last_lagged_query = lagged
+        if lagged and q_local.size == 0:
+            self.last_stats = self._stats(stats, m, 0, t0); return np.empty((0, 5), dtype=np.int64)
         # --- 1. per-window SVD of the ks block, keep kb most variable directions ---
         Xs = V[:, : self.ks]
+        basis_rows = Xs[q_local] if lagged else Xs
         try:
-            _u, _sv, vt = np.linalg.svd(Xs, full_matrices=False)     # rows of vt = right singular vectors, descending
+            _u, _sv, vt = np.linalg.svd(basis_rows, full_matrices=False)  # rows of vt = right singular vectors, descending
             proj = Xs @ vt[: self.kb].T                                # (m, kb) == U[:, :kb] * s[:kb]
         except np.linalg.LinAlgError:
             proj = Xs[:, : self.kb]
@@ -14280,7 +14518,8 @@ class CorrJoinDoubleFilterIndex:
             a_loc, b_loc, touched, n_cand = _competitor_kernels.corrjoin_double_filter(
                 np.ascontiguousarray(proj), np.ascontiguousarray(V[:, self.ks:]), np.ascontiguousarray(cells),
                 np.ascontiguousarray(srt.astype(np.int64)), np.ascontiguousarray(keys[srt]),
-                np.ascontiguousarray(self._neighbor_offsets), float(self.eps1), float(self.eps2))
+                np.ascontiguousarray(self._neighbor_offsets), float(self.eps1), float(self.eps2),
+                np.ascontiguousarray(q_local) if lagged else None)
             keep = list(zip(a_loc.tolist(), b_loc.tolist()))
             self.last_r1 = (n_cand / n_pairs_total) if n_pairs_total else 0.0
             stats.update({"lsh_candidates_touched": int(touched), "num_distance_checks": int(touched) + int(n_cand),
@@ -14293,14 +14532,14 @@ class CorrJoinDoubleFilterIndex:
           e1sq = self.eps1 * self.eps1
           cand = []
           touched = 0
-          for i in range(m):
+          for i in (q_local.tolist() if lagged else range(m)):
             ci = cells[i]
             for off in self._neighbor_offsets:
                 lst = post.get(tuple((ci + off).tolist()))
                 if not lst:
                     continue
                 for j in lst:
-                    if j <= i:
+                    if (j == i) if lagged else (j <= i):
                         continue
                     touched += 1
                     d = proj[i] - proj[j]
@@ -14323,6 +14562,11 @@ class CorrJoinDoubleFilterIndex:
         b = alive_idx[np.fromiter((p[1] for p in keep), dtype=np.int64, count=len(keep))]
         # skip a pair of the same series (cannot happen synchronously, kept for safety)
         ok = ~((self._sid[a] == self._sid[b]) & (self._time[a] == self._time[b]))
+        if lagged:
+            # each unordered pair once: emit from the later-time entry, tie-break sid (the rule the
+            # ParCorr / StatStream indexes use; `a` is the query, `b` the entry it met)
+            t_a_, t_b_, s_a_, s_b_ = self._time[a], self._time[b], self._sid[a], self._sid[b]
+            ok &= ~((t_b_ > t_a_) | ((t_b_ == t_a_) & (s_b_ < s_a_)))
         a, b = a[ok], b[ok]
         sid_a, sid_b, t_a, t_b = self._sid[a], self._sid[b], self._time[a], self._time[b]
         rows = np.empty((a.shape[0], 5), dtype=np.int64)
@@ -19252,7 +19496,7 @@ class CorrTrack_optimize:
         record["validation_metric"] = getattr(corrtrack, "validation_metric", None)
         # (2026-07-06) Part 1 -- see docs/implementation_log.md.
         record["candidate_lsh_n_bands"] = getattr(corrtrack, "candidate_lsh_n_bands", None)
-        for _pk in ("parcorr_k", "parcorr_f", "parcorr_c", "parcorr_neighbor_probe", "parcorr_cell_size", "supports_neg_corr", "statstream_n_coeffs", "statstream_index_dims", "statstream_apply_dft_filter", "statstream_eps", "statstream_report", "statstream_tolerance", "statstream_bw_coeffs", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2"):
+        for _pk in ("parcorr_k", "parcorr_f", "parcorr_c", "parcorr_neighbor_probe", "parcorr_cell_size", "supports_neg_corr", "supports_lags", "statstream_n_coeffs", "statstream_index_dims", "statstream_apply_dft_filter", "statstream_eps", "statstream_report", "statstream_tolerance", "statstream_bw_coeffs", "corrjoin_ks", "corrjoin_ke", "corrjoin_kb", "corrjoin_eps1", "corrjoin_eps2"):
             record[_pk] = getattr(corrtrack, _pk, None)
         record["candidate_apply_dot_gamma_filter"] = getattr(corrtrack, "candidate_apply_dot_gamma_filter", None)
         record["candidate_hamming_threshold"] = getattr(corrtrack, "candidate_hamming_threshold", None)

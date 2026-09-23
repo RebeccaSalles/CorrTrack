@@ -13,7 +13,7 @@ Protocol choices per dataset are the 2026-09-17 proposals in cells() (awaiting t
 decision): Motes W=240/24/L=480 epochs (covers BRAID's 224 min); Yellowstone W=2000/100/L=1000
 (FilCorr's 20 s / 1 s / 10 s); USCRN W=168/12/L=48; Berkeley W=90/10; CorrJoin sets W=240/24 so
 ks/ke = 15/30 hold. T sweep {0.7, 0.8, 0.9, 0.95} (0.9+ is where the grid methods prune). The lagged comparison includes one
-step=1 cell (Yellowstone slice) because BRAID probes 70 lags where exact_stomp probes 15 at
+step=1 cell (Yellowstone slice) because BRAID probes 70 lags where bf_incremental probes 15 at
 step=12 (comparison plan section 5a.3). m is capped at 2000 (the battery target); Berkeley
 Earth additionally runs the exact arms plus StatStream at the full 18,520 for scalability.
 
@@ -154,8 +154,16 @@ def synth_rungs():
     return design_points(SYNTH_SPEC, 4, 4, 2, "ladder")
 
 
-STEP1_CELL = Cell("yellowstone_bp3_7", 2000, 1, 1000, 0.9, n_series=28, n_obs=30000, arms="bruteforce,exact_stomp,filcorr,braid,thinbraid,corrtrack,statstream",
-                  walltime="48:00:00", calib_obs=9000, note="step=1 lagged cell (BRAID probes 70 lags vs exact_stomp 15 at step=12); step != basic_window so the grid arms are excluded")
+# (2026-09-23) the two reduced arm lists, named so they stay in step with ALL_ARMS (abaca/nway_compare.py).
+# Both now carry corrtrack_hamming, the second CorrTrack backend; the lagged one drops plain BRAID and TSUBASA
+# for their m^2-per-(level|segment, lag) state, and every other arm runs.
+LARGE_M_LAGGED_ARMS = ("bruteforce,bf_incremental,filcorr,thinbraid,corrtrack,corrtrack_hamming,"
+                       "parcorr,csz,statstream,corrjoin")
+FULL_M_ARMS = ("bruteforce,bf_incremental,filcorr,tsubasa,thinbraid,corrtrack,corrtrack_hamming,"
+               "parcorr,csz,statstream,corrjoin")
+
+STEP1_CELL = Cell("yellowstone_bp3_7", 2000, 1, 1000, 0.9, n_series=28, n_obs=30000, arms="bruteforce,bf_incremental,filcorr,braid,thinbraid,corrtrack,corrtrack_hamming,statstream",
+                  walltime="48:00:00", calib_obs=9000, note="step=1 lagged cell (BRAID probes 70 lags vs bf_incremental 15 at step=12); step != basic_window so the grid arms are excluded")
 
 
 def sobol_unit(n_points: int, d: int, seed: int):
@@ -238,12 +246,17 @@ def cells(m_levels: int = 4, l_levels: int = 4, replicates: int = 2, kind: str =
                 arms = d.arms
                 if arms == "all" and m > 2000 and L > 1:
                     # plain BRAID keeps an m x m matrix per (level, lag): ~200 MB each at m = 5,000, tens of GB
-                    # over the probe set; ThinBRAID is its large-m form (their section 5), so it stands in
-                    arms = "bruteforce,exact_stomp,filcorr,tsubasa,thinbraid,corrtrack,parcorr,csz,statstream,corrjoin"
+                    # over the probe set; ThinBRAID is its large-m form (their section 5), so it stands in.
+                    # (2026-09-23) TSUBASA leaves the LAGGED large-m cells for the same reason: its lagged
+                    # extension caches one m x m cross-segment sketch per (live segment, lag), ~14 GB at
+                    # m = 5,000 with W/b = 14 and L = 5, which is the price of keeping its own reuse property
+                    # (plan §0d (ii)); it stays in every synchronous cell, where it costs one matrix per segment.
+                    arms = LARGE_M_LAGGED_ARMS
                 if d.full_m and m == d.full_m:
                     # above the 2k cap: plain BRAID excluded (O(m^2) per-pair state, ~2.2 GB at 2k); the pruning
-                    # arms are included since their candidate loops run in competitor_kernels (2026-09-17)
-                    arms = "bruteforce,exact_stomp,filcorr,tsubasa,thinbraid,corrtrack,parcorr,csz,statstream,corrjoin"
+                    # arms are included since their candidate loops run in competitor_kernels (2026-09-17).
+                    # This anchor is synchronous (L = 1), so TSUBASA's sketches are one per segment: it stays.
+                    arms = FULL_M_ARMS
                 out.append(Cell(d.label, d.W, d.step, (L - 1) * d.step, T, n_series=m, n_obs=d.n_obs, arms=arms,
                                 extra=dict(d.extra), walltime=("96:00:00" if (d.full_m and m == d.full_m) else d.walltime), calib_obs=d.calib_obs,
                                 note=f"{d.note} | L={L}"))
@@ -261,7 +274,7 @@ def cells(m_levels: int = 4, l_levels: int = 4, replicates: int = 2, kind: str =
         for dens in SYNTH_DENSITIES:
             for (m, L) in synth_rungs():
                 for T in THRESHOLDS:
-                    arms = "all" if not (m > 2000 and L > 1) else "bruteforce,exact_stomp,filcorr,tsubasa,thinbraid,corrtrack,parcorr,csz,statstream,corrjoin"
+                    arms = "all" if not (m > 2000 and L > 1) else LARGE_M_LAGGED_ARMS
                     for diff in (False, True):
                         name = synth_name(proc, dens, T, m, L, diff)
                         out.append(Cell(name, SYNTH_W, SYNTH_STEP, (L - 1) * SYNTH_STEP, T, n_series=m, n_obs=SYNTH_N, arms=arms,
@@ -359,14 +372,19 @@ def emit(path: str, results_root: str, select=None, m_levels: int = 4, l_levels:
         for tag, neg in (("pos", ""), ("neg", "NEG_CORR_FLAG=--neg-corr")):
             run = common + ([neg] if neg else [])
             hyper = f"$RESULTS_ROOT/hyperopt/{c.stem}_{tag}"
+            hyper_h = f"$RESULTS_ROOT/hyperopt_hamming/{c.stem}_{tag}"
             tuned = f"$RESULTS_ROOT/tuned/{c.stem}_{tag}"
             h_cmd = " ".join(["$SNAPSHOT/abaca/hyperopt_corrtrack.oar"] + run + [f"OUT_DIR={hyper}"])
+            # (2026-09-21, user) CorrTrack runs with BOTH candidate backends in every cell: lsh_sign_dot (arm corrtrack) and
+            # lsh_hamming_exact + dot gate (arm corrtrack_hamming), each tuned by its own hyperopt grid
+            h2_cmd = " ".join(["$SNAPSHOT/abaca/hyperopt_corrtrack.oar"] + run + ["PARAM_GRID_CONFIG=experiment_run_param_grid_campaign_hamming.py", f"OUT_DIR={hyper_h}"])
             t_cmd = " ".join(["$SNAPSHOT/abaca/tune_competitors.oar"] + run + [f"CALIB_OBS={c.calib_obs}", f"CALIB_WINDOWS={CALIB_WINDOWS}", f"CALIB_SERIES={CALIB_SERIES}", f"OUT_DIR={tuned}"])
-            n_cmd = " ".join(["$SNAPSHOT/abaca/nway_compare.oar"] + run + [f"ARMS={c.arms}", f"COMPETITOR_PARAMS={tuned}", f"HYPEROPT_DIR={hyper}", f"RUN_NAME={c.stem}_{tag}"])
+            n_cmd = " ".join(["$SNAPSHOT/abaca/nway_compare.oar"] + run + [f"ARMS={c.arms}", f"COMPETITOR_PARAMS={tuned}", f"HYPEROPT_DIR={hyper}", f"HYPEROPT_HAMMING_DIR={hyper_h}", f"RUN_NAME={c.stem}_{tag}"])
             lines += [f"H_JOB=$(submit -n h_{c.stem}_{tag} {pack_res} -S \"{h_cmd}\")",
+                      f"H2_JOB=$(submit -n hh_{c.stem}_{tag} {pack_res} -S \"{h2_cmd}\")",
                       f"T_JOB=$(submit -n t_{c.stem}_{tag} {pack_res} -S \"{t_cmd}\")",
-                      f"N_JOB=$(submit -n n_{c.stem}_{tag} -a \"$H_JOB\" -a \"$T_JOB\" {nway_res} -S \"{n_cmd}\")",
-                      f"echo \"{c.stem}_{tag} H=$H_JOB T=$T_JOB N=$N_JOB\""]
+                      f"N_JOB=$(submit -n n_{c.stem}_{tag} -a \"$H_JOB\" -a \"$H2_JOB\" -a \"$T_JOB\" {nway_res} -S \"{n_cmd}\")",
+                      f"echo \"{c.stem}_{tag} H=$H_JOB H2=$H2_JOB T=$T_JOB N=$N_JOB\""]
         lines.append("")
         n_cells += 1
     # only the generators the selected cells need
@@ -383,7 +401,7 @@ def emit(path: str, results_root: str, select=None, m_levels: int = 4, l_levels:
             gen_lines.append(g)
     Path(gen_path).write_text("\n".join(gen_lines) + "\n")
     open(path, "w").write("\n".join(lines) + "\n")
-    print(f"wrote {path}: {n_cells} cells, {6 * n_cells} jobs (hyperopt, tune, N-way; x2 for the neg_corr run); generators in {gen_path} ({len(gen_lines) - n_gen_header} commands)")
+    print(f"wrote {path}: {n_cells} cells, {8 * n_cells} jobs (hyperopt lsh, hyperopt hamming, tune, N-way; x2 for the neg_corr run); generators in {gen_path} ({len(gen_lines) - n_gen_header} commands)")
 
 
 def main() -> None:

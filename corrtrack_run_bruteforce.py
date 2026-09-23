@@ -344,7 +344,7 @@ def parse_args():
     parser.add_argument("--no-track-min-dist", dest="track_min_dist", action="store_false")
     parser.add_argument(
         "--baseline-mode",
-        choices=("bruteforce", "exact_stomp", "filcorr", "tsubasa", "braid"),
+        choices=("bruteforce", "bf_incremental", "filcorr", "tsubasa", "braid"),
         default=None,
         help="Exact baseline implementation for the brute-force stage. 'filcorr' is the "
         "Zhong/Souza/Mueen (ICDM 2020) competitor -- see --filcorr-fs/--filcorr-ft. "

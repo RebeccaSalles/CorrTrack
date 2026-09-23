@@ -5,7 +5,7 @@ Companion to `docs/competitor_comparison_plan.md`, which settles *what* each met
 we compare it. This document settles *how* to build it: files, classes, signatures, order, tests.
 
 Scope: **TSUBASA, BRAID/ThinBRAID, ParCorr/Cole-Shasha-Zhao, StatStream, CorrJoin**, added to the
-existing `bruteforce` / `exact_stomp` / `filcorr` / CorrTrack battery. All primary sources have
+existing `bruteforce` / `bf_incremental` / `filcorr` / CorrTrack battery. All primary sources have
 been read (comparison plan §10.4); there are no literature blockers left.
 
 ---
@@ -18,7 +18,7 @@ reason to expect this to go smoothly.
 
 | pattern | axis | existing members | to add |
 |---|---|---|---|
-| **A. All-pairs baseline** | `baseline_mode` | `bruteforce`, `exact_stomp`, `filcorr` | **TSUBASA**, **BRAID** |
+| **A. All-pairs baseline** | `baseline_mode` | `bruteforce`, `bf_incremental`, `filcorr` | **TSUBASA**, **BRAID** |
 | **B. Pruning method** | `data_representation` x `candidate_backend` | `sketch_proj` x {`lsh_approx`, `hamming_exact`, `brute_force`} | **ParCorr/CSZ**, **StatStream**, **CorrJoin** |
 
 **That split is exactly the "prunes pairs" column of the capability matrix**, which is a good
@@ -77,12 +77,12 @@ corr(x,y) = 1 - d^2(x_hat, y_hat) / 2
 
 ### 0b. Extract the five-sum sufficient statistics (3 consumers)
 
-`sum x, sum y, sum x^2, sum y^2, sum xy` are used by `exact_stomp` (inline today), **CorrJoin**
+`sum x, sum y, sum x^2, sum y^2, sum xy` are used by `bf_incremental` (inline today), **CorrJoin**
 (their Eq. 2 incremental update) and **BRAID** (their Eqs. 9 and 10, per level). Pull the
 accumulate-and-combine logic into one helper rather than writing it a third time.
 
 Keep it a plain function over arrays, not a class: BRAID needs it per level and per lag, CorrJoin
-per stride, `exact_stomp` per window. A class would fit none of them well.
+per stride, `bf_incremental` per window. A class would fit none of them well.
 
 ### 0c. Counter contract (this is what makes the comparison publishable)
 
@@ -106,7 +106,7 @@ draft of this paragraph said `total_candidates = 0`, which was wrong.
 
 This is a live problem, not a hypothetical: the capability matrix says **ParCorr has no negative
 correlation and FilCorr has none either** (its Eq. 7 takes a `max` of signed correlations), yet
-our shipped FilCorr port applies `|corr| >= threshold` because it inherits `exact_stomp`'s accept
+our shipped FilCorr port applies `|corr| >= threshold` because it inherits `bf_incremental`'s accept
 mask. That deviation is already in published results (comparison plan §4b.2).
 
 **The policy:**
@@ -236,7 +236,7 @@ Corr(x,y) = sum_j B_j ( s_xj s_yj c_j + d_xj d_yj )
   bought with quadratic storage), and cap `m` on local runs.
 - **Scope note**: TSUBASA's headline feature is *arbitrary* query windows, which our fixed-window
   harness never exercises. Say so rather than letting it look slower for no reason. Its honest
-  comparison against `exact_stomp` is "per-pair precomputed sketches versus rolling statistics".
+  comparison against `bf_incremental` is "per-pair precomputed sketches versus rolling statistics".
 - **Anchor**: exact, so it must reproduce the bruteforce pair set precisely.
 - Negative correlation: yes, their Algorithm 2 uses `|c| > theta` in every experiment.
 
@@ -346,7 +346,7 @@ Hardest, and last, but no longer gated on anything: the spec is complete (compar
   **Both divide by `n`, and `eps_1` uses `ks`, not `kb`.** Both derivative sources had this wrong
   and either error quietly corrupts recall and speed.
 - Incremental correlation across strides via the five running sums (phase 0b) -- the same form
-  `exact_stomp` already implements, so this is reuse.
+  `bf_incremental` already implements, so this is reuse.
 - **SVD across windows -- SETTLED by the authors' own code (2026-09-16).** The user supplied
   the R scripts the paper made available (`docs/reference_code/corrjoin_authors_R/`, with a
   README of what was read). `2-CorrJoin.R` **recomputes the SVD from scratch every window**
@@ -397,8 +397,8 @@ a fair competitor yet; a documented discrepancy is a result.
 | CorrJoin PACMMOD 2023 | authors' stock/chlorine/gas/synthetic files, m = 1,000, W = 1,020, stride 10, ks/ke/kb = 15/30/3 | speedup <= 1/r1; gains only for m > 100; pruning vanishes near 20% correlated (Fig. 15) | mean r1, 1/r1 ceiling, correlated fraction, T in {0.7, 0.8, 0.9, 0.95} | **reproduces qualitatively**: r1 falls with T (stock 0.33 -> 0.06, ceiling 3.1x -> 17x; synthetic 0.28 -> 0.05, 3.6x -> 20x; chlorine 0.74 -> 0.13); gas, 26% correlated at T = 0.7, has r1 = 0.92 and a 1.1x ceiling, their Fig. 15 statement exactly. Speedup values not transcribed from the paper; the measured wall ratio corrjoin/bf (0.03 to 1.05) stays below 1/r1 in every cell, as it must |
 | StatStream VLDB 2002 | random walks s = 100 + sum(u - 0.5), m = 500, sliding window 1 h = 3,600 at 1 s, basic window 60 | Fig. 5: grid pruning power 0.01 to 0.09, filter precision ~0.55 to 0.9 at 16 coefficients; Table 2 S0.85 t=0.0005: precision 0.9931, recall 1.0 (real cells 0.9765 to 0.9947 / 0.9987 to 1.0) | grid (16 sliding-window coefficients, Lemma 2 filter); post-processing = section 3.4 curve fitting with 2 DFT coefficients per basic window, exact means and sigmas, report if corr_approx > T - t | **reproduces**: pruning power 0.0093 to 0.0259, filter precision 0.68 to 0.76, S0.85 t=0.0005 -> 0.9936 / 0.9992, T=0.9 t=0.001 -> 0.9748 / 1.0 |
 | ParCorr DMKD 2018 | Yahoo (unavailable) -> sp500_sub263 (m = 263), corrjoin_stock (m = 1,000), w = 500, b = 20 | recall > 90 / 96 / 95.7% at T = 0.7 / 0.8 / 0.9 with r = 60, k = 2, f = 0.7; precision 100% | recall vs bruteforce at exactly those settings; the cell size, which the paper does not state, at CSZ's c = 0.7 | **does not reproduce at the paper's stated settings**: recall 13 to 38% (precision 1.0). The unstated cell size is the whole story: the CSZ-protocol tuning of 2026-09-17 (c = 0.3 to 0.5, f = 0.6 to 1.0, N = 30 to 48) reached 0.94 to 0.97 on Motes. ParCorr's published recall is reachable only with a cell size the paper omits, which is what the protocol is for; disclosed |
-| FilCorr ICDM 2020 | white noise at 100 Hz, 3-7 Hz band, W = 2,000, lag 100, m = 25 to 200; Yellowstone case study | up to 4x more sensors than naive (16x time at O(m^2)); beats ParCorr below ~700 streams | time ratio bruteforce/filcorr and its square root vs m; Yellowstone lagged pairs | **trend reproduces, magnitude below the paper's at our m**: time ratio 0.40x (m = 25) -> 1.27 -> 2.47 -> 4.82x (m = 200), sensor multiplier 2.2x at m = 200 and rising (paper "up to 4x", at larger m). Our naive baseline is the `bruteforce` arm: an all-pairs Pearson recompute per step, vectorized in Cython, a faster implementation of the same "naive" the paper used; `exact_stomp` (incremental) is the stricter comparison and runs in the campaign. Yellowstone: the job ran with lag 100 (1 s) instead of the paper's 10 s and found 0 pairs >= 0.5; rerun with lag 1,000 |
-| TSUBASA SIGMOD 2022 | USCRN 2020 temperature, m = 153, W = 168, step 12, T = 0.7 and 0.9 | exact; >= 10x faster than raw Pearson recompute | exact-match flag; wall vs our `bruteforce` arm = Cython all-pairs Pearson **recomputed from raw values every step** (the papers' "naive", vectorized), not `exact_stomp` (the incremental five-sum arm) | **exactness reproduces** (1,707,473 and 207,565 pairs identical to bruteforce); wall 0.78x of the recompute baseline, i.e. 1.28x faster where the paper reports >= 10x over its naive. The gap is the baseline's tier (a per-pair recompute in their Go code vs our vectorized Cython recompute), consistent with CorrJoin's Fig. 10 placing TSUBASA at the naive's complexity. Against `exact_stomp` (incremental) the campaign will show the stricter ratio |
+| FilCorr ICDM 2020 | white noise at 100 Hz, 3-7 Hz band, W = 2,000, lag 100, m = 25 to 200; Yellowstone case study | up to 4x more sensors than naive (16x time at O(m^2)); beats ParCorr below ~700 streams | time ratio bruteforce/filcorr and its square root vs m; Yellowstone lagged pairs | **trend reproduces, magnitude below the paper's at our m**: time ratio 0.40x (m = 25) -> 1.27 -> 2.47 -> 4.82x (m = 200), sensor multiplier 2.2x at m = 200 and rising (paper "up to 4x", at larger m). Our naive baseline is the `bruteforce` arm: an all-pairs Pearson recompute per step, vectorized in Cython, a faster implementation of the same "naive" the paper used; `bf_incremental` (incremental) is the stricter comparison and runs in the campaign. Yellowstone: the job ran with lag 100 (1 s) instead of the paper's 10 s and found 0 pairs >= 0.5; rerun with lag 1,000 |
+| TSUBASA SIGMOD 2022 | USCRN 2020 temperature, m = 153, W = 168, step 12, T = 0.7 and 0.9 | exact; >= 10x faster than raw Pearson recompute | exact-match flag; wall vs our `bruteforce` arm = Cython all-pairs Pearson **recomputed from raw values every step** (the papers' "naive", vectorized), not `bf_incremental` (the incremental five-sum arm) | **exactness reproduces** (1,707,473 and 207,565 pairs identical to bruteforce); wall 0.78x of the recompute baseline, i.e. 1.28x faster where the paper reports >= 10x over its naive. The gap is the baseline's tier (a per-pair recompute in their Go code vs our vectorized Cython recompute), consistent with CorrJoin's Fig. 10 placing TSUBASA at the naive's complexity. Against `bf_incremental` (incremental) the campaign will show the stricter ratio |
 
 ## 3b. Campaign (added 2026-09-17; redesigned the same day as a Sobol design)
 
@@ -451,6 +451,92 @@ Submission: `abaca/campaign_feeder.py` feeds the emitted script cell by cell whi
 below `--max-waiting` (resumable through `<script>.state`, `--skip-done`). Aggregation:
 `abaca/aggregate_campaign.py` -> `runs.csv`, `cells.csv`, `tuning.csv`, `summary_by_{T,m,L,space,dataset,neg}.md`,
 `failures.md`, each number with its cell count.
+
+### 3c. CorrTrack feature experiments (planned 2026-09-20, user's request)
+
+Three separate experiments showing capabilities the competitors do not have (or have only by restarting).
+Each is a small script under `abaca/` in the style of `ablation_corrtrack.py` (forked arms, resources, JSON), run as
+`experiment.oar` jobs, tuned parameters taken from the campaign hyperopt of the matching cell (or a dedicated
+hyperopt where the cell does not exist). Costs are in `abaca/campaign_budget.py` (side experiments).
+
+**F1. Window step down to 1 (`abaca/step_sweep.py`).** Question: how does the per-step cost of each method scale
+when the stream advances one point at a time, the finest online granularity? CorrTrack's sketch update is O(m k)
+per step whatever the step (one basic window of one point), bf_incremental updates every pair in O(1), bruteforce
+recomputes O(m^2 L W), BRAID/FilCorr/TSUBASA recompute their structures. Design: sp500 (W 60), USCRN temperature
+(W 168), Yellowstone (W 2000), step in {1, 2, 3, 5, 10, W/10}, T = 0.9, both spaces; arms bruteforce, bf_incremental,
+filcorr, braid, thinbraid, corrtrack, statstream (the grid arms need basic_window = step, which at step = 1 would
+make their sketch the raw window: excluded, stated). Output: per-step latency boxplots and throughput (steps per
+second) against step, sketch / candidate / validation shares, recall. Constraint to respect: n_lags a multiple of
+step (L fixed per dataset, n_lags = (L-1) step), basic_window a multiple of step (CorrTrack uses basic_window =
+W/12 for every step here, so the sketch stays the same object across the sweep).
+
+**F2. Dynamic window size and step mid-stream (`abaca/dynamic_window.py`).** The library has
+`CorrTrack.update_window_size` (W must stay a multiple of basic_window; sketch nodes re-derive the sketch from the
+retained basic-window dots, no from-scratch pass, verified bit-identical to a fresh tracker in
+`test_incremental_sketch_survives_window_resize`), `update_window_step` (basic_window must be a multiple of the new
+step; n_lagged_windows and the grid nodes follow) and `update_n_lags`. Design: three datasets (sp500 W 60/s 5, USCRN
+W 168/s 12, motes W 2880/s 288), T = 0.9, both spaces, three schedules over the stream: (a) W shrinks to W/2 at 1/3
+of the stream and returns to W at 2/3; (b) step halves at 1/3 and returns at 2/3; (c) both together. Three
+runners per schedule: CorrTrack adaptive (the update_* calls), CorrTrack restart (a new tracker at each change:
+warm-up of W_new/step steps with no output plus the from-scratch sketch), bruteforce following the same schedule
+(the truth after each change). Measured: recall / precision in the windows after each change, the per-step
+sketch and candidate times around the change (no spike expected for the adaptive tracker, a warm-up gap for the
+restart), the number of steps without output. Growing W needs history the nodes may have dropped: the adaptive
+tracker becomes exact after (W_new - W)/step steps; that latency is a result, not a defect, and is reported.
+Competitors: no dynamic change is implemented for them; the paper gives a capability table from their structures
+(StatStream digests survive a W change to another multiple of b; ParCorr/CSZ sketches, BRAID levels, TSUBASA and
+CorrJoin PAA must be rebuilt; all must restart on a step change). Pre-requisite: a test of update_window_step and of
+update_window_size with the lsh_sign_dot backend against a fresh tracker (the existing test uses brute_force).
+
+**F3. Multiple window sizes at once (`abaca/multi_window.py`).** `CorrTrackMultiWindow` computes the basic-window
+dots once for the largest size and derives the sketches of the shorter sizes from the trailing blocks; candidates
+are matched within a size. Design: sp500, USCRN temperature, ASOS air temperature; size sets {W/2, W} and
+{W/4, W/2, W}; T = 0.9, both spaces. Runners: the shared-sketch tracker, one independent CorrTrack per size (the
+naive way to get several horizons), bruteforce per size (truth). Measured: total and per-phase time of the
+shared tracker vs the sum of the independent trackers (the saving is the sketch stage and the shared index),
+recall per size, memory. Constraint (README of the multiwinsizes release): all sizes share one hyperparameter set;
+the campaign's hyperopt of the largest size is used, and the recall per size is what shows whether that is
+acceptable.
+
+### 0d (ii). Lag policy, made consistent (2026-09-23, user's decision)
+
+§0d settles negative correlation; lags were left to a per-arm judgement that had become inconsistent:
+ParCorr and CSZ ran on lagged cells (the shared index retains windows, so the same-cell vote is
+time-agnostic) while TSUBASA and CorrJoin were refused as "synchronous only", although neither needed a
+new mechanism either. The user asked for one rule. **The rule: enable the lagged run for every arm whose
+own test is time-agnostic, and disclose it per arm, exactly as §0d does for negatives.** The vocabulary is
+the same and now travels in the rows as `supports_lags`:
+
+| tier | meaning | arms |
+|---|---|---|
+| `native` | the paper searches lags and evaluates it | CorrTrack, FilCorr, BRAID / ThinBRAID, bruteforce, bf_incremental |
+| `specified` | the mechanism is in the paper, never evaluated there | StatStream (its timestamped grid, §3.6) |
+| `enabled_by_us` | the extension is ours: the method's own test applies unchanged to a retained window | ParCorr, CSZ, CorrJoin, TSUBASA |
+| `not_available` | would require designing part of their method | (none, for lags) |
+
+What "no new mechanism" means per arm, and what it costs:
+- **ParCorr / CSZ**: the grid keeps entries alive across the horizon; the same-cell vote and every
+  parameter are unchanged. ParCorr's own future work lists delayed correlations; CSZ's problem statement
+  claims "asynchronous" with no algorithm ([C] in the comparison plan's matrix).
+- **CorrJoin** (2026-09-23): both filters are Euclidean tests on per-window normalized projections and
+  never refer to the two windows sharing a timestamp; only their Alg. 1's outer loop is co-temporal. The
+  index probes the current window against the retained ones, the kernel gained an optional query subset,
+  and the canonical later-first rule is applied as in the other Pattern B arms. One degree of freedom,
+  disclosed: the SVD basis is taken from the CURRENT window's series (their `svdFunc`, unchanged) and the
+  retained windows are projected onto it. Verified: the lagged pair set equals bruteforce's exactly
+  (recall 1.000, precision 1.000) while still pruning (101,824 candidates of 2,068,522 pair-windows on the
+  USCRN W=96/step=12/n_lags=36 cell).
+- **TSUBASA** (2026-09-23): Lemma 1 is an ANOVA decomposition over aligned segments, and it holds verbatim
+  between x's segment at absolute position p and y's segment at p - l, each series' delta still taken
+  against its own window mean. The per-pair cross term becomes a CROSS-segment sketch, cached per
+  (later segment, lag) and reused by every query window containing it, which preserves TSUBASA's own
+  reuse property. Two consequences, both recorded: the probed lags must shift whole segments (the arm
+  refuses `window_step % basic_window != 0` rather than faking it), and the sketch state grows with the
+  number of probed lags, which is visible in peak RSS and is the honest price of the extension. Verified:
+  exact match with bruteforce on the lagged cell (recall 1.000, precision 1.000).
+
+`abaca/nway_compare.py`'s `SYNC_ONLY` is therefore empty and no arm is N/A on a lagged run; the tables'
+`‡` marker (capability ours, not the authors') now covers four arms instead of two.
 
 ## 4. Order of work
 
@@ -553,7 +639,7 @@ also functions as a bug detector.
 
 | arm | prediction | if it fails, suspect |
 |---|---|---|
-| TSUBASA | close to `exact_stomp`; both lose to CorrTrack as `m` grows | the per-pair sketch store, not the algorithm |
+| TSUBASA | close to `bf_incremental`; both lose to CorrTrack as `m` grows | the per-pair sketch store, not the algorithm |
 | BRAID | loses badly at `m=500+` (no pruning, `O(k^2)` pairs); competitive at small `k` | our port, if it wins at large `k` |
 | FilCorr | competitive at `m=500`, losing as `m` grows -- their own crossover against ParCorr is ~700 streams | whether our port is band-limited enough to be their method |
 | ParCorr/CSZ | wins on sparse data, ties on dense (the CorrJoin 20% finding, our own 17.6% tie) | the vote threshold, if recall is low |
@@ -622,7 +708,7 @@ Recorded because three arms cross a threshold between 500 and 2,000:
 | ParCorr/CSZ sketch size | `r ~ 8 log(n)/eps^2` | grows only logarithmically; `r = 60` still reasonable |
 
 **BRAID and `window_step` (entry (k)):** the harness lag grid is `window_step`-spaced, so at
-step=12 exact_stomp evaluates 15 lags while BRAID probes 70. BRAID's published saving is against
+step=12 bf_incremental evaluates 15 lags while BRAID probes 70. BRAID's published saving is against
 an every-lag baseline. **The lagged comparison must include a step=1 configuration**, or BRAID
 is asked to beat a baseline that already skips 90% of the lags.
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# CorrTrack four-way comparison: bruteforce vs exact_stomp vs filcorr vs CorrTrack (main).
+# CorrTrack four-way comparison: bruteforce vs bf_incremental vs filcorr vs CorrTrack (main).
 # Real fr_air_temperature_121_1 dataset, window_size=168/step=12/n_lags=168/thr=0.7.
 #
 # Submit from the Sophia frontend, from the CorrTrack working tree:

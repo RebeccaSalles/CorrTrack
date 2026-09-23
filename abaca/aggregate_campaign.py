@@ -37,7 +37,7 @@ from pathlib import Path
 
 import numpy as np
 
-ARMS = ("bruteforce", "exact_stomp", "filcorr", "tsubasa", "braid", "thinbraid", "corrtrack", "parcorr", "csz", "statstream", "corrjoin")
+ARMS = ("bruteforce", "bf_incremental", "filcorr", "tsubasa", "braid", "thinbraid", "corrtrack", "corrtrack_hamming", "parcorr", "csz", "statstream", "corrjoin")
 STEM_RE = re.compile(r"^(?P<dataset>.+?)_m(?P<m>\d+)_W(?P<W>\d+)_s(?P<step>\d+)_L(?P<nlags>\d+)_T(?P<T>[0-9.]+)(?P<diff>_diff)?_(?P<tag>pos|neg)$")
 RUN_FIELDS = ("status", "reason", "correlated", "total_candidates", "tested", "recall", "precision", "f1", "candidate_precision",
               "candidate_specificity", "candidate_specificity_is_lower_bound", "candidate_fpr", "candidate_false_positives",
@@ -101,6 +101,9 @@ def load(results_root: Path, power: dict | None = None):
             cell["kw_idle_power_w"] = job_min_power(power, node.get("hostname"), d["arms"])
         cells.append(cell)
         for arm, r in d["arms"].items():
+            # (2026-09-23) results written before the rename carry the old arm id; normalize so a mixed
+            # results tree aggregates into one table
+            arm = "bf_incremental" if arm == "exact_stomp" else arm
             row = dict(cell=name, **fac, arm=arm, **{k: r.get(k) for k in RUN_FIELDS}, **{f"res_{k}": (r.get("resources") or {}).get(k) for k in RES_FIELDS},
                        **{f"prof_{k}": prof.get(k) for k in ("density_at_threshold", "low_frequency_energy_share_mean", "lag1_autocorr_mean", "constant_window_fraction", "regime_source")})
             row["speedup_vs_bf"] = (bf["wall"] / r["wall"]) if (r.get("status") == "ok" and bf.get("wall") and r.get("wall")) else None
@@ -122,11 +125,12 @@ def load(results_root: Path, power: dict | None = None):
                                    calib_recall=t.get("recall"), calib_precision=t.get("precision"), calib_total_candidates=t.get("total_candidates"),
                                    tuning_status=t.get("status"), target_recall=t.get("target_recall"),
                                    **{f"job_{k}": v for k, v in time_v(results_root / "tuned" / name / "time_v.txt").items()}))
-        hp = list((results_root / "hyperopt" / name).rglob("best_params_corrtrack.json"))
-        if hp:
-            b = json.load(open(hp[0]))
-            tuning.append(dict(cell=name, **fac, arm="corrtrack", **{k: v for k, v in b.items() if not isinstance(v, (dict, list))},
-                               **{f"job_{k}": v for k, v in time_v(results_root / "hyperopt" / name / "time_v.txt").items()}))
+        for sub, arm in (("hyperopt", "corrtrack"), ("hyperopt_hamming", "corrtrack_hamming")):
+            hp = list((results_root / sub / name).rglob("best_params_corrtrack.json"))
+            if hp:
+                b = json.load(open(hp[0]))
+                tuning.append(dict(cell=name, **fac, arm=arm, **{k: v for k, v in b.items() if not isinstance(v, (dict, list))},
+                                   **{f"job_{k}": v for k, v in time_v(results_root / sub / name / "time_v.txt").items()}))
     return runs, cells, tuning
 
 

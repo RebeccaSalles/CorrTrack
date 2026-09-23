@@ -31,7 +31,7 @@ from library_corrtrack_parallel import (
     CSV_DELIMITER,
     COMPARISON_COLUMNS,
     Candidates,
-    Candidates_BF_ExactSTOMP,
+    Candidates_BF_Incremental,
     Candidates_BF_FilCorr,
     CorrTrack,
     CorrTrackMultiWindow,
@@ -908,6 +908,57 @@ class StableReproducedChangesTest(unittest.TestCase):
         self.assertEqual(int(mask.sum()), int(np.unique(library_corrtrack_parallel._proxy_rows_as_keys(library_corrtrack_parallel._proxy_canonical_pair_rows(cand))).size))
         recall = float((mask & ref["truth"]).sum() / max(1, ref["truth"].sum()))
         self.assertGreater(recall, 0.8, f"proxy recall {recall:.3f} with a series subsample")
+
+    def test_lagged_extension_of_tsubasa_and_corrjoin_matches_bruteforce(self):
+        # (2026-09-23, user) TSUBASA and CorrJoin are synchronous as published; both are now run on
+        # lagged cells as a disclosed extension (supports_lags="enabled_by_us"). Neither gains a new
+        # mechanism, so both must reproduce the bruteforce LAGGED pair set exactly: TSUBASA because its
+        # Lemma 1 holds between segments shifted by whole basic windows, CorrJoin because its two
+        # Euclidean filters are false-negative-free and its own line 14 verifies every survivor.
+        import tempfile
+        rng = np.random.default_rng(19)
+        m, n, W, step, n_lags, T = 24, 700, 48, 6, 18, 0.8
+        base_sig = np.cumsum(rng.normal(size=n + n_lags))
+        values = []
+        for i in range(m):
+            shift = (i % 4) * 6                                   # planted lags at 0, 6, 12, 18
+            values.append(base_sig[n_lags - shift: n_lags - shift + n] + 0.35 * rng.normal(size=n))
+        data = np.vstack([np.arange(n), np.vstack(values)])
+        ids = np.array([f"s{i}" for i in range(m)])
+        base = dict(window_size=W, window_step=step, basic_window=step, n_lags=n_lags, corr_threshold=T,
+                    neg_corr=False, preprocess=False, exec="sequential", parallel_sketch=False,
+                    parallel_candidates=False, parallel_validation=False, max_workers=0, monitor=False,
+                    track_min_dist=True, artifact_mode="final", artifact_buffer_max_rows=250000,
+                    artifact_merge_mode="merged", save_only_required_artifacts=True,
+                    save_maxlag_artifacts=False, verbose=False, testing=False, validation_metric="pearson")
+        with tempfile.TemporaryDirectory() as tmp:
+            bf, _, bf_flags = library_corrtrack_parallel.run_and_log_bruteforce(
+                "lagcheck", data, ids, dict(base, baseline_mode="bruteforce"), f"{tmp}/bf.csv",
+                metadata={"nodes": 0}, recall_by_window=True, verbose=False, testing=False)
+            self.assertGreater(int(bf["correlated"]), 0)
+            bf_rows = {tuple(r) for r in np.asarray(bf_flags.correlated_rows()[0]).tolist()}
+            self.assertGreater(len({r[2] - r[3] for r in bf_rows}), 1, "the fixture must contain lagged pairs")
+
+            ts, _, ts_flags = library_corrtrack_parallel.run_and_log_bruteforce(
+                "lagcheck", data, ids, dict(base, baseline_mode="tsubasa"), f"{tmp}/ts.csv",
+                metadata={"nodes": 0}, recall_by_window=True, verbose=False, testing=False)
+            self.assertEqual({tuple(r) for r in np.asarray(ts_flags.correlated_rows()[0]).tolist()}, bf_rows)
+            self.assertEqual(ts["supports_lags"], "enabled_by_us")
+
+            cj_params = dict(n_vectors=W // 4 + W // 2, seed=2468, seed_toggle=1357, preprocess=False,
+                             data_representation="sketch_paa_svd", candidate_backend="corrjoin_double_filter",
+                             corrjoin_ks=W // 4, corrjoin_ke=W // 2, corrjoin_kb=3)
+            cj, _, cj_flags = library_corrtrack_parallel.run_and_log_corrtrack(
+                "lagcheck", data, ids, base, cj_params, f"{tmp}/cj.csv", metadata={"nodes": 0, "alg": "corrjoin"},
+                recall_by_window=True, corr_val=True, monitor=False, verbose=False, testing=False)
+            self.assertEqual({tuple(r) for r in np.asarray(cj_flags.correlated_rows()[0]).tolist()}, bf_rows)
+            self.assertEqual(cj["supports_lags"], "enabled_by_us")
+            self.assertLess(int(cj["total_candidates"]), int(bf["total_candidates"]))   # it still prunes
+
+        # the alignment guard: with window_step not a multiple of basic_window the lags would misalign
+        with self.assertRaises(ValueError):
+            library_corrtrack_parallel.Candidates_BF_TSUBASA(
+                window_size=W, window_step=step, n_lags=n_lags, corr_threshold=T, basic_window=4)
 
     def test_kendall_tau_matches_scipy_exactly(self):
         # (2026-07-31) validation_metric="kendall" now routes through
@@ -2610,7 +2661,7 @@ class StableReproducedChangesTest(unittest.TestCase):
         self.assertEqual(actual_keys, expected_keys)
         self.assertEqual(int(out_rows[:, 2].max()), big_t + 12345)  # no truncation/overflow
 
-    def test_filcorr_candidates_node_matches_exact_stomp_pearson_full_band(self):
+    def test_filcorr_candidates_node_matches_bf_incremental_pearson_full_band(self):
         # (2026-09-11) FilCorr competitor baseline port (Zhong, Souza, Mueen --
         # ICDM 2020, from the colleague's feat/v2-engine branch -- see
         # docs/implementation_log.md's 2026-09-11 entry). Candidates_BF_FilCorr
@@ -2638,7 +2689,7 @@ class StableReproducedChangesTest(unittest.TestCase):
                     window_size, window_step, n_lags, corr_threshold, neg_corr=True,
                     filcorr_fs=0.0, filcorr_ft=0.5, filcorr_sampling_rate=1.0,
                 )
-                st = Candidates_BF_ExactSTOMP(
+                st = Candidates_BF_Incremental(
                     window_size, window_step, n_lags, corr_threshold, neg_corr=True,
                 )
                 ids = [f"s{i}" for i in range(n_series)]
@@ -4135,9 +4186,9 @@ class StableReproducedChangesTest(unittest.TestCase):
         )
         return record
 
-    def test_tsubasa_node_matches_exact_stomp_pearson(self):
+    def test_tsubasa_node_matches_bf_incremental_pearson(self):
         # Candidates_BF_TSUBASA recovers Pearson from per-basic-window sketches
-        # (their Lemma 1). It is exact, so it must match exact_stomp key-for-key
+        # (their Lemma 1). It is exact, so it must match bf_incremental key-for-key
         # and value-for-value at lag 0. Exercised with window_step < basic_window
         # so the window start is usually OFF the basic-window grid, forcing the
         # partial head/tail segments (their arbitrary-query-window case) and
@@ -4152,7 +4203,7 @@ class StableReproducedChangesTest(unittest.TestCase):
             n_steps = max(60, (window_size // step_len) + 30)
             with self.subTest(window_size=window_size, basic_window=basic_window, step=window_step):
                 ts = Candidates_BF_TSUBASA(window_size, window_step, 0, corr_threshold, basic_window, neg_corr=True)
-                st = Candidates_BF_ExactSTOMP(window_size, window_step, 0, corr_threshold, neg_corr=True)
+                st = Candidates_BF_Incremental(window_size, window_step, 0, corr_threshold, neg_corr=True)
                 ids = [f"s{i}" for i in range(n_series)]
                 t = 0
                 max_abs_err, mismatch, any_accepted, total_ts, total_st = 0.0, 0, False, 0, 0
@@ -4181,12 +4232,16 @@ class StableReproducedChangesTest(unittest.TestCase):
                 # cache never holds segments that have left the window
                 self.assertLessEqual(len(ts._segment_cache), window_size // basic_window + 1)
 
-    def test_tsubasa_refuses_lags(self):
-        # 0d policy applied to lags: TSUBASA has none, so the arm refuses
-        # n_lags > 0 rather than silently extending the method.
+    def test_tsubasa_lag_tier_and_alignment_guard(self):
+        # (2026-09-23, user) replaces test_tsubasa_refuses_lags: TSUBASA now runs on lagged cells as a
+        # disclosed extension (its Lemma 1 holds between segments shifted by whole basic windows), so the
+        # 0d policy is applied through the tier rather than a refusal. What is still refused is a
+        # configuration whose probed lags would NOT shift whole segments, since there the decomposition
+        # does not apply and running it would be faking the method.
+        self.assertEqual(Candidates_BF_TSUBASA(32, 8, 8, 0.5, 8).supports_lags, "enabled_by_us")
+        self.assertEqual(Candidates_BF_TSUBASA(32, 8, 0, 0.5, 8).supports_lags, "native")
         with self.assertRaises(ValueError):
-            Candidates_BF_TSUBASA(32, 8, 8, 0.5, 8)
-        Candidates_BF_TSUBASA(32, 8, 0, 0.5, 8)  # n_lags=0 is fine
+            Candidates_BF_TSUBASA(32, 8, 8, 0.5, 5)      # window_step 8 is not a multiple of basic_window 5
 
     def test_run_and_log_bruteforce_tsubasa_matches_bruteforce_and_meets_contract(self):
         # End-to-end dispatch (baseline_mode="tsubasa" -> run_bf -> run_bf_tsubasa ->
@@ -4214,7 +4269,7 @@ class StableReproducedChangesTest(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmp:
             counts = {}
-            for mode in ("bruteforce", "exact_stomp", "filcorr", "tsubasa"):
+            for mode in ("bruteforce", "bf_incremental", "filcorr", "tsubasa"):
                 extra = dict(filcorr_fs=0.0, filcorr_ft=0.5, filcorr_sampling_rate=1.0) if mode == "filcorr" else {}
                 record = self._bf_end_to_end(mode, data, ids, base_config, tmp, **extra)
                 counts[mode] = record["correlated"]
@@ -4222,10 +4277,10 @@ class StableReproducedChangesTest(unittest.TestCase):
                     self._assert_competitor_contract(record, pattern="A")
                 # (2026-09-17) the per-arm evidence tier reaches the record for Pattern A too
                 self.assertEqual(record["supports_neg_corr"],
-                                 {"bruteforce": "native", "exact_stomp": "native",
+                                 {"bruteforce": "native", "bf_incremental": "native",
                                   "filcorr": "enabled_by_us", "tsubasa": "native"}[mode], mode)
         self.assertGreater(counts["bruteforce"], 0)
-        for mode in ("exact_stomp", "filcorr", "tsubasa"):
+        for mode in ("bf_incremental", "filcorr", "tsubasa"):
             self.assertEqual(counts[mode], counts["bruteforce"], mode)
 
     # ------------------------------------------------------------------
@@ -4245,11 +4300,11 @@ class StableReproducedChangesTest(unittest.TestCase):
         levels = Candidates_BF_BRAID._build_levels(12, 16)
         self.assertEqual(levels, [(0, list(range(0, 13)))])
 
-    def test_braid_exact_anchor_matches_exact_stomp_when_2b_exceeds_n_lags(self):
+    def test_braid_exact_anchor_matches_bf_incremental_when_2b_exceeds_n_lags(self):
         # The degenerate-exact configuration (plan A2 anchor): with 2*b > n_lags,
         # level 0 covers every lag at raw resolution -- no smoothing, no
         # interpolation -- so BRAID in "all_lags" mode must reproduce the
-        # exact_stomp lagged pair set key-for-key and value-for-value. Both the
+        # bf_incremental lagged pair set key-for-key and value-for-value. Both the
         # plain (rolling per-pair sums) and, at d0 >> W, the Thin variant are
         # checked; Thin is only approximately exact so gets a loose tolerance
         # on values but the same pair set is still required at this d0.
@@ -4257,7 +4312,7 @@ class StableReproducedChangesTest(unittest.TestCase):
         m, W, step, n_lags = 8, 32, 4, 12
         ids = [f"s{i}" for i in range(m)]
         br = Candidates_BF_BRAID(W, step, n_lags, 0.3, neg_corr=True, b=16, report_mode="all_lags")
-        st = Candidates_BF_ExactSTOMP(W, step, n_lags, 0.3, neg_corr=True)
+        st = Candidates_BF_Incremental(W, step, n_lags, 0.3, neg_corr=True)
         self.assertEqual(len(br.levels), 1)
         mism, maxerr, acc, t = 0, 0.0, 0, 0
         for k in range(60):
@@ -4644,7 +4699,7 @@ class StableReproducedChangesTest(unittest.TestCase):
         # validation downstream), (d) show the published tuning surface: recall
         # non-decreasing in c and in 1/f, and (e) refuse neg_corr=True.
         data, ids, W, step, N = self._parcorr_dataset()
-        st = Candidates_BF_ExactSTOMP(W, step, 0, 0.7, neg_corr=False)
+        st = Candidates_BF_Incremental(W, step, 0, 0.7, neg_corr=False)
         gt = {}
         for s0 in range(0, N, step):
             acc, _, _ = st.run(data[:, s0:s0 + step], ids, verbose=False, testing=False, numeric_rows=False)
@@ -4682,7 +4737,7 @@ class StableReproducedChangesTest(unittest.TestCase):
         # (one huge cell, one required hit) the candidate set is the full pair
         # set and the validated set must equal brute force's exactly.
         data, ids, W, step, N = self._parcorr_dataset()
-        st = Candidates_BF_ExactSTOMP(W, step, 0, 0.7, neg_corr=False)
+        st = Candidates_BF_Incremental(W, step, 0, 0.7, neg_corr=False)
         gt = {}
         for s0 in range(0, N, step):
             acc, _, _ = st.run(data[:, s0:s0 + step], ids, verbose=False, testing=False, numeric_rows=False)
@@ -4770,7 +4825,7 @@ class StableReproducedChangesTest(unittest.TestCase):
         return np.vstack([np.arange(N), X]), [f"s{i}" for i in range(m)], W, step, N
 
     def _gt(self, data, ids, W, step, n_lags, T, neg):
-        st = Candidates_BF_ExactSTOMP(W, step, n_lags, T, neg_corr=neg); g = {}
+        st = Candidates_BF_Incremental(W, step, n_lags, T, neg_corr=neg); g = {}
         for s0 in range(0, data.shape[1], step):
             acc, _, _ = st.run(data[:, s0:s0 + step], ids, verbose=False, testing=False, numeric_rows=False)
             g.update(acc)
@@ -4968,10 +5023,24 @@ class StableReproducedChangesTest(unittest.TestCase):
             CorrTrack(window_size=W, basic_window=6, window_step=step, n_vectors=60, n_lags=0, corr_threshold=0.7,
                       neg_corr=True, exec="sequential", data_representation="sketch_paa_svd",
                       candidate_backend="corrjoin_double_filter")
-        with self.assertRaises(ValueError):
-            CorrTrack(window_size=W, basic_window=6, window_step=step, n_vectors=60, n_lags=12, corr_threshold=0.7,
-                      neg_corr=False, exec="sequential", data_representation="sketch_paa_svd",
-                      candidate_backend="corrjoin_double_filter")
+        # (2026-09-23, user) lags are now ENABLED for this arm and disclosed as ours: the constructor
+        # accepts n_lags > 0 and the index declares the tier, while neg_corr stays refused above.
+        ct_lagged = CorrTrack(window_size=W, basic_window=6, window_step=step, n_vectors=60, n_lags=12, corr_threshold=0.7,
+                              neg_corr=False, exec="sequential", data_representation="sketch_paa_svd",
+                              candidate_backend="corrjoin_double_filter")
+        self.assertEqual(ct_lagged.n_lags, 12)
+        ix3 = library_corrtrack_parallel.CorrJoinDoubleFilterIndex(
+            n_vectors=ks + ke, ks=ks, ke=ke, kb=3, eps1=np.sqrt(2 * ks * (1 - T) / W), eps2=np.sqrt(2 * ke * (1 - T) / W),
+            n_lagged_windows=2)
+        self.assertEqual(ix3.supports_lags, "enabled_by_us")
+        # two windows alive at different times: the pair is found once, emitted from the later entry
+        ix3.insert_many(None, np.arange(2), np.vstack([vx, vx * 0.999 + 1e-4]), np.array([0, 1]),
+                        np.array([10, 4]), np.full(2, W), np.arange(2))
+        rows_lagged = ix3.find_pair_rows_full_cosine(np.array([0]), 0.0, 0.0)
+        self.assertEqual(rows_lagged.shape[0], 1)
+        self.assertTrue(ix3.last_lagged_query)
+        self.assertEqual(int(rows_lagged[0, 2]), 10)             # later time first
+        self.assertEqual(int(rows_lagged[0, 3]), 4)
 
     def test_run_and_log_corrtrack_corrjoin_knobs_thread_and_pattern_b_contract(self):
         data, ids, W, step, N = self._corrjoin_dataset("walks", m=40)

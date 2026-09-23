@@ -56,9 +56,17 @@ def our_jobs(user: str | None = None) -> dict[str, int]:
     return counts
 
 
-def nway_done(stem: str, results_root: str) -> bool:
+def block_tags(block: str) -> list[str]:
+    """(2026-09-21) the labelled runs a block submits ("pos", "neg", or both): a script may carry one run
+    per cell (abaca/campaign_m500_tables.py keeps neg_corr only), so the expected job count and the
+    done-check follow the block instead of assuming six jobs / two runs."""
+    tags = re.findall(r'^echo "\S+_(pos|neg) H=', block, flags=re.M)
+    return tags or ["pos", "neg"]
+
+
+def nway_done(stem: str, results_root: str, tags=("pos", "neg")) -> bool:
     root = Path(os.path.expandvars(results_root))
-    return (root / "nway" / f"{stem}_pos" / "nway.json").exists() and (root / "nway" / f"{stem}_neg" / "nway.json").exists()
+    return all((root / "nway" / f"{stem}_{t}" / "nway.json").exists() for t in tags)
 
 
 def main() -> None:
@@ -79,7 +87,7 @@ def main() -> None:
     done = set(state_path.read_text().split()) if state_path.exists() else set()
     results_root = os.environ.get("RESULTS_ROOT", "$HOME/corrtrack_abaca_results")
     todo = [(s, b) for s, b in blocks if s not in done and (not args.only or any(o in s for o in args.only))
-            and not (args.skip_done and nway_done(s, results_root))]
+            and not (args.skip_done and nway_done(s, results_root, block_tags(b)))]
     print(f"{len(blocks)} cells in script, {len(done)} already submitted, {len(todo)} to go; "
           f"limits: waiting<{args.max_waiting}, total<{args.max_total}, {args.blocks_per_round} cells per round, poll {args.poll:.0f}s", flush=True)
     if not args.dry_run and not os.environ.get("SNAPSHOT"):
@@ -100,10 +108,10 @@ def main() -> None:
                 print(f"would submit {stem}")
             else:
                 r = subprocess.run(["bash", "-c", header + block], capture_output=True, text=True)
-                ids = re.findall(r"(?:H|T|N)=(\d+)", r.stdout)                 # the block echoes "<stem>_<tag> H=.. T=.. N=.."
+                ids = re.findall(r"(?:H2|H|T|N)=(\d+)", r.stdout)              # the block echoes "<stem>_<tag> H=.. T=.. [H2=..] N=.."
                 err = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else ""
                 print(f"{time.strftime('%F %T')} submitted {stem}: jobs {','.join(ids) or 'NONE'} rc={r.returncode} {err}", flush=True)
-                if r.returncode == 0 and len(ids) == 6:
+                if r.returncode == 0 and len(ids) == len(re.findall(r"\$\(submit ", block)):   # one id per submitted job
                     with state_path.open("a") as fh:
                         fh.write(stem + "\n")
                 else:

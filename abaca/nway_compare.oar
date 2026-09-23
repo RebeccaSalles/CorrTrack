@@ -35,12 +35,19 @@ EXTRA_ARGS="${EXTRA_ARGS:-}"                # e.g. "--n-obs 20000 --set corrjoin
 EXTRA_ARGS="${EXTRA_ARGS//+/ }"             # '+' stands for a space inside the single EXTRA_ARGS token
 PREPROCESS="${PREPROCESS:-0}"                 # 1: the cell runs on first differences (all arms, the truth, the tuning)
 PREPROCESS_FLAG=$([ "$PREPROCESS" = "1" ] && echo --preprocess || echo "")
+EVAL_SPAN="${EVAL_SPAN:-holdout}"             # full: every arm runs on the whole stream (2026-09-21, user); tuning stays on the first TRAIN_RATIO
 COMPETITOR_PARAMS="${COMPETITOR_PARAMS:-}"  # dir with best_params_<arm>.json from tune_competitors.oar
 BEST_PARAMS="${BEST_PARAMS:-}"              # CorrTrack's own best_params_corrtrack.json
 HYPEROPT_DIR="${HYPEROPT_DIR:-}"            # or: the hyperopt_corrtrack.oar OUT_DIR to search for it
 if [ -z "$BEST_PARAMS" ] && [ -n "$HYPEROPT_DIR" ]; then
   BEST_PARAMS=$(find "$HYPEROPT_DIR" -name best_params_corrtrack.json 2>/dev/null | head -1)
   echo "best_params from HYPEROPT_DIR: ${BEST_PARAMS:-NOT FOUND}"
+fi
+BEST_PARAMS_HAMMING="${BEST_PARAMS_HAMMING:-}"      # the lsh_hamming_exact grid's best_params_corrtrack.json (corrtrack_hamming arm)
+HYPEROPT_HAMMING_DIR="${HYPEROPT_HAMMING_DIR:-}"
+if [ -z "$BEST_PARAMS_HAMMING" ] && [ -n "$HYPEROPT_HAMMING_DIR" ]; then
+  BEST_PARAMS_HAMMING=$(find "$HYPEROPT_HAMMING_DIR" -name best_params_corrtrack.json 2>/dev/null | head -1)
+  echo "best_params (hamming) from HYPEROPT_HAMMING_DIR: ${BEST_PARAMS_HAMMING:-NOT FOUND}"
 fi
 if [ -z "$BEST_PARAMS" ]; then
   # (2026-09-18) no tuned CorrTrack parameters: nway_compare.py refuses the corrtrack arm; fail the job
@@ -85,8 +92,8 @@ echo "== N-way comparison =="
 # shellcheck disable=SC2086
 python abaca/nway_compare.py --dataset-config "$DATASET_CONFIG" --arms "$ARMS" \
   --window-size "$WINDOW_SIZE" --window-step "$WINDOW_STEP" --basic-window "$BASIC_WINDOW" --n-lags "$N_LAGS" --corr-threshold "$THR" \
-  ${COMPETITOR_PARAMS:+--competitor-params "$COMPETITOR_PARAMS"} ${BEST_PARAMS:+--best-params "$BEST_PARAMS"} \
-  $NEG_CORR_FLAG $PREPROCESS_FLAG $EXTRA_ARGS ${RUN_NAME:+--cell "$RUN_NAME"} --out "$RUN_DIR/nway.json" 2>&1 | tee "$RUN_DIR/nway.log"
+  ${COMPETITOR_PARAMS:+--competitor-params "$COMPETITOR_PARAMS"} ${BEST_PARAMS:+--best-params "$BEST_PARAMS"} ${BEST_PARAMS_HAMMING:+--best-params-hamming "$BEST_PARAMS_HAMMING"} \
+  $NEG_CORR_FLAG $PREPROCESS_FLAG --eval-span "$EVAL_SPAN" $EXTRA_ARGS ${RUN_NAME:+--cell "$RUN_NAME"} --out "$RUN_DIR/nway.json" 2>&1 | tee "$RUN_DIR/nway.log"
 COMPARE_RC=${PIPESTATUS[0]}
 
 rm -rf "$TMPDIR"

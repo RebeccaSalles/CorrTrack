@@ -27,7 +27,7 @@ NEG_CORR = True
 
 # Baseline used by corrtrack_run_bruteforce / full experiments.
 # - "bruteforce": stable exhaustive baseline.
-# - "exact_stomp": exact incremental rolling-dot baseline for benchmarking.
+# - "bf_incremental": exact incremental rolling-dot baseline for benchmarking.
 # - "filcorr": Zhong/Souza/Mueen (ICDM 2020) competitor -- band-pass Pearson via
 #   Parseval's identity on FFT coefficients. See FILCORR_FS/FT below and
 #   Candidates_BF_FilCorr in library_corrtrack_parallel.py.

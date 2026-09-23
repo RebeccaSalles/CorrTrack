@@ -1,4 +1,4 @@
-"""Four-way comparison: bruteforce (plain) vs exact_stomp vs filcorr vs CorrTrack (main,
+"""Four-way comparison: bruteforce (plain) vs bf_incremental vs filcorr vs CorrTrack (main,
 LSH-accelerated), on the real fr_air_temperature_121_1 dataset. Abaca version: no memory
 capping/subprocess isolation needed (192GB node, vs the 7.8GB WSL box this was developed
 against) -- single process, in-memory metrics via CorrTrack.compute_metrics_bf.
@@ -43,7 +43,7 @@ base_config = dict(
 
 results = {}
 
-for mode in ("bruteforce", "exact_stomp", "filcorr"):
+for mode in ("bruteforce", "bf_incremental", "filcorr"):
     cfg = dict(base_config, baseline_mode=mode, filcorr_fs=0.0, filcorr_ft=0.5,
                filcorr_sampling_rate=1.0)
     t0 = time.perf_counter()
@@ -100,7 +100,7 @@ print(f"corrtrack    done: wall={wall:.2f}s correlated={record_ct['correlated']}
 bf_flags = results["bruteforce"]["_flags"]
 bf_total_candidates = results["bruteforce"].get("total_candidates") or results["bruteforce"].get("tested")
 
-for mode in ("exact_stomp", "filcorr", "corrtrack"):
+for mode in ("bf_incremental", "filcorr", "corrtrack"):
     metrics = CorrTrack.compute_metrics_bf(
         results[mode]["_flags"], bf_flags, windows=True, total_pairs_bf=bf_total_candidates,
     )
@@ -115,7 +115,7 @@ header = (f"{'method':12s} {'wall_s':>8s} {'cand_s':>8s} {'val_s':>8s} {'monit_s
           f"{'correlated':>11s} {'precision':>9s} {'recall':>7s} {'speedup':>8s}")
 print(header)
 bf_wall = results["bruteforce"]["_wall"]
-for mode in ("bruteforce", "exact_stomp", "filcorr", "corrtrack"):
+for mode in ("bruteforce", "bf_incremental", "filcorr", "corrtrack"):
     r = results[mode]
     prec = r.get("_precision")
     rec = r.get("_recall")

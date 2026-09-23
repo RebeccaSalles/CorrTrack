@@ -9,7 +9,7 @@ correction and it changes several rows.
 ParCorr's cell size is **decided** in §2.3: the v1 `_compute_base_cell_size` formula is not used.
 **All primary sources are now read** (FilCorr, TSUBASA and the StatStream technical report
 obtained 2026-09-16). No `[?]` cells remain in the capability matrix. See §10.4.
-Follows on from the four-way comparison already done (bruteforce / exact_stomp / filcorr /
+Follows on from the four-way comparison already done (bruteforce / bf_incremental / filcorr /
 CorrTrack -- see `docs/implementation_log.md`'s 2026-09-12 entry).
 
 **The engineering plan lives in `docs/competitor_implementation_plan.md`** (rev. 2026-09-16):
@@ -260,7 +260,7 @@ so either would have produced CorrJoin numbers that are quietly wrong in *both* 
 speed. This was the highest-priority item on the old §10.1 checklist and it is now closed.
 
 **Incremental correlation across strides** (paper Eq. 2): maintained via the five running sums
-`s1..s5` (`Σx, Σy, Σx², Σy², Σxy`) -- the same sufficient-statistics form `exact_stomp` already
+`s1..s5` (`Σx, Σy, Σx², Σy², Σxy`) -- the same sufficient-statistics form `bf_incremental` already
 uses, so the port reuses machinery rather than inventing it. PAA mean vectors update in
 `O(h + k)` per stride. The paper reports (Fig. 16a) that stride has only a **slight** effect on
 runtime -- note this is the opposite of the thesis's finding, which was an artefact of
@@ -297,7 +297,7 @@ SIGMOD 2023 paper, which is worth more in the write-up than our own measurement 
 - **TSUBASA's position (paper Fig. 10):** the paper measures TSUBASA as having "a similar time
   complexity as the naive IncP since it does not reduce the number of pairwise comparisons,"
   an order of magnitude worse than its own baseline. That corroborates §5's assessment that
-  TSUBASA occupies `exact_stomp`'s slot rather than being a pruning rival, and independently
+  TSUBASA occupies `bf_incremental`'s slot rather than being a pruning rival, and independently
   justifies keeping it ranked *secondary*.
 
 **The paper's own baselines** (for the §6.5 reproduction check): ϵ-kdB tree, **TSUBASA**,
@@ -725,7 +725,7 @@ finds hard to dismiss:
 `baseline_mode="tsubasa"` + `Candidates_BF_TSUBASA` beside `Candidates_BF_ExactSTOMP` and
 `Candidates_BF_FilCorr`. **It is exact, so it must reproduce the bruteforce pair set precisely**;
 that expectation is the faithfulness anchor, the same discipline that caught two real bugs in
-the FilCorr port. Its distinct claim against `exact_stomp` is *arbitrary query windows from
+the FilCorr port. Its distinct claim against `bf_incremental` is *arbitrary query windows from
 precomputed per-pair sketches*, not speed, and the comparison should say so.
 
 ---
@@ -797,7 +797,7 @@ practice, so `m` grows with the stream.
 Three ideas, in the paper's own order:
 1. **Sufficient statistics.** `R(l)` is algebraic, so five running numbers suffice
    (`Sx, Sxx, Sy, Syy, Sxy(l)`), with `Sxy(l) = Σ_{t>l} x_t · y_{t−l}`. **These are the same
-   five sums `exact_stomp` and CorrJoin use** -- the third independent consumer, which argues
+   five sums `bf_incremental` and CorrJoin use** -- the third independent consumer, which argues
    for factoring that machinery out once rather than three times.
 2. **Geometric probing.** Compute `R(l)` only at `l = 0, 1, 2, 4, ..., 2^i`, then **cubic-spline
    interpolate** between the probed lags and locate the maximum with **Brent's method**. The
@@ -901,7 +901,7 @@ into one speed number.
 Every method here, exact or approximate, decomposes the same way. Phases that are *zero* for a
 method are informative, not gaps:
 
-| phase | countable quantity | BF | exact_stomp / TSUBASA | FilCorr | BRAID | ParCorr / StatStream / CorrJoin / CorrTrack |
+| phase | countable quantity | BF | bf_incremental / TSUBASA | FilCorr | BRAID | ParCorr / StatStream / CorrJoin / CorrTrack |
 |---|---|---|---|---|---|---|
 | **summarize** | coefficients produced per window; values read | 0 | sufficient statistics | `B` band coefficients | `O(log n)` levels x `b` coefficients | `k` sketch dims (+ SVD for CorrJoin) |
 | **prune** | index probes, sketch-space distance/dot computations | **0** | **0** | **0** | **0** | the entire contribution |
@@ -941,7 +941,7 @@ the backing evidence.
 This project already has a worked precedent to cite: the FilCorr port's real-decomposition fix
 (a complex matmul whose imaginary half was discarded) and cross-step FFT memoization (the same
 window's FFT recomputed ~15x) were handicap-removals, while a `prange` multi-core kernel was
-**deliberately declined** because `exact_stomp` does not get one. Recorded in
+**deliberately declined** because `bf_incremental` does not get one. Recorded in
 `docs/implementation_log.md`'s 2026-09-11 (d) entry -- i.e. the policy is documented as it was
 applied, not reconstructed afterwards.
 
@@ -1126,11 +1126,11 @@ automated test:
 | phase | method | why this order | main risk |
 |---|---|---|---|
 | 0 | protocol + papers | record §6 decisions; **CorrJoin and ParCorr papers obtained and extracted (§10.1 and §10.2 item 1 closed)** -- remaining: StatStream (VLDB 2002) parameters and BRAID's TKDD 2010 extension, §10.2; clone the reference implementations and the original datasets | no blocker left |
-| 1 | **shared prerequisites** | (a) the **normalize-window-before-reducing** path, needed by *both* ParCorr and CorrJoin (§2 constraint 2, §3.1 step 1); (b) factor out the **five-sum sufficient-statistics** helper now that `exact_stomp`, CorrJoin *and* BRAID all need it | small; both are consolidation, not invention |
+| 1 | **shared prerequisites** | (a) the **normalize-window-before-reducing** path, needed by *both* ParCorr and CorrJoin (§2 constraint 2, §3.1 step 1); (b) factor out the **five-sum sufficient-statistics** helper now that `bf_incremental`, CorrJoin *and* BRAID all need it | small; both are consolidation, not invention |
 | 2 | **ParCorr** | cheapest: sketch already exists, grid+vote code exists in the v1.0 snapshot (disabled -- see §2.2), user knows it intimately, and all parameters are now paper-confirmed (§2.1) | re-enabling the vote correctly (`f=0.7`, not the snapshot's effective `f=1.0`) and deciding the cell-size question (§2.2, last row) |
 | 3 | **StatStream** | **the closest structural peer to CorrTrack** (§4.3) and the one a reviewer will press hardest on. Shares the grid work with phase 2 and the FFT caching with FilCorr. **Build the [E] core first** (synchronous pruning, the only part its authors evaluated); the [S] lag and negative-correlation paths are a second, separately-labelled step (§5b.6) | bigger than the earlier draft assumed: incremental DFT (Lemma 6 digests), the timestamped never-cleared lagged grid, and the `O(k·n²)` unaligned-window table -- **all of it unevaluated by its authors**, so there is no published number to check our port against |
 | 4 | **BRAID** | the only lag method here that does **no pruning**, so it isolates the lag mechanism; and the only arm whose approximation lands on the lag value. No SVD, no index; hierarchical sums + spline + Brent | the comparability mismatches in §5a.3, especially the different accuracy axis -- design that reporting before coding |
-| 5 | **TSUBASA** | exact, so it has a hard correctness anchor; structurally close to existing `exact_stomp`. Easy enough to slot anywhere | low |
+| 5 | **TSUBASA** | exact, so it has a hard correctness anchor; structurally close to existing `bf_incremental`. Easy enough to slot anywhere | low |
 | 6 | **CorrJoin** | **no longer gated** and no longer the hardest -- spec is in hand (§3.1), the SVD is a cheap per-window `m x ks` decomposition, and the original datasets are available for validation | the two-stage filter plumbing; ε and lag semantics resolved |
 
 ## 8. Infrastructure already in place
@@ -1158,7 +1158,7 @@ cost, but **now on one axis instead of two**: the **specification risk is elimin
 the paper resolved the ε formulas and the lag question, both of which the derivative sources
 had wrong), leaving only the **engineering** cost of incremental SVD over sliding windows, which
 is real but bounded. Its incremental correlation update turns out to reuse the same
-sufficient-statistics form `exact_stomp` already implements, which reduces that cost further.
+sufficient-statistics form `bf_incremental` already implements, which reduces that cost further.
 
 The fallback if time runs short: ParCorr + StatStream + **BRAID** implemented, TSUBASA and
 CorrJoin discussed as related work with the omission stated plainly. Two asymmetries to weigh
