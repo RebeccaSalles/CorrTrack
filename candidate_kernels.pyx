@@ -554,6 +554,18 @@ cdef inline int _popcount64(uint64_t x) noexcept nogil:
     return count
 
 
+cdef extern from *:
+    """
+    /* (2026-09-24) gcc/clang lower this to a single POPCNT under -march=native (the flag this
+       extension is already built with; see setup_cython.py), and fall back to a libgcc routine
+       everywhere else, so it is portable as well as faster than the SWAR sequence below. The SWAR
+       version is kept and still used by nothing hot -- see _popcount64_swar's own comment for why
+       it exists at all (it replaced a Kernighan loop that was a real, measured 0.76x regression). */
+    static inline long _ck_popcount64(unsigned long long x) { return (long)__builtin_popcountll(x); }
+    """
+    int64_t _ck_popcount64(uint64_t x) nogil
+
+
 cdef inline int64_t _popcount64_swar(uint64_t x) nogil:
     # (2026-07-10) Branch-free O(1) SWAR popcount for HammingExactIndex's
     # per-candidate Hamming distance scan -- deliberately
@@ -635,6 +647,7 @@ cdef inline Py_ssize_t _hamming_best_dist(int64_t[:, ::1] words,
                                           int64_t q_entry,
                                           int64_t cand,
                                           bint signed_abs) nogil:
+    # (2026-09-24) Same distance, same masking, hardware popcount instead of the SWAR sequence.
     cdef Py_ssize_t hw
     cdef Py_ssize_t hpos = 0, hneg = 0, hbest
     cdef uint64_t qw_word, cw_word, xw_mask
@@ -642,9 +655,37 @@ cdef inline Py_ssize_t _hamming_best_dist(int64_t[:, ::1] words,
         qw_word = <uint64_t>words[q_entry, hw]
         cw_word = <uint64_t>words[cand, hw]
         xw_mask = word_masks[hw]
-        hpos = hpos + _popcount64_swar((qw_word ^ cw_word) & xw_mask)
+        hpos = hpos + _ck_popcount64((qw_word ^ cw_word) & xw_mask)
         if signed_abs:
-            hneg = hneg + _popcount64_swar((qw_word ^ (~cw_word)) & xw_mask)
+            hneg = hneg + _ck_popcount64((qw_word ^ (~cw_word)) & xw_mask)
+    hbest = hpos
+    if signed_abs and hneg < hbest:
+        hbest = hneg
+    return hbest
+
+
+cdef inline Py_ssize_t _hamming_best_dist_q(uint64_t *q_words,
+                                            int64_t[:, ::1] words,
+                                            uint64_t[:] word_masks,
+                                            Py_ssize_t n_words,
+                                            int64_t cand,
+                                            bint signed_abs) nogil:
+    """(2026-09-24) `_hamming_best_dist` with the QUERY's words already masked and in registers.
+
+    The exhaustive scan re-read `words[q_entry, hw]` -- a strided 2D memoryview load -- once per
+    candidate per word, for every one of the alive_count candidates of every query. The query is
+    fixed for the whole scan, so it is read once into a small stack array by the caller and the
+    mask is folded in there too. Identical arithmetic: (q ^ c) & mask == (q & mask) ^ (c & mask).
+    """
+    cdef Py_ssize_t hw
+    cdef Py_ssize_t hpos = 0, hneg = 0, hbest
+    cdef uint64_t cw_word, xw_mask
+    for hw in range(n_words):
+        xw_mask = word_masks[hw]
+        cw_word = (<uint64_t>words[cand, hw]) & xw_mask
+        hpos = hpos + _ck_popcount64(q_words[hw] ^ cw_word)
+        if signed_abs:
+            hneg = hneg + _ck_popcount64((q_words[hw] ^ (~cw_word)) & xw_mask)
     hbest = hpos
     if signed_abs and hneg < hbest:
         hbest = hneg
@@ -5017,6 +5058,17 @@ cdef class HammingExactIndex:
     cdef object _entry_ids
     cdef object _alive_list      # (capacity,) int64 -- packed list of currently-alive node indices
     cdef object _alive_pos       # (capacity,) int64 -- node_idx -> position within _alive_list
+    # (2026-09-24) The scan's own copy of the three fields it reads for EVERY alive node, laid out by
+    # alive-list POSITION instead of by node index. The scan walks positions 0..alive_count-1 in order, but
+    # the node ids it got from _alive_list are scattered, so `words[node]`, `_time[node]` and `_sid_idx[node]`
+    # were three random loads per node: measured at 7.9 ns per node visit, about 24 cycles, for an XOR and a
+    # popcount. Mirrored here they are three sequential streams (25 bytes per node, ~11 KB at m=444, L1
+    # resident). They are a mirror, never a second source of truth: written only where _alive_list itself is
+    # written (the append in _insert_one and the swap-remove in _remove_from_alive_list), and a churn test
+    # asserts they still agree with the node-indexed arrays after repeated insert/drop rounds.
+    cdef object _alive_words     # (capacity, n_words) int64 -- _words[alive_list[pos]]
+    cdef object _alive_time      # (capacity,) int64      -- _time[alive_list[pos]]
+    cdef object _alive_sid       # (capacity,) int64      -- _sid_idx[alive_list[pos]]
 
     cdef Py_ssize_t _win_capacity
     cdef object _win_sid_idx_arr
@@ -5044,6 +5096,9 @@ cdef class HammingExactIndex:
     cdef int64_t[::1] _entry_ids_mv
     cdef int64_t[::1] _alive_list_mv
     cdef int64_t[::1] _alive_pos_mv
+    cdef int64_t[:, ::1] _alive_words_mv
+    cdef int64_t[::1] _alive_time_mv
+    cdef int64_t[::1] _alive_sid_mv
 
     cdef void _refresh_slot_views(self):
         self._vectors_mv = self._vectors
@@ -5057,6 +5112,9 @@ cdef class HammingExactIndex:
         self._entry_ids_mv = self._entry_ids
         self._alive_list_mv = self._alive_list
         self._alive_pos_mv = self._alive_pos
+        self._alive_words_mv = self._alive_words
+        self._alive_time_mv = self._alive_time
+        self._alive_sid_mv = self._alive_sid
 
     def __cinit__(self, Py_ssize_t n_vectors=1, Py_ssize_t initial_capacity=1024,
                   Py_ssize_t hamming_threshold=-1, bint apply_dot_filter=True):
@@ -5102,6 +5160,9 @@ cdef class HammingExactIndex:
         self._entry_ids = np.empty(self._capacity, dtype=np.int64)
         self._alive_list = np.full(self._capacity, -1, dtype=np.int64)
         self._alive_pos = np.full(self._capacity, -1, dtype=np.int64)
+        self._alive_words = np.zeros((self._capacity, self._n_words), dtype=np.int64)
+        self._alive_time = np.zeros(self._capacity, dtype=np.int64)
+        self._alive_sid = np.full(self._capacity, -1, dtype=np.int64)
         self._refresh_slot_views()
 
         self._win_capacity = initial_capacity
@@ -5195,6 +5256,15 @@ cdef class HammingExactIndex:
         new_alive_list = np.full(new_cap, -1, dtype=np.int64)
         new_alive_list[:self._capacity] = self._alive_list
         self._alive_list = new_alive_list
+        new_alive_words = np.zeros((new_cap, self._n_words), dtype=np.int64)
+        new_alive_words[:self._capacity, :] = self._alive_words
+        self._alive_words = new_alive_words
+        new_alive_time = np.zeros(new_cap, dtype=np.int64)
+        new_alive_time[:self._capacity] = self._alive_time
+        self._alive_time = new_alive_time
+        new_alive_sid = np.full(new_cap, -1, dtype=np.int64)
+        new_alive_sid[:self._capacity] = self._alive_sid
+        self._alive_sid = new_alive_sid
         new_alive_pos = np.full(new_cap, -1, dtype=np.int64)
         new_alive_pos[:self._capacity] = self._alive_pos
         self._alive_pos = new_alive_pos
@@ -5287,6 +5357,9 @@ cdef class HammingExactIndex:
         cdef int64_t[::1] entry_ids_arr = self._entry_ids_mv
         cdef int64_t[::1] alive_list = self._alive_list_mv
         cdef int64_t[::1] alive_pos = self._alive_pos_mv
+        cdef int64_t[:, ::1] alive_words = self._alive_words_mv
+        cdef int64_t[::1] alive_time = self._alive_time_mv
+        cdef int64_t[::1] alive_sid = self._alive_sid_mv
 
         for d in range(self._n_vectors):
             vectors[node, d] = all_vectors[row, d]
@@ -5309,6 +5382,11 @@ cdef class HammingExactIndex:
 
         alive_list[self._alive_count] = node
         alive_pos[node] = self._alive_count
+        # the scan's position-indexed mirror of this node's three scanned fields (see _alive_words)
+        for w in range(self._n_words):
+            alive_words[self._alive_count, w] = words[node, w]
+        alive_time[self._alive_count] = time_val
+        alive_sid[self._alive_count] = sid_idx
         self._alive_count += 1
 
         return entry_id
@@ -5377,13 +5455,22 @@ cdef class HammingExactIndex:
         # in this design, so there is nothing else to unlink.
         cdef int64_t[::1] alive_list = self._alive_list_mv     # class-held views; see _refresh_slot_views
         cdef int64_t[::1] alive_pos = self._alive_pos_mv
+        cdef int64_t[:, ::1] alive_words = self._alive_words_mv
+        cdef int64_t[::1] alive_time = self._alive_time_mv
+        cdef int64_t[::1] alive_sid = self._alive_sid_mv
         cdef Py_ssize_t pos = <Py_ssize_t>alive_pos[node_idx]
         cdef Py_ssize_t last_pos = self._alive_count - 1
         cdef int64_t last_node
+        cdef Py_ssize_t w
         if pos != last_pos:
             last_node = alive_list[last_pos]
             alive_list[pos] = last_node
             alive_pos[last_node] = pos
+            # the mirror moves with it, one swap per array, so position stays the only index the scan needs
+            for w in range(self._n_words):
+                alive_words[pos, w] = alive_words[last_pos, w]
+            alive_time[pos] = alive_time[last_pos]
+            alive_sid[pos] = alive_sid[last_pos]
         alive_list[last_pos] = -1
         alive_pos[node_idx] = -1
         self._alive_count -= 1
@@ -5431,6 +5518,37 @@ cdef class HammingExactIndex:
     cpdef object find_pair_rows_full_cosine_signed(self, long[:] recent_entry_ids, double gamma, double tau):
         return self._find_pair_rows_meta(recent_entry_ids, gamma, True)
 
+    def debug_alive_mirror_ok(self):
+        """(2026-09-24) True iff the scan's position-indexed mirror still agrees with what it mirrors.
+
+        The mirror (_alive_words/_alive_time/_alive_sid) is a second copy of three per-node fields, kept in
+        step with the swap-remove alive list. Drift would not crash anything, it would silently change which
+        candidates the scan sees, so the invariant is checkable from a test rather than argued about.
+        """
+        cdef Py_ssize_t pos, w
+        cdef int64_t node
+        cdef int64_t[::1] alive_list = self._alive_list_mv
+        cdef int64_t[::1] alive_pos = self._alive_pos_mv
+        cdef int64_t[:, ::1] alive_words = self._alive_words_mv
+        cdef int64_t[::1] alive_time = self._alive_time_mv
+        cdef int64_t[::1] alive_sid = self._alive_sid_mv
+        cdef int64_t[:, ::1] words = self._words_mv
+        cdef int64_t[::1] time_idx = self._time_mv
+        cdef int64_t[::1] sid_idx = self._sid_idx_mv
+        cdef uint8_t[::1] alive = self._alive_mv
+        for pos in range(self._alive_count):
+            node = alive_list[pos]
+            if node < 0 or node >= self._count or not alive[node]:
+                return False
+            if alive_pos[node] != pos:
+                return False
+            if alive_time[pos] != time_idx[node] or alive_sid[pos] != sid_idx[node]:
+                return False
+            for w in range(self._n_words):
+                if alive_words[pos, w] != words[node, w]:
+                    return False
+        return True
+
     cdef object _find_pair_rows_meta(self, long[:] recent_entry_ids, double gamma, bint signed_abs):
         cdef Py_ssize_t n_recent = recent_entry_ids.shape[0]
         cdef Py_ssize_t i, node_pos, w, count, out_i
@@ -5451,6 +5569,10 @@ cdef class HammingExactIndex:
         cdef int64_t[:] win_sid_idx, win_sid_rank, win_time, win_w
         cdef int64_t hpos, hneg, hbest
         cdef uint64_t qw_word, cw_word, xw_mask
+        # (2026-09-24) the query's masked sign words, hoisted out of the per-candidate scan; the bound
+        # covers n_vectors up to 4096 and anything larger falls back to the unhoisted helper
+        cdef uint64_t q_words_buf[64]
+        cdef bint n_words_ok = self._n_words <= 64
         cdef double t0 = time.perf_counter()
 
         if n_recent == 0 or self._alive_count == 0:
@@ -5473,7 +5595,7 @@ cdef class HammingExactIndex:
                     raise MemoryError()
             _pair_seen_clear(self._pair_seen_occupied_buf, self._pair_seen_cap_buf)
 
-        cdef int64_t[:, :] words = self._words
+        cdef int64_t[:, ::1] words = self._words_mv     # class-held view; see _refresh_slot_views
         cdef uint64_t[:] word_masks = self._word_masks
         cdef double[:, :] vectors = self._vectors
         cdef uint8_t[:] alive = self._alive
@@ -5482,7 +5604,12 @@ cdef class HammingExactIndex:
         cdef int64_t[:] sid_rank = self._sid_rank
         cdef int64_t[:] time_idx = self._time
         cdef int64_t[:] window_size = self._window_size
-        cdef int64_t[:] alive_list = self._alive_list
+        cdef int64_t[::1] alive_list = self._alive_list_mv        # class-held views; see _refresh_slot_views
+        cdef int64_t[::1] alive_pos = self._alive_pos_mv
+        cdef int64_t[:, ::1] alive_words = self._alive_words_mv   # the scan's position-indexed mirror
+        cdef int64_t[::1] alive_time = self._alive_time_mv
+        cdef int64_t[::1] alive_sid = self._alive_sid_mv
+        cdef Py_ssize_t q_pos
 
         # (2026-09-14) Fix for the measured ~1.9x redundant-enumeration finding
         # (docs/implementation_log.md's 2026-09-14 entry, "Hamming-exact enumeration
@@ -5529,6 +5656,9 @@ cdef class HammingExactIndex:
             q_rank = sid_rank[q_entry]
             q_time = time_idx[q_entry]
             q_w = window_size[q_entry]
+            if n_words_ok:
+                for w in range(self._n_words):
+                    q_words_buf[w] = (<uint64_t>words[q_entry, w]) & word_masks[w]
 
             # TRUE enumeration count: this loop always runs alive_count
             # times, unconditionally -- unlike `total_touched` below (which
@@ -5545,18 +5675,16 @@ cdef class HammingExactIndex:
                     continue
                 if is_recent[node] and time_idx[node] == q_time and sid_idx[node] <= q_sid:
                     continue
-                hpos = 0
-                hneg = 0
-                for w in range(self._n_words):
-                    qw_word = <uint64_t>words[q_entry, w]
-                    cw_word = <uint64_t>words[node, w]
-                    xw_mask = word_masks[w]
-                    hpos += _popcount64_swar((qw_word ^ cw_word) & xw_mask)
-                    if signed_abs:
-                        hneg += _popcount64_swar((qw_word ^ (~cw_word)) & xw_mask)
-                hbest = hpos
-                if signed_abs and hneg < hbest:
-                    hbest = hneg
+                # (2026-09-24) The query's words are fixed for this whole scan, so they were hoisted
+                # into q_words_buf (masked once) before the loop instead of being re-read from the 2D
+                # memoryview once per candidate per word; the popcount is the hardware instruction.
+                # Identical distance, identical order, identical counters.
+                if n_words_ok:
+                    hbest = _hamming_best_dist_q(q_words_buf, words, word_masks, self._n_words,
+                                                 node, signed_abs)
+                else:
+                    hbest = _hamming_best_dist(words, word_masks, self._n_words,
+                                               q_entry, node, signed_abs)
                 if hbest > self._hamming_threshold:
                     continue
                 total_touched += 1

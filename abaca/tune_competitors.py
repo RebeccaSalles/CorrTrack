@@ -83,7 +83,19 @@ def parameter_grid(arm, W, b=None):
         # then also admits pairs just below T, which is the paper's own trade-off.
         full = max(1, int(b or 12) // 2 + 1)
         bw = sorted({min(v, full) for v in (2, 3, 4, 6, full)})
-        return {"statstream_n_coeffs": [4, 8, 12, 16, 24, 32], "statstream_index_dims": [1, 2, 3, 4], "statstream_bw_coeffs": bw}
+        # (2026-09-24) statstream_n_coeffs is bounded by the WINDOW, not the basic window: the digest is 2n
+        # real values and Lemma 7 needs 2n <= W, which the sketch raises on. Without the cap, every value
+        # above W/2 is a guaranteed error -- at W=30 that is 16, 24 and 32, i.e. half the grid spent on
+        # settings the evaluator can only score as failures, and the largest LEGAL digest (15 here) never
+        # tried. Same treatment as statstream_bw_coeffs above: cap the listed values and add the maximum,
+        # so the lossless end of the range stays reachable and the tuner picks among legal settings only.
+        # n_max is added only when the cap actually removed something (n_max < 32), so a short window keeps
+        # a maximal legal option and a long one is left with the listed values rather than an absurd digest
+        # (W=2880 would otherwise get n=1440, i.e. 2880 real values per window, for nothing).
+        n_max = max(1, int(W) // 2)
+        listed = {v for v in (4, 8, 12, 16, 24, 32) if v <= n_max}
+        n_coeffs = sorted(listed | ({n_max} if n_max < 32 else set()))
+        return {"statstream_n_coeffs": n_coeffs, "statstream_index_dims": [1, 2, 3, 4], "statstream_bw_coeffs": bw}
     if arm == "corrjoin":
         ds = divisors(W, 4, W // 2)
         return {"corrjoin_ks": ds, "corrjoin_ke": ds, "corrjoin_kb": [2, 3, 4]}

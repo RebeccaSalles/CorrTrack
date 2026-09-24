@@ -9944,3 +9944,99 @@ the small-m and short-W rows inherit a tuning fitted elsewhere. What the campaig
 that the synchronous columns are expected to win wherever m is above roughly 250, that its small-m datasets
 (uscrn2020_temperature, m = 60) will still lose their SYNCHRONOUS rows and win their lagged ones, and that
 this is a property of the baseline's shape, not a defect to tune away.
+
+### 2026-09-24 (e) [competitor campaign thread] snapshot provenance, the rule for pooling timings, and StatStream's Lemma 7 bound
+
+Three separate things closed here; the first two are process, the third is a real defect in the tuning range.
+
+1. Snapshot provenance. `prepare_snapshot.oar` stamped `sha=` from the CLONE's HEAD while copying the
+clone's working TREE, which was written into rather than pulled, so four snapshots holding four different
+code states all stamped `d0e337877e3d`. `dirty_tracked_py` hinted at it but is a count, and ignores
+untracked files. SNAPSHOT_OK now also carries `content=`, a sha256 over the snapshot's own `.py`/`.pyx`/
+`.oar` files taken AFTER the copy, and `source_commit=`. Verified on the cluster: the four existing
+snapshots fingerprint to four different values (98585da, 27e79d4, 3036d8d, 6b3a873), which is the direct
+confirmation that they are not the same code; the clone has since been reset to a real commit and reports
+zero tracked modifications. Consumers read SNAPSHOT_OK with `[ -f ]` and `sed -n 's/^key=//p'`, so the extra
+lines are inert, and every run directory already copies its snapshot's SNAPSHOT_OK, so existing results can
+still be grouped by `date=`/`built_on=` even though their copies predate the new stamp.
+
+2. The rule that follows. The 2026-09-24 (b) and (c) work changed wall time for the Pattern B arms and left
+every Pattern A arm untouched: normalized against bruteforce in the same run, corrtrack 2.18x faster,
+corrtrack_hamming 1.83x, corrjoin 1.41x, parcorr about 1.26x, csz about 1.09x, and bruteforce,
+bf_incremental, FilCorr, TSUBASA, BRAID, ThinBRAID unchanged by construction. So pooling timing rows across
+code states is not extra noise, it is a per-arm bias, and a table mixing them would credit CorrTrack with
+part of a code date. Quality columns (candidates, correlated, recall, precision, specificity) are identical
+across all states and remain poolable; wall time, per-step latency, energy and speedup are not. The
+aggregation scripts do not yet enforce this (none of them reads the snapshot), so for now it is a
+construction rule: build a timing table from one snapshot's runs only.
+
+3. StatStream's digest was not bounded by the window. `sketch_dft` refuses `2n > W` (Lemma 7: the digest is
+2n real values), but neither the tuning grid nor the untuned default knew about W. Consequences, both real:
+the grid `[4, 8, 12, 16, 24, 32]` offered three settings at W = 30 that can only ever be scored as errors
+(half the grid, and the evaluator catches them, so the waste was silent), and the largest LEGAL digest (15)
+was never tried; and the untuned default n = 16 made the arm fail outright on any cell with W < 32, which is
+how this surfaced -- the sp500 W = 30 cell reported `ERROR ... needs 2n <= window_size=30` instead of a row.
+Fixed the same way the 2026-09-22 (j) `statstream_bw_coeffs` cap was: the grid is capped at W//2 and the
+maximum is added only when the cap actually removed something, so a short window keeps a maximal legal
+option (W = 30 -> [4, 8, 12, 15]) and a long one is left alone rather than being handed an absurd digest
+(W = 2880 would otherwise get n = 1440, i.e. 2880 real values per window). `nway_compare` clamps the value
+it is going to run, default or tuned, and PRINTS the clamp, so a reduced knob cannot travel into a table
+unannounced; a tuned file fitted at another window is clamped rather than allowed to take the arm down
+mid-campaign. The sp500 W = 30 cell now runs: n_coeffs 16 -> 15, recall 0.9136, 4,148 candidates, 1.06x
+against bruteforce (with the untuned default bandwidth; a tuned cell should do better). Regression test
+added for every campaign horizon.
+
+Not yet fixed, and it affects the campaign now running: the arm-update submit script was generated before
+the re-tune driver change, so its jobs re-tune the competitors (`ts_`) but not CorrTrack (no `hs_`/`hh_`
+jobs are queued), i.e. CorrTrack runs on parameters fitted under the pre-optimization cost model while its
+competitors are tuned under the code being measured. That understates CorrTrack rather than flattering it,
+so the run is conservative, not wrong -- but it is an asymmetry, and closing it needs a fresh snapshot from
+a clone fetched past f8ca6cc plus a re-submit.
+
+### 2026-09-24 (f) [competitor campaign thread] the hamming scan: measured, mostly not where I said it was
+
+Entry (e) predicted 2-3x from making `HammingExactIndex`'s exhaustive scan sequential. Measured, it is worth
+almost nothing at the size that prompted it and about a quarter at campaign scale. Recording the number
+rather than the prediction, and keeping the change for the reason the measurement gives, not the one it was
+written for.
+
+What was done: the SWAR popcount replaced by `__builtin_popcountll` (one POPCNT under the `-march=native`
+this extension already builds with); the query's sign words masked once and hoisted out of the per-candidate
+loop, where they had been re-read from a 2D memoryview per candidate per word; and the three fields the scan
+reads for every alive node (sign words, start time, series index) mirrored into arrays indexed by ALIVE-LIST
+POSITION, so the loop walks three sequential streams and resolves the node id only for candidates that pass
+the Hamming filter.
+
+Isolated A/B of the scan (the pre-change build from HEAD against this one, same driver: insert m windows,
+query them, expire the previous step; minimum of 10-40 steps, which is the statistic that survives this
+machine's drift):
+
+  | m | before (min / median) | after (min / median) | scan speedup (min / median) |
+  |---|---|---|---|
+  | 444 | 0.551 / 0.946 ms | 0.566 / 0.861 ms | 0.97x / 1.10x |
+  | 2,000 | 10.344 / 22.043 ms | 9.393 / 16.738 ms | 1.10x / 1.32x |
+  | 5,000 | 70.108 / 135.743 ms | 58.915 / 107.271 ms | 1.19x / 1.27x |
+
+Why the prediction was wrong: the estimate of 7.9 ns per node visit came from the whole candidate stage of a
+real run, not from the scan, and the scan alone is 2.4-2.8 ns per visit -- roughly 8 cycles for a load, an
+XOR, a popcount and three integer comparisons, i.e. already near its instruction floor. The cache argument
+that motivated the mirror does not apply at m = 444 at all: the alive population's metadata is about 7 KB
+per array there, so the "scattered" reads were already L1 hits and making them sequential could not help.
+It only starts to matter when those arrays leave L1, which is what the m = 2,000 and 5,000 rows show.
+
+Kept, on those grounds: neutral at small m, 20-30% of the scan at the sizes the campaign's large-m cells
+use, and the scan is that arm's dominant cost. Not kept as a general "this made hamming fast" claim.
+
+On the invariant the change touches, since it was asked: the mirror is written in exactly two places, the
+append in `_insert_one` and the swap in `_remove_from_alive_list`, and it changes nothing about slot reuse or
+the `entry_id == slot index` contract that two earlier bugs were traced to -- it adds position-indexed copies
+beside the node-indexed arrays, it does not renumber anything. The risk is the ordinary one for a second copy
+of the truth, drift, which would silently change which candidates the scan sees rather than crash. So the
+exact invariant is checkable from a test: `debug_alive_mirror_ok()` verifies, inside the class, that for every
+alive position the mirrored words, time and series index still equal the node-indexed ones and that
+`alive_pos` is still the inverse of `alive_list`; a new churn test drives twelve rounds of insert and expire
+(forcing freed slots, reuse, and swaps from the end of the list) and asserts it after each.
+
+Results unchanged throughout: 177,439 candidates and recall 1.0000 for corrtrack_hamming on the reference
+cell, 168,385 / 0.9920 for corrtrack, with StatStream now reporting a row there as well (4,148 candidates,
+recall 0.9136) instead of failing Lemma 7. 173 tests pass.

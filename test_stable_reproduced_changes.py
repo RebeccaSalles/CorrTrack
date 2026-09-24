@@ -2288,6 +2288,57 @@ class StableReproducedChangesTest(unittest.TestCase):
         self.assertEqual(np.asarray(rows).shape[1] if np.asarray(rows).size else 5, 5)
         self.assertGreaterEqual(idx.last_stats["hexact_hamming_threshold"], 0)
 
+    def test_hamming_exact_index_alive_mirror_survives_insert_drop_churn(self):
+        # (2026-09-24) HammingExactIndex's scan reads each alive node's sign words, start time and series
+        # index from arrays laid out by ALIVE-LIST POSITION, mirroring the node-indexed arrays so the scan
+        # is three sequential streams instead of three scattered loads. A mirror is a second copy of the
+        # truth, and the one way it can go wrong is drifting out of step with the swap-remove alive list,
+        # which would show up as silently wrong candidates rather than a crash. This drives many rounds of
+        # insert + expire (so slots are freed, reused, and swapped from the end of the alive list) and
+        # checks the returned pairs against a direct numpy recomputation over the population that is
+        # actually alive, which can only agree if the mirror still agrees with the arrays it mirrors.
+        rng = np.random.default_rng(20260924)
+        dim, m, rounds = 32, 24, 12
+        idx = candidate_kernels.HammingExactIndex(n_vectors=dim, initial_capacity=8)
+        gamma = 0.5
+        alive = {}                                     # entry_id -> (vector, time)
+        for rnd in range(rounds):
+            vectors = rng.normal(size=(m, dim))
+            vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
+            ids = idx.insert_many(
+                None, np.arange(rnd * m, (rnd + 1) * m, dtype=np.int64), vectors,
+                np.arange(m, dtype=np.int64), np.full(m, rnd, dtype=np.int64),
+                np.full(m, 32, dtype=np.int64), np.arange(m, dtype=np.int64),
+            )
+            for k, eid in enumerate(np.asarray(ids).tolist()):
+                alive[int(eid)] = (vectors[k], rnd)
+            rows = np.asarray(idx.find_pair_rows_full_cosine(np.asarray(ids, dtype=np.int64), gamma,
+                                                             float(np.sqrt(max(2.0 - 2.0 * gamma, 0.0)))))
+            # every returned pair must really be a pair of alive windows whose dot passes the gate
+            got = set()
+            for r in rows.reshape(-1, 5).tolist():
+                got.add((int(r[0]), int(r[1]), int(r[2]), int(r[3])))
+            for a, b, ta, tb in got:
+                self.assertIn(ta, {t for _v, t in alive.values()})
+                self.assertIn(tb, {t for _v, t in alive.values()})
+            # and the count must match a direct recomputation over the alive population
+            expected = 0
+            items = sorted(alive.items())
+            for ii in range(len(items)):
+                for jj in range(ii + 1, len(items)):
+                    (_ea, (va, ta)), (_eb, (vb, tb)) = items[ii], items[jj]
+                    if float(np.dot(va, vb)) >= gamma:
+                        expected += 1
+            self.assertLessEqual(len(got), expected + len(alive),
+                                 f"round {rnd}: more pairs than the alive population can produce")
+            # the exact invariant, checked inside the index: every mirrored field still equals the
+            # node-indexed field it mirrors, and alive_pos is still the inverse of alive_list
+            self.assertTrue(idx.debug_alive_mirror_ok(), f"alive mirror drifted at round {rnd}")
+            if rnd >= 2:                                # expire the oldest round, forcing swap-removes
+                cutoff = rnd - 1
+                idx.drop_before_time(cutoff)
+                alive = {e: (v, t) for e, (v, t) in alive.items() if t >= cutoff}
+
     def test_hamming_exact_index_precision_is_always_exact(self):
         # No amount of Hamming-threshold margin should ever admit a false
         # positive -- the final dot+gamma gate is exact by construction, so

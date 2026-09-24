@@ -2249,3 +2249,36 @@ still the user's: budget row (A-E / C-mem / D-mem), host split (11+4 or 8+3), re
 0.67%). Before any new submission: storage cleanup on zenith (account unlocked; the m=500 tables campaign
 from snapshot `d0e337877e3d_m500tables` must not be touched).
 Still open from (b): `statstream_n_coeffs=16` violates StatStream's own Lemma 7 guard at window_size=30.
+### 2026-09-24 (e) provenance stamp verified on the cluster; StatStream's Lemma 7 bound fixed; hamming scan partly optimized
+Branch: `dev`. Log entry (e). Cluster checked once (read-only): clone is at a real commit with zero tracked
+modifications, and the four snapshots fingerprint to four DIFFERENT values, confirming four code states.
+StatStream: the tuning grid and the untuned default ignored the window, so `2n <= W` (Lemma 7) failed --
+half the grid was unusable at W=30 and the arm errored outright on short windows. Grid now capped at W//2
+(maximum added only when the cap bites), `nway_compare` clamps and prints, tuned files fitted at another
+window are clamped rather than fatal. sp500 W=30 now runs: n_coeffs 16 -> 15, recall 0.9136, 1.06x.
+`corrtrack_hamming`: its exhaustive scan now uses the hardware popcount and the query's sign words are
+hoisted out of the per-candidate loop; its candidate stage 1.69 -> 1.55 ms/step, results identical.
+**Uncommitted**: `abaca/{nway_compare,tune_competitors}.py`, `candidate_kernels.pyx` (+ rebuilt .c/.so),
+`test_abaca_tools.py`, `docs/implementation_log.md`, `tasks/current_task.md`. 172 tests pass.
+Next exact step, in priority order:
+1. The campaign now running re-tunes the competitors but NOT CorrTrack (the submit script predates f8ca6cc;
+   no `hs_`/`hh_` jobs are queued). Conservative for us, but asymmetric. Closing it needs `git fetch &&
+   git reset --hard origin/dev` on the cluster clone, a fresh snapshot, and a re-submit.
+2. Decide whether to take the remaining hamming optimization (compacted alive-list arrays so the scan is
+   sequential; the scan is 7.9 ns per node visit, about 24 cycles for four scattered loads, so roughly 2-3x
+   of its candidate stage is available). It would be another code state, so it belongs with the re-submit.
+3. Still the user's: budget row, host split, repeat sample, zenith cleanup.
+### 2026-09-24 (f) hamming scan measured: kept, but for large m only
+Log entry (f). Hardware popcount + hoisted query words + a position-indexed mirror of the three fields the
+scan reads. Isolated A/B against the pre-change build: 0.97x/1.10x at m=444 (min/median), 1.10x/1.32x at
+m=2000, 1.19x/1.27x at m=5000. The 2-3x predicted in (e) was wrong: the scan is 2.4-2.8 ns per node visit,
+already near its instruction floor, and at m=444 the whole alive metadata is ~7 KB per array, so the
+scattered reads were L1 hits already. Kept because the campaign's large-m cells are where it pays.
+Invariant guarded by `HammingExactIndex.debug_alive_mirror_ok()` plus a twelve-round insert/expire churn test.
+**Uncommitted**: `abaca/{nway_compare,tune_competitors}.py`, `candidate_kernels.pyx` (+ rebuilt .c/.so),
+`test_stable_reproduced_changes.py`, `test_abaca_tools.py`, docs, this file. 173 tests pass.
+Next exact step: the re-submit the user approved -- on the cluster clone `git fetch && git reset --hard
+origin/dev` (it is one commit behind, at 1750dba, so it does not yet have the CorrTrack re-tune f8ca6cc),
+build a fresh snapshot, re-generate and re-submit the arm updates. That snapshot carries this hamming work
+and the StatStream Lemma 7 fix, so the W=30 StatStream cells stop erroring and CorrTrack is tuned under the
+code being measured.

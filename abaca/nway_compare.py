@@ -235,6 +235,16 @@ def main() -> None:
         ct_source_h = "UNTUNED defaults (--allow-untuned: smoke, not quotable)"
     ct_params_h = dict(ct_params_h, preprocess=bool(args.preprocess), candidate_backend="lsh_hamming_exact")
     common = dict(n_vectors=args.n_vectors, seed=2468, seed_toggle=1357, preprocess=bool(args.preprocess))
+    # (2026-09-24) StatStream's digest is 2n real values and Lemma 7 needs 2n <= W, which the sketch raises
+    # on: at W=30 the paper-default n=16 makes the arm fail outright rather than report a row. n is capped
+    # here at the largest legal digest for THIS cell, and the clamp is printed, because a silently reduced
+    # knob is exactly the kind of thing that must not travel into a table unannounced. Tuned values are
+    # clamped too: a best_params file fitted at another window would otherwise take the arm down mid-run.
+    ss_n_max = max(1, int(args.window_size) // 2)
+    ss_n_coeffs = int(knobs.get("statstream_n_coeffs", 16))
+    if ss_n_coeffs > ss_n_max:
+        print(f"statstream: n_coeffs {ss_n_coeffs} -> {ss_n_max} (Lemma 7 needs 2n <= W={args.window_size})", flush=True)
+        ss_n_coeffs = ss_n_max
     pattern_b = {
         "corrtrack": ct_params,
         "corrtrack_hamming": ct_params_h,
@@ -243,7 +253,7 @@ def main() -> None:
         "csz": dict(common, data_representation="sketch_proj", candidate_backend="parcorr_grid", parcorr_k=knobs.get("parcorr_k", 2),
                     parcorr_f=knobs.get("parcorr_f", 0.7), parcorr_c=knobs.get("parcorr_c", 0.7), parcorr_neighbor_probe=True),
         "statstream": dict(common, data_representation="sketch_dft", candidate_backend="statstream_grid",
-                           statstream_n_coeffs=knobs.get("statstream_n_coeffs", 16), statstream_index_dims=knobs.get("statstream_index_dims", 4),
+                           statstream_n_coeffs=ss_n_coeffs, statstream_index_dims=knobs.get("statstream_index_dims", 4),
                            **{k: knobs[k] for k in ("statstream_report", "statstream_bw_coeffs", "statstream_tolerance") if k in knobs}),
         "corrjoin": dict(common, data_representation="sketch_paa_svd", candidate_backend="corrjoin_double_filter",
                          corrjoin_ks=knobs.get("corrjoin_ks", 15), corrjoin_ke=knobs.get("corrjoin_ke", 30), corrjoin_kb=knobs.get("corrjoin_kb", 3)),
@@ -255,6 +265,11 @@ def main() -> None:
             if f.exists():
                 # the tuned file may carry its own preprocess (the tuning ran in the cell's space); the cell's value wins
                 bp = {k: v for k, v in json.load(open(f)).items() if not k.startswith("_") and k != "preprocess"}
+                if arm == "statstream" and int(bp.get("statstream_n_coeffs", 0)) > ss_n_max:
+                    # a file fitted at another window: clamp rather than let Lemma 7 take the arm down
+                    print(f"statstream: tuned n_coeffs {bp['statstream_n_coeffs']} -> {ss_n_max} "
+                          f"(Lemma 7 needs 2n <= W={args.window_size})", flush=True)
+                    bp["statstream_n_coeffs"] = ss_n_max
                 pattern_b[arm] = dict(pattern_b[arm], **bp, preprocess=bool(args.preprocess))
                 tuned[arm] = str(f)
     pattern_a_extra = {

@@ -121,3 +121,20 @@ def test_aggregate_parse_stem_and_power_integration():
     runs = [dict(cell="c", T=0.9, arm="corrtrack", status="ok", speedup_vs_bf=2.0, recall=0.95, candidate_precision=0.5, candidate_specificity=0.9, step_time_median=0.001, res_peak_rss_delta_mb=10.0)]
     md = summary(runs, "T", "t")
     assert "| 0.9 | corrtrack | 1 | 2.00" in md
+
+
+def test_statstream_tuning_grid_respects_lemma_7_window_bound():
+    # (2026-09-24) StatStream's digest is 2n real values and the DFT sketch refuses 2n > W (Lemma 7),
+    # so any grid value above W/2 can only ever be scored as an error. At W=30 that was 16, 24 and 32 --
+    # half the grid -- and the largest legal digest (15) was never offered. The cap must hold at every
+    # horizon the campaign uses, and must NOT inflate the long windows with an absurd maximum.
+    from abaca.tune_competitors import parameter_grid
+    for W, b in ((30, 3), (48, 6), (60, 6), (96, 12), (168, 12), (240, 24), (2880, 24)):
+        values = parameter_grid("statstream", W, b)["statstream_n_coeffs"]
+        assert values, (W, values)
+        assert all(2 * v <= W for v in values), (W, values)          # every setting is legal
+        assert all(v >= 1 for v in values)
+        if W // 2 < 32:                                              # the cap bit: the maximum stays reachable
+            assert max(values) == W // 2, (W, values)
+        else:                                                        # it did not: the listed range is untouched
+            assert values == [4, 8, 12, 16, 24, 32], (W, values)
