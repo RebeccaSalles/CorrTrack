@@ -14,7 +14,13 @@ PARAM_GRID = dict(_BASE)
 PARAM_GRID.update({
     # 2 x 4 x 5 x 2 = 80 settings: 150 took 40 min locally at m = 492 (8 took 7 min), the pick was
     # n_vectors 64, offset 0.05, occupancy 8; n_vectors 16 and offset 0.15 never won in the pilots
-    "n_vectors": [32, 64],
+    # (2026-09-24, user) the sketch width is fixed at 64 rather than tuned per cell. The 32-vector
+    # option was selected in 7 cells (all smartmeter, lsh backend) and 6 of them then missed the 0.95
+    # recall target on the full stream (0.900 to 0.938) while posting speedups up to 16.4x: the proxy
+    # recall of the narrower sketch is optimistic, so the selection bought speed with misses. Against
+    # 136 cells at 64 vectors, only 5 missed the target. Fixing it also removes a degree of freedom
+    # from our own method that the competitors keep.
+    "n_vectors": [64],
     "candidate_cosine_threshold_offset": [0.0, 0.05, 0.10, 0.20],
     "candidate_lsh_target_occupancy": [2.0, 3.0, 5.0, 8.0, 12.0],
     "candidate_hamming_filter_max_frac": [None, 0.40],
