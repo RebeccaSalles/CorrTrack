@@ -9807,3 +9807,98 @@ Known issue unrelated to this work, seen while running the A/B: `statstream` err
 with `statstream_n_coeffs=16 needs 2n <= window_size=30 (Lemma 7)`. That is a tuning-range question for the
 cell (the 2026-09-22 (j) cap is `b/2+1` on the bandwidth coefficients, not on `n_coeffs`), not a regression
 from these changes; it must be settled before StatStream's W = 30 rows are used.
+
+### 2026-09-24 (c) [competitor campaign thread] no Python per window, and the index insert was 90% buffer setup
+
+Entry (b) removed the per-window Python from the insert path but left two things standing: the window
+registry (a key -> slot dict plus five Python lists, about 13% of the W = 30 cell) and the Cython side,
+which entry (b) treated as the floor. Both were wrong to leave. The registry is now numeric and vectorized,
+nothing on the LSH path costs anything per window in Python, and the Cython insert turned out to be spending
+nine tenths of its time acquiring buffers rather than indexing anything.
+
+1. The window registry, vectorized.
+`_win_sid`, `_win_sid_idx`, `_win_sid_rank`, `_win_time`, `_win_w` keep their names and their meaning but are
+now numpy views of geometrically grown buffers truncated to `_win_count`; the free list is a stack in an
+int64 buffer. Allocation of a whole step's slots is `_win_alloc_many` (freed slots first, most recent first,
+exactly the order the per-key `list.pop()` produced, then a contiguous range at the end), the metadata is
+written with five scatter assignments, and the slots are kept ON the partition. Expiry then hands the whole
+block back with one call instead of a dict lookup per window. The scalar allocator is still there, unchanged
+in semantics, for the other backends and for the dict fallback.
+
+2. The partition arrays, without reading the keys.
+Every place that builds a step's window keys builds them as `(series_ids[s], curr_start, window_size)`, so
+`_build_sketch_keys` now records that (`_sketch_keys_uniform`): the window start is one int64 for the step,
+so is the window size, and row s is series s. `partition_sketches` uses that instead of three `np.fromiter`
+loops over the keys (one of them calling `_time_key_to_int64` per window), and answers its window-size guard
+without scanning. A merged or restored key list leaves the record empty and the per-key path runs as before.
+The series-index identity is not assumed: `_uniform_sid_idx` checks, once per lookup object rather than once
+per window, that the lookup's own values are 0..m-1 in iteration order, and returns None if they are not.
+
+3. The series maps, learned once.
+`_lsh_sid_meta` fills `_sid_idx_map` / `_sid_sort_rank_map` from (key, sid_idx) pairs the first time it sees
+them and then only reads two arrays. The per-key allocator used to mint `sid_idx = len(map)` as it walked;
+that is the same number as the sketch side's own series index (row s is series s in both), and the sketch
+side's is the one validation indexes data rows with, so this is the same value with the tie broken in favour
+of the side that defines it.
+
+4. `insert_many` was passing one Python object per window.
+`vectors_np[i]` on an `ndim=2` buffer falls back to `__getitem__` and builds a fresh ndarray per row.
+`_insert_one` now takes the batch matrix and a row index.
+
+5. The real one: every per-window helper re-acquired its buffers.
+`_insert_one` opened with fourteen `cdef int64_t[:] x = self._array` lines, and `_remove_from_postings` with
+two. Each of those is a buffer acquisition on a Python object, roughly 175 ns, so the helpers spent about
+2.5 us per window on setup before touching a band. The giveaway was that `insert_many`'s cost was FLAT in
+both `n_vectors` (8 vs 64) and `n_bands` (1 vs 7) at 1.14 ms per 444 windows: all overhead, no work. The
+views are now held by the class and refreshed only where the arrays are reallocated (`__cinit__`,
+`_finalize_sizing`, `_ensure_capacity`). Same treatment for `HammingExactIndex` (`corrtrack_hamming`).
+Isolated: 444 inserts went from 1.136 ms to 0.200 ms, the matching expiry from 0.133 ms to 0.019 ms.
+
+Tried and reverted: reading the dot gate's two rows through raw `double*` pointers with the query row hoisted
+out of the candidate loop. Bit-identical and measurably not faster (0.97 vs 0.91 ms per step over three
+runs) -- that gate is bound by pulling each candidate's 512-byte row out of L2, not by address arithmetic.
+The comment stays in the source so the next reader does not re-try it.
+
+Verification (same protocol as entry (b): the outputs are the same objects, not approximately the same).
+- sp500 W = 30 T = 0.95 differenced m = 444, with ParCorr, CSZ, CorrJoin and corrtrack_hamming in the run:
+  168,385 / 177,439 / 167,024 / 17,980,329 / 4,535 candidates and 3,963 / 3,995 / 2,917 / 3,995 / 3,995
+  correlated, recall 0.9920 / 1.0000 / 0.7302 / 1.0000 / 1.0000. Unchanged.
+- sp500 W = 30 n_lags = 15: 165,748 / 178,636 candidates, recall 0.9912 / 1.0000. Unchanged.
+- uscrn2020_temperature W = 96 n_lags = 36 (bruteforce, TSUBASA, CorrJoin, ParCorr, StatStream): unchanged.
+- neg_corr W = 30: corrtrack_hamming, whose candidate stage is exact by construction, still reports recall
+  1.0000, which is the end-to-end check on the signed path.
+- The monitoring step: unchanged and still adds no Python hotspot.
+- 171 tests pass, including the all_pairs ablation (neg_corr, both gates off, must enumerate exactly the
+  bruteforce universe) and the LSH recall tests.
+
+Measured (sp500, differenced, T = 0.95, m = 444, sequential, three repeats, medians; bruteforce's own
+per-step median is quoted so the machine state can be compared with entry (a)'s):
+
+  | W (step) | bruteforce before / after | CorrTrack before | CorrTrack after | speedup before | after |
+  |---|---|---|---|---|---|
+  | 30 (3) | 5.098 / 5.134 | 5.503 | 2.541 (-54%) | 0.88x | 1.95x |
+  | 90 (9) | 8.877 / 8.616 | 5.449 | 2.764 (-49%) | 1.62x | 2.88x |
+  | 180 (18) | 13.050 / 14.028 | 6.030 | 2.961 (-51%) | 2.01x | 4.23x |
+
+  The W = 30 and W = 90 baselines repeat to within 3% of the "before" session, so those two rows are a clean
+  before/after; W = 180's baseline is 7.5% slower today, so read 4.23x as "about 4x". The lagged cell
+  (n_lags = 15, same tuning) went 6.304 -> 4.422 ms per step against a baseline that measured 71.1 and 71.8
+  ms per step in the two sessions, i.e. a speedup of 15.7x.
+
+Where the time goes now, per step at W = 30 (phase profiler): sketch 1.13 ms (kernel 0.37, prep 0.20,
+new_stream 0.23, materialize 0.12, partition 0.19), candidate search `cand.lsh_numeric_rows` 0.97 ms,
+index insert `cand.lsh_insert` 0.24 ms, expiry 0.02 ms. The candidate stage as a whole went 1.87 -> 0.33 ms
+per step excluding the search. The search is now the single largest candidate-stage cost and it is real
+work: 23,777 candidates touched and 18,531 64-dimensional dot products per step, about 51 ns per dot, which
+is L2 bandwidth for a 512-byte row, not overhead.
+
+Left for later, with sizes measured rather than guessed.
+- `sketch.incremental_materialize` 0.12 ms per step (4% of the cell) is `dict(zip(keys, norm_matrix))`:
+  iterating the matrix builds one row object per window. Removing it means making `Sketches.sketches` and
+  `CorrTrack.sketches` lazy, which several consumers (validation fallbacks, debug paths, the multi-window
+  entry point) read directly. Not attempted.
+- The partition dict's VALUES are now dead weight on the LSH path (only its keys are read), but it is the
+  fallback path's input and the other backends' input.
+- The hyperopt grids were tuned when an insert cost five times what it now costs, so the optimum may have
+  moved toward more bands or finer buckets. The campaign re-runs hyperopt per cell, so it will find the new
+  optimum on its own; no tuned file needs rewriting, but the old tuned outputs are not the new optimum.

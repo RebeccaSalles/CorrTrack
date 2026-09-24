@@ -3551,6 +3551,47 @@ cdef class SignLSHBandIndex:
     cdef int64_t *_pair_seen_a_buf
     cdef int64_t *_pair_seen_b_buf
     cdef Py_ssize_t _pair_seen_cap_buf
+    # (2026-09-24) Typed views of the per-slot arrays above, held once instead of being acquired
+    # again on every call. The per-window helpers (_insert_one, _remove_from_postings) each began
+    # with a dozen `cdef int64_t[:] x = self._array` lines, and every one of those is a buffer
+    # acquisition on a Python object: ~2.5 us per window of pure setup, which at m = 444 windows
+    # per step was the whole measured cost of the index insert (1.26 ms per step at W = 30, flat in
+    # both n_vectors and n_bands -- i.e. all overhead, no work). _refresh_slot_views re-binds them
+    # wherever the arrays themselves are (re)allocated: __cinit__, _finalize_sizing, _ensure_capacity.
+    cdef double[:, ::1] _vectors_mv
+    cdef uint8_t[::1] _alive_mv
+    cdef int64_t[::1] _window_idx_mv
+    cdef int64_t[::1] _sid_idx_mv
+    cdef int64_t[::1] _sid_rank_mv
+    cdef int64_t[::1] _time_mv
+    cdef int64_t[::1] _window_size_mv
+    cdef int64_t[::1] _entry_ids_mv
+    cdef int64_t[:, ::1] _words_mv
+    cdef int32_t[:, ::1] _band_keys_mv
+    cdef int32_t[:, ::1] _neg_band_keys_mv
+    cdef int32_t[:, ::1] _membership_pos_mv
+    cdef int64_t[:, ::1] _band_dims_mv
+    cdef double[:, ::1] _band_offsets_mv
+
+    cdef void _refresh_slot_views(self):
+        self._vectors_mv = self._vectors
+        self._alive_mv = self._alive
+        self._window_idx_mv = self._window_idx
+        self._sid_idx_mv = self._sid_idx
+        self._sid_rank_mv = self._sid_rank
+        self._time_mv = self._time
+        self._window_size_mv = self._window_size
+        self._entry_ids_mv = self._entry_ids
+        self._words_mv = self._words
+        self._band_keys_mv = self._band_keys
+        self._neg_band_keys_mv = self._neg_band_keys
+        self._membership_pos_mv = self._membership_pos
+        if self._band_dims is not None:
+            self._band_dims_mv = np.ascontiguousarray(self._band_dims, dtype=np.int64)
+            self._band_dims = self._band_dims_mv.base
+        if self._band_offsets is not None:
+            self._band_offsets_mv = np.ascontiguousarray(self._band_offsets, dtype=np.float64)
+            self._band_offsets = self._band_offsets_mv.base
 
     def __cinit__(self, Py_ssize_t n_vectors=1, Py_ssize_t initial_capacity=1024,
                   Py_ssize_t n_lagged_windows=1, Py_ssize_t n_bands=64,
@@ -3666,6 +3707,7 @@ cdef class SignLSHBandIndex:
         self._post_count = NULL
         self._post_total_slots = 0
         self._visited_stamp = np.full(self._capacity, -1, dtype=np.int64)
+        self._refresh_slot_views()
         self._win_capacity = initial_capacity
         self._win_sid_idx_arr = np.full(self._win_capacity, -1, dtype=np.int64)
         self._win_sid_rank_arr = np.full(self._win_capacity, -1, dtype=np.int64)
@@ -3826,6 +3868,7 @@ cdef class SignLSHBandIndex:
             self._post_members[_slot] = NULL
             self._post_capacity[_slot] = 0
             self._post_count[_slot] = 0
+        self._refresh_slot_views()
         self._sized = True
 
     cdef void _finalize_hamming_threshold(self, double gamma):
@@ -3907,6 +3950,7 @@ cdef class SignLSHBandIndex:
         self._membership_pos = new_membership_pos
         self._visited_stamp = new_visited_stamp
         self._capacity = new_cap
+        self._refresh_slot_views()
         new_touched = <int64_t *>realloc(self._touched_buf, new_cap * sizeof(int64_t))
         if new_touched == NULL:
             raise MemoryError("SignLSHBandIndex: failed to grow touched-candidate buffer")
@@ -3952,7 +3996,14 @@ cdef class SignLSHBandIndex:
         self._free_slots[self._free_count] = idx
         self._free_count += 1
 
-    cdef int64_t _insert_one(self, double[:] vector, int64_t window_idx, int64_t sid_idx,
+    # (2026-09-24) Takes the whole batch's vector matrix plus a row index, not one row.
+    # `vectors_np[i]` in insert_many built a fresh Python ndarray object for every window
+    # (an ndim=2 buffer indexed with a single subscript falls back to __getitem__), which
+    # at m = 444 windows per step cost more than all the banding and posting-list work put
+    # together (measured: 1.26 ms of the candidate stage's 1.30 ms per step at W = 30).
+    # Reading rows straight out of a contiguous memoryview allocates nothing.
+    cdef int64_t _insert_one(self, double[:, ::1] all_vectors, Py_ssize_t row,
+                              int64_t window_idx, int64_t sid_idx,
                               int64_t time_idx, int64_t window_size, int64_t sid_rank):
         cdef Py_ssize_t i, d, band_idx, w, dim, flat, cap, cnt
         cdef int64_t new_id, key
@@ -3973,23 +4024,25 @@ cdef class SignLSHBandIndex:
             self._ensure_capacity(self._count + 1)
             i = self._count
             self._count += 1
-        cdef double[:, ::1] vectors_mv = self._vectors
-        cdef uint8_t[:] alive_mv = self._alive
-        cdef int64_t[:] window_idx_mv = self._window_idx
-        cdef int64_t[:] sid_idx_mv = self._sid_idx
-        cdef int64_t[:] sid_rank_mv = self._sid_rank
-        cdef int64_t[:] time_mv = self._time
-        cdef int64_t[:] window_size_mv = self._window_size
-        cdef int64_t[:] entry_ids_mv = self._entry_ids
-        cdef int64_t[:, :] band_dims = self._band_dims
-        cdef int32_t[:, :] band_keys = self._band_keys
-        cdef int32_t[:, :] neg_band_keys = self._neg_band_keys
-        cdef double[:, :] band_offsets_mv = self._band_offsets
-        cdef int32_t[:, :] membership_pos = self._membership_pos
-        cdef int64_t[:, ::1] words_mv = self._words
+        # (2026-09-24) the per-slot views are held by the class (see _refresh_slot_views); acquiring
+        # them here was ~2.5 us of buffer setup per window, more than all the real work below
+        cdef double[:, ::1] vectors_mv = self._vectors_mv
+        cdef uint8_t[::1] alive_mv = self._alive_mv
+        cdef int64_t[::1] window_idx_mv = self._window_idx_mv
+        cdef int64_t[::1] sid_idx_mv = self._sid_idx_mv
+        cdef int64_t[::1] sid_rank_mv = self._sid_rank_mv
+        cdef int64_t[::1] time_mv = self._time_mv
+        cdef int64_t[::1] window_size_mv = self._window_size_mv
+        cdef int64_t[::1] entry_ids_mv = self._entry_ids_mv
+        cdef int64_t[:, ::1] band_dims = self._band_dims_mv
+        cdef int32_t[:, ::1] band_keys = self._band_keys_mv
+        cdef int32_t[:, ::1] neg_band_keys = self._neg_band_keys_mv
+        cdef double[:, ::1] band_offsets_mv = self._band_offsets_mv
+        cdef int32_t[:, ::1] membership_pos = self._membership_pos_mv
+        cdef int64_t[:, ::1] words_mv = self._words_mv
 
         for d in range(self._n_vectors):
-            vectors_mv[i, d] = vector[d]
+            vectors_mv[i, d] = all_vectors[row, d]
         if self._band_mode == 0:
             # (2026-07-21) Full-vector sign pattern for the optional Hamming
             # pre-filter -- packed identically to HammingExactIndex's own
@@ -4003,7 +4056,7 @@ cdef class SignLSHBandIndex:
                     bits_in_word = 64
                 word_tmp = 0
                 for bit in range(bits_in_word):
-                    if vector[w * 64 + bit] >= 0:
+                    if all_vectors[row, w * 64 + bit] >= 0:
                         word_tmp |= (<uint64_t>1) << bit
                 words_mv[i, w] = <int64_t>word_tmp
         alive_mv[i] = 1
@@ -4048,7 +4101,7 @@ cdef class SignLSHBandIndex:
                 key = 0
                 for w in range(self._band_width):
                     dim = band_dims[band_idx, w]
-                    key = (key << 1) | (1 if vector[dim] >= 0 else 0)
+                    key = (key << 1) | (1 if all_vectors[row, dim] >= 0 else 0)
             else:
                 # (2026-07-22) Grid mode: quantize each of this band's
                 # band_width raw coordinates into a per-dimension cell
@@ -4068,9 +4121,9 @@ cdef class SignLSHBandIndex:
                 for w in range(self._band_width):
                     dim = band_dims[band_idx, w]
                     offv = band_offsets_mv[band_idx, w]
-                    cell = <int64_t>floor((vector[dim] + offv) / self._cell_width)
+                    cell = <int64_t>floor((all_vectors[row, dim] + offv) / self._cell_width)
                     key = key * 1000003 + cell
-                    cell = <int64_t>floor((-vector[dim] + offv) / self._cell_width)
+                    cell = <int64_t>floor((-all_vectors[row, dim] + offv) / self._cell_width)
                     neg_key = neg_key * 1000003 + cell
                 key = key % self._bucket_count
                 if key < 0:
@@ -4178,10 +4231,11 @@ cdef class SignLSHBandIndex:
         cdef int64_t[:] win_size = self._win_size_arr
 
         entry_ids = np.empty(n, dtype=np.int64)
+        cdef double[:, ::1] vectors_mv = vectors_np
         for i in range(n):
             wi = <int64_t>window_idx_np[i]
             entry_ids[i] = self._insert_one(
-                vectors_np[i], wi, <int64_t>sid_idx_np[i], <int64_t>time_np[i],
+                vectors_mv, i, wi, <int64_t>sid_idx_np[i], <int64_t>time_np[i],
                 <int64_t>window_size_np[i], <int64_t>sid_rank_np[i],
             )
             if wi >= 0:
@@ -4220,8 +4274,8 @@ cdef class SignLSHBandIndex:
         # there is no threshold to tune.
         cdef Py_ssize_t band_idx, flat, pos, last, moved
         cdef int64_t key
-        cdef int32_t[:, :] band_keys = self._band_keys
-        cdef int32_t[:, :] membership_pos = self._membership_pos
+        cdef int32_t[:, ::1] band_keys = self._band_keys_mv       # class-held views; see _refresh_slot_views
+        cdef int32_t[:, ::1] membership_pos = self._membership_pos_mv
         for band_idx in range(self._n_bands):
             key = band_keys[node_idx, band_idx]
             flat = band_idx * self._bucket_count + key
@@ -4515,6 +4569,11 @@ cdef class SignLSHBandIndex:
                     continue
                 unique_pre_dot_pairs += 1
                 if self._apply_dot_filter:
+                    # (2026-09-24) Tried and reverted: hoisting the query row out of the candidate
+                    # loop and reading both rows through raw double* pointers. Bit-identical, and
+                    # measurably NOT faster here (0.97 vs 0.91 ms per step over three runs) -- the
+                    # memoryview form already compiles to the same walk, and this gate is bound by
+                    # pulling each candidate's 512-byte row out of L2, not by address arithmetic.
                     score = 0.0
                     for d in range(self._n_vectors):
                         score += vectors[q_entry, d] * vectors[cand, d]
@@ -4971,6 +5030,33 @@ cdef class HammingExactIndex:
     cdef int64_t *_pair_seen_a_buf
     cdef int64_t *_pair_seen_b_buf
     cdef Py_ssize_t _pair_seen_cap_buf
+    # (2026-09-24) Class-held typed views of the per-slot arrays -- same fix, same reason, as
+    # SignLSHBandIndex's `_refresh_slot_views`: the per-window helpers were spending more time
+    # acquiring buffers than doing their work.
+    cdef double[:, ::1] _vectors_mv
+    cdef int64_t[:, ::1] _words_mv
+    cdef uint8_t[::1] _alive_mv
+    cdef int64_t[::1] _window_idx_mv
+    cdef int64_t[::1] _sid_idx_mv
+    cdef int64_t[::1] _sid_rank_mv
+    cdef int64_t[::1] _time_mv
+    cdef int64_t[::1] _window_size_mv
+    cdef int64_t[::1] _entry_ids_mv
+    cdef int64_t[::1] _alive_list_mv
+    cdef int64_t[::1] _alive_pos_mv
+
+    cdef void _refresh_slot_views(self):
+        self._vectors_mv = self._vectors
+        self._words_mv = self._words
+        self._alive_mv = self._alive
+        self._window_idx_mv = self._window_idx
+        self._sid_idx_mv = self._sid_idx
+        self._sid_rank_mv = self._sid_rank
+        self._time_mv = self._time
+        self._window_size_mv = self._window_size
+        self._entry_ids_mv = self._entry_ids
+        self._alive_list_mv = self._alive_list
+        self._alive_pos_mv = self._alive_pos
 
     def __cinit__(self, Py_ssize_t n_vectors=1, Py_ssize_t initial_capacity=1024,
                   Py_ssize_t hamming_threshold=-1, bint apply_dot_filter=True):
@@ -5016,6 +5102,7 @@ cdef class HammingExactIndex:
         self._entry_ids = np.empty(self._capacity, dtype=np.int64)
         self._alive_list = np.full(self._capacity, -1, dtype=np.int64)
         self._alive_pos = np.full(self._capacity, -1, dtype=np.int64)
+        self._refresh_slot_views()
 
         self._win_capacity = initial_capacity
         self._win_sid_idx_arr = np.full(self._win_capacity, -1, dtype=np.int64)
@@ -5112,6 +5199,7 @@ cdef class HammingExactIndex:
         new_alive_pos[:self._capacity] = self._alive_pos
         self._alive_pos = new_alive_pos
         self._capacity = new_cap
+        self._refresh_slot_views()
 
     cdef void _ensure_window_capacity(self, Py_ssize_t need):
         cdef Py_ssize_t new_cap
@@ -5150,7 +5238,14 @@ cdef class HammingExactIndex:
         self._free_slots[self._free_count] = idx
         self._free_count += 1
 
-    cdef int64_t _insert_one(self, double[:] vector, int64_t window_idx, int64_t sid_idx,
+    # (2026-09-24) Takes the whole batch's vector matrix plus a row index, not one row.
+    # `vectors_np[i]` in insert_many built a fresh Python ndarray object for every window
+    # (an ndim=2 buffer indexed with a single subscript falls back to __getitem__), which
+    # at m = 444 windows per step cost more than all the banding and posting-list work put
+    # together (measured: 1.26 ms of the candidate stage's 1.30 ms per step at W = 30).
+    # Reading rows straight out of a contiguous memoryview allocates nothing.
+    cdef int64_t _insert_one(self, double[:, ::1] all_vectors, Py_ssize_t row,
+                              int64_t window_idx, int64_t sid_idx,
                               int64_t time_val, int64_t window_size, int64_t sid_rank):
         cdef Py_ssize_t node
         cdef Py_ssize_t w, d, bit, bits_in_word
@@ -5180,27 +5275,28 @@ cdef class HammingExactIndex:
         # query misindexing (see docs/implementation_log.md's memory-leak
         # fix entry for the two tests that caught this).
         entry_id = node
-        cdef double[:, :] vectors = self._vectors
-        cdef int64_t[:, :] words = self._words
-        cdef uint8_t[:] alive = self._alive
-        cdef int64_t[:] window_idx_arr = self._window_idx
-        cdef int64_t[:] sid_idx_arr = self._sid_idx
-        cdef int64_t[:] sid_rank_arr = self._sid_rank
-        cdef int64_t[:] time_arr = self._time
-        cdef int64_t[:] window_size_arr = self._window_size
-        cdef int64_t[:] entry_ids_arr = self._entry_ids
-        cdef int64_t[:] alive_list = self._alive_list
-        cdef int64_t[:] alive_pos = self._alive_pos
+        # (2026-09-24) class-held views -- see _refresh_slot_views
+        cdef double[:, ::1] vectors = self._vectors_mv
+        cdef int64_t[:, ::1] words = self._words_mv
+        cdef uint8_t[::1] alive = self._alive_mv
+        cdef int64_t[::1] window_idx_arr = self._window_idx_mv
+        cdef int64_t[::1] sid_idx_arr = self._sid_idx_mv
+        cdef int64_t[::1] sid_rank_arr = self._sid_rank_mv
+        cdef int64_t[::1] time_arr = self._time_mv
+        cdef int64_t[::1] window_size_arr = self._window_size_mv
+        cdef int64_t[::1] entry_ids_arr = self._entry_ids_mv
+        cdef int64_t[::1] alive_list = self._alive_list_mv
+        cdef int64_t[::1] alive_pos = self._alive_pos_mv
 
         for d in range(self._n_vectors):
-            vectors[node, d] = vector[d]
+            vectors[node, d] = all_vectors[row, d]
         for w in range(self._n_words):
             bits_in_word = self._n_vectors - w * 64
             if bits_in_word > 64:
                 bits_in_word = 64
             word_tmp = 0
             for bit in range(bits_in_word):
-                if vector[w * 64 + bit] >= 0:
+                if all_vectors[row, w * 64 + bit] >= 0:
                     word_tmp |= (<uint64_t>1) << bit
             words[node, w] = <int64_t>word_tmp
         alive[node] = 1
@@ -5261,10 +5357,11 @@ cdef class HammingExactIndex:
         cdef int64_t[:] win_size = self._win_size_arr
 
         entry_ids = np.empty(n, dtype=np.int64)
+        cdef double[:, ::1] vectors_mv = vectors_np
         for i in range(n):
             wi = <int64_t>window_idx_np[i]
             entry_ids[i] = self._insert_one(
-                vectors_np[i], wi, <int64_t>sid_idx_np[i], <int64_t>time_np[i],
+                vectors_mv, i, wi, <int64_t>sid_idx_np[i], <int64_t>time_np[i],
                 <int64_t>window_size_np[i], <int64_t>sid_rank_np[i],
             )
             if wi >= 0:
@@ -5278,8 +5375,8 @@ cdef class HammingExactIndex:
         # O(1) swap-remove: move the LAST alive-list entry into the
         # expiring node's slot, shrink the count. No posting lists exist
         # in this design, so there is nothing else to unlink.
-        cdef int64_t[:] alive_list = self._alive_list
-        cdef int64_t[:] alive_pos = self._alive_pos
+        cdef int64_t[::1] alive_list = self._alive_list_mv     # class-held views; see _refresh_slot_views
+        cdef int64_t[::1] alive_pos = self._alive_pos_mv
         cdef Py_ssize_t pos = <Py_ssize_t>alive_pos[node_idx]
         cdef Py_ssize_t last_pos = self._alive_count - 1
         cdef int64_t last_node

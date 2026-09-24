@@ -2226,3 +2226,26 @@ written: the feature-experiment scripts `abaca/{step_sweep,dynamic_window,multi_
 Open issue to settle before StatStream's W=30 rows are used: `statstream_n_coeffs=16` violates its own Lemma 7
 guard at window_size=30 (`2n <= W`), so that cell errors; the tuner's range needs the same kind of cap the
 bandwidth coefficients got on 2026-09-22 (j).
+### 2026-09-24 (c) no Python per window; the Cython insert was 90% buffer setup
+Branch: `dev`. Log entry (c) has the full account. Five more changes, same shared Pattern B path:
+the window registry is buffer-backed and allocated/freed a step at a time (`_win_alloc_many`,
+`_win_free_many`, slots kept on the partition); `partition_sketches` derives its arrays from
+`_sketch_keys_uniform` instead of reading keys; the series maps are learned once (`_lsh_sid_meta`);
+`insert_many` passes the batch matrix instead of one ndarray per row; and both Cython indexes now hold
+their per-slot memoryviews on the class instead of re-acquiring fourteen buffers per window
+(`_refresh_slot_views`) -- that last one alone took 444 inserts from 1.136 ms to 0.200 ms.
+Measured (sp500, differenced, T=0.95, m=444, 3 repeats): CorrTrack ms/step 5.503 -> 2.541 (W=30),
+5.449 -> 2.764 (W=90), 6.030 -> 2.961 (W=180); synchronous speedup 0.88x -> 1.95x / 2.88x / 4.23x;
+lagged (n_lags=15) 6.304 -> 4.422 ms/step, 15.7x. Every counter unchanged on all the reference cells
+(sync, lagged, five-arm uscrn2020, neg_corr, monitor); 171 tests pass.
+**Uncommitted** (this thread, cumulative): `library_corrtrack_parallel.py`, `candidate_kernels.pyx`
+(+ rebuilt `.c`/`.so`), `abaca/{aggregate_campaign,campaign_budget,campaign_competitors,tune_competitors}.py`,
+`test_abaca_tools.py`, `docs/{implementation_log,competitor_implementation_plan,campaign_budget_2026-09-20}.md`,
+`tasks/current_task.md`.
+Next exact step: nothing is required by this change (the campaign re-runs hyperopt per cell, so the new
+cost balance is picked up automatically), but the previously tuned CorrTrack files were chosen when an
+index insert cost five times what it now costs and are no longer the optimum. The open decisions are
+still the user's: budget row (A-E / C-mem / D-mem), host split (11+4 or 8+3), repeat sample (4.8% vs
+0.67%). Before any new submission: storage cleanup on zenith (account unlocked; the m=500 tables campaign
+from snapshot `d0e337877e3d_m500tables` must not be touched).
+Still open from (b): `statstream_n_coeffs=16` violates StatStream's own Lemma 7 guard at window_size=30.

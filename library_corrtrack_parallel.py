@@ -3374,11 +3374,13 @@ class ArrayBackedPartition(dict):
     insert falls back to the original loop.
     """
 
-    __slots__ = ("arrays",)
+    __slots__ = ("arrays", "win_slots", "min_time")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.arrays = None
+        self.win_slots = None      # the window-registry slots this partition's windows were given
+        self.min_time = None       # the smallest window start in it, for the index's expiry cutoff
 
 
 class NumericCorrelatedFlags:
@@ -10479,6 +10481,8 @@ class Sketches:
         self._orth_perm = None
         self._orth_signs = None
         self._sketch_keys = []
+        self._sketch_keys_uniform = None
+        self._uniform_sid_cache = None
         debug_env = os.environ.get("CORRTRACK_DEBUG_SKETCHES", "").strip().lower()
         self._debug_sketches = debug_env in ("1", "true", "yes")
         # Parameters grids
@@ -11354,6 +11358,7 @@ class Sketches:
                 self.sketches = sketches
                 self._sketch_matrix = matrix
                 self._sketch_keys = keys
+                self._sketch_keys_uniform = None         # restored state: uniformity not recorded
                 self._const_flags = const_flags
                 self._spiked_flags = spiked_flags
                 self.partition_sketches(size)
@@ -11364,6 +11369,7 @@ class Sketches:
                         per_grid_parts[grid].append(partition)
         finally:
             self.sketches, self._sketch_matrix, self._sketch_keys, self._const_flags, self._spiked_flags = saved_state
+        self._sketch_keys_uniform = None
 
         merged_partitions = [None for _ in range(self.n_grids)]
         for grid, parts in enumerate(per_grid_parts):
@@ -11388,6 +11394,7 @@ class Sketches:
         self.sketches = merged_sketches
         self._sketch_matrix = None
         self._sketch_keys = list(merged_sketches.keys())
+        self._sketch_keys_uniform = None                 # several nodes merged: starts need not agree
         self.partitions = merged_partitions
 
         if testing and merged_sketches:
@@ -11491,6 +11498,7 @@ class Sketches:
         if n_series == 0:
             self._sketch_matrix = None
             self._sketch_keys = []
+            self._sketch_keys_uniform = None
             return
         B = self._dft_basis_matrix()
         raw, denom = self._dft_raw_incremental(current_window, curr_start, B)
@@ -11502,7 +11510,7 @@ class Sketches:
         series_ids = list(self.series_ids)
         if len(series_ids) < n_series:
             series_ids = series_ids + [None] * (n_series - len(series_ids))
-        self._sketch_keys = [(series_ids[sidx], curr_start, window_size) for sidx in range(n_series)]
+        self._build_sketch_keys(series_ids, curr_start, window_size, n_series)
         self.sketches = dict(zip(self._sketch_keys, out))
 
     def _paa_basis_matrix(self):
@@ -11537,7 +11545,7 @@ class Sketches:
         curr_start = self._curr_startTime(); window_size = self.window_size
         self.sketches = {}
         if n_series == 0:
-            self._sketch_matrix = None; self._sketch_keys = []; return
+            self._sketch_matrix = None; self._sketch_keys = []; self._sketch_keys_uniform = None; return
         B = self._paa_basis_matrix()
         mean = current_window.mean(axis=1)
         centred = current_window - mean[:, None]
@@ -11551,7 +11559,7 @@ class Sketches:
         series_ids = list(self.series_ids)
         if len(series_ids) < n_series:
             series_ids = series_ids + [None] * (n_series - len(series_ids))
-        self._sketch_keys = [(series_ids[sidx], curr_start, window_size) for sidx in range(n_series)]
+        self._build_sketch_keys(series_ids, curr_start, window_size, n_series)
         self.sketches = dict(zip(self._sketch_keys, out))
 
     def _clean_obsolete_basicDots(self):
@@ -11581,6 +11589,7 @@ class Sketches:
             self.sketches = {}
             self._sketch_matrix = None
             self._sketch_keys = []
+            self._sketch_keys_uniform = None
             return
 
         window_blocks = current_window.reshape(n_series, self.n_basic_windows, self.basic_window)
@@ -11641,7 +11650,7 @@ class Sketches:
         series_ids = list(self.series_ids)
         if len(series_ids) < n_series:
             series_ids = series_ids + [None] * (n_series - len(series_ids))
-        self._sketch_keys = [(series_ids[s], curr_start, window_size) for s in range(n_series)]
+        self._build_sketch_keys(series_ids, curr_start, window_size, n_series)
         self.sketches = dict(zip(self._sketch_keys, norm_matrix))
     
     def _print_incremental_intermediary_window(self):
@@ -11691,6 +11700,7 @@ class Sketches:
                     self.basicFeatureSums.append(np.empty((0, self.n_basic_windows), dtype=np.float64))
                     self._sketch_matrix = None
                     self._sketch_keys = []
+                    self._sketch_keys_uniform = None
                     continue
                 curr_start = self._curr_startTime()
                 window_size = self.window_size
@@ -11738,7 +11748,7 @@ class Sketches:
                 series_ids = list(self.series_ids)
                 if len(series_ids) < n_series:
                     series_ids = series_ids + [None] * (n_series - len(series_ids))
-                self._sketch_keys = [(series_ids[s], curr_start, window_size) for s in range(n_series)]
+                self._build_sketch_keys(series_ids, curr_start, window_size, n_series)
                 self.sketches = dict(zip(self._sketch_keys, norm_matrix))
             del self.basicDots[0]
             if self.basicFeatureSums:
@@ -11913,7 +11923,7 @@ class Sketches:
         if len(series_ids) < n_series:
             series_ids = series_ids + [None] * (n_series - len(series_ids))
         t_materialize = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
-        self._sketch_keys = [(series_ids[s], curr_start, window_size) for s in range(n_series)]
+        self._build_sketch_keys(series_ids, curr_start, window_size, n_series)
         self.sketches = dict(zip(self._sketch_keys, norm_matrix))
         if t_materialize is not None:
             self._profile_add("sketch.incremental_materialize", time.perf_counter() - t_materialize)
@@ -12075,6 +12085,41 @@ class Sketches:
             return vector
         return signs * vector[perm]
 
+    def _uniform_sid_idx(self, sid_lookup, n_keys):
+        """Series indices for a uniform key list, without reading the keys.
+
+        The keys are (series_ids[s], start, w) for s in range(n_series) and `sid_lookup` maps a series id
+        to its index, so row s has series index s whenever the lookup's own values are 0..len-1 in
+        iteration order (which is how CorrTrack builds it, and how `list(self.series_ids)` orders the ids
+        the keys were built from). That condition is checked once per lookup object, not per window, and
+        the answer is cached; anything else (a shorter lookup, a reordered one, padding rows past the end
+        of the series list) returns None and the caller falls back to the per-key path."""
+        cache = getattr(self, "_uniform_sid_cache", None)
+        if cache is not None and cache[0] is sid_lookup and cache[1] == len(sid_lookup) and cache[2] >= n_keys:
+            return cache[3][:n_keys]
+        n_lookup = len(sid_lookup)
+        if n_lookup == 0 or n_lookup < n_keys:
+            return None
+        values = np.fromiter(sid_lookup.values(), dtype=np.int64, count=n_lookup)
+        if not np.array_equal(values, np.arange(n_lookup, dtype=np.int64)):
+            return None
+        idx = np.arange(n_lookup, dtype=np.int64)
+        self._uniform_sid_cache = (sid_lookup, n_lookup, n_lookup, idx)
+        return idx[:n_keys]
+
+    def _build_sketch_keys(self, series_ids, curr_start, window_size, n_series):
+        """Build the step's window keys and record what is uniform about them.
+
+        Every key built here is (series_ids[s], curr_start, window_size) for s in range(n_series), so the
+        arrays `partition_sketches` needs are known without reading the keys back one at a time: the
+        window start is one int64 for the whole step, so is the window size, and the series index of row s
+        is s itself. `_sketch_keys_uniform` records that; any other way of setting `_sketch_keys` (a merge
+        of several nodes' sketch dicts, a restored state) leaves it None and the per-key path runs."""
+        keys = [(series_ids[s], curr_start, window_size) for s in range(n_series)]
+        self._sketch_keys = keys
+        self._sketch_keys_uniform = (_time_key_to_int64(curr_start), int(window_size))
+        return keys
+
     def partition_sketches(self, window_size):
         # (2026-09-24) see ArrayBackedPartition: the full-vector branch below builds its dict FROM arrays it
         # has already computed, and the index insert then walks that dict back into arrays one window at a
@@ -12089,12 +12134,20 @@ class Sketches:
 
         keys = self._sketch_keys
         matrix = self._sketch_matrix
+        # (2026-09-24) `uniform` is (start_int64, window_size) when this step's keys were built by
+        # _build_sketch_keys, i.e. all of them share a start and a window size and row s is series s.
+        # It lets the three key-derived arrays below be produced without touching a single key, and it
+        # answers the window-size guard without scanning. None (a merged or restored key list) keeps the
+        # per-key path exactly as it was.
+        uniform = getattr(self, "_sketch_keys_uniform", None) if keys is self._sketch_keys else None
         if (
             matrix is None
             or not keys
             or matrix.shape[0] != len(keys)
-            or any(k[2] != window_size for k in keys)
+            or (window_size != uniform[1] if uniform is not None
+                else any(k[2] != window_size for k in keys))
         ):
+            uniform = None
             keys = []
             rows = []
             for k, v in self.sketches.items():
@@ -12116,14 +12169,21 @@ class Sketches:
         sid_lookup = self._sid_lookup
         if sid_lookup is None:
             sid_lookup = {sid: i for i, sid in enumerate(self.series_ids)}
-        sid_idx = np.fromiter((sid_lookup.get(k[0], -1) for k in keys), dtype=np.int64, count=len(keys))
-        # (2026-09-24) time_arr is built below, after the full-vector branch: that branch's consumer
-        # (Candidates._input_tree_lsh_batch_from_arrays) reads the window start from the key, exactly as
-        # the dict insert path does, so building it here cost one _time_key_to_int64 call per window per
-        # step for nothing. The tuple partitions below do need it, and get it from the same keys.
-        w_arr = np.fromiter((int(k[2]) for k in keys), dtype=np.int64, count=len(keys))
-        if self._const_flags is not None and self._const_flags.size >= len(keys):
-            const_flags = np.asarray(self._const_flags[: len(keys)], dtype=np.uint8)
+        n_keys = len(keys)
+        sid_idx = None
+        if uniform is not None:
+            sid_idx = self._uniform_sid_idx(sid_lookup, n_keys)
+        if sid_idx is None:
+            sid_idx = np.fromiter((sid_lookup.get(k[0], -1) for k in keys), dtype=np.int64, count=n_keys)
+            time_arr = np.fromiter((_time_key_to_int64(k[1]) for k in keys), dtype=np.int64, count=n_keys)
+            w_arr = np.fromiter((int(k[2]) for k in keys), dtype=np.int64, count=n_keys)
+        else:
+            time_arr = np.full(n_keys, uniform[0], dtype=np.int64)
+            w_arr = np.full(n_keys, uniform[1], dtype=np.int64)
+        if self._const_flags is not None and self._const_flags.size >= n_keys:
+            const_flags = np.asarray(self._const_flags[: n_keys], dtype=np.uint8)
+        elif not self.is_constant:
+            const_flags = np.zeros(n_keys, dtype=np.uint8)
         else:
             const_flags = np.array(
                 [bool(self.is_constant.get(k[0], False)) for k in keys],
@@ -12134,6 +12194,7 @@ class Sketches:
         if not np.all(valid_mask):
             matrix = matrix[valid_mask]
             sid_idx = sid_idx[valid_mask]
+            time_arr = time_arr[valid_mask]
             w_arr = w_arr[valid_mask]
             const_flags = const_flags[valid_mask]
             keys = [k for k, keep in zip(keys, valid_mask) if keep]
@@ -12169,11 +12230,12 @@ class Sketches:
             # kept every row (duplicate keys would collapse in the dict but not in the arrays, and the dict
             # is the authority), so the fast path can never see more rows than the dict path would insert.
             if len(partition) == len(keys):
+                partition.min_time = int(time_arr.min()) if time_arr.size else None
                 partition.arrays = (
                     list(keys),
                     np.ascontiguousarray(matrix, dtype=np.float64),
                     np.ascontiguousarray(sid_idx, dtype=np.int64),
-                    None,                                       # window starts: read from the keys, above
+                    np.ascontiguousarray(time_arr, dtype=np.int64),
                     np.ascontiguousarray(w_arr, dtype=np.int64),
                     np.ascontiguousarray(const_mask, dtype=bool),
                 )
@@ -12182,8 +12244,6 @@ class Sketches:
 
         n_grids = min(self.n_grids, n_dim // self.grid_dimensions)
         self.partitions = [None for _ in range(self.n_grids)]
-        # the tuple partitions below carry the window start in the array itself, so it is built here
-        time_arr = np.fromiter((_time_key_to_int64(k[1]) for k in keys), dtype=np.int64, count=len(keys))
         sid_idx_arr = np.ascontiguousarray(sid_idx, dtype=np.int64)
         time_arr = np.ascontiguousarray(time_arr, dtype=np.int64)
         w_arr = np.ascontiguousarray(w_arr, dtype=np.int64)
@@ -14906,11 +14966,24 @@ class Candidates:
         self._sid_idx_map = {}
         self._sid_sort_rank_map = {}
         self._sid_idx_rank = []
-        self._win_sid = []
-        self._win_sid_idx = []
-        self._win_sid_rank = []
-        self._win_time = []
-        self._win_w = []
+        # (2026-09-24) The registry is buffer-backed: `_win_*` stay ordinary attributes with the same
+        # names, lengths and element meaning as the Python lists they replace, but each is a numpy VIEW
+        # of a geometrically grown buffer (`_win_*_buf`) truncated to `_win_count`. len(), indexing and
+        # item assignment behave as before and writes go through to the buffer; what the views add is
+        # that a whole step's worth of slots can be allocated, written and freed with vectorized numpy
+        # calls instead of one Python loop iteration per window (see `_win_alloc_many`). The free list is
+        # the same LIFO stack, held as `_win_free_buf` + `_win_free_n` for the same reason.
+        self._win_count = 0
+        self._win_sid_buf = np.empty(0, dtype=object)
+        self._win_sid_idx_buf = np.empty(0, dtype=np.int64)
+        self._win_sid_rank_buf = np.empty(0, dtype=np.int64)
+        self._win_time_buf = np.empty(0, dtype=np.int64)
+        self._win_w_buf = np.empty(0, dtype=np.int64)
+        self._win_free_buf = np.empty(0, dtype=np.int64)
+        self._win_free_n = 0
+        self._sid_obj_arr = None
+        self._lsh_sid_meta_cache = None
+        self._win_reslice()
         # (2026-09-07) Free-list of reclaimed window_idx slots -- see
         # docs/implementation_log.md's memory-leak fix entry. Before this,
         # _get_or_create_window_idx only ever minted a brand new idx
@@ -14922,7 +14995,6 @@ class Candidates:
         # up. _clean_old_sketches now pushes a freed idx here when an
         # expiring window's key is dropped; _get_or_create_window_idx pops
         # from here before ever growing _win_sid's length.
-        self._win_free_idx = []
         self._candidate_numeric_rows = None
         self._profile_callback = None
         self._profile_metric_callback = None
@@ -15549,12 +15621,7 @@ class Candidates:
         obj._sid_idx_map = dict(getattr(obj, "_sid_idx_map", {}))
         obj._sid_sort_rank_map = dict(getattr(obj, "_sid_sort_rank_map", {}))
         obj._sid_idx_rank = list(getattr(obj, "_sid_idx_rank", []))
-        obj._win_sid = list(getattr(obj, "_win_sid", []))
-        obj._win_sid_idx = list(getattr(obj, "_win_sid_idx", []))
-        obj._win_sid_rank = list(getattr(obj, "_win_sid_rank", []))
-        obj._win_time = list(getattr(obj, "_win_time", []))
-        obj._win_w = list(getattr(obj, "_win_w", []))
-        obj._win_free_idx = list(getattr(obj, "_win_free_idx", []))
+        obj._win_rebuild_buffers(obj)
         obj._candidate_numeric_rows = None
         obj._profile_metric_callback = None
         obj._blocked_index = getattr(obj, "_blocked_index", None)
@@ -15612,12 +15679,7 @@ class Candidates:
         self._sid_idx_map = dict(getattr(self, "_sid_idx_map", {}))
         self._sid_sort_rank_map = dict(getattr(self, "_sid_sort_rank_map", {}))
         self._sid_idx_rank = list(getattr(self, "_sid_idx_rank", []))
-        self._win_sid = list(getattr(self, "_win_sid", []))
-        self._win_sid_idx = list(getattr(self, "_win_sid_idx", []))
-        self._win_sid_rank = list(getattr(self, "_win_sid_rank", []))
-        self._win_time = list(getattr(self, "_win_time", []))
-        self._win_w = list(getattr(self, "_win_w", []))
-        self._win_free_idx = list(getattr(self, "_win_free_idx", []))
+        self._win_rebuild_buffers(self)
         self._candidate_numeric_rows = None
         self._profile_metric_callback = None
         self._blocked_index = getattr(self, "_blocked_index", None)
@@ -15692,8 +15754,12 @@ class Candidates:
                     # (2026-09-24) the stored partition is a sketch node's own ArrayBackedPartition, now
                     # reached by reference (see the single-part merge above). Updating it in place would
                     # both mutate that node's object and leave its arrays describing only part of the
-                    # merged content, so merge into a plain copy: the slow dict insert path then runs.
-                    current = dict(current)
+                    # merged content, so merge into a copy with no arrays: the dict insert path then runs.
+                    # The copy keeps `win_slots`, the slots already handed to this partition's windows, so
+                    # _clean_old_sketches still frees them when it expires.
+                    merged = ArrayBackedPartition(current)
+                    merged.win_slots = getattr(current, "win_slots", None)
+                    current = merged
                     self.partition[-1] = current
                 if not isinstance(new_partition, dict):
                     new_partition = self._partition_to_dict(new_partition)
@@ -15786,6 +15852,132 @@ class Candidates:
             return out
         return None
 
+    # ---- window registry (buffer-backed; see the fields in __init__) -----------------------------
+
+    def _win_reslice(self):
+        """Refresh the `_win_*` views after a growth or a count change. O(1): views, not copies."""
+        n = self._win_count
+        self._win_sid = self._win_sid_buf[:n]
+        self._win_sid_idx = self._win_sid_idx_buf[:n]
+        self._win_sid_rank = self._win_sid_rank_buf[:n]
+        self._win_time = self._win_time_buf[:n]
+        self._win_w = self._win_w_buf[:n]
+
+    def _win_ensure_capacity(self, needed):
+        capacity = self._win_sid_idx_buf.shape[0]
+        if needed <= capacity:
+            return
+        new_capacity = max(16, capacity * 2, int(needed))
+        def grow(buf, fill):
+            out = np.empty(new_capacity, dtype=buf.dtype)
+            if buf.shape[0]:
+                out[: buf.shape[0]] = buf
+            out[buf.shape[0]:] = fill
+            return out
+        self._win_sid_buf = grow(self._win_sid_buf, None)
+        self._win_sid_idx_buf = grow(self._win_sid_idx_buf, -1)
+        self._win_sid_rank_buf = grow(self._win_sid_rank_buf, -1)
+        self._win_time_buf = grow(self._win_time_buf, 0)
+        self._win_w_buf = grow(self._win_w_buf, 0)
+
+    def _win_alloc_one(self):
+        """One slot, freed-slots-first (LIFO) -- the allocation half of the old _get_or_create_window_idx."""
+        if self._win_free_n > 0:
+            self._win_free_n -= 1
+            return int(self._win_free_buf[self._win_free_n])
+        idx = self._win_count
+        self._win_ensure_capacity(idx + 1)
+        self._win_count = idx + 1
+        self._win_reslice()
+        return idx
+
+    def _win_alloc_many(self, n):
+        """`n` slots in one call, in the order the per-window loop would have produced them: the freed
+        slots first, most recently freed first (the old list.pop()), then fresh ids appended at the end."""
+        out = np.empty(n, dtype=np.int64)
+        if n == 0:
+            return out
+        take = self._win_free_n if self._win_free_n < n else n
+        if take:
+            out[:take] = self._win_free_buf[self._win_free_n - take: self._win_free_n][::-1]
+            self._win_free_n -= take
+        extra = n - take
+        if extra:
+            start = self._win_count
+            self._win_ensure_capacity(start + extra)
+            out[take:] = np.arange(start, start + extra, dtype=np.int64)
+            self._win_count = start + extra
+            self._win_reslice()
+        return out
+
+    def _win_free_many(self, slots):
+        """Push slots back onto the free stack, vectorized (the old per-key _release_window_idx append)."""
+        slots = np.asarray(slots, dtype=np.int64).ravel()
+        n = slots.shape[0]
+        if n == 0:
+            return
+        need = self._win_free_n + n
+        if need > self._win_free_buf.shape[0]:
+            new_capacity = max(16, self._win_free_buf.shape[0] * 2, need)
+            grown = np.empty(new_capacity, dtype=np.int64)
+            if self._win_free_n:
+                grown[: self._win_free_n] = self._win_free_buf[: self._win_free_n]
+            self._win_free_buf = grown
+        self._win_free_buf[self._win_free_n: need] = slots
+        self._win_free_n = need
+
+    def _win_free_one(self, idx):
+        if self._win_free_n >= self._win_free_buf.shape[0]:
+            self._win_free_many(np.array([idx], dtype=np.int64))
+            return
+        self._win_free_buf[self._win_free_n] = idx
+        self._win_free_n += 1
+
+    def _win_write_meta_many(self, slots, sid_obj, sid_idx, sid_rank, time_arr, w_arr):
+        """Write a whole step's window metadata with five scatter assignments."""
+        self._win_sid_buf[slots] = sid_obj
+        self._win_sid_idx_buf[slots] = sid_idx
+        self._win_sid_rank_buf[slots] = sid_rank
+        self._win_time_buf[slots] = time_arr
+        self._win_w_buf[slots] = w_arr
+
+    def _win_sid_objects(self, sid_idx):
+        """The sid objects for a sid_idx array, via one fancy index into a cached object array.
+
+        `_win_sid` holds the raw series id (only `_window_distance_sq_by_indices` reads it, and only in
+        return_distances mode); resolving it per window would be exactly the Python loop this path exists
+        to remove. `_sid_idx_map` is the inverse of what is needed, so it is inverted once and cached,
+        and rebuilt whenever it has grown."""
+        arr = self._sid_obj_arr
+        n_map = len(self._sid_idx_map)
+        if arr is None or arr.shape[0] != n_map:
+            arr = np.empty(n_map, dtype=object)
+            for sid, idx in self._sid_idx_map.items():
+                if 0 <= idx < n_map:
+                    arr[idx] = sid
+            self._sid_obj_arr = arr
+        if arr.shape[0] == 0:
+            return np.full(sid_idx.shape[0], None, dtype=object)
+        clipped = np.clip(sid_idx, 0, arr.shape[0] - 1)
+        return arr[clipped]
+
+    def _win_rebuild_buffers(self, state_source):
+        """Restore the registry from a plain-array state dump (from_state/load_state)."""
+        sid = np.asarray(getattr(state_source, "_win_sid", []), dtype=object)
+        n = sid.shape[0]
+        state_source._win_count = n
+        state_source._win_sid_buf = np.array(sid, dtype=object)
+        state_source._win_sid_idx_buf = np.asarray(getattr(state_source, "_win_sid_idx", []), dtype=np.int64).copy()
+        state_source._win_sid_rank_buf = np.asarray(getattr(state_source, "_win_sid_rank", []), dtype=np.int64).copy()
+        state_source._win_time_buf = np.asarray(getattr(state_source, "_win_time", []), dtype=np.int64).copy()
+        state_source._win_w_buf = np.asarray(getattr(state_source, "_win_w", []), dtype=np.int64).copy()
+        free = np.asarray(getattr(state_source, "_win_free_buf", []), dtype=np.int64)
+        free_n = int(getattr(state_source, "_win_free_n", 0) or 0)
+        state_source._win_free_buf = free.copy() if free.shape[0] else np.empty(0, dtype=np.int64)
+        state_source._win_free_n = min(free_n, state_source._win_free_buf.shape[0])
+        state_source._sid_obj_arr = None
+        Candidates._win_reslice(state_source)
+
     def _window_id_key(self, window_id):
         sid, start_time, window_size = window_id
         return (str(sid), int(start_time), int(window_size))
@@ -15819,20 +16011,12 @@ class Candidates:
         # (2026-09-07) Reuse a freed slot (pushed by _clean_old_sketches when
         # an expiring window's key is dropped) before ever growing
         # _win_sid's length -- see _win_free_idx's field comment.
-        if self._win_free_idx:
-            idx = self._win_free_idx.pop()
-            self._win_sid[idx] = sid
-            self._win_sid_idx[idx] = sid_idx
-            self._win_sid_rank[idx] = sid_rank
-            self._win_time[idx] = int(start_time)
-            self._win_w[idx] = int(window_size)
-        else:
-            idx = len(self._win_sid)
-            self._win_sid.append(sid)
-            self._win_sid_idx.append(sid_idx)
-            self._win_sid_rank.append(sid_rank)
-            self._win_time.append(int(start_time))
-            self._win_w.append(int(window_size))
+        idx = self._win_alloc_one()
+        self._win_sid_buf[idx] = sid
+        self._win_sid_idx_buf[idx] = sid_idx
+        self._win_sid_rank_buf[idx] = sid_rank
+        self._win_time_buf[idx] = int(start_time)
+        self._win_w_buf[idx] = int(window_size)
         self._window_idx[window_id] = idx
         return idx, sid_idx, sid_rank
 
@@ -15853,7 +16037,7 @@ class Candidates:
         # disclosed as a known remaining gap there.
         idx = self._window_idx.pop(window_id, None)
         if idx is not None:
-            self._win_free_idx.append(idx)
+            self._win_free_one(idx)
 
     def _get_or_create_window_idx_numeric(self, sid_idx, start_time, window_size):
         sid_idx = int(sid_idx)
@@ -15863,22 +16047,31 @@ class Candidates:
         idx = self._window_idx_numeric.get(key)
         if idx is not None:
             return idx
-        idx = len(self._win_sid)
         sid = self._sid_list[sid_idx] if 0 <= sid_idx < len(self._sid_list) else str(sid_idx)
         if sid_idx >= len(self._sid_idx_rank):
             rank = int(self._sid_sort_rank_map.get(sid, sid_idx))
         else:
             rank = int(self._sid_idx_rank[sid_idx])
+        # (2026-09-24) still minted monotonically, never from the free list: this path's callers do not
+        # release their slots (the gap disclosed in _release_window_idx), so taking a freed slot here
+        # could hand a live tuple-partition window a slot another window is about to overwrite.
+        idx = self._win_count
+        self._win_ensure_capacity(idx + 1)
+        self._win_count = idx + 1
+        self._win_reslice()
         self._window_idx_numeric[key] = idx
-        self._win_sid.append(sid)
-        self._win_sid_idx.append(int(sid_idx))
-        self._win_sid_rank.append(rank)
-        self._win_time.append(start_time)
-        self._win_w.append(window_size)
+        self._win_sid_buf[idx] = sid
+        self._win_sid_idx_buf[idx] = int(sid_idx)
+        self._win_sid_rank_buf[idx] = rank
+        self._win_time_buf[idx] = start_time
+        self._win_w_buf[idx] = window_size
         return idx
 
     def _partition_min_time(self, partition):
         try:
+            stored = getattr(partition, "min_time", None)   # recorded when the arrays were attached
+            if stored is not None:
+                return int(stored)
             if isinstance(partition, tuple) and len(partition) >= 2:
                 arr = np.asarray(partition[1], dtype=np.int64)
                 if arr.size:
@@ -16253,7 +16446,7 @@ class Candidates:
         tree_ready = (
             self._candidate_backend == "bptree"
             and self._tree_index is not None
-            and self._recent_entry_ids
+            and len(self._recent_entry_ids) > 0
             and len(self._win_sid) > 0
             and len(self._win_time) == len(self._win_sid)
             and len(self._win_w) == len(self._win_sid)
@@ -16852,7 +17045,7 @@ class Candidates:
         self._recent_entry_ids = []
         arrays = getattr(last_partition, "arrays", None)
         if arrays is not None:
-            return self._input_tree_lsh_batch_from_arrays(arrays)
+            return self._input_tree_lsh_batch_from_arrays(last_partition, arrays)
         win_indices = []
         sid_indices = []
         sid_ranks = []
@@ -16915,20 +17108,26 @@ class Candidates:
         self._recent_entry_ids = np.asarray(entry_ids, dtype=np.int64).tolist()
         return True
 
-    def _input_tree_lsh_batch_from_arrays(self, arrays):
-        """(2026-09-24) Insert a whole step's windows from the partition's arrays instead of walking its dict.
+    def _input_tree_lsh_batch_from_arrays(self, partition, arrays):
+        """(2026-09-24) Insert a whole step's windows from the partition's arrays, with no per-window Python.
 
-        Same contract and same result as the dict loop above (identical insert_many arguments and order,
-        identical `_recent_window_ids` / `_recent_entry_ids` updates, and the same skipped
-        `_reverse_entry_ids` bookkeeping the note there explains). The per-window
-        work that remains is the window-index allocation, which owns Python state (a key dict and a free
-        list) and is batched in `_get_or_create_window_idx_many`; constant windows are dropped by a mask
-        instead of a per-window branch, and the sketch matrix is sliced once instead of being rebuilt row by
-        row with np.vstack. The 2026-09-24 profile attributed 0.93 ms per step (19% of the candidate stage at
-        W = 30, L = 1) to the loop this replaces, and every Pattern B arm shares this path, so the saving is
-        the same for CorrTrack and for the competitor indexes.
+        The sketch side already has this step as arrays (series index, window start, window size, constant
+        mask, sketch matrix); `partition_sketches` attaches them, and this method hands them to the index.
+        Nothing here is proportional to the number of windows in Python: the constant rows are dropped by a
+        mask, the window slots are allocated in one call (`_win_alloc_many`) and their metadata written with
+        five scatter assignments, the series ids and ranks come from arrays built once per run, and the
+        slots are kept ON the partition so that expiry can hand them back with one vectorized call instead
+        of looking every key up again. The dict loop above stays as the fallback for partitions that do not
+        carry arrays (a merge of two partitions with the same start, a restored state).
+
+        Same results as that loop: the same rows are inserted, in the same order, with the same series
+        indices, ranks, starts and window sizes, and the same `_recent_entry_ids`. What it does not do is
+        maintain `_window_idx` (the key -> slot map), which on this path nothing reads: the slots travel
+        with the partition. If the dict fallback ever runs for a partition, it repopulates the map for its
+        own keys as it always did, and `_clean_old_sketches` frees both.
         """
-        keys, matrix, _sid_idx_all, _time_all, w_all, const_mask = arrays
+        keys, matrix, all_sid_idx, time_arr, w_arr, const_mask = arrays
+        sid_idx = all_sid_idx
         n_rows = len(keys)
         if n_rows == 0 or matrix.shape[0] != n_rows or matrix.shape[1] == 0:
             return True                                         # the dict path skips empty vectors too
@@ -16940,84 +17139,78 @@ class Candidates:
             matrix = fixed
         const_arr = np.asarray(const_mask, dtype=bool)
         if const_arr.any():
-            keep_idx = np.flatnonzero(~const_arr)
-            if keep_idx.size == 0:
+            keep = ~const_arr
+            if not keep.any():
                 return True
-            kept_keys = [keys[i] for i in keep_idx.tolist()]
+            vectors = matrix[keep]
+            sid_idx = sid_idx[keep]
+            time_arr = time_arr[keep]
+            w_arr = w_arr[keep]
         else:                                                   # the common case: nothing to drop
-            keep_idx = None
-            kept_keys = keys
-        # window sizes reuse the partition's w array, built with the same int(k[2]) the dict path uses.
-        # Times do not: the partition's time array goes through _time_key_to_int64, which differs from the
-        # dict path's int(key[1]) for datetime-valued keys, so they are still read from the keys here.
-        n_kept = len(kept_keys)
-        times = np.fromiter((int(k[1]) for k in kept_keys), dtype=np.int64, count=n_kept)
-        w_all = np.asarray(w_all, dtype=np.int64)
-        window_sizes = np.ascontiguousarray(w_all if keep_idx is None else w_all[keep_idx])
-        win_indices, sid_indices, sid_ranks = self._get_or_create_window_idx_many(kept_keys)
-        self._recent_window_ids = set(kept_keys)
-        vector_arr = np.ascontiguousarray(matrix if keep_idx is None else matrix[keep_idx], dtype=np.float64)
+            vectors = matrix
+        n = sid_idx.shape[0]
+        if n == 0:
+            return True
+        # the maps are learned from the unfiltered rows, where key row i is series all_sid_idx[i]
+        sid_obj_all, ranks_all = self._lsh_sid_meta(keys, all_sid_idx)
+        sid_obj = sid_obj_all[sid_idx]
+        sid_ranks = ranks_all[sid_idx]
+        slots = self._win_alloc_many(n)
+        self._win_write_meta_many(slots, sid_obj, sid_idx, sid_ranks, time_arr, w_arr)
+        # the slots this partition owns, so _clean_old_sketches can release them without its key loop
+        previous = getattr(partition, "win_slots", None)
+        partition.win_slots = slots if previous is None else np.concatenate((previous, slots))
+        # on this backend _recent_window_ids is only read for its truthiness (every other reader is gated
+        # on "flat" or "brute_force"), so the key list itself serves and nothing is hashed per window
+        self._recent_window_ids = keys
         t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
         entry_ids = self._lsh_index.insert_many(
             None,
-            win_indices,
-            vector_arr,
-            sid_indices,
-            times,
-            window_sizes,
-            sid_ranks,
+            slots,
+            np.ascontiguousarray(vectors, dtype=np.float64),
+            np.ascontiguousarray(sid_idx, dtype=np.int64),
+            np.ascontiguousarray(time_arr, dtype=np.int64),
+            np.ascontiguousarray(w_arr, dtype=np.int64),
+            np.ascontiguousarray(sid_ranks, dtype=np.int64),
         )
         if t0 is not None:
             self._profile_add("cand.lsh_insert", time.perf_counter() - t0)
-        self._recent_entry_ids = np.asarray(entry_ids, dtype=np.int64).tolist()  # see the note above
+        # kept as the int64 array the candidate search wants (its callers ascontiguousarray it anyway);
+        # the truthiness tests that used to read this list now ask for its length
+        self._recent_entry_ids = np.asarray(entry_ids, dtype=np.int64)
         return True
 
-    def _get_or_create_window_idx_many(self, keys):
-        """Batched `_get_or_create_window_idx`: identical slot-reuse semantics, one pass, arrays out."""
-        n = len(keys)
-        win = np.empty(n, dtype=np.int64)
-        sids = np.empty(n, dtype=np.int64)
-        ranks = np.empty(n, dtype=np.int64)
-        window_idx = self._window_idx
-        win_sid, win_sid_idx = self._win_sid, self._win_sid_idx
-        win_sid_rank, win_time, win_w = self._win_sid_rank, self._win_time, self._win_w
-        free_idx = self._win_free_idx
-        sid_map, rank_map = self._sid_idx_map, self._sid_sort_rank_map
-        for i, key in enumerate(keys):
-            idx = window_idx.get(key)
-            if idx is not None:
-                win[i] = idx
-                sids[i] = win_sid_idx[idx]
-                ranks[i] = win_sid_rank[idx]
-                continue
-            sid, start_time, window_size = key
-            sid_idx = sid_map.get(sid)
-            if sid_idx is None:
-                sid_idx = len(sid_map)
-                sid_map[sid] = sid_idx
-            sid_rank = rank_map.get(sid)
-            if sid_rank is None:
-                sid_rank = len(rank_map)
-                rank_map[sid] = sid_rank
-            if free_idx:
-                idx = free_idx.pop()
-                win_sid[idx] = sid
-                win_sid_idx[idx] = sid_idx
-                win_sid_rank[idx] = sid_rank
-                win_time[idx] = int(start_time)
-                win_w[idx] = int(window_size)
-            else:
-                idx = len(win_sid)
-                win_sid.append(sid)
-                win_sid_idx.append(sid_idx)
-                win_sid_rank.append(sid_rank)
-                win_time.append(int(start_time))
-                win_w.append(int(window_size))
-            window_idx[key] = idx
-            win[i] = idx
-            sids[i] = sid_idx
-            ranks[i] = sid_rank
-        return win, sids, ranks
+    def _lsh_sid_meta(self, keys, sid_idx):
+        """(series ids, sort ranks) for this step's sid_idx, from arrays built once per run.
+
+        The per-key allocator learned both maps from the keys as it walked them, minting
+        sid_idx = len(_sid_idx_map) and sid_rank = len(_sid_sort_rank_map) the first time it saw a series.
+        Here the partition already carries the sketch side's own series index for every row, which is the
+        same number (row s is series s in both), so the maps are filled from (key, sid_idx) pairs once and
+        then only read. The caches are rebuilt when the map grows or a larger index appears.
+        """
+        cache = getattr(self, "_lsh_sid_meta_cache", None)
+        n_needed = int(sid_idx.max()) + 1 if sid_idx.shape[0] else 0
+        if cache is None or cache[0] != len(self._sid_idx_map) or cache[1] < n_needed:
+            sid_map = self._sid_idx_map
+            rank_map = self._sid_sort_rank_map
+            for row, key in enumerate(keys):                    # once per run, not once per step
+                sid = key[0]
+                if sid not in sid_map:
+                    sid_map[sid] = int(sid_idx[row]) if row < sid_idx.shape[0] else len(sid_map)
+                if sid not in rank_map:
+                    rank_map[sid] = sid_map[sid]
+            size = max(len(sid_map), n_needed)
+            sid_obj = np.empty(size, dtype=object)
+            ranks = np.arange(size, dtype=np.int64)
+            for sid, idx in sid_map.items():
+                if 0 <= idx < size:
+                    sid_obj[idx] = sid
+                    ranks[idx] = int(rank_map.get(sid, idx))
+            self._sid_obj_arr = None                            # the scalar path's cache, now stale
+            cache = (len(sid_map), size, sid_obj, ranks)
+            self._lsh_sid_meta_cache = cache
+        return cache[2], cache[3]
 
     def _input_tree_lsh_batch_tuple(self, partition):
         sid_idx_arr, time_arr, w_arr, chunk_arr, is_const = partition[:5]
@@ -17322,25 +17515,31 @@ class Candidates:
                 self._expire_instinct_index()
                 return
             if self._candidate_backend in _LSH_SIGN_DOT_BACKENDS and self._lsh_index is not None:
-                # (2026-09-24) same three operations per expiring key as before, with the two that are
-                # no-ops on this backend skipped when their map is empty (self.sketches is only written by
-                # the blocked-lazy tuple path, and _input_tree_lsh_batch no longer fills
-                # _reverse_entry_ids -- see the note there), and _release_window_idx inlined: it was one
-                # Python call per window per step for a dict pop and a list append. The free-list
-                # semantics are unchanged -- see _release_window_idx for why a freed slot is safe to
-                # reuse immediately.
+                # (2026-09-24) The expiring partition knows which window slots it was given
+                # (_input_tree_lsh_batch_from_arrays stores them), so they go back to the free stack in one
+                # vectorized call instead of a dict lookup per window. The free-list semantics are
+                # unchanged -- see _release_window_idx for why a freed slot is safe to reuse immediately.
+                # The per-key loop still runs for anything the array path did not do: the key -> slot map
+                # (only populated when the dict fallback ran for this partition), self.sketches (only
+                # written by the blocked-lazy tuple path) and _reverse_entry_ids (not maintained here at
+                # all -- see the note in _input_tree_lsh_batch). When all three are empty, which is the
+                # steady state of this backend, there is nothing per window left to do.
+                slots = getattr(old_partition, "win_slots", None)
+                if slots is not None:
+                    self._win_free_many(slots)
                 sketches = self.sketches if self.sketches else None
                 reverse = self._reverse_entry_ids if self._reverse_entry_ids else None
-                window_idx = self._window_idx
-                free_idx = self._win_free_idx
-                for key in old_partition:
-                    if sketches is not None:
-                        sketches.pop(key, None)
-                    if reverse is not None:
-                        reverse.pop(key, None)
-                    idx = window_idx.pop(key, None)
-                    if idx is not None:
-                        free_idx.append(idx)
+                window_idx = self._window_idx if self._window_idx else None
+                if sketches is not None or reverse is not None or window_idx is not None:
+                    for key in old_partition:
+                        if sketches is not None:
+                            sketches.pop(key, None)
+                        if reverse is not None:
+                            reverse.pop(key, None)
+                        if window_idx is not None:
+                            idx = window_idx.pop(key, None)
+                            if idx is not None:
+                                self._win_free_one(idx)
                 self._expire_lsh_index()
                 return
             for k, v in old_partition.items():
@@ -17576,7 +17775,7 @@ class Candidates:
         blocked_ready = (
             self._candidate_backend in _BLOCKED_INDEX_BACKENDS
             and self._blocked_index is not None
-            and self._recent_entry_ids
+            and len(self._recent_entry_ids) > 0
             and len(self._win_sid) > 0
             and len(self._win_time) == len(self._win_sid)
             and len(self._win_w) == len(self._win_sid)
@@ -17651,7 +17850,7 @@ class Candidates:
             and self._instinct_index is not None
             and self.candidate_similarity == "cosine"
             and self.candidate_cosine_threshold is not None
-            and self._recent_entry_ids
+            and len(self._recent_entry_ids) > 0
             and len(self._win_sid) > 0
             and len(self._win_time) == len(self._win_sid)
             and len(self._win_w) == len(self._win_sid)
@@ -17697,7 +17896,7 @@ class Candidates:
             and self._lsh_index is not None
             and self.candidate_similarity == "cosine"
             and self.candidate_cosine_threshold is not None
-            and self._recent_entry_ids
+            and len(self._recent_entry_ids) > 0
             and len(self._win_sid) > 0
             and len(self._win_time) == len(self._win_sid)
             and len(self._win_w) == len(self._win_sid)
@@ -17748,7 +17947,7 @@ class Candidates:
         tree_ready = (
             self._candidate_backend == "bptree"
             and self._tree_index is not None
-            and self._recent_entry_ids
+            and len(self._recent_entry_ids) > 0
             and len(self._win_sid) > 0
             and len(self._win_time) == len(self._win_sid)
             and len(self._win_w) == len(self._win_sid)
