@@ -415,6 +415,34 @@ nway JSON carries the dataset profile (`abaca/dataset_profile.py`) and the metri
 entry (g). **Open for the user**: W/step policy (log (f) table), `--points`, pilot cells.
 Nothing submitted; Abaca at 9e983d3 with datasets synced.
 
+### 3b (iii). Repeated measurements (2026-09-23, user's decision)
+
+The campaign reports one speedup per cell from one run. Repeated measurement of the same cell with the same
+binary puts the run-to-run dispersion of that ratio at 7 to 9% of the mean (three repeats: bf_incremental
+2.515 / 2.341 / 2.463, filcorr 1.889 / 2.036 / 2.045, tsubasa 0.780 / 0.856 / 0.855, with the bruteforce wall
+itself moving 8.5%), so a single run cannot separate two arms closer than about 10% and the tables must not be
+read as a ranking at that scale. Rather than assume a tolerance, the campaign measures one.
+
+**What repeats**: `campaign_competitors.REPEATS = 3` applied by `repeat_runs(cell, tag)` to a sample that spans
+both regimes and the whole size range: per dataset, the largest SYNCHRONOUS cell (m_max, L = 1) and a LAGGED
+cell at half that size, at T = 0.9, in both spaces, on the positive run only, with the synthetic family sampled
+at one density (2%). 59 cells, 118 extra N-way runs, 37 datasets, m from 14 to 5,000, L from 1 to 8.
+
+**What does not repeat**: the hyperopt and the tuning. Their outputs are fixed inputs of the measurement, so a
+repeat re-runs only the N-way job (same `HYPEROPT_DIR`, `HYPEROPT_HAMMING_DIR` and `COMPETITOR_PARAMS`,
+`RUN_NAME` suffixed `_r2`, `_r3`). Each repeat lands on whatever node the scheduler gives, so the dispersion
+includes the node-to-node component the tables are actually exposed to.
+
+**Cost**: 70 node-hours, 4.8% of option C-mem (the emitted manifest goes from 12,808 to 13,044 jobs). An earlier
+estimate in this thread said 5% for repeating ALL the anchors; that was wrong, since the anchors are the most
+expensive cells and repeating them costs 78 to 130% of the campaign. The sample above is the version that fits.
+
+**How it is read**: `abaca/aggregate_campaign.py` groups the `_r<k>` runs, every summary table uses the MEDIAN
+of a cell's repeats, and `repeatability.md` reports the per-cell spread plus the median and 90th percentile over
+the sample. That figure is the tolerance the paper quotes: differences below it are reported as ties, and two
+arms with different resource profiles (FilCorr is BLAS-bound, bf_incremental bandwidth-bound) are not ranked
+against each other unless the gap clears it on the machine the numbers come from (log 2026-09-23 (e) and (f)).
+
 ### 3b (ii). Execution mechanics on Abaca (2026-09-19)
 
 Per-arm accounting (user's request): every arm of every battery runs in a forked child

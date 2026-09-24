@@ -2181,3 +2181,48 @@ class, aggregator). **Uncommitted** (this thread, cumulative): `library_corrtrac
 `corrtrack_run_bruteforce.py`, `abaca/{nway_compare,campaign_competitors,campaign_budget,campaign_feeder,aggregate_campaign,
 naive_baseline,resource_probe,kwollect_power,fourway_compare,sparse_fourway_compare}.py`, `abaca/*.oar`,
 `test_stable_reproduced_changes.py`, `test_abaca_tools.py`, docs. Awaiting the user's budget row and host split.
+### 2026-09-23 (e) FilCorr vs bf_incremental
+Log entry (e): density degrades both exact arms' speedup (output cost), FilCorr beats plain BF by executing Parseval
+as BLAS matmuls rather than a per-pair kernel, and the FilCorr/bf_incremental ordering is machine-dependent (cluster
+has FilCorr ahead 13-16%, this laptop has bf_incremental ahead). Open: one cluster job on the sp500 m500 cell to
+settle the ordering before the paper ranks them.
+### 2026-09-23 (f) ranking tolerance and the FilCorr band sweep
+Log (f): speedup ratios repeat to about +-5% on one machine (three repeats, spread 7 to 9%), so single-run
+differences under about 10% are ties and cross-machine ordering needs confirmation on the reporting machine;
+recommendation recorded to repeat the dataset anchors three times (about 5% of campaign cost). FilCorr's rising
+recall at narrow bands explained and simulated (degrees of freedom collapse; null pass rate 0.0942 at 2 coefficients).
+Repeats now in the manifest (plan §3b (iii)): 13,044 jobs, +4.8% cost, `repeatability.md` from the aggregator.
+### 2026-09-24 (a) synchronous rows explained
+Log (a): CorrTrack's cost is flat in L (2.52 s at L=1, 2.80 s at L=6) while bruteforce's grows 10x, so the
+synchronous speedup is set by how little work there is to avoid at W=30, not by pruning quality (166x cut, recall
+0.99 in both). W sweep (30/3, 90/9, 180/18) running to quantify the window axis. Optimization target identified:
+the candidate search at L=1 (12 us per query); a free search would make CorrTrack 3.1x in that cell.
+W sweep done: synchronous CorrTrack speedup 0.88x at W=30, 1.62x at W=90, 2.01x at W=180 (candidates 168k -> 2.1k,
+recall 0.992 -> 1.000). The m=500 synchronous rows are a small-window artefact; the campaign's horizons are 168 to 2880.
+### 2026-09-24 (b) candidate-stage Python audit: done, results unchanged, W=30 synchronous now a win
+Branch: `dev` (no branch switch; the working copy is `/home/rsalles/corrtrack_release_dev`).
+Log entry (b) has the full account. Five fixes, all on the path shared by every Pattern B arm
+(`_LSH_SIGN_DOT_BACKENDS`), so comparability holds and the Pattern A arms were not touched:
+`ArrayBackedPartition` + `_input_tree_lsh_batch_from_arrays` + `_get_or_create_window_idx_many`; the
+single-partition merge in `_get_sketches` no longer copies the dict (that copy was silently dropping the arrays,
+so the fast path was never taken); the partition dict is built in C; the window-start array is only built for the
+tuple partitions that need it; `_reverse_entry_ids` (write-only on these backends) is no longer maintained and
+`_release_window_idx` is inlined on expiry.
+Measured (sp500, differenced, T=0.95, m=444, three repeats): CorrTrack ms/step 5.503 -> 4.549 at W=30, 5.449 ->
+4.780 at W=90, 6.030 -> 5.260 at W=180; synchronous speedup at W=30 0.88x -> 1.12-1.15x. Outputs identical in
+every check (W=30 sync with ParCorr/CSZ/CorrJoin, W=30 n_lags=15, uscrn2020 W=96 n_lags=36 five-arm cell, all
+matching the stored reference counts), 171 tests pass.
+**Uncommitted** (this thread, cumulative, unchanged from (d) except as noted): `library_corrtrack_parallel.py`
+(this entry's only code change), `competitor_kernels.pyx` (+ .c/.so), `corrtrack_param_search.py`,
+`experiment_run_param_grid_campaign.py`, `experiment_run_exec_param.py`, `corrtrack_run_bruteforce.py`,
+`abaca/{nway_compare,campaign_competitors,campaign_budget,campaign_feeder,aggregate_campaign,naive_baseline,
+resource_probe,kwollect_power,fourway_compare,sparse_fourway_compare,tune_competitors,campaign_arm_updates}.py`,
+`abaca/*.oar`, `test_stable_reproduced_changes.py`, `test_abaca_tools.py`, docs.
+Next exact step: the hyperopt grids were tuned against the old wall times but not against different results, so
+nothing needs re-tuning; the open decisions are still the user's (budget row A-E / C-mem / D-mem, host split
+11+4 or 8+3, repeat sample 4.8% vs 0.67%). Before any new submission: storage cleanup on zenith (account is
+unlocked; the m=500 tables campaign from snapshot `d0e337877e3d_m500tables` must not be touched). Not yet
+written: the feature-experiment scripts `abaca/{step_sweep,dynamic_window,multi_window}.py` (F1/F2/F3).
+Open issue to settle before StatStream's W=30 rows are used: `statstream_n_coeffs=16` violates its own Lemma 7
+guard at window_size=30 (`2n <= W`), so that cell errors; the tuner's range needs the same kind of cap the
+bandwidth coefficients got on 2026-09-22 (j).

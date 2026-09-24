@@ -9537,3 +9537,273 @@ attribution now sits on the update in the class docstring, not on the arm.
 - The N-way summary column was widened from 12 to 17 characters for `bf_incremental` and `corrtrack_hamming`.
 - 169 tests pass; the lagged battery reruns unchanged (USCRN W=96 step=12 n_lags=36: bf_incremental recall 1.000,
   1.11x bruteforce; TSUBASA and CorrJoin recall 1.000).
+
+### 2026-09-23 (b) Arm updates launched: statstream everywhere, corrjoin and tsubasa lagged
+After the other session's 2026-09-23 changes (lossless statstream digest grid; lagged TSUBASA and
+CorrJoin, disclosed per row as supports_lags="enabled_by_us"; exact_stomp renamed bf_incremental,
+old spellings kept), only those three arms need new measurements, per the user's scope call.
+`abaca/campaign_arm_updates.py`: 143 cells, arms by class (S: statstream; L: statstream, corrjoin,
+tsubasa; N: statstream, tsubasa, since CorrJoin still cannot express negative correlation), two
+jobs each (CSZ tuning for statstream and corrjoin, then an N-way of bruteforce plus those arms;
+TSUBASA has no knobs). Brute force reruns per cell because it is both the ground truth and the
+timing anchor. A three-cell A/B check (`abaca/ab_check_submit.sh`, all arms on the new code
+against the stored results) tests rather than assumes that the rename and plumbing left the other
+arms unchanged.
+Three snapshot builds were needed, all three failing on stale files on the cluster rather than on
+code: the Abaca clone is pinned at d0e3378 while the working tree is at 015d8e5, so committed
+files (test_stable_reproduced_changes.py, test_abaca_tools.py, abaca/aggregate_campaign.py) were
+silently old there. Syncing the full 27-file difference fixed it; snapshot `d0e337877e3d_lagext`
+passes 169 tests. Worth resolving properly: the clone only ever receives what someone copies.
+Own error: I chained the submission inside a background watcher and also ran it by hand, so both
+fired. Result was a second feeder on the same script and 8 duplicate jobs (3 A/B cells, 5 N-way),
+two of which would have written the same RUN_NAME directory. Killed the extra feeder and deleted
+the newer duplicate of each job name, keeping the older id so the ts_ / ns_ dependencies still
+point at live jobs. Rule for next time: a watcher either submits or reports, never both.
+
+### 2026-09-23 (e) [competitor campaign thread] why FilCorr at full band beats plain BF, and the FilCorr vs bf_incremental ordering
+User's question: with no band filtering, why does FilCorr get a better speedup at higher densities and beat
+bf_incremental? Investigated on sp500 (W=30, step=3, m=444, n_obs=2768), each arm in its own forked child
+(`abaca/nway_compare.py`), speedup over the plain bruteforce of the same run:
+
+| cell | density | bruteforce | bf_incremental | filcorr |
+|---|---|---|---|---|
+| n_lags=15 (L=6), T=0.70 | 34.9M correlated | 1.00x | 2.21x | 1.42x |
+| n_lags=15 (L=6), T=0.95 | 379k correlated | 1.00x | 2.18x | 1.81x |
+| n_lags=0 (L=1), T=0.70 | 5.6M correlated | 1.00x | 0.86x | 0.60x |
+
+Three findings, in order of importance for the paper:
+1. **Neither exact arm's speedup improves with density; it degrades.** Both compute every pair-window whatever the
+   density, so what changes is the shared, unavoidable cost of EMITTING the output: 34.9M accepted pair-windows at
+   T = 0.70 against 379k at T = 0.95. That cost is identical for every arm and compresses all speedups toward 1
+   (FilCorr 1.81x -> 1.42x here; the m=500 tables show the same, FilCorr 1.78x at 5.3e-3 -> 1.65x at 9.9e-2, STOMP
+   1.58x -> 1.45x). What the user saw at high density is a RANKING effect: the pruning arms collapse there
+   (CorrTrack 0.88x at density 9.9e-2 against 12.71x at 7.2e-6), so the exact all-pairs arms are the only ones left
+   above 1 and FilCorr leads them on the cluster.
+2. **Why a full-band FFT arm beats plain BF at all.** "No band filtering" is not "no reduction". The `bruteforce`
+   arm validates each pair-window in the per-row Cython kernel (`validate_corr_rows`, O(W) scalar work per pair),
+   while FilCorr expresses the whole m x m block as two real BLAS matmuls over the half-spectrum
+   (`Wx_re @ Wy_re.T + Wx_im @ Wy_im.T`, Parseval) with each window's band FFT computed once and reused across
+   every lag and step that references it. Same arithmetic, far better execution: measured candidate stage 1.02 s
+   against bruteforce's 10.23 s on the T = 0.70 lagged cell.
+3. **The FilCorr vs bf_incremental ordering is machine-dependent and must not be over-read.** The cluster tables
+   have FilCorr ahead by 13 to 16% at every density; on this laptop bf_incremental is ahead (2.21x against 1.42x),
+   and in the synchronous cell both fall BELOW plain BF. The two arms trade different resources: bf_incremental
+   does about W/step fewer flops (two (m x step) @ (step x m) matmuls per lag) but read-modify-writes an m x m dot
+   matrix per lag every step, so it is bandwidth-bound; FilCorr does the same flops as the raw recompute in
+   better-shaped (m x B) @ (B x m) matmuls and touches the m x m output once. Which wins depends on the machine's
+   BLAS-to-bandwidth balance. The band is not the difference: the m=500 campaign runs FilCorr at fs=0.0, ft=0.5,
+   sampling_rate=1.0, the same full band used here. **Worth one cluster job to confirm the ordering before the
+   paper ranks these two arms against each other; the safe statement is that both exact arms are within a small
+   factor and both beat the per-pair baseline in the lagged regime.**
+Method note: the first measurement of this comparison ran the three arms in one process and was contaminated, the
+previous arm's correlated set (about 700 MB at this density) still being alive while the next arm ran; the numbers
+above come from the harness's own per-arm forked isolation, which exists for exactly that reason.
+
+### 2026-09-23 (f) [competitor campaign thread] speedup tolerance, and why FilCorr's recall RISES as its band narrows
+Two user questions arising from the m=500 tables and the FilCorr band sweep.
+
+**(a) How precisely can speedups be ranked?** Measured the repeatability of the ratio itself: the same cell
+(sp500, W=30, step=3, n_lags=15, T=0.9, m=200, n_obs=1500), the same binary, three repeats, each arm in its own
+forked child. Speedups over the bruteforce of the same run: bf_incremental 2.515 / 2.341 / 2.463 (spread 7.1% of
+the mean), filcorr 1.889 / 2.036 / 2.045 (7.8%), tsubasa 0.780 / 0.856 / 0.855 (9.2%); the bruteforce wall itself
+moves 8.5% between repeats. So on ONE machine with the SAME binary the ratio is reproducible to roughly +-5%
+(half-spread), and a single run cannot separate two arms closer than about 10%. The cross-machine term is larger
+and has a known direction: an arm that is BLAS-bound (FilCorr) and one that is bandwidth-bound (bf_incremental)
+swap places between this laptop and mercantour3 (log (e)), a gap of 13 to 16% on the cluster reversing here.
+Practice adopted for the paper: report the median of repeats with the observed spread, treat differences under
+about 10% on one machine as ties, and do not rank two arms with different resource profiles at all unless the gap
+exceeds roughly 2x or the ordering is confirmed on the machine the results come from. The campaign currently runs
+each cell ONCE, which is enough for the order-of-magnitude claims (pruning versus all-pairs) but not to rank two
+exact arms against each other; three repeats of the dataset anchors would fix that at about 5% of the campaign's
+cost and is the cheapest way to make the tables defensible.
+
+**(b) FilCorr's recall rising as the band narrows (smartmeter, differenced).** The sweep shows, at T = 0.70:
+full band recall 1.000 precision 1.000; 8 coefficients 0.326 / 0.002; 4 coefficients 0.433 / 0.000; 2 coefficients
+0.673 / 0.000, with specificity falling 0.997 -> 0.971 -> 0.857. Two separate effects, neither of them an
+improvement:
+1. **The first collapse (1.000 -> 0.326) is the band throwing away the signal.** Band-pass FilCorr computes a
+   DIFFERENT quantity, the correlation of the low-pass filtered windows. Differenced half-hourly consumption
+   carries its correlated structure in the short-term fluctuations, i.e. exactly the high frequencies the low-pass
+   band discards, so the filtered correlation stops tracking the broadband one and two thirds of the true pairs
+   drop below the threshold.
+2. **The subsequent RISE (0.326 -> 0.673) is a degenerate estimator, not recovery.** The correlation is computed
+   from B complex coefficients, i.e. about 2B real degrees of freedom, so as B shrinks the null distribution of
+   the estimate spreads toward +-1 and a fixed threshold admits a growing share of unrelated pairs. Simulated on
+   independent series at W = 48 (the smartmeter window), the fraction of INDEPENDENT pairs passing corr >= 0.7 is
+   0.0000 at the full 24 coefficients, 0.0008 at 8, 0.0169 at 4 and 0.0942 at 2; the sweep's own specificity at 2
+   coefficients (0.857, i.e. 14.3% of negatives reported) is the same order. The arm is reporting almost
+   everything, and recall rises mechanically because a reporter that fires on 14% of all pairs also catches most
+   of the true ones. Precision 0.000 and specificity 0.857 are where that shows.
+The paper should therefore read the band sweep as a precision/specificity story, never a recall one, and state
+that a narrow band both changes the quantity and destroys the estimate's degrees of freedom.
+- Repeated measurements added to the campaign (user agreed, 2026-09-23): `campaign_competitors.REPEATS = 3` with
+  `repeat_runs(cell, tag)` selecting the sample (largest synchronous cell and a lagged cell at half that size per
+  dataset, T = 0.9, both spaces, positive run, synthetics at the 2% density): 59 cells, 118 extra N-way runs,
+  70 node-hours, 4.8% of option C-mem, manifest 12,808 -> 13,044 jobs. Only the N-way job repeats; hyperopt and
+  tuning outputs are the fixed inputs of the measurement. `aggregate_campaign.py` groups `_r<k>` runs, the summary
+  tables use each cell's median, and a new `repeatability.md` reports the per-cell spread with the median and 90th
+  percentile of the sample, which is the tolerance the paper quotes. Plan §3b (iii) records the decision, the
+  earlier "5% for all anchors" estimate is corrected there (repeating every anchor would cost 78 to 130%, the
+  anchors being the most expensive cells). Budget tables refreshed: complete figure on 11 + 4 hosts A 60.4 d,
+  B 21.7, C 10.0, D 7.7, E 15.8, C-mem 7.9, D-mem 6.4. Two tests added (the sample's definition and that only the
+  measurement repeats; the aggregator's median and spread); 171 pass.
+
+### 2026-09-24 (a) [competitor campaign thread] why CorrTrack does not win the synchronous rows: the baseline is too cheap there
+User: CorrTrack loses in every synchronous row of the m=500 tables even at very low density; is something wrong?
+Answer: no. Same dataset, space, threshold, window and step (sp500 differenced, W=30, step=3, T=0.95, m=444),
+each arm tuned by its own campaign hyperopt and run in its own forked child; ONLY n_lags changes:
+
+| n_lags | arm | wall | sketch | cand | val | candidates | recall | speedup |
+|---|---|---|---|---|---|---|---|---|
+| 0 | bruteforce | 2.62 | | 0.63 | 1.92 | 27,930,264 | | 1.00x |
+| 0 | bf_incremental | 2.44 | | 0.86 | 1.48 | 27,930,264 | 1.000 | 1.07x |
+| 0 | corrtrack | 2.52 | 0.78 | 1.58 | 0.07 | 168,385 | 0.992 | 1.04x |
+| 0 | corrtrack_hamming | 1.97 | 0.60 | 1.26 | 0.05 | 177,439 | 1.000 | 1.33x |
+| 15 | bruteforce | 25.11 | | 10.38 | 15.61 | 304,906,344 | | 1.00x |
+| 15 | bf_incremental | 10.28 | | 2.87 | 7.29 | 304,906,344 | 1.000 | 2.44x |
+| 15 | corrtrack | 2.80 | 0.69 | 1.95 | 0.07 | 165,748 | 0.991 | 8.96x |
+| 15 | corrtrack_hamming | 3.68 | 0.71 | 3.80 | 0.07 | 178,636 | 1.000 | 6.83x |
+
+- **The pruning is not the problem.** It cuts 27.9M pair-windows to 168k at recall 0.992 synchronously, and 304.9M
+  to 166k at recall 0.991 lagged: the same quality, and validation costs 0.07 s either way against bruteforce's
+  1.92 s and 15.61 s.
+- **CorrTrack's own cost is almost independent of the lag horizon** (2.52 s synchronous against 2.80 s at L = 6;
+  sketch 0.78 -> 0.69, search 1.58 -> 1.95) while the baseline's grows with it (2.62 -> 25.11 s). The speedup is
+  therefore set by how much work there is to avoid, not by how well it is avoided. At L = 1 there are m^2/2 =
+  95k pair-windows per step to skip, worth 6.6 ms at W = 30's 69 ns per pair-window, against a fixed sketch plus
+  search cost of about 8 ms. At L = 6 the same fixed cost buys 1.04M skipped pair-windows per step.
+- **W compounds it**: at W = 30 an exact validation is 69 ns, so the whole universe is cheap. Five of the six
+  m=500 datasets run W = 30, the least favourable window length in the study for any pruning method; the campaign's
+  own horizons are 168, 240, 2000 and 2880. A W sweep at fixed W/step (30/3, 90/9, 180/18, synchronous, same
+  cell) is running to quantify that axis.
+- **Where the synchronous loss actually sits**: not the sketch (0.78 s) but the candidate search (1.58 s, about
+  12 us per query for 7 bands at occupancy 12, roughly twice what the probe plus gates should cost). With a free
+  search CorrTrack would be 3.1x even in this cell, so the synchronous regime is an optimization target rather
+  than a structural defeat: worth a CORRTRACK_PROFILE breakdown of the candidate stage if the paper wants the
+  synchronous column to be competitive at small W.
+Method note: two heavy measurements briefly ran concurrently on this machine and were serialized before the
+numbers above were taken; timings from contending runs are not comparable.
+- The window-length axis, measured (same cell and tuning protocol, synchronous throughout, W/step fixed at 10,
+  each W with its own hyperopt): CorrTrack's synchronous speedup rises monotonically with the window length.
+
+  | W (step) | bruteforce wall | ns per pair-window | CorrTrack candidates | CorrTrack speedup | CT-hamming |
+  |---|---|---|---|---|---|
+  | 30 (3) | 1.50 s | 44 | 168,385 (recall 0.992) | 0.88x | 0.86x |
+  | 90 (9) | 0.83 s | 83 | 10,716 (recall 1.000) | 1.62x | 1.59x |
+  | 180 (18) | 0.52 s | 121 | 2,143 (recall 1.000) | 2.01x | 2.11x |
+
+  Two effects compound: the exact validation CorrTrack avoids gets dearer per pair-window (44 -> 121 ns), and the
+  sketch discriminates better on longer windows, so the candidate set falls 79x while recall rises to 1.000. The
+  synchronous rows of the m=500 tables are therefore a W = 30 artefact, not a property of the method: at the
+  campaign's own horizons (168, 240, 2000, 2880) the synchronous columns should show CorrTrack ahead, and the
+  campaign will measure exactly that. The candidate search remains the dominant CorrTrack stage at every W
+  (cand > sketch > validation), so it stays the optimization target named above.
+- Profiled the candidate stage on the W = 30 synchronous cell (CORRTRACK_PROFILE, 191 steps, m = 444) to check the
+  "there is room" claim rather than leave it an estimate. Per step: index INSERT `cand.input_tree` 2.23 ms (of
+  which `cand.lsh_insert`, the Cython part, 1.30 ms), sketch 1.41 ms, candidate rows `cand.lsh_numeric_rows`
+  0.88 ms, `cand.clean_old` 0.31 ms, `cand.lsh_expire` 0.15 ms; counters 25,449 index candidates touched,
+  20,376 dot checks and 807 returned per step over 444 alive entries. So at L = 1 the dominant cost is INSERTION,
+  not search: with one window per series alive the whole index turns over every step (insert m, query m, expire m),
+  and `_input_tree_lsh_batch` marshals every window through Python first (dict iteration, per-window np.asarray,
+  list appends, vstack) before the batched `insert_many`. That Python marshalling is 2.23 - 1.30 = 0.93 ms per
+  step, about 19% of the candidate stage and 10% of CorrTrack's wall in this cell: a real and previously
+  unexamined inefficiency (the 2026-09-10 numeric-representation work removed the same pattern from the
+  validation path but not from the insert path), uniform across cells since every step inserts m windows. It is
+  NOT enough to flip W = 30 (removing it entirely would take CorrTrack from 1.70 s to about 1.45 s against
+  bruteforce's 1.50 s, i.e. break-even) but it would help every cell, most visibly the lagged ones where the
+  candidate stage is the whole cost. Recorded as an optimization candidate, not scheduled.
+- The W = 30 protocol question: the campaign's horizon rule already gives these datasets their own windows,
+  sp500 and acwi_capweighted W = 60 (a quarter of daily trading), smartmeter W = 48 (a day of half-hourly),
+  streamflow, wikipedia and global_weather W = 30 (a month of daily). Only the m=500 tables force W = 30 on all
+  six. Nothing needs inflating: the defensible presentation is the crossover itself, which the W-robustness cells
+  (sp500 and uscrn2020_temperature at half and double their horizon) measure inside the campaign.
+
+### 2026-09-24 (b) [competitor campaign thread] the candidate-stage Python audit: five fixes, identical results, W=30 synchronous now a win
+
+The 2026-09-24 (a) entry left the insert path named as an optimization candidate and not scheduled. It is now
+done, together with a wider sweep for the same class of problem (Python objects and per-item Python loops on a
+path whose real work is already vectorized). Everything below was verified to leave every counter unchanged
+before it was kept, and every fix is on a path shared by all Pattern B arms (`_LSH_SIGN_DOT_BACKENDS`:
+CorrTrack lsh_dot and hamming_dot, ParCorr, CSZ, StatStream, CorrJoin, all_pairs), so the comparison stays fair:
+the same code got faster for the competitors' indexes as for ours, and the Pattern A arms (bruteforce,
+bf_incremental, FilCorr, TSUBASA, BRAID) were not touched at all.
+
+What the profile said, and what was wrong.
+`Sketches.partition_sketches` already computes the step's windows as arrays (keys, sketch matrix, series
+indices, window starts, window sizes, constant mask), materializes them into a `{key: (vector, is_const, 0.0)}`
+dict, and `Candidates._input_tree_lsh_batch` then walked that dict back into the same arrays one window at a
+time. At W = 30, m = 444 that is 126,096 windows per run marshalled through Python twice.
+
+The five changes.
+1. `ArrayBackedPartition`, a dict subclass carrying the arrays it was built from, and
+   `Candidates._input_tree_lsh_batch_from_arrays`, which inserts the whole step from them (one matrix slice,
+   one batched window-index allocation in `_get_or_create_window_idx_many`, one `insert_many`). The dict loop
+   stays as the fallback for partitions that do not carry arrays.
+2. The single-partition merge in `CorrTrack._get_sketches` (both dispatch variants) no longer copies a lone
+   sketch node's dict into a fresh one. That copy is what silently dropped the arrays: with it in place the
+   fast path was never taken (measured: 0 of 284 steps), which is also why the first A/B looked like noise.
+   `Candidates.append_partition` now merges into a plain copy when it has to update a partition in place, so a
+   node's own object is never mutated and no stale arrays can survive a merge.
+3. The partition dict is built without a Python loop: `list(matrix)` gives the same row views
+   `np.asarray(matrix[i])` produced, `const_mask.tolist()` the same Python bools, and two zips build the pairs
+   in C. Verified value-for-value and type-for-type; 3.5x faster to build at m = 444.
+4. The window-start array is no longer built in the full-vector branch: its consumer reads the start from the
+   key, exactly as the dict path does, so `_time_key_to_int64` was being called once per window per step for
+   nothing. The tuple partitions that do need it still get it.
+5. `_reverse_entry_ids` is no longer maintained on the LSH insert paths and its no-op pops are skipped on
+   expiry, where `_release_window_idx` is also inlined. The map is write-only for these backends: the LSH
+   branch of `_clean_old_sketches` pops each expiring key and discards the value, and every reader of it
+   (`_clean_old_sketches`' bptree branch, `estimate_recent_range_hits`, `_build_candidate_arrays`) is gated on
+   another backend. `_recent_entry_ids`, which the candidate search does read, is still built.
+
+Verification (nothing here is a claim about approximate equivalence; the outputs are the same objects).
+- sp500 W = 30 step 3 T = 0.95 differenced m = 444: 168,385 candidates, 3,963 correlated, recall 0.9920 before
+  and after, against bruteforce's 27,930,264 / 3,995.
+- Same cell with ParCorr, CSZ, CorrJoin in the run: every arm's candidates, correlated and recall identical
+  with the fast path forced off and on.
+- sp500 W = 30 n_lags = 15 (bruteforce, bf_incremental, corrtrack, corrtrack_hamming): 304,906,344 / 165,748 /
+  178,636 candidates and recall 0.9912 / 1.0000, matching the stored reference run exactly.
+- uscrn2020_temperature W = 96 step 12 n_lags = 36 T = 0.8 m = 60 (bruteforce, TSUBASA, CorrJoin, ParCorr,
+  StatStream): 2,068,522 / 101,824 / 32,062 / 86,111 candidates and 79,127 / 79,127 / 25,346 / 32,020
+  correlated, matching the stored reference run exactly.
+- 171 tests pass (test_stable_reproduced_changes.py, test_abaca_tools.py, test_synth_density.py).
+
+What it bought (sp500, differenced, T = 0.95, m = 444, sequential, same machine as 2026-09-24 (a), three
+repeats, median of the per-step medians):
+
+  | W (step) | CorrTrack ms/step before | after | CorrTrack wall before | after | speedup before | after | bruteforce ms/step before / after |
+  |---|---|---|---|---|---|---|---|
+  | 30 (3) | 5.503 | 4.549 (-17%) | 1.688 s | 1.363 s | 0.88x | 1.14x | 5.098 / 5.393 |
+  | 90 (9) | 5.449 | 4.780 (-12%) | 0.501 s | 0.436 s | 1.62x | 1.92x | 8.877 / 9.304 |
+  | 180 (18) | 6.030 | 5.260 (-13%) | 0.255 s | 0.223 s | 2.01x | 2.65x | 13.050 / 14.754 |
+
+  Read the per-step column, not the speedup column: bruteforce measured 6% (W = 30) to 13% (W = 180) slower
+  today than when the "before" rows were taken, so part of the speedup improvement at the long windows is
+  machine drift and only the CorrTrack columns are a clean before/after of this work. At W = 30, where the
+  question was decided, CorrTrack's own per-step time fell 17% against a baseline that was 6% slower, and the
+  three repeats put the new speedup at 1.12-1.15x. The phase profile moved as predicted: `cand.input_tree` 2.23 ->
+  1.68 ms per step with the Cython `cand.lsh_insert` unchanged at 1.26-1.30 ms, i.e. the Python marshalling
+  fell from 0.93 ms to about 0.39 ms per step. CorrJoin, which shares the path, went 4.60 -> 3.95 ms per step in
+  the same run; ParCorr and CSZ build tuple partitions and are nearly unchanged, as expected.
+
+  This answers the 2026-09-24 (a) question directly: the synchronous W = 30 cell is no longer a loss (0.88x ->
+  1.12-1.15x over three repeats), and it was Python overhead, not the method, that lost it.
+
+What was looked at and deliberately not changed.
+- The window registry (`_get_or_create_window_idx_many` 0.12 s, the expiry key loop about 0.06 s, together
+  ~13% of this cell) is the largest Python cost left. Removing it means replacing the `(sid, start, w)` tuple
+  key dict with a numeric registry, which is shared by every backend including bptree and whose existing
+  numeric variant (`_get_or_create_window_idx_numeric`) is both unreachable from the LSH path and carries a
+  disclosed slot leak. Not attempted: the risk is a silent change to slot reuse, and the payoff is a tenth of
+  what was just taken.
+- The sketch stage is already kernel-bound (`sketch.incremental_kernel` 0.10 s of a 0.15 s function), the
+  monitoring step adds no Python hotspot, and in the dense (T = 0.8, raw) and lagged (n_lags = 15) regimes the
+  Cython search dominates, so the same audit in those regimes found nothing comparable.
+- `self.sketches` and `_recent_window_ids` are left as they are on the LSH path even though the first is never
+  written there and the second is only read for its truthiness: both are shared attributes whose type and
+  contents other backends depend on, and each is worth under 2%.
+
+Known issue unrelated to this work, seen while running the A/B: `statstream` errors on the sp500 W = 30 cell
+with `statstream_n_coeffs=16 needs 2n <= window_size=30 (Lemma 7)`. That is a tuning-range question for the
+cell (the 2026-09-22 (j) cap is `b/2+1` on the bandwidth coefficients, not on `n_coeffs`), not a regression
+from these changes; it must be settled before StatStream's W = 30 rows are used.

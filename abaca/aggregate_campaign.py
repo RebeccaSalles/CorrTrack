@@ -19,6 +19,8 @@ Outputs (in --out):
   summary_by_T.md   median (IQR) of speedup, recall, candidate precision, specificity, step median per arm and T
   summary_by_m.md   the same by m rung; summary_by_space.md by raw / differenced; summary_by_dataset.md
   failures.md       cells with ERROR or N/A arms, with the reason
+  repeatability.md  the cells measured several times (campaign_competitors.REPEATS), their spread, and the
+                    dispersion the tables' differences must clear to be interpreted
   energy.md         when the kwollect power series was fetched (abaca/kwollect_power.py): energy per arm
 
 Every table states the number of cells behind each number. The medians are over cells; a cell is one
@@ -54,6 +56,15 @@ PROFILE_FIELDS = ("m", "n_obs", "n_windows", "density_at_threshold", "low_freque
                   "pair_windows", "correlated_pair_windows")
 
 
+REPEAT_RE = re.compile(r"_r(\d+)$")
+
+
+def split_repeat(name: str):
+    """(base cell name, repeat index): the emitter suffixes a repeated measurement with _r2, _r3, ..."""
+    m = REPEAT_RE.search(name)
+    return (name[: m.start()], int(m.group(1))) if m else (name, 1)
+
+
 def parse_stem(name: str) -> dict:
     m = STEM_RE.match(name)
     if not m:
@@ -84,11 +95,12 @@ def load(results_root: Path, power: dict | None = None):
     for f in sorted((results_root / "nway").glob("*/nway.json")):
         d = json.load(open(f))
         name = d.get("cell") or f.parent.name
+        name, repeat = split_repeat(name)
         fac = parse_stem(name)
         prof = d.get("dataset_profile", {})
         node = d.get("node", {})
         bf = d["arms"].get("bruteforce", {})
-        cell = dict(cell=name, **fac, dataset_label=d.get("dataset"), hostname=node.get("hostname"), oar_job_id=node.get("oar_job_id"),
+        cell = dict(cell=name, repeat=repeat, **fac, dataset_label=d.get("dataset"), hostname=node.get("hostname"), oar_job_id=node.get("oar_job_id"),
                     idle_power_w=node.get("idle_power_w"), energy_source=node.get("energy_source"),
                     corrtrack_params_source=d.get("corrtrack_params_source"), tuned_arms=",".join(sorted(d.get("competitor_params_tuned", {}))),
                     bf_wall=bf.get("wall"), universe=bf.get("total_candidates"), positives=bf.get("correlated"),
@@ -104,7 +116,7 @@ def load(results_root: Path, power: dict | None = None):
             # (2026-09-23) results written before the rename carry the old arm id; normalize so a mixed
             # results tree aggregates into one table
             arm = "bf_incremental" if arm == "exact_stomp" else arm
-            row = dict(cell=name, **fac, arm=arm, **{k: r.get(k) for k in RUN_FIELDS}, **{f"res_{k}": (r.get("resources") or {}).get(k) for k in RES_FIELDS},
+            row = dict(cell=name, repeat=repeat, **fac, arm=arm, **{k: r.get(k) for k in RUN_FIELDS}, **{f"res_{k}": (r.get("resources") or {}).get(k) for k in RES_FIELDS},
                        **{f"prof_{k}": prof.get(k) for k in ("density_at_threshold", "low_frequency_energy_share_mean", "lag1_autocorr_mean", "constant_window_fraction", "regime_source")})
             row["speedup_vs_bf"] = (bf["wall"] / r["wall"]) if (r.get("status") == "ok" and bf.get("wall") and r.get("wall")) else None
             row["cand_speedup_vs_bf"] = (bf["cand_time"] / r["cand_time"]) if (r.get("status") == "ok" and bf.get("cand_time") and r.get("cand_time")) else None
@@ -187,7 +199,34 @@ def _fmt(vals, pct=False, digits=2):
     return f"{med:.{digits}f} ({q1:.{digits}f}-{q3:.{digits}f})"
 
 
+def collapse_repeats(runs: list[dict]) -> tuple[list[dict], str]:
+    """(2026-09-23) One row per (cell, arm): the median over the repeated measurements of that cell, with the
+    observed spread of the speedup in `speedup_spread_pct` and the count in `n_repeats`. Cells measured once
+    pass through unchanged. Also returns a one-line note on the dispersion actually seen, which is what the
+    paper quotes instead of assuming a tolerance (log 2026-09-23 (f))."""
+    by_key = defaultdict(list)
+    for r in runs:
+        by_key[(r["cell"], r["arm"])].append(r)
+    out, spreads = [], []
+    for rs in by_key.values():
+        rs = sorted(rs, key=lambda r: r.get("repeat", 1))
+        base = dict(rs[len(rs) // 2])
+        base["n_repeats"] = len(rs)
+        sp = [r["speedup_vs_bf"] for r in rs if r.get("speedup_vs_bf")]
+        if len(sp) > 1:
+            base["speedup_vs_bf"] = float(np.median(sp))
+            base["speedup_spread_pct"] = 100.0 * (max(sp) - min(sp)) / float(np.mean(sp))
+            spreads.append(base["speedup_spread_pct"])
+        out.append(base)
+    note = (f"{len(spreads)} (cell, arm) pairs were measured more than once: spread of the speedup, median "
+            f"{np.median(spreads):.1f}%, 90th percentile {np.percentile(spreads, 90):.1f}%. Differences below "
+            f"that are not interpreted." if spreads else
+            "No repeated measurements in this results tree: every cell was run once, so no dispersion is available.")
+    return out, note
+
+
 def summary(runs: list[dict], by: str, title: str) -> str:
+    runs, _note = collapse_repeats(runs)
     groups = defaultdict(lambda: defaultdict(list))
     for r in runs:
         if r.get("status") != "ok" or r["arm"] == "bruteforce":
@@ -240,6 +279,13 @@ def main() -> None:
     (out / "summary_by_dataset.md").write_text(summary(runs, "dataset", "By dataset"))
     (out / "summary_by_neg.md").write_text(summary(runs, "neg_corr", "By negative-correlation setting"))
     (out / "failures.md").write_text(failures(runs))
+    collapsed, note = collapse_repeats(runs)
+    rep_rows = [r for r in collapsed if r.get("n_repeats", 1) > 1]
+    (out / "repeatability.md").write_text(
+        "# Repeatability of the measured speedups\n\n" + note + "\n\n"
+        "| cell | arm | repeats | median speedup | spread % |\n|---|---|---|---|---|\n"
+        + "".join(f"| {r['cell']} | {r['arm']} | {r['n_repeats']} | {r['speedup_vs_bf']:.3f} | {r['speedup_spread_pct']:.1f} |\n"
+                  for r in sorted(rep_rows, key=lambda r: -r.get("speedup_spread_pct", 0.0))))
     ok = sum(1 for r in runs if r.get("status") == "ok")
     print(f"{len(cells)} cells, {len(runs)} arm runs ({ok} ok), {len(tuning)} tuning rows -> {out}")
 

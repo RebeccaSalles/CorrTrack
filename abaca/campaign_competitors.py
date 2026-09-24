@@ -318,6 +318,33 @@ NWAY_HOSTS = ("mercantour3-2", "mercantour3-3", "mercantour3-7", "mercantour3-8"
 HOST_SUFFIX = ".sophia.grid5000.fr"
 
 
+# (2026-09-23, user) REPEATS: the speedup tables report a ratio per cell from a single run, and repeated
+# measurement on this project's own machines puts the run-to-run dispersion of that ratio at about 7 to 9% of
+# the mean (three repeats, same binary, same cell; log 2026-09-23 (f)). A single run therefore cannot separate
+# two arms closer than roughly 10%, which is exactly the gap between the two exact arms. A sample of cells is
+# run REPEATS times so the paper can quote the dispersion it measured instead of assuming one: the N-way job is
+# submitted again (same hyperopt and tuning outputs, so only the measurement repeats), and the aggregator groups
+# the `_r<k>` runs and reports the median with the spread. The sample spans both regimes and the whole size
+# range at about 5% of the campaign: per dataset, the largest SYNCHRONOUS cell (m_max, L = 1) and a LAGGED one
+# at half that size, at T = 0.9, both spaces, positive run, with the synthetic family sampled at one density.
+REPEATS = 3
+
+
+def repeat_runs(cell, tag: str) -> int:
+    """How many times this cell's N-way run is measured (1 = once, the default)."""
+    if tag != "pos" or cell.T != 0.9:
+        return 1
+    if cell.dataset.startswith("synth_") and "_d0p02_" not in cell.dataset:
+        return 1
+    d = next((x for x in DATASETS if x.label == cell.dataset), SYNTH_SPEC if cell.dataset.startswith("synth_") else None)
+    if d is None or cell.n_series is None:
+        return 1
+    L = cell.n_lags // cell.step + 1
+    largest_sync = cell.n_series == d.m_max and L == 1
+    lagged_half = cell.n_series == max(1, d.m_max // 2) and L > 1
+    return REPEATS if (largest_sync or lagged_half) else 1
+
+
 # (2026-09-19) tuning budget: the pilot's parcorr stage (130 rows) took 30 min at 63 windows x 492 series and the
 # cost grows as m^2 x windows, so the CSZ protocol runs on at most CALIB_WINDOWS windows of at most CALIB_SERIES
 # series (seeded subset); the filter parameters are per-pair quantities (see tune_competitors.py --calib-series).
@@ -383,8 +410,15 @@ def emit(path: str, results_root: str, select=None, m_levels: int = 4, l_levels:
             lines += [f"H_JOB=$(submit -n h_{c.stem}_{tag} {pack_res} -S \"{h_cmd}\")",
                       f"H2_JOB=$(submit -n hh_{c.stem}_{tag} {pack_res} -S \"{h2_cmd}\")",
                       f"T_JOB=$(submit -n t_{c.stem}_{tag} {pack_res} -S \"{t_cmd}\")",
-                      f"N_JOB=$(submit -n n_{c.stem}_{tag} -a \"$H_JOB\" -a \"$H2_JOB\" -a \"$T_JOB\" {nway_res} -S \"{n_cmd}\")",
-                      f"echo \"{c.stem}_{tag} H=$H_JOB H2=$H2_JOB T=$T_JOB N=$N_JOB\""]
+                      f"N_JOB=$(submit -n n_{c.stem}_{tag} -a \"$H_JOB\" -a \"$H2_JOB\" -a \"$T_JOB\" {nway_res} -S \"{n_cmd}\")"]
+            echo_parts = [f"{c.stem}_{tag} H=$H_JOB H2=$H2_JOB T=$T_JOB N=$N_JOB"]
+            for rep in range(2, repeat_runs(c, tag) + 1):
+                # the same measurement again on whatever node the scheduler gives: the tuned parameters are
+                # already fixed, so this repeats the TIMING, not the tuning
+                r_cmd = n_cmd.replace(f"RUN_NAME={c.stem}_{tag}", f"RUN_NAME={c.stem}_{tag}_r{rep}")
+                lines.append(f"R{rep}_JOB=$(submit -n n_{c.stem}_{tag}_r{rep} -a \"$H_JOB\" -a \"$H2_JOB\" -a \"$T_JOB\" {nway_res} -S \"{r_cmd}\")")
+                echo_parts.append(f"R{rep}=$R{rep}_JOB")
+            lines.append("echo \"" + " ".join(echo_parts) + "\"")
         lines.append("")
         n_cells += 1
     # only the generators the selected cells need
@@ -401,7 +435,10 @@ def emit(path: str, results_root: str, select=None, m_levels: int = 4, l_levels:
             gen_lines.append(g)
     Path(gen_path).write_text("\n".join(gen_lines) + "\n")
     open(path, "w").write("\n".join(lines) + "\n")
-    print(f"wrote {path}: {n_cells} cells, {8 * n_cells} jobs (hyperopt lsh, hyperopt hamming, tune, N-way; x2 for the neg_corr run); generators in {gen_path} ({len(gen_lines) - n_gen_header} commands)")
+    n_jobs = sum(1 for line in lines if "$(submit " in line or line.startswith("submit "))
+    print(f"wrote {path}: {n_cells} cells, {n_jobs} jobs (per cell and labelled run: hyperopt lsh, hyperopt hamming, tune, "
+          f"N-way, plus {REPEATS - 1} repeated N-way measurements on the sampled cells); generators in {gen_path} "
+          f"({len(gen_lines) - n_gen_header} commands)")
 
 
 def main() -> None:

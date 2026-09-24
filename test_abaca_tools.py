@@ -54,14 +54,59 @@ def test_feeder_splits_emitted_script_into_cells(tmp_path):
     header, blocks = split_script(path.read_text())
     assert [b[0] for b in blocks] == ["motes_temperature_m27_W2880_s288_L0_T0.9", "sp500_m492_W60_s5_L20_T0.9_diff"]
     assert header.count("submit()") == 1 and "SNAPSHOT" in header
+    cells_by_stem = {c.stem: c for c in camp.cells()}
     for stem, block in blocks:
-        assert block.count("$(submit ") == 8 and block.count(f"RUN_NAME={stem}_pos") == 1 and block.count(f"RUN_NAME={stem}_neg") == 1
+        cell = cells_by_stem[stem]
+        # 4 jobs per labelled run (two hyperopts, tuning, N-way), plus the extra N-way measurements the
+        # repeat sample gets on its positive run (2026-09-23: campaign_competitors.repeat_runs)
+        expected = 8 + sum(camp.repeat_runs(cell, tag) - 1 for tag in ("pos", "neg"))
+        assert block.count("$(submit ") == expected, (stem, block.count("$(submit "), expected)
+        assert block.count(f"RUN_NAME={stem}_pos") == camp.repeat_runs(cell, "pos")
+        assert block.count(f"RUN_NAME={stem}_neg") == camp.repeat_runs(cell, "neg")
         assert block.count("H=$H_JOB H2=$H2_JOB T=$T_JOB N=$N_JOB") == 2
-        assert block.count("experiment_run_param_grid_campaign_hamming.py") == 2 and block.count("HYPEROPT_HAMMING_DIR=") == 2
-        assert block.count("-l host=1") == 2 and block.count("-l core=") == 6 and block.count("monitor=") == 2
+        # the hamming grid is tuned once per labelled run; HYPEROPT_HAMMING_DIR rides every N-way job, repeats included
+        assert block.count("experiment_run_param_grid_campaign_hamming.py") == 2
+        assert block.count("HYPEROPT_HAMMING_DIR=") == sum(camp.repeat_runs(cell, tag) for tag in ("pos", "neg"))
+        n_host_jobs = 2 + sum(camp.repeat_runs(cell, tag) - 1 for tag in ("pos", "neg"))
+        assert block.count("-l host=1") == n_host_jobs and block.count("-l core=") == 6 and block.count("monitor=") == n_host_jobs
         assert "SNAPSHOT=$SNAPSHOT" in block
     gen = (tmp_path / "s_generate.sh").read_text()
     assert "gen_density_targeted" not in gen                            # real-data cells need no generator
+
+
+def test_repeat_sample_is_the_documented_one_and_only_repeats_the_measurement(tmp_path):
+    # (2026-09-23, user) the sampled cells are measured camp.REPEATS times so the speedup tables carry a
+    # measured dispersion: the largest synchronous cell and a lagged one at half that size, T = 0.9, positive
+    # run, both spaces, synthetics at one density. Only the N-way job repeats; hyperopt and tuning do not.
+    reps = {c.stem: camp.repeat_runs(c, "pos") for c in camp.cells()}
+    repeated = [s for s, n in reps.items() if n > 1]
+    assert repeated, "the repeat sample is empty"
+    assert all(camp.repeat_runs(c, "neg") == 1 for c in camp.cells()), "only the positive run is repeated"
+    for c in camp.cells():
+        if camp.repeat_runs(c, "pos") > 1:
+            assert c.T == 0.9 and (not c.dataset.startswith("synth_") or "_d0p02_" in c.dataset)
+    path = tmp_path / "s.sh"
+    camp.emit(str(path), "$HOME/r", select=repeated[:1] + [s for s, n in reps.items() if n == 1][:1])
+    _header, blocks = split_script(path.read_text())
+    for stem, block in blocks:
+        n = camp.repeat_runs(camp.cells()[[c.stem for c in camp.cells()].index(stem)], "pos")
+        assert block.count("hyperopt_corrtrack.oar") == 4          # two grids x two labelled runs, never repeated
+        assert block.count("tune_competitors.oar") == 2            # one per labelled run, never repeated
+        assert block.count("nway_compare.oar") == 1 + n            # neg once, pos n times
+        for k in range(2, n + 1):
+            assert f"RUN_NAME={stem}_pos_r{k}" in block and f"R{k}=$R{k}_JOB" in block
+
+
+def test_aggregate_repeats_collapse_to_a_median_and_spread():
+    from abaca.aggregate_campaign import collapse_repeats, split_repeat
+    assert split_repeat("cell_pos_r3") == ("cell_pos", 3) and split_repeat("cell_pos") == ("cell_pos", 1)
+    runs = [dict(cell="c", arm="corrtrack", status="ok", repeat=i, speedup_vs_bf=v, recall=0.99)
+            for i, v in ((1, 2.0), (2, 2.2), (3, 2.1))]
+    out, note = collapse_repeats(runs)
+    assert len(out) == 1 and out[0]["n_repeats"] == 3
+    assert out[0]["speedup_vs_bf"] == 2.1                      # the median, not the first or the best
+    assert abs(out[0]["speedup_spread_pct"] - 100 * 0.2 / 2.1) < 0.1
+    assert "measured more than once" in note
 
 
 def test_aggregate_parse_stem_and_power_integration():

@@ -289,9 +289,10 @@ def main() -> None:
         arms = [a for a in arms if a not in skipped]
         if skipped:
             print(f"neg_corr=True: {skipped} report N/A (not_available), not tuned", flush=True)
-    if args.n_lags > 0 and "corrjoin" in arms:
-        arms.remove("corrjoin")
-        print("n_lags > 0: corrjoin is synchronous-only, not tuned", flush=True)
+    # (2026-09-23) CorrJoin runs lagged now, as a disclosed extension of ours (its filters are
+    # time-agnostic), so it is tuned at the cell's n_lags like any other arm. The old guard here
+    # removed it silently, which left every lagged cell running CorrJoin on paper defaults while
+    # nway_compare reported it as a tuned arm.
 
     cfg_dataset = bfmod._load_dataset_config(Path(args.dataset_config))
     bfmod._apply_dataset_config(cfg_dataset)

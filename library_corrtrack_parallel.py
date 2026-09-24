@@ -3360,6 +3360,27 @@ def _rows_as_void_keys(rows):
     return rows.view(np.dtype((np.void, rows.dtype.itemsize * rows.shape[1]))).ravel()
 
 
+class ArrayBackedPartition(dict):
+    """(2026-09-24) A partition dict that also carries the arrays it was built from.
+
+    `Sketches.partition_sketches` computes the sketch matrix, the series indices, the times, the window
+    sizes and the constant mask as arrays, then materializes a {window_key: (vector, is_const, 0.0)} dict
+    from them; `Candidates._input_tree_lsh_batch` used to walk that dict back into the same arrays one
+    window at a time (a per-window np.asarray, a ravel, eight list appends and a dict lookup), which the
+    2026-09-24 profile found to be the single largest Python cost of the candidate stage. Carrying the
+    arrays on the dict lets the insert use them directly while every other consumer keeps seeing a plain
+    dict, so no call site and no behaviour changes. `arrays` is (keys, matrix, sid_idx, time, w, is_const)
+    or None when the partition was not built this way (the merge and copy paths below), in which case the
+    insert falls back to the original loop.
+    """
+
+    __slots__ = ("arrays",)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.arrays = None
+
+
 class NumericCorrelatedFlags:
     """(2026-09-10) The `corr_flags` return of a recall_by_window pass, in numeric form:
     the correlated set as (rows (N,5), corrs (N,) float64). `len()` is the number of
@@ -8404,9 +8425,15 @@ class CorrTrack:
             if not parts:
                 continue
             if isinstance(parts[0], dict):
-                merged_partition = {}
-                for part in parts:
-                    merged_partition.update(part)
+                if len(parts) == 1:
+                    # (2026-09-24) one sketch node (the sequential case) needs no merge: copying it into a
+                    # fresh dict here is what dropped the ArrayBackedPartition's arrays, and with them the
+                    # vectorized insert path in Candidates._input_tree_lsh_batch. Contents are unchanged.
+                    merged_partition = parts[0]
+                else:
+                    merged_partition = {}
+                    for part in parts:
+                        merged_partition.update(part)
             else:
                 if len(parts) == 1:
                     merged_partition = parts[0]
@@ -8520,9 +8547,15 @@ class CorrTrack:
             if not parts:
                 continue
             if isinstance(parts[0], dict):
-                merged_partition = {}
-                for part in parts:
-                    merged_partition.update(part)
+                if len(parts) == 1:
+                    # (2026-09-24) one sketch node (the sequential case) needs no merge: copying it into a
+                    # fresh dict here is what dropped the ArrayBackedPartition's arrays, and with them the
+                    # vectorized insert path in Candidates._input_tree_lsh_batch. Contents are unchanged.
+                    merged_partition = parts[0]
+                else:
+                    merged_partition = {}
+                    for part in parts:
+                        merged_partition.update(part)
             else:
                 sid_list_parts = [p[0] for p in parts if p is not None and p[0].size > 0]
                 if not sid_list_parts:
@@ -12043,6 +12076,10 @@ class Sketches:
         return signs * vector[perm]
 
     def partition_sketches(self, window_size):
+        # (2026-09-24) see ArrayBackedPartition: the full-vector branch below builds its dict FROM arrays it
+        # has already computed, and the index insert then walks that dict back into arrays one window at a
+        # time. The dict now carries those arrays so the insert can skip the walk (Candidates.
+        # _input_tree_lsh_batch's fast path); nothing that consumes it as a plain dict changes.
         if len(self.sketches) == 0 and not self._sketch_keys:
             return
 
@@ -12080,7 +12117,10 @@ class Sketches:
         if sid_lookup is None:
             sid_lookup = {sid: i for i, sid in enumerate(self.series_ids)}
         sid_idx = np.fromiter((sid_lookup.get(k[0], -1) for k in keys), dtype=np.int64, count=len(keys))
-        time_arr = np.fromiter((_time_key_to_int64(k[1]) for k in keys), dtype=np.int64, count=len(keys))
+        # (2026-09-24) time_arr is built below, after the full-vector branch: that branch's consumer
+        # (Candidates._input_tree_lsh_batch_from_arrays) reads the window start from the key, exactly as
+        # the dict insert path does, so building it here cost one _time_key_to_int64 call per window per
+        # step for nothing. The tuple partitions below do need it, and get it from the same keys.
         w_arr = np.fromiter((int(k[2]) for k in keys), dtype=np.int64, count=len(keys))
         if self._const_flags is not None and self._const_flags.size >= len(keys):
             const_flags = np.asarray(self._const_flags[: len(keys)], dtype=np.uint8)
@@ -12094,7 +12134,6 @@ class Sketches:
         if not np.all(valid_mask):
             matrix = matrix[valid_mask]
             sid_idx = sid_idx[valid_mask]
-            time_arr = time_arr[valid_mask]
             w_arr = w_arr[valid_mask]
             const_flags = const_flags[valid_mask]
             keys = [k for k, keep in zip(keys, valid_mask) if keep]
@@ -12115,17 +12154,36 @@ class Sketches:
             # upstream; the only fix needed is computing it once, vectorized
             # over all rows, instead of once per row inside this Python
             # loop. See docs/implementation_log.md.
+            if matrix.dtype != np.float64:                  # the per-row build cast; keep it once, here
+                matrix = np.asarray(matrix, dtype=np.float64)
             row_norms = np.linalg.norm(matrix, axis=1)
-            partition = {}
-            for i, key in enumerate(keys):
-                vec = np.asarray(matrix[i], dtype=np.float64)
-                is_const = bool(const_flags[i]) or row_norms[i] == 0.0
-                partition[key] = (vec, is_const, 0.0)
+            const_mask = (np.asarray(const_flags, dtype=bool)) | (row_norms == 0.0)
+            # (2026-09-24) the same dict, built without a Python loop: list(matrix) yields the same row
+            # views np.asarray(matrix[i]) produced, const_mask.tolist() the same Python bools, and the two
+            # zips build the key/value tuples in C. Verified value-for-value (and type-for-type) against
+            # the loop it replaces; ~3.5x faster to build at m = 444.
+            partition = ArrayBackedPartition(
+                zip(keys, zip(list(matrix), const_mask.tolist(), itertools.repeat(0.0)))
+            )
+            # the same content in array form, for the vectorized insert path. Attached only when the dict
+            # kept every row (duplicate keys would collapse in the dict but not in the arrays, and the dict
+            # is the authority), so the fast path can never see more rows than the dict path would insert.
+            if len(partition) == len(keys):
+                partition.arrays = (
+                    list(keys),
+                    np.ascontiguousarray(matrix, dtype=np.float64),
+                    np.ascontiguousarray(sid_idx, dtype=np.int64),
+                    None,                                       # window starts: read from the keys, above
+                    np.ascontiguousarray(w_arr, dtype=np.int64),
+                    np.ascontiguousarray(const_mask, dtype=bool),
+                )
             self.partitions = [partition]
             return
 
         n_grids = min(self.n_grids, n_dim // self.grid_dimensions)
         self.partitions = [None for _ in range(self.n_grids)]
+        # the tuple partitions below carry the window start in the array itself, so it is built here
+        time_arr = np.fromiter((_time_key_to_int64(k[1]) for k in keys), dtype=np.int64, count=len(keys))
         sid_idx_arr = np.ascontiguousarray(sid_idx, dtype=np.int64)
         time_arr = np.ascontiguousarray(time_arr, dtype=np.int64)
         w_arr = np.ascontiguousarray(w_arr, dtype=np.int64)
@@ -15630,6 +15688,13 @@ class Candidates:
                 if not isinstance(current, dict):
                     current = self._partition_to_dict(current)
                     self.partition[-1] = current if current is not None else {}
+                elif getattr(current, "arrays", None) is not None:
+                    # (2026-09-24) the stored partition is a sketch node's own ArrayBackedPartition, now
+                    # reached by reference (see the single-part merge above). Updating it in place would
+                    # both mutate that node's object and leave its arrays describing only part of the
+                    # merged content, so merge into a plain copy: the slow dict insert path then runs.
+                    current = dict(current)
+                    self.partition[-1] = current
                 if not isinstance(new_partition, dict):
                     new_partition = self._partition_to_dict(new_partition)
                     if new_partition is None:
@@ -16785,6 +16850,9 @@ class Candidates:
 
         self._recent_window_ids = set()
         self._recent_entry_ids = []
+        arrays = getattr(last_partition, "arrays", None)
+        if arrays is not None:
+            return self._input_tree_lsh_batch_from_arrays(arrays)
         win_indices = []
         sid_indices = []
         sid_ranks = []
@@ -16836,11 +16904,120 @@ class Candidates:
         )
         if t0 is not None:
             self._profile_add("cand.lsh_insert", time.perf_counter() - t0)
-        for key, entry_id in zip(keys_for_entries, np.asarray(entry_ids, dtype=np.int64)):
-            entry_id = int(entry_id)
-            self._reverse_entry_ids[key].append(entry_id)
-            self._recent_entry_ids.append(entry_id)
+        # (2026-09-24) _reverse_entry_ids is deliberately not populated on this path. It maps a window key
+        # to the backend entry ids inserted for it, and for the _LSH_SIGN_DOT_BACKENDS this method serves
+        # it is write-only: _clean_old_sketches' LSH branch pops each expiring key and discards the value
+        # (expiry goes through _expire_lsh_index's time cutoff), and every reader of the mapping -- the
+        # bptree branch of _clean_old_sketches, estimate_recent_range_hits, _build_candidate_arrays -- is
+        # gated on another backend. Maintaining it cost one defaultdict lookup, one list allocation and one
+        # append per window per step (~3% of the W = 30 cell). _recent_entry_ids, which the candidate
+        # search does read, is still built here.
+        self._recent_entry_ids = np.asarray(entry_ids, dtype=np.int64).tolist()
         return True
+
+    def _input_tree_lsh_batch_from_arrays(self, arrays):
+        """(2026-09-24) Insert a whole step's windows from the partition's arrays instead of walking its dict.
+
+        Same contract and same result as the dict loop above (identical insert_many arguments and order,
+        identical `_recent_window_ids` / `_recent_entry_ids` updates, and the same skipped
+        `_reverse_entry_ids` bookkeeping the note there explains). The per-window
+        work that remains is the window-index allocation, which owns Python state (a key dict and a free
+        list) and is batched in `_get_or_create_window_idx_many`; constant windows are dropped by a mask
+        instead of a per-window branch, and the sketch matrix is sliced once instead of being rebuilt row by
+        row with np.vstack. The 2026-09-24 profile attributed 0.93 ms per step (19% of the candidate stage at
+        W = 30, L = 1) to the loop this replaces, and every Pattern B arm shares this path, so the saving is
+        the same for CorrTrack and for the competitor indexes.
+        """
+        keys, matrix, _sid_idx_all, _time_all, w_all, const_mask = arrays
+        n_rows = len(keys)
+        if n_rows == 0 or matrix.shape[0] != n_rows or matrix.shape[1] == 0:
+            return True                                         # the dict path skips empty vectors too
+        if matrix.shape[1] != self._vector_dim:                 # the dict path pads or truncates per row
+            fixed = np.zeros((n_rows, self._vector_dim), dtype=np.float64)
+            copy_n = min(matrix.shape[1], self._vector_dim)
+            if copy_n > 0:
+                fixed[:, :copy_n] = matrix[:, :copy_n]
+            matrix = fixed
+        const_arr = np.asarray(const_mask, dtype=bool)
+        if const_arr.any():
+            keep_idx = np.flatnonzero(~const_arr)
+            if keep_idx.size == 0:
+                return True
+            kept_keys = [keys[i] for i in keep_idx.tolist()]
+        else:                                                   # the common case: nothing to drop
+            keep_idx = None
+            kept_keys = keys
+        # window sizes reuse the partition's w array, built with the same int(k[2]) the dict path uses.
+        # Times do not: the partition's time array goes through _time_key_to_int64, which differs from the
+        # dict path's int(key[1]) for datetime-valued keys, so they are still read from the keys here.
+        n_kept = len(kept_keys)
+        times = np.fromiter((int(k[1]) for k in kept_keys), dtype=np.int64, count=n_kept)
+        w_all = np.asarray(w_all, dtype=np.int64)
+        window_sizes = np.ascontiguousarray(w_all if keep_idx is None else w_all[keep_idx])
+        win_indices, sid_indices, sid_ranks = self._get_or_create_window_idx_many(kept_keys)
+        self._recent_window_ids = set(kept_keys)
+        vector_arr = np.ascontiguousarray(matrix if keep_idx is None else matrix[keep_idx], dtype=np.float64)
+        t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
+        entry_ids = self._lsh_index.insert_many(
+            None,
+            win_indices,
+            vector_arr,
+            sid_indices,
+            times,
+            window_sizes,
+            sid_ranks,
+        )
+        if t0 is not None:
+            self._profile_add("cand.lsh_insert", time.perf_counter() - t0)
+        self._recent_entry_ids = np.asarray(entry_ids, dtype=np.int64).tolist()  # see the note above
+        return True
+
+    def _get_or_create_window_idx_many(self, keys):
+        """Batched `_get_or_create_window_idx`: identical slot-reuse semantics, one pass, arrays out."""
+        n = len(keys)
+        win = np.empty(n, dtype=np.int64)
+        sids = np.empty(n, dtype=np.int64)
+        ranks = np.empty(n, dtype=np.int64)
+        window_idx = self._window_idx
+        win_sid, win_sid_idx = self._win_sid, self._win_sid_idx
+        win_sid_rank, win_time, win_w = self._win_sid_rank, self._win_time, self._win_w
+        free_idx = self._win_free_idx
+        sid_map, rank_map = self._sid_idx_map, self._sid_sort_rank_map
+        for i, key in enumerate(keys):
+            idx = window_idx.get(key)
+            if idx is not None:
+                win[i] = idx
+                sids[i] = win_sid_idx[idx]
+                ranks[i] = win_sid_rank[idx]
+                continue
+            sid, start_time, window_size = key
+            sid_idx = sid_map.get(sid)
+            if sid_idx is None:
+                sid_idx = len(sid_map)
+                sid_map[sid] = sid_idx
+            sid_rank = rank_map.get(sid)
+            if sid_rank is None:
+                sid_rank = len(rank_map)
+                rank_map[sid] = sid_rank
+            if free_idx:
+                idx = free_idx.pop()
+                win_sid[idx] = sid
+                win_sid_idx[idx] = sid_idx
+                win_sid_rank[idx] = sid_rank
+                win_time[idx] = int(start_time)
+                win_w[idx] = int(window_size)
+            else:
+                idx = len(win_sid)
+                win_sid.append(sid)
+                win_sid_idx.append(sid_idx)
+                win_sid_rank.append(sid_rank)
+                win_time.append(int(start_time))
+                win_w.append(int(window_size))
+            window_idx[key] = idx
+            win[i] = idx
+            sids[i] = sid_idx
+            ranks[i] = sid_rank
+        return win, sids, ranks
 
     def _input_tree_lsh_batch_tuple(self, partition):
         sid_idx_arr, time_arr, w_arr, chunk_arr, is_const = partition[:5]
@@ -17145,10 +17322,25 @@ class Candidates:
                 self._expire_instinct_index()
                 return
             if self._candidate_backend in _LSH_SIGN_DOT_BACKENDS and self._lsh_index is not None:
+                # (2026-09-24) same three operations per expiring key as before, with the two that are
+                # no-ops on this backend skipped when their map is empty (self.sketches is only written by
+                # the blocked-lazy tuple path, and _input_tree_lsh_batch no longer fills
+                # _reverse_entry_ids -- see the note there), and _release_window_idx inlined: it was one
+                # Python call per window per step for a dict pop and a list append. The free-list
+                # semantics are unchanged -- see _release_window_idx for why a freed slot is safe to
+                # reuse immediately.
+                sketches = self.sketches if self.sketches else None
+                reverse = self._reverse_entry_ids if self._reverse_entry_ids else None
+                window_idx = self._window_idx
+                free_idx = self._win_free_idx
                 for key in old_partition:
-                    self.sketches.pop(key, None)
-                    self._reverse_entry_ids.pop(key, None)
-                    self._release_window_idx(key)
+                    if sketches is not None:
+                        sketches.pop(key, None)
+                    if reverse is not None:
+                        reverse.pop(key, None)
+                    idx = window_idx.pop(key, None)
+                    if idx is not None:
+                        free_idx.append(idx)
                 self._expire_lsh_index()
                 return
             for k, v in old_partition.items():

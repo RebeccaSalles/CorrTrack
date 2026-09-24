@@ -4,7 +4,8 @@
 Three job kinds per cell and labelled run (pos = positive correlations, neg = the --neg-corr run):
   hyperopt  CorrTrack's proxy hyperopt, one per backend (lsh_sign_dot grid and lsh_hamming_exact grid), packed core=2 jobs
   tune      CSZ protocol for the four grid competitors (abaca/tune_competitors.oar), packed core=2 jobs
-  nway      the N-way comparison (abaca/nway_compare.oar), one whole host per job
+  nway      the N-way comparison (abaca/nway_compare.oar), one whole host per job, repeated
+            campaign_competitors.REPEATS times on the sampled cells (the measured-dispersion sample)
 The constants below are the pilot measurements on mercantour3 (Xeon Silver 4114, 2026-09-19/20) and are the
 single place to update when a new measurement comes in. Outputs one markdown report with, per option:
 node-hours and wall-clock days for each job kind, the memory profile (peak per job, cells above the budget),
@@ -142,7 +143,10 @@ def project(option, settings=80):
         bf_s = K_BF * m * m * L * steps
         set_gb = universe * dens * SET_BYTES / 2**30
         for run in runs:
-            nway_h = fac[run] * bf_s / 3600
+            # (2026-09-23, user) the sampled cells are measured camp.REPEATS times so the tables can quote a
+            # measured dispersion instead of an assumed tolerance; only the N-way job repeats
+            reps = camp.repeat_runs(cell, run)
+            nway_h = reps * fac[run] * bf_s / 3600
             # (2026-09-23) TSUBASA's lagged extension caches one m x m cross-segment sketch per (live segment,
             # probed lag); the manifest keeps it out of the m > 2,000 lagged cells, so this term stays small
             # (93 MB measured at m = 492, L = 5), but it is the largest per-arm structure after the sets
@@ -150,7 +154,7 @@ def project(option, settings=80):
                           (math.ceil((cell.W + cell.n_lags) / float(cell.step)) + 1) * (L - 1) * m * m * 8 / 2 ** 30)
             nway_gb = DATA_GB_PER_CELL(m, n) + 2 * set_gb + tsubasa_gb + 1.0   # bf set + one arm set + the arm + temporaries
             tune_h = TUNE_MIN[run] / 60 * (0.8 if L > 1 else 1.0)         # corrjoin not tuned when n_lags > 0
-            rows.append(dict(cell=cell.stem, run=run, dataset=cell.dataset, m=m, L=L, T=cell.T, space="diff" if cell.preprocess else "raw",
+            rows.append(dict(cell=cell.stem, run=run, repeats=reps, dataset=cell.dataset, m=m, L=L, T=cell.T, space="diff" if cell.preprocess else "raw",
                              steps=steps, density=dens, set_gb=set_gb, nway_h=nway_h, nway_gb=nway_gb, nway_wall_h=nway_h,
                              hyper_h=(hyperopt_minutes(settings) + HYPEROPT_HAMMING_MIN) / 60, hyper_gb=HYPEROPT_GB, tune_h=tune_h, tune_gb=TUNE_GB, light=light))
     return rows, dropped
