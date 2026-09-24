@@ -43,6 +43,11 @@ import campaign_m500_tables as m500
 
 OLD_ROOT = "$HOME/corrtrack_abaca_results"          # the full campaign's hyperopt and nway results
 UNTUNABLE = {"smartmeter_m500_m500_W48_s8_L0_T0.95_diff_pos"}   # no correlated pair in the calibration span
+TUNE_CORES = os.environ.get("TUNE_CORES", "2")   # 2026-09-24: the dense lagged cells killed a 2-core
+                                                # tuning job at 19.6 GB (about 9.6 GB per core here)
+FULL_ARMS = os.environ.get("FULL_ARMS", "1") != "0"
+OPTIMIZED_ARMS = os.environ.get("OPTIMIZED_ARMS", "0") != "0"   # only the arms that share the candidate stage    # rerun every arm (repair mode), not only the updated ones
+ONLY_CELLS = set(l.strip() for l in open(os.environ["ONLY_CELLS"]) if l.strip()) if os.environ.get("ONLY_CELLS") else None
 
 
 def main() -> None:
@@ -65,22 +70,43 @@ def main() -> None:
             stem = f"{c.stem}_{tag}"
             sync = "_L0_" in c.stem
             want = (sync and tag == "pos") or (not sync)          # table S is pos only; L and N are the lagged runs
-            if not want or stem in UNTUNABLE:
+            if not want or stem in UNTUNABLE or (ONLY_CELLS is not None and stem not in ONLY_CELLS):
                 continue
+            # RESULTS_ROOT must travel as a job parameter: nway_compare.oar and tune_competitors.oar
+            # build their output directory from the RESULTS_ROOT *inside the job*, and the default is
+            # $HOME/corrtrack_abaca_results, i.e. the campaign's own nway/<cell> (2026-09-23: omitting it
+            # overwrote 120 cells of full-arm results with 2-to-4-arm ones)
             common = [f"DATASET_CONFIG={c.config}", f"WINDOW_SIZE={c.W}", f"WINDOW_STEP={c.step}", f"BASIC_WINDOW={c.step}",
                       f"N_LAGS={c.n_lags}", f"THR={c.T}", f"PREPROCESS={1 if c.preprocess else 0}", "SNAPSHOT=$SNAPSHOT",
+                      "RESULTS_ROOT=$RESULTS_ROOT",
                       "EXTRA_ARGS=" + c.extra_args().replace(" ", "+")] + ([neg] if neg else [])
             tuned = f"$RESULTS_ROOT/tuned/{stem}"
-            arms = ["statstream"] + (["corrjoin", "tsubasa"] if (not sync and tag == "pos") else (["tsubasa"] if not sync else []))
-            tune_arms = [a for a in arms if a in ("statstream", "corrjoin")]        # tsubasa is exact and has no knobs
+            if OPTIMIZED_ARMS:
+                # (2026-09-24, user) the candidate stage (Sketches / Candidates) was optimised, which changes
+                # the timing of every arm that goes through it: the four tuned competitors and both CorrTrack
+                # backends. The five arms built on Candidates_BF_* (bf_incremental, filcorr, tsubasa, braid,
+                # thinbraid) do not use it and keep their measurements; bruteforce reruns as truth and anchor.
+                arms = ["parcorr", "csz", "statstream", "corrjoin", "corrtrack", "corrtrack_hamming"]
+                if tag == "neg":
+                    arms = [a for a in arms if a not in ("parcorr", "csz", "corrjoin")]   # no negative correlation
+                tune_arms = [a for a in arms if a in ("parcorr", "csz", "statstream", "corrjoin")]
+            elif FULL_ARMS:
+                # (2026-09-23, user) rerun the whole arm set on the new code, which also puts every arm of
+                # these cells on one code state and makes the A/B comparison unnecessary for them
+                arms = ["all"]
+                tune_arms = ["parcorr", "csz", "statstream"] + (["corrjoin"] if tag == "pos" else [])
+            else:
+                arms = ["statstream"] + (["corrjoin", "tsubasa"] if (not sync and tag == "pos") else (["tsubasa"] if not sync else []))
+                tune_arms = [a for a in arms if a in ("statstream", "corrjoin")]    # tsubasa is exact and has no knobs
             t_cmd = " ".join(["$SNAPSHOT/abaca/tune_competitors.oar"] + common + [f"ARMS={','.join(tune_arms)}", f"CALIB_OBS={c.calib_obs}",
                              f"CALIB_WINDOWS={cc.CALIB_WINDOWS}", f"CALIB_SERIES={cc.CALIB_SERIES}", f"OUT_DIR={tuned}"])
             n_cmd = " ".join(["$SNAPSHOT/abaca/nway_compare.oar"] + common +
-                             [f"ARMS={','.join(['bruteforce'] + arms)}", f"COMPETITOR_PARAMS={tuned}",
-                              f"HYPEROPT_DIR={OLD_ROOT}/hyperopt/{stem}", "NWAY_LARGE_SET_GB=200", "EVAL_SPAN=full",
+                             [f"ARMS={'all' if (FULL_ARMS and not OPTIMIZED_ARMS) else ','.join(['bruteforce'] + arms)}", f"COMPETITOR_PARAMS={tuned}",
+                              f"HYPEROPT_DIR={OLD_ROOT}/hyperopt/{stem}", f"HYPEROPT_HAMMING_DIR={OLD_ROOT}/hyperopt_hamming/{stem}",
+                              "NWAY_LARGE_SET_GB=200", "EVAL_SPAN=full",
                               f"RUN_NAME={stem}"])
             lines += [f"# --- {stem}: arm updates ({','.join(arms)})",
-                      f"T_JOB=$(submit -n ts_{stem} -l core=2,walltime=6:00:00 -S \"{t_cmd}\")",
+                      f"T_JOB=$(submit -n ts_{stem} -l core={TUNE_CORES},walltime=6:00:00 -S \"{t_cmd}\")",
                       f"N_JOB=$(submit -n ns_{stem} -a \"$T_JOB\" -l host=1,walltime=6:00:00 -S \"{n_cmd}\")",
                       f"echo \"{stem} T=$T_JOB N=$N_JOB\"", ""]
             n += 1
