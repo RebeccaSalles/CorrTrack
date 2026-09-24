@@ -9902,3 +9902,45 @@ Left for later, with sizes measured rather than guessed.
 - The hyperopt grids were tuned when an insert cost five times what it now costs, so the optimum may have
   moved toward more bands or finer buckets. The campaign re-runs hyperopt per cell, so it will find the new
   optimum on its own; no tuned file needs rewriting, but the old tuned outputs are not the new optimum.
+
+### 2026-09-24 (d) [competitor campaign thread] the crossover after (b) and (c): it is m, not W
+
+Entry (a) concluded that CorrTrack's synchronous loss was a W = 30 artefact and that the campaign's longer
+horizons would fix it. After (b) and (c) that conclusion is superseded: the window axis no longer decides
+anything in the range this project uses, and what is left is a series-count threshold.
+
+Window axis (sp500, differenced, T = 0.95, m = 444, synchronous, step = W/10, W/step = 10 basic windows in
+every row; W = 10 and 20 reuse the W = 30 tuning, which can only understate them):
+
+  | W (step) | 10 (1) | 20 (2) | 30 (3) | 90 (9) | 180 (18) |
+  |---|---|---|---|---|---|
+  | speedup | 1.33x | 1.51x | 1.95x | 2.88x | 4.23x |
+  | recall | 0.991 | 0.988 | 0.992 | 1.000 | 1.000 |
+
+There is no window in this range where CorrTrack loses, so nothing about the campaign's horizon rule needs
+changing and no window needs inflating to make the tables work.
+
+Series axis, same cell, m subsampled (all reusing the m = 444 tuning, so the small-m rows are a lower bound
+-- a per-cell hyperopt would pick a smaller sketch there):
+
+  | m | 64 | 128 | 192 | 256 | 320 | 444 |
+  |---|---|---|---|---|---|---|
+  | W = 30 | 0.36x | 0.59x | 0.89x | 1.07x | 1.50x | 1.95x |
+  | W = 90 | - | 0.81x | 0.90x | - | - | 2.88x |
+  | W = 180 | - | 1.16x | 1.65x | - | - | 4.23x |
+
+So the synchronous crossover is about m = 230 at W = 30 and about m = 120 at W = 180: a longer window lowers
+the series count needed, which is the entry (a) mechanism (bruteforce's per-pair-window cost grows with W
+while CorrTrack's candidate stage does not), but the primary axis is m. That is what the shape of the two
+costs predicts: bruteforce is quadratic in m per step, CorrTrack's per-step floor (sketch stage plus index
+insert) is linear in it.
+
+Lagged cells do not have this threshold in any range we run. Same cell at n_lags = 15: m = 64 gives 1.48x,
+m = 128 gives 3.97x, m = 444 gives 15.7x -- lags multiply bruteforce's work by L and leave CorrTrack's
+candidate stage nearly flat, so the crossover sits below the smallest m the campaign uses.
+
+Caveats, stated rather than buried: one dataset (sp500 returns), one threshold, sequential execution, and
+the small-m and short-W rows inherit a tuning fitted elsewhere. What the campaign should take from this is
+that the synchronous columns are expected to win wherever m is above roughly 250, that its small-m datasets
+(uscrn2020_temperature, m = 60) will still lose their SYNCHRONOUS rows and win their lagged ones, and that
+this is a property of the baseline's shape, not a defect to tune away.

@@ -51,6 +51,18 @@ mkdir -p "$REPO_DIR/tmp_artifacts"
 rm -rf "$SNAP/tmp_artifacts"
 ln -sfn "$REPO_DIR/tmp_artifacts" "$SNAP/tmp_artifacts"
 mkdir -p "$SNAP/abaca/logs"
+# (2026-09-24) Content fingerprint of the snapshot's own sources, computed AFTER the copy.
+# Why: SHA above is the CLONE's HEAD, and the clone's tree is not always that commit (files get
+# copied in rather than pulled), so several snapshots holding different code have all stamped the
+# same sha -- which made the campaign's reproducibility manifest say two runs shared a code state
+# when they did not. dirty_tracked_py hinted at it but is only a count, and ignores untracked
+# files. CONTENT is over what was actually copied, so equal CONTENT means identical code, whatever
+# git says; SOURCE_COMMIT records where the tree came from when the copier leaves a .source_commit
+# (a real pull makes it equal to sha).
+CONTENT=$(cd "$SNAP" && find . -path ./datasets -prune -o \( -name '*.py' -o -name '*.pyx' -o -name '*.oar' \) -print \
+          | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-16)
+SOURCE_COMMIT=$(cat "$REPO_DIR/.source_commit" 2>/dev/null || echo "$SHA")
+echo "content=$CONTENT source_commit=$SOURCE_COMMIT"
 
 # shellcheck disable=SC1091
 source "$CONDA_ROOT/etc/profile.d/conda.sh"
@@ -75,6 +87,7 @@ if [ "$BUILD_RC" = "0" ] && [ "$PYTEST_RC" = "0" ]; then
     echo "cpu_model=$(lscpu | sed -n 's/^Model name: *//p' | sed 's/  */ /g')"
     echo "python=$(python -c 'import sys; print(sys.version.split()[0])')"; echo "numpy=$(python -c 'import numpy; print(numpy.__version__)')"
     echo "conda_env=$CONDA_ENV"; echo "dirty_tracked_py=$DIRTY"
+    echo "content=$CONTENT"; echo "source_commit=$SOURCE_COMMIT"
   } > SNAPSHOT_OK
   echo "SNAPSHOT_OK written: $SNAP"; cat SNAPSHOT_OK
 else
