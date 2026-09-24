@@ -46,13 +46,18 @@ UNTUNABLE = {"smartmeter_m500_m500_W48_s8_L0_T0.95_diff_pos"}   # no correlated 
 TUNE_CORES = os.environ.get("TUNE_CORES", "2")   # 2026-09-24: the dense lagged cells killed a 2-core
                                                 # tuning job at 19.6 GB (about 9.6 GB per core here)
 FULL_ARMS = os.environ.get("FULL_ARMS", "1") != "0"
-OPTIMIZED_ARMS = os.environ.get("OPTIMIZED_ARMS", "0") != "0"   # only the arms that share the candidate stage    # rerun every arm (repair mode), not only the updated ones
+OPTIMIZED_ARMS = os.environ.get("OPTIMIZED_ARMS", "0") != "0"   # only the arms that share the candidate stage
+CHANGED_ARMS = os.environ.get("CHANGED_ARMS", "0") != "0"     # statstream + hamming backend (+ lsh where the width changed)
+WIDTH_CELLS = set(l.strip() for l in open(os.environ["WIDTH_CELLS"]) if l.strip()) if os.environ.get("WIDTH_CELLS") else set()    # rerun every arm (repair mode), not only the updated ones
 ONLY_CELLS = set(l.strip() for l in open(os.environ["ONLY_CELLS"]) if l.strip()) if os.environ.get("ONLY_CELLS") else None
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--emit", required=True)
+    # (2026-09-24) each campaign writes to its own root. Pointing a partial-arm run at the root that
+    # holds the complete set overwrote it twice: the wrappers write nway/<cell>/nway.json with the arms
+    # they ran, so a subset silently replaces the whole.
     ap.add_argument("--results-root", default="$HOME/corrtrack_abaca_results/arm_updates")
     args = ap.parse_args()
 
@@ -81,7 +86,13 @@ def main() -> None:
                       "RESULTS_ROOT=$RESULTS_ROOT",
                       "EXTRA_ARGS=" + c.extra_args().replace(" ", "+")] + ([neg] if neg else [])
             tuned = f"$RESULTS_ROOT/tuned/{stem}"
-            if OPTIMIZED_ARMS:
+            if CHANGED_ARMS:
+                # (2026-09-24) 112ce48 changed HammingExactIndex and the StatStream digest grid, and the
+                # sketch width is now fixed at 64, which invalidates the lsh parameters of the cells that
+                # had chosen 32. Nothing else in the library moved, so nothing else is remeasured.
+                arms = ["statstream", "corrtrack_hamming"] + (["corrtrack"] if stem in WIDTH_CELLS else [])
+                tune_arms = ["statstream"]
+            elif OPTIMIZED_ARMS:
                 # (2026-09-24, user) the candidate stage (Sketches / Candidates) was optimised, which changes
                 # the timing of every arm that goes through it: the four tuned competitors and both CorrTrack
                 # backends. The five arms built on Candidates_BF_* (bf_incremental, filcorr, tsubasa, braid,
@@ -110,16 +121,17 @@ def main() -> None:
             t_cmd = " ".join(["$SNAPSHOT/abaca/tune_competitors.oar"] + common + [f"ARMS={','.join(tune_arms)}", f"CALIB_OBS={c.calib_obs}",
                              f"CALIB_WINDOWS={cc.CALIB_WINDOWS}", f"CALIB_SERIES={cc.CALIB_SERIES}", f"OUT_DIR={tuned}"])
             n_cmd = " ".join(["$SNAPSHOT/abaca/nway_compare.oar"] + common +
-                             [f"ARMS={'all' if (FULL_ARMS and not OPTIMIZED_ARMS) else ','.join(['bruteforce'] + arms)}", f"COMPETITOR_PARAMS={tuned}",
+                             [f"ARMS={'all' if (FULL_ARMS and not OPTIMIZED_ARMS and not CHANGED_ARMS) else ','.join(['bruteforce'] + arms)}", f"COMPETITOR_PARAMS={tuned}",
                               f"HYPEROPT_DIR={hyper}", f"HYPEROPT_HAMMING_DIR={hyper_h}",
                               "NWAY_LARGE_SET_GB=200", "EVAL_SPAN=full",
                               f"RUN_NAME={stem}"])
             lines += [f"# --- {stem}: arm updates ({','.join(arms)})",
-                      f"H_JOB=$(submit -n hs_{stem} -l core={TUNE_CORES},walltime=6:00:00 -S \"{h_cmd}\")",
+                      *([] if (CHANGED_ARMS and stem not in WIDTH_CELLS) else
+                        [f"H_JOB=$(submit -n hs_{stem} -l core={TUNE_CORES},walltime=6:00:00 -S \"{h_cmd}\")"]),
                       f"H2_JOB=$(submit -n hh_{stem} -l core={TUNE_CORES},walltime=6:00:00 -S \"{h2_cmd}\")",
                       f"T_JOB=$(submit -n ts_{stem} -l core={TUNE_CORES},walltime=6:00:00 -S \"{t_cmd}\")",
-                      f"N_JOB=$(submit -n ns_{stem} -a \"$H_JOB\" -a \"$H2_JOB\" -a \"$T_JOB\" -l host=1,walltime=6:00:00 -S \"{n_cmd}\")",
-                      f"echo \"{stem} H=$H_JOB H2=$H2_JOB T=$T_JOB N=$N_JOB\"", ""]
+                      f"N_JOB=$(submit -n ns_{stem}{'' if (CHANGED_ARMS and stem not in WIDTH_CELLS) else ' -a \"$H_JOB\"'} -a \"$H2_JOB\" -a \"$T_JOB\" -l host=1,walltime=6:00:00 -S \"{n_cmd}\")",
+                      f"echo \"{stem}{'' if (CHANGED_ARMS and stem not in WIDTH_CELLS) else ' H=$H_JOB'} H2=$H2_JOB T=$T_JOB N=$N_JOB\"", ""]
             n += 1
     open(args.emit, "w").write("\n".join(lines) + "\n")
     os.chmod(args.emit, 0o755)

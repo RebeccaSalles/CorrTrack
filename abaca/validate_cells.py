@@ -23,8 +23,19 @@ for f in cells:
         if arms.get(a, {}).get("status") == "ok":
             src = d.get("corrtrack_params_source" if a == "corrtrack" else "corrtrack_hamming_params_source", "")
             if "UNTUNED" in str(src): bad[stem].append(f"{a}: UNTUNED defaults")
-    missing = [a for a in ("bruteforce", "corrtrack", "corrtrack_hamming", "exact_stomp", "bf_incremental", "filcorr") if a not in arms]
-    if "bruteforce" in missing: bad[stem].append("bruteforce missing")
+    # (2026-09-24) a cell must hold the arms its class defines. Two partial-arm campaigns have now
+    # overwritten a complete result with their own subset, which the previous checks read as success
+    # because every arm present was fine. Absence is the failure mode, so name it.
+    sync = "_L0_" in stem; neg = stem.endswith("_neg")
+    expect = {"bruteforce", "bf_incremental", "filcorr", "braid", "thinbraid", "corrtrack", "corrtrack_hamming", "statstream"}
+    if not neg: expect |= {"parcorr", "csz"}
+    if not neg and sync: expect |= {"corrjoin"}
+    if sync: expect |= {"tsubasa"}
+    elif not neg: expect |= {"tsubasa", "corrjoin"}          # lagged positive: both run as our extension
+    else: expect |= {"tsubasa"}
+    present = set(arms) | {"bf_incremental" if "exact_stomp" in arms else ""} | {"exact_stomp" if "bf_incremental" in arms else ""}
+    gone = sorted(a for a in expect if a not in present)
+    if gone: bad[stem].append(f"arms missing from the cell: {','.join(gone)}")
 print(f"cells checked: {len(cells)}; not comparable: {len(bad)}")
 for stem, msgs in sorted(bad.items()):
     print(f"  {stem}")
