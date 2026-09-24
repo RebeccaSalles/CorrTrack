@@ -98,17 +98,28 @@ def main() -> None:
             else:
                 arms = ["statstream"] + (["corrjoin", "tsubasa"] if (not sync and tag == "pos") else (["tsubasa"] if not sync else []))
                 tune_arms = [a for a in arms if a in ("statstream", "corrjoin")]    # tsubasa is exact and has no knobs
+            # (2026-09-24) CorrTrack is re-tuned under the code being measured, like the competitors: the
+            # candidate-stage optimisation made an index insert about five times cheaper, so parameters fitted
+            # under the old cost model are valid but no longer speed-optimal, and reusing them would handicap
+            # the one arm whose own procedure is supposed to choose them.
+            hyper = f"$RESULTS_ROOT/hyperopt/{stem}"
+            hyper_h = f"$RESULTS_ROOT/hyperopt_hamming/{stem}"
+            h_cmd = " ".join(["$SNAPSHOT/abaca/hyperopt_corrtrack.oar"] + common + [f"OUT_DIR={hyper}"])
+            h2_cmd = " ".join(["$SNAPSHOT/abaca/hyperopt_corrtrack.oar"] + common +
+                              ["PARAM_GRID_CONFIG=experiment_run_param_grid_campaign_hamming.py", f"OUT_DIR={hyper_h}"])
             t_cmd = " ".join(["$SNAPSHOT/abaca/tune_competitors.oar"] + common + [f"ARMS={','.join(tune_arms)}", f"CALIB_OBS={c.calib_obs}",
                              f"CALIB_WINDOWS={cc.CALIB_WINDOWS}", f"CALIB_SERIES={cc.CALIB_SERIES}", f"OUT_DIR={tuned}"])
             n_cmd = " ".join(["$SNAPSHOT/abaca/nway_compare.oar"] + common +
                              [f"ARMS={'all' if (FULL_ARMS and not OPTIMIZED_ARMS) else ','.join(['bruteforce'] + arms)}", f"COMPETITOR_PARAMS={tuned}",
-                              f"HYPEROPT_DIR={OLD_ROOT}/hyperopt/{stem}", f"HYPEROPT_HAMMING_DIR={OLD_ROOT}/hyperopt_hamming/{stem}",
+                              f"HYPEROPT_DIR={hyper}", f"HYPEROPT_HAMMING_DIR={hyper_h}",
                               "NWAY_LARGE_SET_GB=200", "EVAL_SPAN=full",
                               f"RUN_NAME={stem}"])
             lines += [f"# --- {stem}: arm updates ({','.join(arms)})",
+                      f"H_JOB=$(submit -n hs_{stem} -l core={TUNE_CORES},walltime=6:00:00 -S \"{h_cmd}\")",
+                      f"H2_JOB=$(submit -n hh_{stem} -l core={TUNE_CORES},walltime=6:00:00 -S \"{h2_cmd}\")",
                       f"T_JOB=$(submit -n ts_{stem} -l core={TUNE_CORES},walltime=6:00:00 -S \"{t_cmd}\")",
-                      f"N_JOB=$(submit -n ns_{stem} -a \"$T_JOB\" -l host=1,walltime=6:00:00 -S \"{n_cmd}\")",
-                      f"echo \"{stem} T=$T_JOB N=$N_JOB\"", ""]
+                      f"N_JOB=$(submit -n ns_{stem} -a \"$H_JOB\" -a \"$H2_JOB\" -a \"$T_JOB\" -l host=1,walltime=6:00:00 -S \"{n_cmd}\")",
+                      f"echo \"{stem} H=$H_JOB H2=$H2_JOB T=$T_JOB N=$N_JOB\"", ""]
             n += 1
     open(args.emit, "w").write("\n".join(lines) + "\n")
     os.chmod(args.emit, 0o755)
