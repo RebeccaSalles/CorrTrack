@@ -10,6 +10,10 @@ import re, sys, statistics as st, collections
 
 SRC, OUT = sys.argv[1], sys.argv[2]
 TARGET = 0.95
+# (2026-09-25) thresholds come from the table rather than a fixed list: T = 0.85 was added after the
+# first build and a hardcoded list silently dropped those rows instead of failing.
+def thresholds(data):
+    return sorted({r[1] for rows in data.values() for r in rows}, key=float)
 ARMS_ORDER = ["STOMP", "FilCorr", "TSUBASA", "BRAID", "ThinBRAID", "CT-lsh", "CT-ham", "ParCorr", "CSZ", "StatStream", "CorrJoin"]
 
 def parse(src):
@@ -53,6 +57,7 @@ def ranks(rows, arm, T, qualified):
     return n1, n2, n
 
 data = parse(SRC)
+THRS = thresholds(data)
 lines = ["# m=500 tables: medians with per-dataset rank counts", "",
          "Each cell: median speedup over the six datasets (median recall) followed by `[f/s]`, the number of "
          "datasets in that row where the method is the fastest and where it is among the two fastest. The "
@@ -67,7 +72,7 @@ for qualified in (False, True):
     lines += [f"## {'Qualified ranking (only arms reaching recall >= %.2f)' % TARGET if qualified else 'Ranking over every arm that ran'}", ""]
     lines += ["| table | space | T | density | " + " | ".join(ARMS_ORDER) + " |", "|---|---|---|---|" + "---|" * len(ARMS_ORDER)]
     for (cls, space), rows in sorted(data.items()):
-        for T in ("0.7", "0.8", "0.9", "0.95"):
+        for T in THRS:
             grp = [r for r in rows if r[1] == T]
             if not grp: continue
             dens = st.median([float(r[2]) for r in grp])
@@ -83,7 +88,7 @@ for qualified in (False, True):
     # who wins how often overall
     tot = collections.Counter(); tot2 = collections.Counter(); seen = collections.Counter()
     for (cls, space), rows in data.items():
-        for T in ("0.7", "0.8", "0.9", "0.95"):
+        for T in THRS:
             for arm in ARMS_ORDER:
                 n1, n2, n = ranks(rows, arm, T, qualified)
                 tot[arm] += n1; tot2[arm] += n2; seen[arm] += n

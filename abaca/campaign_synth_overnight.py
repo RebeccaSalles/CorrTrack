@@ -12,9 +12,15 @@ Design: one factor at a time around a baseline, which is what the runtime-scalin
 inside one night. Per process: 4 + 4 + 4 + 5 levels minus the 3 repeated baselines = 14 cells,
 28 cells over the two processes, 4 jobs each.
 
-The generator plants only positive correlation here (--corr-sign pos) and every cell runs in raw
-space with neg_corr=False, so L = 1 gives the synchronous comparison and L > 1 the lagged one;
-negative correlation is not an axis of this campaign (it is one in the real-data tables).
+The generator plants only positive correlation here (--corr-sign pos), so L = 1 gives the
+synchronous comparison and L > 1 the lagged one; negative correlation is not an axis of this
+campaign (it is one in the real-data tables).
+
+(2026-09-26, user) Both spaces run, as in the real-data tables: raw levels, where a random walk
+is nonstationary and carries spurious correlation, and first differences, where it becomes white
+noise, the uncooperative case that defeats sketch filters built on energy concentration. The
+density is defined in the space the cell runs in, so a differenced cell needs its own generated
+file (--preprocess).
 
     python abaca/campaign_synth_overnight.py --emit abaca/synth_overnight_submit.sh
     # then, on a node: bash abaca/synth_overnight_submit_generate.sh
@@ -33,52 +39,63 @@ W, STEP, N_OBS = 60, 6, 6000                 # 991 evaluated windows per cell
 # is the exception at L = 3), and the density axis keeps 0.02 while the baseline sits at 0.01.
 BASE = {"m": 500, "L": 6, "T": 0.9, "density": 0.01}
 AXES = {
-    "m": [125, 250, 500, 1000],
+    "m": [125, 250, 500, 1000, 2000],   # 2000 added 2026-09-27; four times the work of m=1000, own walltime below
     "L": [1, 3, 6, 11],
-    "T": [0.7, 0.8, 0.9, 0.95],
+    "T": [0.7, 0.8, 0.85, 0.9, 0.95],     # 0.85 added 2026-09-26, as in the real-data tables
     "density": [0.002, 0.01, 0.02, 0.05, 0.1],
 }
-PROCS = ["ar1", "rw"]                        # stationary / nonstationary
+PROCS = ["ar1", "rw"]                        # stationary / nonstationary base process
+SPACES = [False, True]                       # raw levels, then first differences
 CORRJOIN_KNOBS = {"corrjoin_ks": 6, "corrjoin_ke": 12}    # 6 and 12 divide W = 60
+# (2026-09-28) tuning memory tracks DENSITY, not m: campaign_competitors sizes the packed jobs by m, so a
+# dense m=500 cell got 2 cores (about 19 GB) and the CSZ pass died there at 19.6 GB, always inside CorrJoin
+# since it is tuned last. The dense cells get a wider allocation.
+def tune_cores(m, density):
+    return 8 if (density >= 0.05 or m >= 1000) else 4
 # a dense or large cell costs the most; the cap keeps one runaway cell from eating the night
 WALLTIME = {"pack": "3:00:00", "nway": "3:00:00"}
+# the largest cells cost about m^2: brute force alone is ~20 min at m=1000, so m=2000 gets its own cap
+BIG_WALLTIME = {"pack": "8:00:00", "nway": "16:00:00"}
 
 
 def points():
-    """(proc, m, L, T, density) one factor at a time around BASE, the baseline kept once."""
+    """(proc, m, L, T, density, diff) one factor at a time around BASE, the baseline kept once."""
     out = []
     for proc in PROCS:
         seen = set()
         for axis, levels in AXES.items():
             for v in levels:
                 p = dict(BASE, **{axis: v})
-                key = (proc, p["m"], p["L"], p["T"], p["density"])
-                if key in seen:
-                    continue
-                seen.add(key); out.append(key)
+                for diff in SPACES:
+                    key = (proc, p["m"], p["L"], p["T"], p["density"], diff)
+                    if key in seen:
+                        continue
+                    seen.add(key); out.append(key)
     return out
 
 
-def name_of(proc, m, L, T, density):
-    return f"ovn_{proc}_m{m}_L{L}_T{str(T).replace('.', 'p')}_d{str(density).replace('.', 'p')}"
+def name_of(proc, m, L, T, density, diff=False):
+    return f"ovn_{proc}_m{m}_L{L}_T{str(T).replace('.', 'p')}_d{str(density).replace('.', 'p')}{'_diff' if diff else ''}"
 
 
-def gen_command(proc, m, L, T, density):
+def gen_command(proc, m, L, T, density, diff=False):
     # --allow-spurious: a raw random walk produces correlated tuples the generator did not plant;
     # the file is kept and the spurious fraction recorded, which is the point of the nonstationary arm
     return (f"python datasets/fetch/gen_density_targeted.py --proc {proc} --density {density} --T {T} "
             f"--m {m} --n {N_OBS} --W {W} --step {STEP} --L {L} --corr-sign pos --allow-spurious "
-            f"--name {name_of(proc, m, L, T, density)}")
+            + ("--preprocess " if diff else "")
+            + f"--name {name_of(proc, m, L, T, density, diff)}")
 
 
 def synth_cells() -> list[cc.Cell]:
     out = []
-    for (proc, m, L, T, density) in points():
-        name = name_of(proc, m, L, T, density)
+    for (proc, m, L, T, density, diff) in points():
+        name = name_of(proc, m, L, T, density, diff)
+        wt = BIG_WALLTIME if m >= 2000 else WALLTIME
         out.append(cc.Cell(name, W, STEP, (L - 1) * STEP, T, n_series=m, n_obs=N_OBS, arms="all",
-                           extra=dict(CORRJOIN_KNOBS), walltime=WALLTIME["nway"], calib_obs=N_OBS,
-                           preprocess=False, config_path=f"datasets/competitor/configs/experiment_dataset_{name}.py",
-                           note=f"{proc} ({'stationary' if proc == 'ar1' else 'nonstationary'}), m={m}, L={L}, T={T}, target density={density}"))
+                           extra=dict(CORRJOIN_KNOBS), walltime=wt["nway"], calib_obs=N_OBS,
+                           preprocess=diff, config_path=f"datasets/competitor/configs/experiment_dataset_{name}.py",
+                           note=f"{proc} ({'stationary' if proc == 'ar1' else 'nonstationary'} process), {'differenced' if diff else 'raw levels'}, m={m}, L={L}, T={T}, target density={density}"))
     return out
 
 
@@ -100,6 +117,12 @@ def main() -> None:
             continue
         # campaign_competitors.emit already writes the hamming hyperopt job (hh_*), its HYPEROPT_HAMMING_DIR
         # and the N-way dependency on it (2026-09-21), so this driver only adds what is specific to it
+        # (2026-09-25) RESULTS_ROOT must reach the job: the wrappers build their output directory from the
+        # RESULTS_ROOT inside it, and the default is the main campaign's own results. campaign_competitors
+        # still does not pass it, so every job line of this campaign gets it here.
+        if ln.startswith(("H_JOB=$(submit", "H2_JOB=$(submit", "T_JOB=$(submit", "N_JOB=$(submit")):
+            ln = ln.replace(" SNAPSHOT=$SNAPSHOT", " SNAPSHOT=$SNAPSHOT RESULTS_ROOT=$RESULTS_ROOT", 1)
+            assert "RESULTS_ROOT=$RESULTS_ROOT" in ln, ln
         if ln.startswith("N_JOB=$(submit"):
             ln = ln.replace(" RUN_NAME=", " NWAY_LARGE_SET_GB=200 EVAL_SPAN=full RUN_NAME=")
             assert '"$H2_JOB"' in ln and "HYPEROPT_HAMMING_DIR" in ln, ln

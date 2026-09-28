@@ -10040,3 +10040,141 @@ alive position the mirrored words, time and series index still equal the node-in
 Results unchanged throughout: 177,439 candidates and recall 1.0000 for corrtrack_hamming on the reference
 cell, 168,385 / 0.9920 for corrtrack, with StatStream now reporting a row there as well (4,148 candidates,
 recall 0.9136) instead of failing Lemma 7. 173 tests pass.
+
+### 2026-09-24 Final m=500 campaign: one code state, one root, after two overwrites of my own making
+Sequence of the day, including two data losses caused by this session.
+- Morning: the 120-cell repair finished, 143/143 cells carrying all 12 arms. `validate_cells.py`
+  (new) then found 41 cells not comparable: CorrJoin had run on paper defaults in every lagged
+  cell because `tune_competitors.py` still removed it when `n_lags > 0`, a guard the other session
+  had removed from the runner but not the tuner, and two cells had lost their tuning to an
+  out-of-memory kill at 19.6 GB (2-core jobs), which left StatStream on its default 16 DFT
+  coefficients, illegal at W=30 under Lemma 7, so it raised instead of running. Guard removed,
+  tuning jobs raised to 8 cores.
+- Midday: the other session's candidate-stage optimisation (Sketches / Candidates) changed the
+  timing of the six arms that share it, so those were rerun in all 143 cells. CorrTrack was also
+  re-tuned under the measured code, since an index insert is now about five times cheaper and the
+  earlier parameters, while valid, were fitted against the old cost model. Verified on a sample:
+  the hyperopts run at each cell's own configuration, select the intended backend, and the runs
+  use exactly those files; streamflow moved its gate offset 0.10 -> 0.05 and smartmeter moved from
+  64 vectors at occupancy 8 to 32 at occupancy 2.
+- That run overwrote the 12-arm results with its 7 arms, exactly as yesterday's partial run had.
+  Cause both times: `nway_compare.oar` writes `nway/<cell>/nway.json` with the arms it ran, and I
+  pointed the run at the root holding the complete set. The five exact arms survive only as the
+  derived numbers in `docs/campaign_m500_tables_interim_2026-09-22.md`. Fixed structurally: each
+  campaign writes to its own root, and `validate_cells.py` now fails a cell missing any arm its
+  capability class defines, since the previous checks read a subset as success.
+- Sketch width fixed at 64 (user): the 32-vector option was chosen in 7 of 143 cells, all
+  smartmeter on the lsh backend, and 6 of them then missed the 0.95 recall target on the full
+  stream (0.900 to 0.938) while posting speedups up to 16.4x, i.e. the narrower sketch's proxy
+  recall is optimistic and the selection bought speed with misses; at 64 vectors 5 of 136 missed.
+  Both hyperopt grids halve as a side effect.
+- Provenance: the cluster clone is now updated with `git fetch && git reset --hard origin/dev`
+  instead of rsync, so the snapshot's `sha=` names the real commit; the other session's `content=`
+  fingerprint corroborates it. The reset exposed that the `.oar` wrappers were tracked
+  non-executable, which broke `oarsub -S` with exit 126; their mode bit is now tracked.
+- Final campaign running: 143 cells, every arm, snapshot `final112` (sha 101ef2c, content
+  f7aa10f1814d9eee, 173 tests), results in `final_112ce48`, 572 jobs. This is the run to cite.
+
+### 2026-09-25 paper build and table generation wired up (no algorithm change)
+Branch: `main` (home working copy; this repo's own branch unchanged). No source, kernel or benchmark
+code was touched: this entry is infrastructure for the manuscript only.
+- Found the existing draft where it was not obvious: `paper/` held only `Correlation_Anomaly_Paper.zip`,
+  the Overleaf export of 2026-09-11, and `/paper/` is ignored repo wide by `.gitignore` line 32, so
+  none of it is under version control. Unpacked it in place; the zip is kept as the pristine snapshot.
+  Draft is `main.tex`, 773 lines, `acmart`/`sigconf`/`nonacm`, title "Robust Online Correlation
+  Discovery and Tracking at Scale", plus 6 backup versions, `bibliography.bib` (1766 lines) and four
+  hand made figure PDFs.
+- Draft state: written through section 4 (CorrTrack, 10 subsections) and 5.1 to 5.3 including the
+  experimental settings table. Empty: the three sequential results paragraphs, the parallel results
+  paragraph, the special applications subsubsection, and a commented summary carrying four `??`.
+- Added `paper/tools/build_paper_tables.py`: parses the newest `docs/campaign_m500_tables_ranked_*.md`
+  and `docs/campaign_m500_rankings_*.md` and emits `paper/tables/{tbl_speedup_qualified,tbl_speedup_all,
+  tbl_margins,headline_macros}.tex`. Intent is that no result number is ever typed into the prose;
+  the prose cites macros, and a campaign rebuild propagates. `\campaignStamp` records the source
+  snapshot so a stale PDF is detectable.
+- Two generator rules that are scientific, not cosmetic, both added after they bit: an arm whose recall
+  in a cell is below the tuned target 0.95 is excluded from "best other arm" and never bolded as row
+  winner. The first version picked StatStream (recall 0.000, 5.27x) as the comparison baseline in
+  CorrTrack's best cell, which would have put a 2.41x claim against an arm that finds nothing in the
+  paper; with the filter the baseline is FilCorr at 4.46x and the ratio is 2.85x. That agrees with the
+  2.87x the ranking builder computes independently as a geometric mean over the row's six datasets,
+  which is the cross check that the generator reads the tables correctly.
+- Added `paper/Makefile` (`check`, `tables`, `pdf`, `watch`, `clean`), `.latexmkrc` (pdflatex, bibtex,
+  `build/` out dir), `paper/.gitignore`, `paper/README.md`, `paper/RESULTS_PLAN.md`.
+- **Not verified: the PDF has never been compiled.** No TeX on this machine: `latexmk`, `pdflatex`,
+  `bibtex`, `xelatex`, `biber`, `tectonic` all absent. `make check` reports this and prints the apt
+  line. The generated tables are therefore syntactically unreviewed by LaTeX itself.
+- `main.tex` deliberately left byte for byte identical to the export, verified by diff against the
+  zip, because it is still open whether the canonical copy is here or in Overleaf. No `\input` hooks
+  inserted yet.
+- Evidence problem recorded in `paper/RESULTS_PLAN.md` rather than silently written around: the
+  Conclusion (line 760) claims CorrTrack "considerably outperform[s] brute force and the state of the
+  art", and the commented summary is drafted to end with "?? times faster than the state of the art".
+  The 2026-09-23 qualified ranking does not support that unconditionally. CorrTrack leads 8 of 24 rows,
+  FilCorr 16. CorrTrack wins clearly at tau 0.9 and 0.95 and in differenced space (margins to 2.87x,
+  ahead on all six datasets of those rows); FilCorr leads at tau 0.7 and 0.8 and every short window row
+  in both spaces by 1.04x to 1.14x; on short windows, raw, tau 0.7, CorrTrack is 0.94x, slower than
+  brute force. Against brute force the claim is safe. Against FilCorr it needs its condition attached.
+  This is the user's call to make, and the abstract inherits it.
+- Numbers presently wired are the 2026-09-23 snapshot, which the running `final_112ce48` campaign will
+  supersede. Sequence to refresh is unchanged and recorded in `tasks/current_task.md`: drain, then
+  `validate_cells.py`, then the three builders, then `make tables` in `paper/`. No cluster access was
+  made in this session.
+
+## 2026-09-28 -- synthetic tables and figures rebuilt on both spaces; two provenance-encoded campaign figures
+
+Branch `main` (home working copy). No algorithm, kernel or job-submission code touched; this entry is
+about readers of the result files only.
+
+New, all under `abaca/`: `synth_results.py` (loader for the synthetic OFAT campaign, parses the cell
+name and reads the effective density from the run's own dataset profile), `build_synth_tables.py`,
+`build_synth_figures.py`, `campaign_figures.py`. The scratchpad scripts that produced the 2026-09-26
+synthetic doc were lost with `/tmp`, which is the reason these are in the repo now rather than in a
+scratchpad: every table and figure in the paper should be regenerable from a tracked builder.
+
+Commands run:
+
+    python3 abaca/build_synth_tables.py  ~/results/synth_overnight docs/synthetic_tables_2026-09-28.md
+    python3 abaca/build_synth_figures.py ~/results/synth_overnight docs/figures
+    python3 abaca/campaign_figures.py    ~/results/final_112ce48   docs/figures
+
+Results.
+
+- **Generator validation, now covering both spaces** (the 2026-09-26 check saw raw cells only). Median
+  effective/target density is 1.00 for ar1 in both spaces and for the differenced random walk, with a
+  0.91 floor only at target 0.1 where the correlated groups saturate. The raw random walk overshoots,
+  median 1.22 and up to 4.83 at T=0.70: spurious correlation of levels, which is what that arm is for
+  (`--allow-spurious`). Conclusion recorded in `docs/synthetic_scaling_2026-09-28.md`: report the
+  effective density, never the requested target.
+- **Synthetic curves, 60 of 64 cells.** CorrTrack leads every cell except the raw random walk at
+  T=0.70 and 0.80. Stationary raw: 8.30x at m=125 to 24.57x at m=1000 (best competitor 11.43x);
+  L=1 5.58x to L=11 26.51x; T=0.70 8.95x to T=0.95 25.18x; density 0.002 27.4x falling to 0.1 5.6x.
+  Recall median 0.998 (lsh) / 1.000 (hamming), minimum 0.950 / 0.962, precision 1.000 everywhere.
+  StatStream's recall 0.000 appears in exactly the three cells whose CSZ tuning fell back to defaults
+  and nowhere else, so it is a tuning failure, not a result; those three are being rerun.
+- **Two new campaign figures.** `docs/figures/speedup_vs_density.png` puts speedup against the
+  effective density per class and space, and `docs/figures/performance_profile.png` is a Dolan-More
+  profile over all 179 cells, one panel unconditioned and one counting a cell only when the method
+  also reached recall 0.95. Over the whole campaign CorrTrack is fastest on 120 of 179 cells (83
+  lsh, 37 hamming), FilCorr on 53, CorrJoin 5, StatStream 1; median distance from the best method on
+  a cell is 1.02 for CT-lsh and 1.18 for CT-ham.
+- **Provenance is encoded in the marks**, per the user's requirement that the figures say which
+  capabilities were enabled or evaluated by us rather than by the original authors: circle `native`,
+  triangle `enabled_by_us`, square `specified`, hollow for median recall below 0.95, `//` and `..`
+  hatching on the synthetic bar charts. Every tier is read from the run's own `supports_lags` /
+  `supports_neg_corr` field, so it cannot drift from what was run, and a mixed slice is marked with
+  the least author-evaluated tier it contains.
+
+Known issues.
+
+- Four m=2000 cells and three dense-cell tuning repairs were still running when these were built, so
+  the m axis in the figures stops at 1000 and the three dense cells carry their fallback-tuned
+  competitor numbers. Rebuild both synthetic artifacts when the queue drains.
+- The threshold bar charts are at m=500, the largest size the threshold axis covers: the design is
+  one factor at a time, so m=1000 and m=2000 exist at T=0.90 only. The earlier
+  `threshold_bars_m1000.png` was degenerate for that reason (a single threshold group) and has been
+  removed along with `docs/synthetic_scaling_2026-09-26.md`, which covered raw levels only and
+  labelled the base process as though it were the space.
+- ParCorr, CSZ and CorrJoin plateau near 0.66 in the performance profile because class N has no such
+  arm at all (`not_available`). The profile counts a missing capability as unsolved, which is the
+  intended semantics but needs saying in the caption.

@@ -8,7 +8,10 @@ ROOT = os.path.expanduser(sys.argv[1] if len(sys.argv) > 1 else "~/corrtrack_aba
 TUNED_ARMS = {"parcorr", "csz", "statstream", "corrjoin"}          # the CSZ protocol tunes these
 CT_ARMS = {"corrtrack": "hyperopt", "corrtrack_hamming": "hyperopt_hamming"}
 bad = collections.defaultdict(list)
-cells = sorted(glob.glob(f"{ROOT}/nway/*_m500_*/nway.json"))
+# (2026-09-28) every cell under the root, not only the m=500 ones: the glob was copied from the
+# real-data campaign and silently skipped 12 of the 60 synthetic cells, which is the failure mode
+# this script exists to prevent.
+cells = sorted(glob.glob(f"{ROOT}/nway/*/nway.json"))
 for f in cells:
     stem = os.path.basename(os.path.dirname(f)); d = json.load(open(f)); arms = d["arms"]
     tuned = {k for k in (d.get("competitor_params_tuned") or {})}

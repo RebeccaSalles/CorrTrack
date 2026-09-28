@@ -19,6 +19,7 @@ i.e. 3 x 48 = 144 runs x 4 jobs (lsh hyperopt, hamming hyperopt, CSZ tuning, N-w
 from __future__ import annotations
 
 import argparse
+import os
 import re
 
 import campaign_competitors as cc
@@ -32,6 +33,10 @@ M500_SETS = [
     ("global_weather_m500", 30, 3, 15, 500, 2768),
     ("acwi_capweighted_m500", 30, 3, 15, 500, 2768),
 ]
+# (2026-09-25, user) T = 0.85 added: the CorrTrack/FilCorr crossover falls between 0.80 and 0.90 in three
+# of the four lagged rows, and the effective density drops about fivefold across that gap, so the curve is
+# unresolved exactly where it turns. Overridable so a campaign can run only the new level.
+THRESHOLDS = tuple(float(x) for x in os.environ["THRESHOLDS"].split(",")) if os.environ.get("THRESHOLDS") else cc.THRESHOLDS
 CORRJOIN_KNOBS_BY_W = {30: {"corrjoin_ks": 5, "corrjoin_ke": 10}, 48: {"corrjoin_ks": 6, "corrjoin_ke": 12}}   # as in campaign_competitors DATASETS
 
 
@@ -40,7 +45,7 @@ def m500_cells(tables=("S", "L", "N")) -> list[cc.Cell]:
     main() keeps: pos for the L0 cells (table S), pos and neg for the lagged cells (tables L and N)."""
     out = []
     for label, W, step, n_lags, m, T_len in M500_SETS:
-        for T in cc.THRESHOLDS:
+        for T in THRESHOLDS:
             for diff in (False, True):
                 for lags in sorted({0 if "S" in tables else None, n_lags if ("L" in tables or "N" in tables) else None} - {None}):
                     out.append(cc.Cell(label, W, step, lags, T, n_series=m, n_obs=T_len, arms="all",

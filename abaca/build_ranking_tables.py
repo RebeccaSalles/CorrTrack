@@ -10,8 +10,13 @@ import re, sys, math, statistics as st, collections
 
 SRC, OUT = sys.argv[1], sys.argv[2]
 TARGET = 0.95
+# (2026-09-25) thresholds come from the table rather than a fixed list: T = 0.85 was added after the
+# first build and a hardcoded list silently dropped those rows instead of failing.
+def thresholds(data):
+    return sorted({r[1] for rows in data.values() for r in rows}, key=float)
 TIE = 0.10          # (2026-09-23, user) arms within 10% of the best count as tied for that place
-ARMS = ["STOMP", "FilCorr", "TSUBASA", "BRAID", "ThinBRAID", "CorrTrack", "ParCorr", "CSZ", "StatStream", "CorrJoin"]
+# (2026-09-25) the exact incremental arm is labelled bf_incr in the final tables (exact_stomp was renamed
+ARMS = ["bf_incr", "FilCorr", "TSUBASA", "BRAID", "ThinBRAID", "CorrTrack", "ParCorr", "CSZ", "StatStream", "CorrJoin"]
 # (2026-09-23, user) CT-lsh and CT-ham are two tuned backends of one method, so they are ranked as one
 # arm whose speedup on a dataset is the better of the two (the better QUALIFYING one under the recall
 # filter). Counting them separately would let one method occupy two places and split its own wins.
@@ -48,13 +53,13 @@ def row_stats(rows, T, qualified):
         if not pool: continue
         best = max(pool.values())
         first = [a for a, v in pool.items() if v >= best * (1 - TIE)]      # tied for first
-        for a in first: counts[a][0] += 1
+        for a in first: counts.setdefault(a, [0, 0])[0] += 1
         rest = {a: v for a, v in pool.items() if a not in first}
         second = []
         if rest:
             b2 = max(rest.values())
             second = [a for a, v in rest.items() if v >= b2 * (1 - TIE)]
-        for a in set(first) | set(second): counts[a][1] += 1               # first or second place, ties included
+        for a in set(first) | set(second): counts.setdefault(a, [0, 0])[1] += 1   # first or second, ties included
     if not per: return counts, None
     # winner: most firsts, ties broken by the median speedup
     cand = max(counts, key=lambda a: (counts[a][0], st.median([p[a] for _, p in per if a in p]) if any(a in p for _, p in per) else 0))
@@ -75,6 +80,7 @@ def row_stats(rows, T, qualified):
                         lo=min(ratios), hi=max(ratios), verdict=verdict)
 
 data = parse(SRC)
+THRS = thresholds(data)
 L = ["# m=500 tables: rankings, margins and paired tests", "",
      "`[f/s]` = datasets of that row where the arm is the fastest / among the two fastest, out of six. "
      "CorrTrack is one arm here: its value on a dataset is the better of its two tuned backends. "
@@ -94,7 +100,7 @@ for qualified in (False, True):
           "| table | space | T | " + " | ".join(ARMS) + " | leader | margin | spread | range | ahead/tied/behind | verdict |",
           "|---|---|---|" + "---|" * (len(ARMS) + 6)]
     for (cls, space), rows in sorted(data.items()):
-        for T in ("0.7", "0.8", "0.9", "0.95"):
+        for T in THRS:
             counts, w = row_stats(rows, T, qualified)
             if not any(c[1] for c in counts.values()): continue
             present = {COLLAPSE.get(a, a) for _, _, v in rows for a in v}

@@ -2282,3 +2282,68 @@ origin/dev` (it is one commit behind, at 1750dba, so it does not yet have the Co
 build a fresh snapshot, re-generate and re-submit the arm updates. That snapshot carries this hamming work
 and the StatStream Lemma 7 fix, so the W=30 StatStream cells stop erroring and CorrTrack is tuned under the
 code being measured.
+
+## 2026-09-24 -- final m=500 campaign running (572 jobs, snapshot final112, root final_112ce48). See log 2026-09-24.
+Next exact step: when the feeder reports all 143 cells fed and the queue drains, run
+`python3 ~/corrtrack_abaca_results/validate_cells.py ~/corrtrack_abaca_results/final_112ce48` and only if it exits 0,
+rebuild `docs/campaign_m500_tables_interim_*.md` (builder `scratchpad/build_campaign_tables.py`), the ranked view
+(`abaca/build_ranked_tables.py`) and the rankings (`abaca/build_ranking_tables.py`) from that root. Compare each cell's
+new bruteforce wall against the previous run's as a check that the earlier snapshots' timings were poolable.
+Open: the synthetic mini campaign (28 cells) is halted after its datasets were generated; ASOS per-station fill is
+paused with 199 country files present and the pivot/screen not yet rerun.
+
+## 2026-09-25 -- paper infrastructure set up; writing continues in the other session
+Branch: `main` (home working copy). No algorithm, kernel or benchmark code touched.
+Changed files (all new except the two docs): `paper/` unpacked from its zip, plus `paper/Makefile`,
+`paper/.latexmkrc`, `paper/.gitignore`, `paper/README.md`, `paper/RESULTS_PLAN.md`,
+`paper/tools/build_paper_tables.py`, `paper/tables/*.tex` (generated);
+`docs/implementation_log.md`, `tasks/current_task.md`. Note `/paper/` is gitignored repo wide
+(`.gitignore` line 32), so none of it is tracked.
+Commands run: `unzip` the Overleaf export, `python3 tools/build_paper_tables.py`, `make check`.
+Results: tables and headline macros generate cleanly from `docs/campaign_m500_*_2026-09-23.md`;
+generator cross checks against the ranking builder (2.85x vs 2.87x on the same row).
+Known issues: (1) **the PDF has never been compiled**, no TeX toolchain on this machine;
+(2) tables are from the 2026-09-23 snapshot, not the running `final_112ce48` campaign;
+(3) the Conclusion's "considerably outperforming ... the state of the art" is not supported
+unconditionally by the current data, see the evidence check in `paper/RESULTS_PLAN.md`;
+(4) parameter sensitivity and parallel results have no generated source data yet.
+Next exact step for the paper session, in order:
+1. `sudo apt install -y latexmk texlive-latex-recommended texlive-latex-extra
+   texlive-fonts-recommended texlive-bibtex-extra`, then `cd paper && make pdf` and fix whatever
+   the first real compile reports.
+2. Decide Overleaf vs local canonical. `main.tex` is still byte identical to the export on purpose.
+   If Overleaf stays canonical, clone its git bridge into `paper/` before editing anything.
+3. Read `paper/RESULTS_PLAN.md`, settle the FilCorr framing question, then write sections 5.4.1 to
+   5.4.3 citing the macros in `tables/headline_macros.tex` rather than literal numbers.
+Unchanged and still open from 2026-09-24: drain the 572 job campaign, `validate_cells.py` on
+`final_112ce48`, rebuild the three campaign docs, then `make tables` in `paper/`. Synthetic mini
+campaign still halted; ASOS per-station fill still paused at 199 country files. No cluster access
+was made on 2026-09-25.
+
+## 2026-09-28 -- synthetic and campaign artifacts rebuilt; four synthetic cells still in flight
+Branch: `main` (home working copy). Cluster root for the real campaign `final_112ce48` (179 cells,
+complete); synthetic root `synth_overnight` (60 of 64 cells).
+Changed files: new `abaca/synth_results.py`, `abaca/build_synth_tables.py`,
+`abaca/build_synth_figures.py`, `abaca/campaign_figures.py`; new
+`docs/synthetic_tables_2026-09-28.md`, `docs/synthetic_scaling_2026-09-28.md`,
+`docs/campaign_m500_figures_2026-09-28.md`, `docs/figures/*.png`; removed
+`docs/synthetic_scaling_2026-09-26.md` and `docs/figures/threshold_bars_m1000.png` (superseded, see
+the log entry); `docs/implementation_log.md`, `tasks/current_task.md`.
+Commands run: one `rsync` of the two result roots' `nway.json` files into `~/results/`, the three
+builders above, and two `ssh -n sophia.g5k` status checks. No jobs submitted, none killed.
+Results: generator validated in both spaces (effective/target 1.00 except the raw random walk,
+which overshoots by design); CorrTrack fastest on 120 of 179 real cells; synthetic curves in
+`docs/synthetic_scaling_2026-09-28.md`.
+Known issues: the four m=2000 cells and three dense-cell tuning repairs (jobs 3148956, 3148960,
+3148976, 3148980, 3148984, 3149001, 3149005) were running when the artifacts were built.
+Next exact step, once `oarstat -u` is empty for those jobs:
+
+    rsync -a --include='*/' --include='nway.json' --exclude='*' \
+      sophia.g5k:'~/corrtrack_abaca_results/synth_overnight/nway/' ~/results/synth_overnight/nway/
+    python3 ~/corrtrack_release_dev/abaca/validate_cells.py ~/corrtrack_abaca_results/synth_overnight   # on the frontend
+    python3 abaca/build_synth_tables.py  ~/results/synth_overnight docs/synthetic_tables_2026-09-28.md
+    python3 abaca/build_synth_figures.py ~/results/synth_overnight docs/figures
+
+then update the m=2000 row of `docs/synthetic_scaling_2026-09-28.md` from the regenerated table.
+Still open and unchanged: ASOS per-station fill (199 country files, pivot and degree screen done,
+raw density 0.219 and differenced 0.004), and the paper's results prose.
