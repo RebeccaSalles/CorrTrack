@@ -120,6 +120,31 @@ def load(results_root: Path, power: dict | None = None):
                        **{f"prof_{k}": prof.get(k) for k in ("density_at_threshold", "low_frequency_energy_share_mean", "lag1_autocorr_mean", "constant_window_fraction", "regime_source")})
             row["speedup_vs_bf"] = (bf["wall"] / r["wall"]) if (r.get("status") == "ok" and bf.get("wall") and r.get("wall")) else None
             row["cand_speedup_vs_bf"] = (bf["cand_time"] / r["cand_time"]) if (r.get("status") == "ok" and bf.get("cand_time") and r.get("cand_time")) else None
+            # (2026-09-29) Work-normalized cost, so a timing difference between two arms can be read as
+            # algorithmic or as an implementation gap instead of being argued about.
+            #
+            # ns_per_problem_pw divides the whole run by the SAME denominator for every arm, the cell's
+            # pair-window universe (m(m-1)/2 x steps x lags, bruteforce's own total_candidates). It is the
+            # only cross-arm-comparable throughput number here, because the task is identical; an arm that
+            # prunes well is low, which is the correct reading.
+            #
+            # ns_per_validated_pw is the parity check. Every arm hands its survivors to the SAME Cython
+            # validation kernel, so this number must not depend on the arm. If one port is an outlier the
+            # difference is in our plumbing for that arm, not in its algorithm, which is exactly the
+            # question a reader asks when a paper compares its own ports. Reported per arm so they can see
+            # it rather than take our word.
+            #
+            # ns_per_candidate_emitted is the candidate stage divided by what that stage EMITTED. It is not
+            # cross-arm comparable on its own (a hard-pruning arm looks expensive per candidate precisely
+            # because it avoided work) and is kept only to be read beside the candidate counts.
+            universe = bf.get("total_candidates")
+            if r.get("status") == "ok":
+                row["ns_per_problem_pw"] = (1e9 * r["wall"] / universe) if (universe and r.get("wall")) else None
+                row["ns_per_validated_pw"] = (1e9 * r["val_time"] / r["tested"]) if (r.get("tested") and r.get("val_time")) else None
+                row["ns_per_candidate_emitted"] = ((1e9 * r["cand_time"] / r["total_candidates"])
+                                                   if (r.get("total_candidates") and r.get("cand_time")) else None)
+            else:
+                row["ns_per_problem_pw"] = row["ns_per_validated_pw"] = row["ns_per_candidate_emitted"] = None
             pf = r.get("phase_fractions") or {}
             for k in ("sk_time", "cand_time", "val_time", "monit_time"):
                 row[f"frac_{k}"] = pf.get(k)
@@ -238,14 +263,21 @@ def summary(runs: list[dict], by: str, title: str) -> str:
         groups[(r.get(by), r["arm"])]["step"].append(1e3 * r["step_time_median"] if r.get("step_time_median") is not None else None)
         groups[(r.get(by), r["arm"])]["peak"].append(r.get("res_peak_rss_delta_mb"))
         groups[(r.get(by), r["arm"])]["energy"].append(r.get("kw_energy_j") if r.get("kw_energy_j") is not None else r.get("res_energy_j"))
+        groups[(r.get(by), r["arm"])]["ns_pw"].append(r.get("ns_per_problem_pw"))
+        groups[(r.get(by), r["arm"])]["ns_val"].append(r.get("ns_per_validated_pw"))
         groups[(r.get(by), r["arm"])]["n"].append(1)
-    out = [f"## {title}", "", "Median (IQR) over cells; n = cells with the arm ok. Speedup = bruteforce wall / arm wall (same cell, same node).", "",
-           f"| {by} | arm | n | speedup | recall % | cand. precision % | cand. specificity % | step median ms | peak RSS delta MB | energy J |",
-           "|---|---|---|---|---|---|---|---|---|---|"]
+    out = [f"## {title}", "", "Median (IQR) over cells; n = cells with the arm ok. Speedup = bruteforce wall / arm wall (same cell, same node).",
+           "ns/pair-window divides the whole run by the cell's pair-window universe, the same denominator for every arm, so it is the",
+           "one throughput number that compares across arms. ns/validated is the shared validation kernel's cost per surviving",
+           "pair-window: every arm calls the same kernel, so it should not depend on the arm, and an outlier there is an implementation",
+           "gap in that port rather than a property of its algorithm.", "",
+           f"| {by} | arm | n | speedup | recall % | cand. precision % | cand. specificity % | step median ms | ns/pair-window | ns/validated | peak RSS delta MB | energy J |",
+           "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for (g, arm) in sorted(groups, key=lambda k: (str(k[0]), ARMS.index(k[1]) if k[1] in ARMS else 99)):
         d = groups[(g, arm)]
         out.append(f"| {g} | {arm} | {len(d['n'])} | {_fmt(d['speedup'])} | {_fmt(d['recall'], pct=True)} | {_fmt(d['cprec'], pct=True)} | "
-                   f"{_fmt(d['spec'], pct=True)} | {_fmt(d['step'], digits=3)} | {_fmt(d['peak'], digits=0)} | {_fmt(d['energy'], digits=0)} |")
+                   f"{_fmt(d['spec'], pct=True)} | {_fmt(d['step'], digits=3)} | {_fmt(d['ns_pw'], digits=1)} | {_fmt(d['ns_val'], digits=1)} | "
+                   f"{_fmt(d['peak'], digits=0)} | {_fmt(d['energy'], digits=0)} |")
     return "\n".join(out) + "\n"
 
 

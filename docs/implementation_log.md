@@ -10482,3 +10482,38 @@ BF_vect 140.2 -> 175 s, BF_incr 39.3 -> 49 s, CorrTrack's faster backend 32.7 ->
 in the text is now a division of two printed numbers: 393x, 1,401x, 1,682x, 4.28x, 3.57x. The
 measured median wall clocks (168 s and 18 s) are still stated, labelled as what they are, so nothing
 is hidden by the model.
+
+### 2026-09-29 (a) [competitor campaign thread] work-normalized cost, so "is one port slower than the others" is a number
+
+The reproduction section answers whether each port computes what its paper says. It does not answer the
+next question, which the user raised: a port can be exact and still be a slow implementation, and then the
+speedup table credits CorrTrack for our own C rather than for the method. Phase R checks the cost side only
+where a paper states something transportable (FilCorr's throughput trend and sensor multiplier, CorrJoin's
+r1 and its 1/r1 speedup ceiling, StatStream's pruning power, the reference point of TSUBASA's 10x), and for
+BRAID and ParCorr not at all. Published seconds are not reproducible across hardware, data size and
+language, so the gap has to be closed from our own measurements instead.
+
+`abaca/aggregate_campaign.py` now derives three numbers per (cell, arm) and prints two of them in every
+summary table:
+
+- `ns_per_problem_pw` = wall / the cell's pair-window universe (bruteforce's own total_candidates). The
+  SAME denominator for every arm, because the task is identical, so it is the one throughput number that
+  compares across arms. An arm that prunes well is low, which is the correct reading.
+- `ns_per_validated_pw` = val_time / tested. This is the parity check. Every arm hands its survivors to the
+  same Cython validation kernel, so this number must not depend on the arm; an outlier is an implementation
+  gap in that port rather than a property of its algorithm. It is reported per arm so a reader can see it
+  instead of taking our word for it.
+- `ns_per_candidate_emitted` = cand_time / total_candidates, kept in the CSV only. It is NOT comparable
+  across arms on its own (a hard-pruning arm looks expensive per candidate precisely because it avoided
+  work) and is there to be read beside the candidate counts.
+
+Test added: both derived columns on a synthetic two-arm cell, checking that the problem-normalized number
+uses the universe for both arms and that two arms whose validation costs the same per pair-window report
+the same `ns_per_validated_pw`, plus that a failed arm carries the columns as None rather than dropping out.
+174 tests pass.
+
+The context this belongs to, for the paper: our bruteforce is 63 to 99 ns per pair-window and a vectorized
+BLAS naive is 27 to 59, i.e. the same tier, while the interpreted naive the competitor papers measure
+against is about 30,000 ns, 300 to 500x slower (2026-09-23 (c)). So the large speedups in that literature
+are mostly a Python-overhead artefact, and the campaign declines that free win by using the stronger
+baseline. The two new columns let a reader check that we did not take the opposite free win either.

@@ -138,3 +138,37 @@ def test_statstream_tuning_grid_respects_lemma_7_window_bound():
             assert max(values) == W // 2, (W, values)
         else:                                                        # it did not: the listed range is untouched
             assert values == [4, 8, 12, 16, 24, 32], (W, values)
+
+
+def test_work_normalized_columns_use_the_same_denominator_for_every_arm():
+    # (2026-09-29) The question a reader asks about a paper that compares its own ports is whether one of
+    # them was implemented worse than the others. Two derived numbers answer it from the campaign's own
+    # output: ns_per_problem_pw divides each arm's wall by the SAME denominator, the cell's pair-window
+    # universe (bruteforce's total_candidates), so it compares across arms; ns_per_validated_pw is the
+    # shared validation kernel's cost per surviving pair-window, which must not depend on the arm.
+    from abaca.aggregate_campaign import load
+    import json as _json
+    cell = {
+        "dataset": "d", "cell": "d_m10_W30_s3_L0_T0.9_pos", "dataset_profile": {}, "node": {},
+        "arms": {
+            "bruteforce": {"status": "ok", "wall": 10.0, "cand_time": 1.0, "val_time": 8.0, "total_candidates": 1000,
+                           "tested": 1000, "runtime": 10.0},
+            "corrtrack": {"status": "ok", "wall": 2.0, "cand_time": 1.5, "val_time": 0.4, "total_candidates": 50,
+                          "tested": 50, "runtime": 2.0},
+            "statstream": {"status": "ERROR", "reason": "Lemma 7"},
+        },
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        nway = Path(tmp) / "nway" / "d_m10_W30_s3_L0_T0.9_pos"
+        nway.mkdir(parents=True)
+        (nway / "nway.json").write_text(_json.dumps(cell))
+        runs, _cells, _tuning = load(Path(tmp))
+    rows = {r["arm"]: r for r in runs}
+    # same denominator for both ok arms: 1e9 * wall / 1000
+    assert rows["bruteforce"]["ns_per_problem_pw"] == pytest.approx(1e7)
+    assert rows["corrtrack"]["ns_per_problem_pw"] == pytest.approx(2e6)
+    # the shared validation kernel: 8 s over 1000 vs 0.4 s over 50, i.e. the same cost per pair-window
+    assert rows["bruteforce"]["ns_per_validated_pw"] == pytest.approx(8e6)
+    assert rows["corrtrack"]["ns_per_validated_pw"] == pytest.approx(8e6)
+    # a failed arm carries the columns as None rather than being absent
+    assert rows["statstream"]["ns_per_problem_pw"] is None
