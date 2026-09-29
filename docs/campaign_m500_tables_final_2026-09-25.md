@@ -2,13 +2,15 @@
 
 One code state for every arm and cell: snapshot `101ef2c` / `content=f7aa10f1814d9eee`, all twelve arms in one job per cell, brute force rerun in each as both ground truth and timing anchor, monitoring off, every arm evaluated on the whole stream while its parameters were chosen on the first 30%. CorrTrack is tuned by its own hyperopt (sketch width fixed at 64), the four pruning competitors by the CSZ protocol, BRAID/ThinBRAID at published defaults, and the exact arms have no recall knob.
 
+**Naming.** `BF_vect` is the vectorised exact brute force, which is also the ground truth and the timing anchor of its own cell; `BF_incr` is the exact incremental baseline; `CorrTrack-LSH` and `CorrTrack-Ham` are CorrTrack's two tuned backends. Every speedup is that cell's `BF_vect` wall clock divided by the arm's, measured in the same job.
+
 Cell entries are recall/precision/specificity/speedup. One arm is absent from one cell: ThinBRAID exhausted the node's 192 GB in acwi lagged negative at T=0.70, the densest cell of the study (17.9% of pair-windows correlated, 224 million of them), where its reported set plus the metrics temporaries do not fit; the other eleven arms of that cell ran normally, brute force included.
 
 **Legend.** `†` published defaults, not tuned: BRAID and ThinBRAID (the CSZ protocol does not apply to them; TSUBASA, bf_incremental and full-band FilCorr are exact and have no recall knob). `‡` the capability is ours, not the authors': ParCorr, CSZ and CorrJoin reach class L, and TSUBASA classes L and N, through a lag extension of ours, and FilCorr handles negative correlation in class N only because we enabled it (the runs record supports_lags / supports_neg_corr = enabled_by_us). `¶` specified in the paper but never evaluated there: StatStream's lags in classes L and N, and the negative correlation of BRAID, ThinBRAID and StatStream in class N. `§` emits its own decision instead of a validated set, so precision and specificity can fall below 1: StatStream and ThinBRAID do so in every cell, while BRAID, in the same family by design, reports exactly the brute-force set on these lag grids.
 
-## Table S, raw: synchronous, positive (n_lags=0, neg_corr=False)
+## Table S, raw: synchronous, positive only (n_lags=0, neg_corr=False)
 
-| dataset | T | density | BF s | bf_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CT-lsh | CT-ham | ParCorr | CSZ | StatStream | CorrJoin | tuning s (lsh/ham/CSZ) |
+| dataset | T | density | BF_vect s | BF_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CorrTrack-LSH | CorrTrack-Ham | ParCorr | CSZ | StatStream | CorrJoin | tuning s (lsh/ham/CSZ) |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | streamflow | 0.7 | 1.59e-01 | 15 | 1.000/1.000/1.000/1.51x | 1.000/1.000/1.000/1.67x | 1.000/1.000/1.000/0.60x | 1.000/1.000/1.000/1.27x | 0.815/0.634/0.911/0.70x | 0.961/1.000/1.000/0.88x | 0.968/1.000/1.000/0.94x | 0.969/1.000/1.000/0.39x | 0.958/1.000/1.000/0.28x | 0.992/0.581/0.864/0.28x | 1.000/1.000/1.000/0.55x | 350/44/881 |
 | streamflow | 0.8 | 9.80e-02 | 14 | 1.000/1.000/1.000/1.58x | 1.000/1.000/1.000/1.75x | 1.000/1.000/1.000/0.61x | 1.000/1.000/1.000/1.35x | 0.792/0.487/0.909/0.68x | 0.980/1.000/1.000/1.04x | 0.978/1.000/1.000/1.12x | 0.958/1.000/1.000/0.30x | 0.956/1.000/1.000/0.29x | 0.990/0.571/0.919/0.41x | 1.000/1.000/1.000/0.70x | 287/40/738 |
@@ -41,9 +43,9 @@ Cell entries are recall/precision/specificity/speedup. One arm is absent from on
 | acwi | 0.9 | 3.93e-02 | 14 | 1.000/1.000/1.000/1.58x | 1.000/1.000/1.000/1.79x | 1.000/1.000/1.000/0.59x | 1.000/1.000/1.000/1.35x | 0.870/0.226/0.878/0.65x | 0.975/1.000/1.000/1.29x | 0.999/1.000/1.000/1.41x | 0.961/1.000/1.000/0.41x | 0.990/1.000/1.000/0.19x | 0.980/0.999/1.000/1.09x | 1.000/1.000/1.000/1.16x | 275/42/561 |
 | acwi | 0.95 | 8.52e-03 | 14 | 1.000/1.000/1.000/1.65x | 1.000/1.000/1.000/1.88x | 1.000/1.000/1.000/0.60x | 1.000/1.000/1.000/1.40x | 0.879/0.062/0.885/0.67x | 0.985/1.000/1.000/1.88x | 0.978/1.000/1.000/2.39x | 0.972/1.000/1.000/0.65x | 0.987/1.000/1.000/0.23x | 0.973/0.999/1.000/2.01x | 1.000/1.000/1.000/1.50x | 230/40/474 |
 
-## Table S, differenced: synchronous, positive (n_lags=0, neg_corr=False)
+## Table S, differenced: synchronous, positive only (n_lags=0, neg_corr=False)
 
-| dataset | T | density | BF s | bf_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CT-lsh | CT-ham | ParCorr | CSZ | StatStream | CorrJoin | tuning s (lsh/ham/CSZ) |
+| dataset | T | density | BF_vect s | BF_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CorrTrack-LSH | CorrTrack-Ham | ParCorr | CSZ | StatStream | CorrJoin | tuning s (lsh/ham/CSZ) |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | streamflow | 0.7 | 3.22e-02 | 14 | 1.000/1.000/1.000/1.54x | 1.000/1.000/1.000/1.79x | 1.000/1.000/1.000/0.61x | 1.000/1.000/1.000/1.29x | 0.812/0.356/0.951/0.67x | 0.980/1.000/1.000/1.02x | 0.964/1.000/1.000/1.14x | 0.956/1.000/1.000/0.40x | 0.932/1.000/1.000/0.14x | 0.959/0.201/0.873/0.42x | 1.000/1.000/1.000/0.44x | 233/28/621 |
 | streamflow | 0.8 | 1.53e-02 | 14 | 1.000/1.000/1.000/1.59x | 1.000/1.000/1.000/1.82x | 1.000/1.000/1.000/0.59x | 1.000/1.000/1.000/1.34x | 0.800/0.212/0.954/0.68x | 0.983/1.000/1.000/1.34x | 0.977/1.000/1.000/1.44x | 0.963/1.000/1.000/0.31x | 0.964/1.000/1.000/0.15x | 0.955/0.161/0.923/0.63x | 1.000/1.000/1.000/0.61x | 180/25/563 |
@@ -76,9 +78,9 @@ Cell entries are recall/precision/specificity/speedup. One arm is absent from on
 | acwi | 0.9 | 7.07e-04 | 14 | 1.000/1.000/1.000/1.63x | 1.000/1.000/1.000/1.90x | 1.000/1.000/1.000/0.59x | 1.000/1.000/1.000/1.35x | 0.750/0.007/0.925/0.68x | 0.978/1.000/1.000/2.79x | 0.992/1.000/1.000/2.68x | 0.967/1.000/1.000/0.73x | 0.951/1.000/1.000/0.16x | 1.000/0.900/1.000/2.25x | 1.000/1.000/1.000/1.47x | 169/30/523 |
 | acwi | 0.95 | 6.20e-05 | 13 | 1.000/1.000/1.000/1.59x | 1.000/1.000/1.000/1.81x | 1.000/1.000/1.000/0.59x | 1.000/1.000/1.000/1.33x | 0.777/0.001/0.929/0.66x | 0.994/1.000/1.000/3.12x | 1.000/1.000/1.000/2.96x | 0.808/1.000/1.000/1.16x | 0.760/1.000/1.000/0.13x | 1.000/0.858/1.000/2.36x | 1.000/1.000/1.000/1.58x | 170/29/489 |
 
-## Table L, raw: lagged, positive
+## Table L, raw: lagged, positive only (neg_corr=False)
 
-| dataset | T | density | BF s | bf_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CT-lsh | CT-ham | ParCorr | CSZ | StatStream | CorrJoin | tuning s (lsh/ham/CSZ) |
+| dataset | T | density | BF_vect s | BF_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CorrTrack-LSH | CorrTrack-Ham | ParCorr | CSZ | StatStream | CorrJoin | tuning s (lsh/ham/CSZ) |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | streamflow | 0.7 | 4.59e-02 | 182 | 1.000/1.000/1.000/3.70x | 1.000/1.000/1.000/4.24x | 1.000/1.000/1.000/1.33x | 1.000/1.000/1.000/1.65x | 0.779/0.337/0.926/0.63x | 0.981/1.000/1.000/2.35x | 0.981/1.000/1.000/2.38x | 0.983/1.000/1.000/0.57x | 0.988/1.000/1.000/0.43x | 0.990/0.719/0.981/1.04x | 1.000/1.000/1.000/1.66x | 176/25/4105 |
 | streamflow | 0.8 | 2.43e-02 | 177 | 1.000/1.000/1.000/3.90x | 1.000/1.000/1.000/4.50x | 1.000/1.000/1.000/1.34x | 1.000/1.000/1.000/1.70x | 0.751/0.211/0.930/0.62x | 0.975/1.000/1.000/3.63x | 0.989/1.000/1.000/3.32x | 0.963/1.000/1.000/1.40x | 0.987/1.000/1.000/0.51x | 0.989/0.716/0.990/1.69x | 1.000/1.000/1.000/2.64x | 121/23/3337 |
@@ -111,9 +113,9 @@ Cell entries are recall/precision/specificity/speedup. One arm is absent from on
 | acwi | 0.9 | 1.11e-02 | 177 | 1.000/1.000/1.000/4.01x | 1.000/1.000/1.000/4.63x | 1.000/1.000/1.000/1.35x | 1.000/1.000/1.000/1.76x | 0.869/0.087/0.897/0.61x | 0.969/1.000/1.000/3.84x | 0.999/1.000/1.000/3.30x | 0.983/1.000/1.000/1.40x | 0.986/1.000/1.000/0.61x | 0.972/1.000/1.000/3.44x | 1.000/1.000/1.000/5.09x | 145/33/2885 |
 | acwi | 0.95 | 1.39e-03 | 164 | 1.000/1.000/1.000/3.84x | 1.000/1.000/1.000/4.48x | 1.000/1.000/1.000/1.27x | 1.000/1.000/1.000/1.56x | 0.878/0.012/0.904/0.57x | 0.986/1.000/1.000/5.95x | 1.000/1.000/1.000/4.36x | 0.986/1.000/1.000/1.64x | 0.981/1.000/1.000/0.82x | 1.000/0.968/1.000/7.58x | 1.000/1.000/1.000/9.13x | 113/30/2244 |
 
-## Table L, differenced: lagged, positive
+## Table L, differenced: lagged, positive only (neg_corr=False)
 
-| dataset | T | density | BF s | bf_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CT-lsh | CT-ham | ParCorr | CSZ | StatStream | CorrJoin | tuning s (lsh/ham/CSZ) |
+| dataset | T | density | BF_vect s | BF_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CorrTrack-LSH | CorrTrack-Ham | ParCorr | CSZ | StatStream | CorrJoin | tuning s (lsh/ham/CSZ) |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | streamflow | 0.7 | 3.24e-03 | 175 | 1.000/1.000/1.000/3.96x | 1.000/1.000/1.000/4.63x | 1.000/1.000/1.000/1.33x | 1.000/1.000/1.000/1.70x | 0.800/0.064/0.962/0.63x | 0.977/1.000/1.000/4.52x | 0.989/1.000/1.000/4.07x | 0.995/1.000/1.000/0.68x | 0.932/1.000/1.000/0.37x | 0.956/0.173/0.985/2.44x | 1.000/1.000/1.000/1.16x | 120/16/3441 |
 | streamflow | 0.8 | 1.46e-03 | 171 | 1.000/1.000/1.000/3.89x | 1.000/1.000/1.000/4.60x | 1.000/1.000/1.000/1.30x | 1.000/1.000/1.000/1.64x | 0.792/0.032/0.965/0.61x | 0.965/1.000/1.000/7.09x | 0.977/1.000/1.000/7.21x | 0.962/1.000/1.000/1.12x | 0.965/1.000/1.000/0.41x | 0.954/0.143/0.992/3.01x | 1.000/1.000/1.000/2.06x | 74/12/3164 |
@@ -146,9 +148,9 @@ Cell entries are recall/precision/specificity/speedup. One arm is absent from on
 | acwi | 0.9 | 6.44e-05 | 176 | 1.000/1.000/1.000/4.08x | 1.000/1.000/1.000/4.80x | 1.000/1.000/1.000/1.38x | 1.000/1.000/1.000/1.76x | 0.750/0.001/0.934/0.62x | 0.982/1.000/1.000/15.78x | 0.992/1.000/1.000/13.45x | 0.967/1.000/1.000/2.84x | 0.951/1.000/1.000/0.46x | 1.000/0.899/1.000/5.99x | 1.000/1.000/1.000/5.62x | 68/21/2916 |
 | acwi | 0.95 | 5.64e-06 | 176 | 1.000/1.000/1.000/4.07x | 1.000/1.000/1.000/4.73x | 1.000/1.000/1.000/1.36x | 1.000/1.000/1.000/1.70x | 0.777/0.000/0.936/0.62x | 0.990/1.000/1.000/26.42x | 1.000/1.000/1.000/15.83x | 0.808/1.000/1.000/5.40x | 0.760/1.000/1.000/0.86x | 1.000/0.857/1.000/6.42x | 1.000/1.000/1.000/9.05x | 65/23/2576 |
 
-## Table N, raw: lagged, negative
+## Table N, raw: lagged, both signs (neg_corr=True: negative correlation searched as well as positive)
 
-| dataset | T | density | BF s | bf_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CT-lsh | CT-ham | ParCorr | CSZ | StatStream | CorrJoin | tuning s (lsh/ham/CSZ) |
+| dataset | T | density | BF_vect s | BF_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CorrTrack-LSH | CorrTrack-Ham | ParCorr | CSZ | StatStream | CorrJoin | tuning s (lsh/ham/CSZ) |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | streamflow | 0.7 | 5.09e-02 | 182 | 1.000/1.000/1.000/3.61x | 1.000/1.000/1.000/4.03x | 1.000/1.000/1.000/1.32x | 1.000/1.000/1.000/1.60x | 0.803/0.249/0.870/0.60x | 0.980/1.000/1.000/1.67x | 0.981/1.000/1.000/1.71x | N/A | N/A | 0.990/0.736/0.981/0.82x | N/A | 217/29/195 |
 | streamflow | 0.8 | 2.57e-02 | 177 | 1.000/1.000/1.000/3.83x | 1.000/1.000/1.000/4.27x | 1.000/1.000/1.000/1.32x | 1.000/1.000/1.000/1.64x | 0.778/0.145/0.879/0.59x | 0.975/1.000/1.000/2.60x | 0.989/1.000/1.000/2.50x | N/A | N/A | 0.989/0.726/0.990/1.26x | N/A | 136/23/102 |
@@ -181,9 +183,9 @@ Cell entries are recall/precision/specificity/speedup. One arm is absent from on
 | acwi | 0.9 | 1.42e-02 | 176 | 1.000/1.000/1.000/3.85x | 1.000/1.000/1.000/4.44x | 1.000/1.000/1.000/1.30x | 1.000/1.000/1.000/1.66x | 0.753/0.061/0.833/0.57x | 0.967/1.000/1.000/2.51x | 0.999/1.000/1.000/2.16x | N/A | N/A | 0.970/1.000/1.000/2.15x | N/A | 175/34/59 |
 | acwi | 0.95 | 1.56e-03 | 177 | 1.000/1.000/1.000/4.03x | 1.000/1.000/1.000/4.70x | 1.000/1.000/1.000/1.37x | 1.000/1.000/1.000/1.69x | 0.805/0.008/0.844/0.59x | 0.985/1.000/1.000/4.03x | 1.000/1.000/1.000/3.20x | N/A | N/A | 1.000/0.967/1.000/4.88x | N/A | 127/32/26 |
 
-## Table N, differenced: lagged, negative
+## Table N, differenced: lagged, both signs (neg_corr=True: negative correlation searched as well as positive)
 
-| dataset | T | density | BF s | bf_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CT-lsh | CT-ham | ParCorr | CSZ | StatStream | CorrJoin | tuning s (lsh/ham/CSZ) |
+| dataset | T | density | BF_vect s | BF_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CorrTrack-LSH | CorrTrack-Ham | ParCorr | CSZ | StatStream | CorrJoin | tuning s (lsh/ham/CSZ) |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | streamflow | 0.7 | 3.26e-03 | 175 | 1.000/1.000/1.000/3.89x | 1.000/1.000/1.000/4.47x | 1.000/1.000/1.000/1.32x | 1.000/1.000/1.000/1.68x | 0.825/0.039/0.933/0.61x | 0.976/1.000/1.000/2.84x | 0.988/1.000/1.000/2.37x | N/A | N/A | 0.955/0.171/0.985/1.62x | N/A | 128/19/251 |
 | streamflow | 0.8 | 1.46e-03 | 176 | 1.000/1.000/1.000/3.90x | 1.000/1.000/1.000/4.55x | 1.000/1.000/1.000/1.33x | 1.000/1.000/1.000/1.65x | 0.810/0.019/0.938/0.62x | 0.981/1.000/1.000/4.63x | 0.977/1.000/1.000/5.25x | N/A | N/A | 1.000/0.143/0.991/2.23x | N/A | 81/14/151 |
@@ -218,9 +220,9 @@ Cell entries are recall/precision/specificity/speedup. One arm is absent from on
 
 ## Overall medians: one row per table, space and threshold, one column per arm
 
-Median speedup over brute force (median recall) across the six datasets.
+Each entry is the MEDIAN over the six datasets of that row: median speedup over `BF_vect`, with the median recall in brackets. The density column is the median effective density of the same six cells.
 
-| table | space | T | density | bf_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CT-lsh | CT-ham | ParCorr | CSZ | StatStream | CorrJoin |
+| table | space | T | density | BF_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CorrTrack-LSH | CorrTrack-Ham | ParCorr | CSZ | StatStream | CorrJoin |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | S | raw | 0.7 | 9.9e-02 | 1.55x (1.000) | 1.74x (1.000) | 0.61x (1.000) | 1.32x (1.000) | 0.70x (0.877) | 1.36x (0.969) | 1.42x (0.974) | 0.42x (0.959) | 0.21x (0.970) | 0.70x (0.984) | 0.76x (1.000) |
 | S | raw | 0.8 | 6.0e-02 | 1.60x (1.000) | 1.82x (1.000) | 0.60x (1.000) | 1.35x (1.000) | 0.69x (0.865) | 1.67x (0.977) | 1.78x (0.984) | 0.56x (0.959) | 0.22x (0.980) | 0.93x (0.984) | 1.02x (1.000) |

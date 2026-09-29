@@ -8,9 +8,9 @@ off, recall / precision / candidate specificity per arm, and the hyperopt / tuni
 each job's time_v.txt. Cells: the six m=500 cuts (sp500_sub263 skipped) at the tables' W / step /
 n_lags, T in {0.7, 0.8, 0.9, 0.95}, raw and differenced, neg_corr=True only (the tables' setting),
 organised (2026-09-21, user) as three capability tables, each tuned at its own (n_lags, neg_corr):
-  S  synchronous, positive  (n_lags=0, neg_corr=False): every arm available
-  L  lagged, positive       (tables' n_lags, neg_corr=False): CorrTrack, FilCorr, StatStream, BRAID/ThinBRAID, exact arms
-  N  lagged, negative       (tables' n_lags, neg_corr=True): the same arms, negative correlation included
+  S  synchronous, positive only (n_lags=0, neg_corr=False): every arm available
+  L  lagged, positive only     (tables' n_lags, neg_corr=False): CorrTrack, FilCorr, StatStream, BRAID/ThinBRAID, exact arms
+  N  lagged, both signs        (tables' n_lags, neg_corr=True): the same arms, now searching negative correlation as well as positive
 i.e. 3 x 48 = 144 runs x 4 jobs (lsh hyperopt, hamming hyperopt, CSZ tuning, N-way). Every arm runs on the whole cut (EVAL_SPAN=full); tuning uses the first TRAIN_RATIO.
 
     python abaca/campaign_m500_tables.py --emit abaca/m500_tables_submit.sh

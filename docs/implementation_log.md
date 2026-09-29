@@ -9354,7 +9354,7 @@ left blank; its T=0.9 sibling already sits at density 2.6e-07. Tables rebuilt wi
 threshold (pooling T mixes densities two orders of magnitude apart, user 2026-09-22):
 docs/campaign_m500_tables_interim_2026-09-22.md, builder scratchpad/build_campaign_tables.py.
 Headline per threshold (median over datasets, speedup vs BF at the tuned recall):
-table L differenced CT-lsh 4.30x (T=0.7) -> 12.71x (0.95), CT-ham 3.67x -> 11.28x, FilCorr flat
+table L differenced CorrTrack-LSH 4.30x (T=0.7) -> 12.71x (0.95), CorrTrack-Ham 3.67x -> 11.28x, FilCorr flat
 at 4.3-4.5x, STOMP 3.7-3.8x; table S CT 0.88-1.5x, always under FilCorr's 1.7x; table N raw
 CT 1.4-1.6x at T=0.7 (FilCorr 4.2x wins) -> 5.9-6.2x at 0.95. StatStream recall 0.00 on every
 differenced cell and 0.09-0.70 on raw, decreasing with T: its port needs the other session's
@@ -9518,13 +9518,13 @@ is therefore: the speedups the competitor papers report against "naive" are larg
 against a competent vectorized baseline the exact arms sit in the same tier, and that is the baseline the campaign
 uses.
 
-### 2026-09-23 (d) [competitor campaign thread] `exact_stomp` renamed to `bf_incremental`
+### 2026-09-23 (d) [competitor campaign thread] `exact_stomp` renamed to `BF_incremental`
 User's decision after the supervisors' questions: the old name suggested we had reimplemented STOMP (Zhu et al.'s
 matrix profile), which we had not. The arm is our strongest exact all-pairs baseline: every pair-window computed
 exactly, with the cross term of each (pair, lag) rolled forward in O(window_step) instead of recomputed in
 O(window_size). It borrows the matrix-profile literature's incremental sliding dot-product update, and the
 attribution now sits on the update in the class docstring, not on the arm.
-- Canonical id `bf_incremental` everywhere (library dispatch, `abaca/*`, configs, tests, both plan documents);
+- Canonical id `BF_incremental` everywhere (library dispatch, `abaca/*`, configs, tests, both plan documents);
   class `Candidates_BF_ExactSTOMP` -> `Candidates_BF_Incremental` (FilCorr, TSUBASA and BRAID subclass it).
 - Nothing old breaks: `_resolve_baseline_mode` keeps `exact_stomp` / `stomp` / `exact` / `incremental*` as
   aliases, `Candidates_BF_ExactSTOMP` remains as a module-level class alias for the sibling working copies,
@@ -9534,13 +9534,13 @@ attribution now sits on the update in the class docstring, not on the arm.
   unrecognized mode, so the first pass of the rename (which rewrote the alias KEY as well) turned `exact_stomp`
   into `bruteforce` without any error. Caught by resolving every spelling explicitly; the campaign's own
   `--baseline-mode` values are now covered by that check.
-- The N-way summary column was widened from 12 to 17 characters for `bf_incremental` and `corrtrack_hamming`.
-- 169 tests pass; the lagged battery reruns unchanged (USCRN W=96 step=12 n_lags=36: bf_incremental recall 1.000,
+- The N-way summary column was widened from 12 to 17 characters for `BF_incremental` and `corrtrack_hamming`.
+- 169 tests pass; the lagged battery reruns unchanged (USCRN W=96 step=12 n_lags=36: BF_incremental recall 1.000,
   1.11x bruteforce; TSUBASA and CorrJoin recall 1.000).
 
 ### 2026-09-23 (b) Arm updates launched: statstream everywhere, corrjoin and tsubasa lagged
 After the other session's 2026-09-23 changes (lossless statstream digest grid; lagged TSUBASA and
-CorrJoin, disclosed per row as supports_lags="enabled_by_us"; exact_stomp renamed bf_incremental,
+CorrJoin, disclosed per row as supports_lags="enabled_by_us"; exact_stomp renamed BF_incremental,
 old spellings kept), only those three arms need new measurements, per the user's scope call.
 `abaca/campaign_arm_updates.py`: 143 cells, arms by class (S: statstream; L: statstream, corrjoin,
 tsubasa; N: statstream, tsubasa, since CorrJoin still cannot express negative correlation), two
@@ -9560,12 +9560,12 @@ two of which would have written the same RUN_NAME directory. Killed the extra fe
 the newer duplicate of each job name, keeping the older id so the ts_ / ns_ dependencies still
 point at live jobs. Rule for next time: a watcher either submits or reports, never both.
 
-### 2026-09-23 (e) [competitor campaign thread] why FilCorr at full band beats plain BF, and the FilCorr vs bf_incremental ordering
+### 2026-09-23 (e) [competitor campaign thread] why FilCorr at full band beats plain BF, and the FilCorr vs BF_incremental ordering
 User's question: with no band filtering, why does FilCorr get a better speedup at higher densities and beat
-bf_incremental? Investigated on sp500 (W=30, step=3, m=444, n_obs=2768), each arm in its own forked child
+BF_incremental? Investigated on sp500 (W=30, step=3, m=444, n_obs=2768), each arm in its own forked child
 (`abaca/nway_compare.py`), speedup over the plain bruteforce of the same run:
 
-| cell | density | bruteforce | bf_incremental | filcorr |
+| cell | density | bruteforce | BF_incremental | filcorr |
 |---|---|---|---|---|
 | n_lags=15 (L=6), T=0.70 | 34.9M correlated | 1.00x | 2.21x | 1.42x |
 | n_lags=15 (L=6), T=0.95 | 379k correlated | 1.00x | 2.18x | 1.81x |
@@ -9585,9 +9585,9 @@ Three findings, in order of importance for the paper:
    (`Wx_re @ Wy_re.T + Wx_im @ Wy_im.T`, Parseval) with each window's band FFT computed once and reused across
    every lag and step that references it. Same arithmetic, far better execution: measured candidate stage 1.02 s
    against bruteforce's 10.23 s on the T = 0.70 lagged cell.
-3. **The FilCorr vs bf_incremental ordering is machine-dependent and must not be over-read.** The cluster tables
-   have FilCorr ahead by 13 to 16% at every density; on this laptop bf_incremental is ahead (2.21x against 1.42x),
-   and in the synchronous cell both fall BELOW plain BF. The two arms trade different resources: bf_incremental
+3. **The FilCorr vs BF_incremental ordering is machine-dependent and must not be over-read.** The cluster tables
+   have FilCorr ahead by 13 to 16% at every density; on this laptop BF_incremental is ahead (2.21x against 1.42x),
+   and in the synchronous cell both fall BELOW plain BF. The two arms trade different resources: BF_incremental
    does about W/step fewer flops (two (m x step) @ (step x m) matmuls per lag) but read-modify-writes an m x m dot
    matrix per lag every step, so it is bandwidth-bound; FilCorr does the same flops as the raw recompute in
    better-shaped (m x B) @ (B x m) matmuls and touches the m x m output once. Which wins depends on the machine's
@@ -9604,11 +9604,11 @@ Two user questions arising from the m=500 tables and the FilCorr band sweep.
 
 **(a) How precisely can speedups be ranked?** Measured the repeatability of the ratio itself: the same cell
 (sp500, W=30, step=3, n_lags=15, T=0.9, m=200, n_obs=1500), the same binary, three repeats, each arm in its own
-forked child. Speedups over the bruteforce of the same run: bf_incremental 2.515 / 2.341 / 2.463 (spread 7.1% of
+forked child. Speedups over the bruteforce of the same run: BF_incremental 2.515 / 2.341 / 2.463 (spread 7.1% of
 the mean), filcorr 1.889 / 2.036 / 2.045 (7.8%), tsubasa 0.780 / 0.856 / 0.855 (9.2%); the bruteforce wall itself
 moves 8.5% between repeats. So on ONE machine with the SAME binary the ratio is reproducible to roughly +-5%
 (half-spread), and a single run cannot separate two arms closer than about 10%. The cross-machine term is larger
-and has a known direction: an arm that is BLAS-bound (FilCorr) and one that is bandwidth-bound (bf_incremental)
+and has a known direction: an arm that is BLAS-bound (FilCorr) and one that is bandwidth-bound (BF_incremental)
 swap places between this laptop and mercantour3 (log (e)), a gap of 13 to 16% on the cluster reversing here.
 Practice adopted for the paper: report the median of repeats with the observed spread, treat differences under
 about 10% on one machine as ties, and do not rank two arms with different resource profiles at all unless the gap
@@ -9656,11 +9656,11 @@ each arm tuned by its own campaign hyperopt and run in its own forked child; ONL
 | n_lags | arm | wall | sketch | cand | val | candidates | recall | speedup |
 |---|---|---|---|---|---|---|---|---|
 | 0 | bruteforce | 2.62 | | 0.63 | 1.92 | 27,930,264 | | 1.00x |
-| 0 | bf_incremental | 2.44 | | 0.86 | 1.48 | 27,930,264 | 1.000 | 1.07x |
+| 0 | BF_incremental | 2.44 | | 0.86 | 1.48 | 27,930,264 | 1.000 | 1.07x |
 | 0 | corrtrack | 2.52 | 0.78 | 1.58 | 0.07 | 168,385 | 0.992 | 1.04x |
 | 0 | corrtrack_hamming | 1.97 | 0.60 | 1.26 | 0.05 | 177,439 | 1.000 | 1.33x |
 | 15 | bruteforce | 25.11 | | 10.38 | 15.61 | 304,906,344 | | 1.00x |
-| 15 | bf_incremental | 10.28 | | 2.87 | 7.29 | 304,906,344 | 1.000 | 2.44x |
+| 15 | BF_incremental | 10.28 | | 2.87 | 7.29 | 304,906,344 | 1.000 | 2.44x |
 | 15 | corrtrack | 2.80 | 0.69 | 1.95 | 0.07 | 165,748 | 0.991 | 8.96x |
 | 15 | corrtrack_hamming | 3.68 | 0.71 | 3.80 | 0.07 | 178,636 | 1.000 | 6.83x |
 
@@ -9686,7 +9686,7 @@ numbers above were taken; timings from contending runs are not comparable.
 - The window-length axis, measured (same cell and tuning protocol, synchronous throughout, W/step fixed at 10,
   each W with its own hyperopt): CorrTrack's synchronous speedup rises monotonically with the window length.
 
-  | W (step) | bruteforce wall | ns per pair-window | CorrTrack candidates | CorrTrack speedup | CT-hamming |
+  | W (step) | bruteforce wall | ns per pair-window | CorrTrack candidates | CorrTrack speedup | CorrTrack-Hamming |
   |---|---|---|---|---|---|
   | 30 (3) | 1.50 s | 44 | 168,385 (recall 0.992) | 0.88x | 0.86x |
   | 90 (9) | 0.83 s | 83 | 10,716 (recall 1.000) | 1.62x | 1.59x |
@@ -9726,7 +9726,7 @@ path whose real work is already vectorized). Everything below was verified to le
 before it was kept, and every fix is on a path shared by all Pattern B arms (`_LSH_SIGN_DOT_BACKENDS`:
 CorrTrack lsh_dot and hamming_dot, ParCorr, CSZ, StatStream, CorrJoin, all_pairs), so the comparison stays fair:
 the same code got faster for the competitors' indexes as for ours, and the Pattern A arms (bruteforce,
-bf_incremental, FilCorr, TSUBASA, BRAID) were not touched at all.
+BF_incremental, FilCorr, TSUBASA, BRAID) were not touched at all.
 
 What the profile said, and what was wrong.
 `Sketches.partition_sketches` already computes the step's windows as arrays (keys, sketch matrix, series
@@ -9761,7 +9761,7 @@ Verification (nothing here is a claim about approximate equivalence; the outputs
   and after, against bruteforce's 27,930,264 / 3,995.
 - Same cell with ParCorr, CSZ, CorrJoin in the run: every arm's candidates, correlated and recall identical
   with the fast path forced off and on.
-- sp500 W = 30 n_lags = 15 (bruteforce, bf_incremental, corrtrack, corrtrack_hamming): 304,906,344 / 165,748 /
+- sp500 W = 30 n_lags = 15 (bruteforce, BF_incremental, corrtrack, corrtrack_hamming): 304,906,344 / 165,748 /
   178,636 candidates and recall 0.9912 / 1.0000, matching the stored reference run exactly.
 - uscrn2020_temperature W = 96 step 12 n_lags = 36 T = 0.8 m = 60 (bruteforce, TSUBASA, CorrJoin, ParCorr,
   StatStream): 2,068,522 / 101,824 / 32,062 / 86,111 candidates and 79,127 / 79,127 / 25,346 / 32,020
@@ -9963,7 +9963,7 @@ still be grouped by `date=`/`built_on=` even though their copies predate the new
 2. The rule that follows. The 2026-09-24 (b) and (c) work changed wall time for the Pattern B arms and left
 every Pattern A arm untouched: normalized against bruteforce in the same run, corrtrack 2.18x faster,
 corrtrack_hamming 1.83x, corrjoin 1.41x, parcorr about 1.26x, csz about 1.09x, and bruteforce,
-bf_incremental, FilCorr, TSUBASA, BRAID, ThinBRAID unchanged by construction. So pooling timing rows across
+BF_incremental, FilCorr, TSUBASA, BRAID, ThinBRAID unchanged by construction. So pooling timing rows across
 code states is not extra noise, it is a per-arm bias, and a table mixing them would credit CorrTrack with
 part of a code date. Quality columns (candidates, correlated, recall, precision, specificity) are identical
 across all states and remain poolable; wall time, per-step latency, energy and speedup are not. The
@@ -10152,12 +10152,12 @@ Results.
   Recall median 0.998 (lsh) / 1.000 (hamming), minimum 0.950 / 0.962, precision 1.000 everywhere.
   StatStream's recall 0.000 appears in exactly the three cells whose CSZ tuning fell back to defaults
   and nowhere else, so it is a tuning failure, not a result; those three are being rerun.
-- **Two new campaign figures.** `docs/figures/speedup_vs_density.png` puts speedup against the
-  effective density per class and space, and `docs/figures/performance_profile.png` is a Dolan-More
+- **Two new campaign figures.** `docs/figures/real_speedup_vs_density.png` puts speedup against the
+  effective density per class and space, and `docs/figures/real_performance_profile.png` is a Dolan-More
   profile over all 179 cells, one panel unconditioned and one counting a cell only when the method
   also reached recall 0.95. Over the whole campaign CorrTrack is fastest on 120 of 179 cells (83
   lsh, 37 hamming), FilCorr on 53, CorrJoin 5, StatStream 1; median distance from the best method on
-  a cell is 1.02 for CT-lsh and 1.18 for CT-ham.
+  a cell is 1.02 for CorrTrack-LSH and 1.18 for CorrTrack-Ham.
 - **Provenance is encoded in the marks**, per the user's requirement that the figures say which
   capabilities were enabled or evaluated by us rather than by the original authors: circle `native`,
   triangle `enabled_by_us`, square `specified`, hollow for median recall below 0.95, `//` and `..`
@@ -10178,3 +10178,307 @@ Known issues.
 - ParCorr, CSZ and CorrJoin plateau near 0.66 in the performance profile because class N has no such
   arm at all (`not_available`). The profile counts a missing capability as unsolved, which is the
   intended semantics but needs saying in the caption.
+
+### 2026-09-28 (later) -- naming, aggregation and ordering fixed across every table and figure
+
+Requested by the user after reading the first build: it was not always clear which numbers are
+aggregates and over what, the bars were unordered, and the method labels were abbreviations.
+
+- **Naming, everywhere** (`build_final_tables.py`, `build_ranked_tables.py`, `build_ranking_tables.py`,
+  `synth_results.py`, `build_synth_tables.py`, `build_synth_figures.py`, `campaign_figures.py`):
+  `bruteforce` is now `BF_vect`, `bf_incr` is `BF_incr`, `CT-lsh` and `CT-ham` are `CorrTrack-LSH`
+  and `CorrTrack-Ham`, so CorrTrack's name appears on its own rows and every method label starts
+  with a capital. The ranking builders still collapse the two backends into one arm named CorrTrack.
+  The brute-force column of the capability tables is now `BF_vect s`; the parsers index by position,
+  so the rename does not break them, and the three campaign docs were rebuilt to confirm it.
+- **Aggregation is stated at the point of use.** The capability tables' median section says it is the
+  median over the six datasets of that row; the synthetic tables say that nothing outside the
+  generator-validation summary is averaged, because that design runs one dataset per level; the
+  density figure says every point is a median over its datasets and carries a second axis naming the
+  threshold each point came from; the performance profile says no averaging happens anywhere and
+  defines a cell. Both narrative docs gained a "How to read the numbers" section.
+- **Bars sorted increasingly** inside each threshold group, with each bar labelled by method, since a
+  sorted order changes from group to group and colour alone would not identify it. The colour legend
+  was dropped as redundant, leaving only the provenance hatch legend.
+- **Figures renamed with an experiment prefix**: `real_speedup_vs_density.png`,
+  `real_performance_profile.png`, `synth_scaling_{ar1,rw}.png`,
+  `synth_threshold_bars_{ar1,rw}.png`.
+
+### 2026-09-28 (third pass) -- figures made less verbose, bar legend restored
+
+- The method names are back in the bar charts' legend and no longer written inside the bars, where
+  they were unreadable at the bar widths twelve methods leave. The bars keep their fastest-first
+  order inside each threshold group.
+- Repeated text removed from every figure: one title line each, column headers only on the top row,
+  the space named once per row as the y-axis label, one x label per column, and the threshold axis
+  of the density figure labelled in the caption instead of six times in the panels. The full
+  explanations live in the two docs, not in the images.
+- Answered in `docs/campaign_m500_figures_2026-09-28.md`: CorrTrack-LSH plateaus at 0.92 in the
+  recall-gated panel because 14 of the 179 cells never meet recall 0.95 for it, 13 of them
+  smartmeter (recall 0.868 to 0.948) plus one wikipedia cell at 0.947. CorrTrack-Ham scores 0.955
+  to 0.997 on the same cells, which is why its curve reaches 1.0.
+
+### 2026-09-28 (fourth pass) -- recall 0.90 panel, one legend order, synthetic figures on raw levels only
+
+All four requested by the user after reading the third build.
+
+- **`abaca/method_style.py` (new)** holds the arm list, labels, colours, provenance marks and the one
+  legend order used by every figure: best median speedup over the 179 campaign cells first (FilCorr
+  4.37, CorrTrack-LSH 4.25, CorrTrack-Ham 3.92, BF_incr 3.88, StatStream 2.29, CorrJoin 1.64, BRAID
+  1.60, TSUBASA 1.32, ParCorr 0.84, ThinBRAID 0.63, CSZ 0.32). `build_final_tables.py`,
+  `synth_results.py`, `build_synth_figures.py` and `campaign_figures.py` all import it, so a rename
+  or a recolour happens once.
+- **Performance profile has a third panel at recall 0.90.** It separates three cases that the 0.95
+  panel alone conflates: CorrTrack-LSH recovers from 92% to 98% of cells and StatStream from 92% to
+  97%, so both sit just under the strict target; ThinBRAID (7% to 20%) and CSZ (49% to 59%) stay far
+  below it; CorrJoin does not move at all (66% at both) because its shortfall is a missing capability
+  in class N, not recall. CorrTrack-LSH's three remaining cells at 0.90 are all smartmeter
+  differenced, at recall 0.868, 0.878 and 0.882.
+- **Synthetic figures now show raw levels only, AR(1) against random walk**, one figure each
+  (`synth_scaling.png`, `synth_threshold_bars.png`) instead of one per process. Justification
+  measured, not assumed: differencing makes both processes stationary and the differenced cells then
+  track raw AR(1) closely (CorrTrack-LSH over the m axis, 8.30 / 13.66 / 19.38 / 24.57 raw AR(1),
+  8.02 / 13.60 / 20.47 / 24.41 differenced AR(1), 7.97 / 14.05 / 20.64 / 24.40 differenced random
+  walk), so the contrast worth plotting is stationary against nonstationary. The differenced cells
+  stay in the tables, where the density validation needs them. The density row is now plotted at the
+  measured density rather than the requested target, which is what makes the random-walk column
+  reach further right.
+- **Text restored where it carried information**: each figure again states what a point or a bar is,
+  what it is measured against and what is aggregated, in one place per figure rather than repeated
+  per panel, and the profile's three panels share one x label.
+
+### 2026-09-28 (fifth pass) -- the shared legend order is the ranking order, not a median
+
+The user's "leading methods" meant leading in the rankings, not the best median speedup, so
+`LEAD_ORDER` in `abaca/method_style.py` is now counted the way `abaca/build_ranking_tables.py`
+counts leadership: cells where the method is the fastest, same 10% tie band, over the 179 campaign
+cells. Firsts / top-two: CorrTrack-LSH 116 / 129, CorrTrack-Ham 71 / 125, FilCorr 65 / 79, BF_incr
+9 / 52, CorrJoin 7 / 11, StatStream 2 / 9; the five that never lead a cell follow by median speedup.
+Counting only the arms that reach recall 0.95, as the qualified ranking table does, gives the same
+order (103 / 80 / 67 / 10 / 8 / 2), which is worth recording because it means the order does not
+depend on that choice. All four figures rebuilt; the legend title now reads "ranking: leads the
+most cells first".
+
+### 2026-09-28 (sixth pass) -- leadership table generated; two repaired dense cells folded in
+
+- `abaca/campaign_figures.py` gained `leadership()` and `leadership_markdown()`: per method, the
+  cells it leads and the cells it is among the two fastest in, with the ranking tables' 10% tie band,
+  in two views (every arm that ran, and only the arms reaching recall 0.95 in that cell). It writes
+  `docs/campaign_m500_leadership_2026-09-28.md` when given a third argument and prints the same table,
+  which is also embedded in `docs/campaign_m500_figures_2026-09-28.md`. The count is the source of the
+  shared legend order, so the order and the table cannot drift apart.
+- Reading worth keeping: at least one CorrTrack backend leads 126 of 179 cells (70%), FilCorr 65,
+  while FilCorr holds the better median speedup (4.37x against 4.25x). The two statistics disagree
+  because CorrTrack's wins are large and concentrated in the sparse cells and FilCorr is steady
+  everywhere, which is exactly the honest framing the paper needs.
+- Cluster: two of the three dense-cell tuning repairs landed, so `StatStream` now reads recall 1.000
+  at target density 0.1 in three of the four dense cells instead of 0.000; the fourth (rw,
+  differenced) is still running, as are the four m=2000 cells. Synthetic tables and figures rebuilt
+  on the repaired data; validation is down to one non-comparable cell from three.
+
+### 2026-09-28 (seventh pass) -- threshold axis labelled, recall percentile spelled out
+
+- `real_speedup_vs_density.png`: the upper axis of the top row now carries its name, "correlation
+  threshold T", with the facet titles pushed above it. The upper axis was already there; only the
+  label was missing, which left the reader to infer what 0.95 to 0.7 meant.
+- The capability table's recall column reads "median (10th percentile)" and the generated doc says
+  what the percentile is: the method reached at least that recall in 90% of its cells. It is there
+  because a median hides a method that is fine in most cells and collapses in a few, which is
+  exactly what ParCorr, CSZ and StatStream do in the same four smartmeter synchronous cells.
+
+### 2026-09-28 (eighth pass) -- Table 3 in the per-dataset layout
+
+`abaca/campaign_figures.py` gained `dataset_table_markdown(cells, cls, space, root)`: one capability
+class in full, laid out as the 2026-09-19 table was (dataset block with m, lag buckets, tested
+pair-windows and observations, then one row per threshold with density, degree, BF_vect wall clock,
+the four speedups with the row leader in bold, and the tuned CorrTrack parameters). The parameters
+come from the hyperopt `best_params_corrtrack.json` of that cell, which are now mirrored locally
+under `~/results/final_112ce48/hyperopt{,_hamming}/`; the loader carries the cell geometry
+(`m`, `n_obs`, `pair_windows`, `W`, `step`, `n_lags`, `lag_buckets`) and both parameter paths.
+
+One column of the old table could not be reproduced and was replaced rather than guessed: its
+"avg degree" counted distinct correlated partners over the whole stream, which needs the correlated
+pair sets, and the campaign kept only counts. The column now reads "partner-lags per series",
+density x (m - 1) x lag buckets, which is the same idea per window and is exact from what the runs
+record. `pair-windows` reproduces the old "pairs" column exactly (sp500 986,519,569).
+
+Emitted for class L differenced into `docs/campaign_m500_leadership_2026-09-28.md`, which now holds
+Tables 1, 2 and 3 of the proposed paper composition.
+
+### 2026-09-28 (ninth pass) -- Table 3 columns chosen by a rule, degree column renamed
+
+- The first Table 3 showed four arms picked by hand, which was not defensible: inside class L
+  differenced, StatStream has a higher median speedup than FilCorr (5.12x against 4.71x) and leads
+  one cell, and CorrJoin peaks at 9.05x, above FilCorr's best of 4.85x. Both were missing.
+  `columns_for()` now selects every arm that is among the two fastest in at least one cell of the
+  slice, plus the exact incremental baseline, and the table prints the rule and the median and best
+  of every arm it leaves out. For class L differenced that gives CorrTrack-LSH, CorrTrack-Ham,
+  FilCorr, BF_incr and StatStream, with CorrJoin, BRAID, TSUBASA, ParCorr, ThinBRAID and CSZ named
+  in the footnote.
+- The degree column is renamed "corr. partners per series per window" and the caption now reads it
+  out: density x (m - 1) x lag buckets, the average number of correlated (partner, lag) combinations
+  a series has in one window, with a worked example at both ends of the threshold range.
+
+- Follow-up on the degree column (user: how would a reader know its maximum?): the density column is
+  already the per-window figure, since it is the fraction of tested (pair, lag, window) tuples that
+  come back correlated, so it is the correlation density of an average window. The count column now
+  carries its own ceiling, "13.4 of 2,658", where the ceiling is (m - 1) x lag buckets: 2,658 for
+  sp500, 2,994 for the 500-series datasets at six lag buckets, 1,497 for smartmeter at three.
+
+- Checked whether the 2026-09-19 table's "avg degree" column can be carried over (user's question).
+  Same six datasets, same W / step / lag grid, but not the same cells: that table ran neg_corr=True,
+  so it is the current class N, not class L. Densities confirm it to three or four digits in every
+  row (smartmeter T=0.70: 2.43e-05 old, 2.427e-05 class N now, 1.577e-05 class L; global_weather
+  T=0.70: 1.52e-04 old, 1.521e-04 class N, 1.345e-04 class L). Reusing those degrees in a class L
+  table would overstate smartmeter by about 54% and global_weather by about 13%. They are reusable
+  as-is only if Table 3 becomes class N differenced, and even then T=0.85 has no old row.
+
+### 2026-09-28 (tenth pass) -- the per-cell table's column rule made intrinsic to the arm
+
+The "among the two fastest in at least one cell" rule excluded CorrJoin, whose best in class L
+differenced is 9.05x at recall 1.000, higher than FilCorr's best (4.85x) or StatStream's (6.42x). It
+was excluded only because CorrTrack took both places in the cell where it peaked, so the rule ranked
+an arm by its neighbours rather than by itself. `columns_for()` now keeps the exact incremental
+baseline and every arm that beats it somewhere in the slice: for class L differenced that adds
+CorrJoin and ParCorr, leaving out BRAID (best 1.76x), TSUBASA (1.98x), ThinBRAID (0.71x) and CSZ
+(1.52x), which never beat 4.18x in any cell of that class. A dagger now marks any speedup whose
+recall in that cell is below 0.95, which flags ParCorr's 5.40x peak (recall 0.808) and CorrTrack-LSH
+on the four smartmeter cells.
+
+### 2026-09-28 (eleventh pass) -- per-cell table columns compared against CorrTrack (user's rule)
+
+`columns_for()` now keeps CorrTrack's two backends, the exact incremental baseline, and every arm
+that in at least one cell of the slice either runs faster than CorrTrack (the better of its two
+backends there, as the ranking tables treat it) or reaches recall 0.95 where CorrTrack does not. An
+arm earns its column by being a real alternative somewhere, instead of by out-ranking its
+neighbours or by clearing the baseline.
+
+Two facts fell out of implementing it, both worth the paper:
+
+- The recall clause never fires. In none of the 179 cells does any competitor reach recall 0.95
+  where neither CorrTrack backend does. CorrTrack's recall is never the reason to pick another
+  method.
+- Which arms ever run faster than CorrTrack, per class and space: class S raw FilCorr 12 cells,
+  BF_incr 12, BRAID 10; class S differenced FilCorr 6, BF_incr 5, BRAID 2; class L raw FilCorr 12,
+  BF_incr 11, CorrJoin 8, StatStream 2; class L differenced FilCorr 2 and nothing else; class N raw
+  FilCorr 17, BF_incr 15, BRAID 5, TSUBASA 2, StatStream 1; class N differenced FilCorr 6,
+  BF_incr 6. So FilCorr is the only competitor that ever beats CorrTrack in every class, and the
+  differenced lagged class is where CorrTrack is least contested.
+
+### 2026-09-28 (twelfth pass) -- class N relabelled: both signs, not negative
+
+Class N is `neg_corr=True`, which searches negative correlation *as well as* positive, so it is a
+superset of class L's work, not its opposite. Every label that read "lagged, negative" now reads
+"lagged, both signs", and for symmetry S and L read "positive only". Corrected in
+`abaca/campaign_figures.py` (the facet titles of `real_speedup_vs_density.png`),
+`abaca/build_final_tables.py` (the six table headings) and the docstring of
+`abaca/campaign_m500_tables.py` that defines the classes; the figures, the three campaign tables and
+`docs/campaign_m500_figures_2026-09-28.md` were rebuilt under it, and that doc now states the three
+class definitions explicitly.
+
+### 2026-09-28 (thirteenth pass) -- the near-miss recall question, and a claim corrected
+
+The user asked what happens when a method comes close in speed *and* reaches the recall target in a
+cell where CorrTrack does not. The column rule's recall clause never fires, because CorrTrack always
+has one backend at or above 0.95, so `recall_contest()` now answers the sharper question and the
+per-cell tables carry its result: where CorrTrack's faster backend misses the target, which arm is
+the fastest that reaches it?
+
+It happens in 14 cells of 179, 13 of them smartmeter. In 11 the answer is CorrTrack's own second
+backend. In 3 a competitor takes it: CorrJoin 9.71x against CorrTrack-Ham's 9.23x (smartmeter, class
+L raw, T=0.95), FilCorr 4.50x against 2.86x (wikipedia, class N raw, T=0.70), FilCorr 4.29x against
+3.55x (smartmeter, class N differenced, T=0.80). Counting every cell, the fastest arm meeting recall
+0.95 is a CorrTrack backend in 118 of 179, FilCorr in 54, CorrJoin in 6, StatStream in 1.
+
+This corrects the claim in the twelfth-pass note above and in my summary to the user that
+"CorrTrack's recall is never the reason to pick another method": it is, in 3 cells of 179, each at a
+margin below 1.6x. Class L differenced, the table in the body, is not one of them; its four
+LSH misses are all covered by the hamming backend.
+
+### 2026-09-28 (16:30) -- last dense repair landed; synthetic set validates clean
+
+The third dense-cell tuning repair (rw, m=500, density 0.1, differenced) finished, so
+`validate_cells.py` now reports 0 non-comparable cells out of 60. With its CSZ pass tuned properly,
+StatStream reads recall 1.000 in all four dense cells at 0.84x to 0.88x, that is slower than brute
+force in the regime where CorrTrack still returns 5.6x to 5.8x; the earlier recall 0.000 was the
+tuning failure, as recorded. Synthetic tables and figures rebuilt; the narrative doc's caveat
+paragraph updated. The four m=2000 cells are still running (8 hours in, 16 hour walltime).
+
+### 2026-09-28 (17:00) -- measured why the synthetic threshold axis is not flat at fixed density
+
+User's question: with the generator holding the density at 0.01, why does the threshold still change
+CorrTrack's speedup? Phase breakdown of the five cells (CorrTrack-LSH, ar1, raw, m=500, L=6):
+sketch time 2.2 to 2.5 s and validation 2.7 to 2.9 s are flat, the candidate set is the same size
+(13.5 M tested, candidate precision 0.995 to 1.000), and the candidate search alone falls 27.0 s to
+5.9 s from T=0.70 to T=0.95. So density fixes the validation work, which no filter can avoid, and
+the threshold fixes how cheaply the index isolates it: the LSH bands are sized from the cosine
+threshold, so a low threshold widens the neighbourhood swept before the dot-gamma gate culls it back
+to the same candidates. Written up as section 3 of `docs/synthetic_scaling_2026-09-28.md`, with the
+table. This is also the cleanest evidence we have that the two knobs are separate cost drivers,
+since on real data raising T lowers the density at the same time.
+
+### 2026-09-28 (18:30) -- per pair-window cost of the naive tiers measured (user)
+
+The competitor papers measure against a naive implementation; this project measures against BF_vect,
+a far stronger reference. One short job (`naive_probe`, 3151040, mercantour3, snapshot final112) ran
+`abaca/naive_baseline.py` at m in {25, 50, 100, 200}, W=60, step=6, T=0.90, on a generated dataset,
+synchronously and at n_lags=30, and priced the four exact tiers per pair-window. No competitor
+experiment was run on the naive tiers; this is a cost probe only, as the user asked.
+
+- naive Python (np.corrcoef per pair, per window, per lag): 54,086 to 55,992 ns per pair-window,
+  flat across m and across lag depth, since it is per-pair work nothing amortises.
+- BF_vect: 1,689 ns at m=25 falling to 203 ns at m=200 synchronous and 205 ns lagged; the campaign's
+  own 179 cells give a median of 140 ns at m=500.
+- BF_incr: 128 ns at m=200 synchronous, 47 ns lagged, 39 ns median in the campaign. Its advantage
+  over BF_vect grows with the lag grid: 1.59x at m=200 synchronous, 4.38x at m=200 with six lag
+  probes, 3.6x median in the campaign.
+- Ratios at the campaign's scale: naive Python is 393x BF_vect and 1,401x BF_incr. The median cell
+  would take 19.1 hours under the naive loop against 168 s for BF_vect and 20 s for the faster
+  CorrTrack backend, so the same result quoted against the naive tier would read about 1,539x where
+  ours reads 3.9x.
+- Recorded honestly in the same table: naive numpy is not slow. At 11 to 39 ns per pair-window it
+  beats BF_vect, because it is one BLAS product per window that counts and returns nothing, with no
+  pairs emitted, no lag grid, no guards and no state; its lagged counts already diverge from the
+  exact arms (147,152 against 156,969 at m=200). It is a floor on the arithmetic, not a usable
+  baseline.
+
+Builder: `abaca/naive_cost_table.py` (campaign root + probe JSONs -> markdown), output
+`docs/naive_baseline_cost_2026-09-28.md`. Probe JSONs mirrored to `~/results/probes/`.
+
+- Correction to the entry above: the projection picked `max()` over the two CorrTrack backends'
+  wall clocks, which is the slower one, not the faster. Fixed to `min()`. The corrected line reads
+  18 s for the faster backend, 4.4x against BF_vect and about 1,682x against the naive tier, on a
+  median cell of 1,251,083,598 pair-windows. The per pair-window costs and the 393x / 1,401x ratios
+  were unaffected, since they never used that value.
+
+### 2026-09-28 (22:00) -- synthetic campaign complete at 64 cells; provenance markers on the scaling figure
+
+- The four m=2000 cells finished and the queue is empty. `validate_cells.py`: 64 cells checked, 0 not
+  comparable. Brute force alone costs about 4,800 s in those cells; CorrTrack-LSH returns 25.98x
+  (ar1 raw, recall 1.000), 26.48x (rw raw, 0.997), 25.53x and 25.35x differenced.
+- The m axis now turns over: the best competitor peaks at m=500 (ParCorr 16.08x on ar1 raw) and
+  falls to 11.43x at m=1000 and 9.82x at m=2000, while CorrTrack keeps climbing, 19.38x to 24.57x to
+  25.98x. On the random walk the same comparison is 26.48x against 5.80x at m=2000. The gap widens
+  with m instead of closing, which is the claim the synthetic design exists to test.
+- `synth_scaling.png` gained the capability encoding it was missing: marker shape is the provenance
+  of the capability the cell exercises (circle authors, triangle added by us, square specified but
+  never evaluated), hollow when that arm's recall in the cell is below 0.95, read from the run's own
+  supports_lags field, with the legend entries to match. The threshold bars already carried it as
+  hatching.
+- Synthetic tables and both figures rebuilt on all 64 cells; the narrative doc updated.
+
+### 2026-09-28 (22:40) -- the naive-cost numbers standardised so they divide
+
+The user found that the slide text did not reconcile: 19.1 h against 168 s is 409x, not the quoted
+393x, and 168 s against 18 s is 9.3x, not 4.4x. The cause was mixing three different medians, a
+median rate (140 ns), a median wall clock (168 s) and a median of per-cell ratios (4.4x). Medians do
+not compose: the cell with the median wall clock is not the cell with the median size, and
+CorrTrack's per-cell rate is strongly skewed (p10 9.8 ns, p90 99 ns), so its median wall of 18 s
+comes from smaller and sparser cells than the median-size one.
+
+`abaca/naive_cost_table.py` now prices a single object, a cell of the campaign's median size
+(1,251,083,598 pair-windows), at each tier's median rate: naive Python 55,030 ns/pw -> 19.1 h,
+BF_vect 140.2 -> 175 s, BF_incr 39.3 -> 49 s, CorrTrack's faster backend 32.7 -> 41 s. Every ratio
+in the text is now a division of two printed numbers: 393x, 1,401x, 1,682x, 4.28x, 3.57x. The
+measured median wall clocks (168 s and 18 s) are still stated, labelled as what they are, so nothing
+is hidden by the model.

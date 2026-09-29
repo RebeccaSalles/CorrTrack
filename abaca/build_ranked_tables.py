@@ -14,7 +14,7 @@ TARGET = 0.95
 # first build and a hardcoded list silently dropped those rows instead of failing.
 def thresholds(data):
     return sorted({r[1] for rows in data.values() for r in rows}, key=float)
-ARMS_ORDER = ["STOMP", "FilCorr", "TSUBASA", "BRAID", "ThinBRAID", "CT-lsh", "CT-ham", "ParCorr", "CSZ", "StatStream", "CorrJoin"]
+ARMS_ORDER = ["BF_incr", "FilCorr", "TSUBASA", "BRAID", "ThinBRAID", "CorrTrack-LSH", "CorrTrack-Ham", "ParCorr", "CSZ", "StatStream", "CorrJoin"]
 
 def parse(src):
     """(class, space) -> list of rows; each row = (dataset, T, density, bf_s, {arm: (rec, prec, spec, speedup)})"""

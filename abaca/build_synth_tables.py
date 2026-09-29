@@ -41,6 +41,12 @@ def main() -> None:
            "spaces (raw levels and first differences) and for both base processes. W=60, step=6, 6000 observations, "
            "991 evaluated windows, positive correlation only. Each cell ran the twelve arms and its own brute force "
            "in one job with monitoring off, so every speedup is a wall-clock ratio inside one job on one node.", "",
+           "**Naming.** `BF_vect` is the vectorised exact brute force, which is each cell's own ground truth and "
+           "timing anchor; `BF_incr` is the exact incremental baseline; `CorrTrack-LSH` and `CorrTrack-Ham` are "
+           "CorrTrack's two tuned backends. **Aggregation.** Nothing below section 1 is averaged: this design runs "
+           "a single generated dataset per level, so every speedup, recall and time is that one cell's own "
+           "measurement. The only medians in this file are the effective/target density summary at the end of "
+           "section 1, and they say so.", "",
            "In raw levels a random walk is nonstationary and carries spurious correlation the generator did not "
            "plant; differencing turns it into white noise, which is the uncooperative case for any filter built on "
            "energy concentration. The AR(1) process is stationary in raw levels already.", ""]
@@ -73,7 +79,7 @@ def main() -> None:
 
     # 2. the four scaling curves, raw and differenced side by side
     out += ["## 2. Scaling curves as tables", "",
-            "Speedup over the cell's own brute force, with recall in parentheses. The exact arms (bf_incr, TSUBASA, "
+            "Speedup over the cell's own `BF_vect`, with recall in parentheses. One row is one cell, not an average. The exact arms (bf_incr, TSUBASA, "
             "full-band FilCorr) have no recall knob; StatForce-style arms that emit their own decision can fall "
             "below 1 on recall and precision.", ""]
     for proc, desc in PROCS:

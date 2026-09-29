@@ -2166,25 +2166,25 @@ cells are not quotable (tuned before the grid change).
 Plan §0d (ii) is the consistent lag policy; `supports_lags` travels with every row. **Uncommitted**:
 `library_corrtrack_parallel.py`, `competitor_kernels.pyx` (+ rebuilt .c/.so), `abaca/nway_compare.py`,
 `abaca/naive_baseline.py` (per-pair-window column), `test_stable_reproduced_changes.py`, docs. Next: the
-`exact_stomp` -> `bf_incremental` rename the user approved (alias kept for old result files), then the campaign
+`exact_stomp` -> `BF_incremental` rename the user approved (alias kept for old result files), then the campaign
 re-emit (lagged cells now carry 12 arms, so the budget's battery factor needs a re-measure).
 ### 2026-09-23 (c) campaign updated for the lagged arms; naive-baseline table corrected
 Manifest re-emitted (1,601 cells, 12,808 jobs; arm lists named and carrying corrtrack_hamming; TSUBASA out of the
 m > 2,000 lagged cells with a guard in the arm). Budget factors re-measured: complete figure C-mem 7.6 d, D-mem 6.1 d
 on 11 + 4 hosts. **Uncommitted**: `abaca/{campaign_competitors,campaign_budget,naive_baseline,nway_compare}.py`,
 `library_corrtrack_parallel.py`, `competitor_kernels.pyx` (+ .c/.so), `test_stable_reproduced_changes.py`, docs.
-Still pending: the `exact_stomp` -> `bf_incremental` rename, and the user's budget-row and host-split decision.
-### 2026-09-23 (d) rename exact_stomp -> bf_incremental
+Still pending: the `exact_stomp` -> `BF_incremental` rename, and the user's budget-row and host-split decision.
+### 2026-09-23 (d) rename exact_stomp -> BF_incremental
 Done across library, abaca, configs, tests and both plan docs, with aliases for the old id (dispatch, arm flag,
 class, aggregator). **Uncommitted** (this thread, cumulative): `library_corrtrack_parallel.py`, `competitor_kernels.pyx`
 (+ .c/.so), `corrtrack_param_search.py`, `experiment_run_param_grid_campaign.py`, `experiment_run_exec_param.py`,
 `corrtrack_run_bruteforce.py`, `abaca/{nway_compare,campaign_competitors,campaign_budget,campaign_feeder,aggregate_campaign,
 naive_baseline,resource_probe,kwollect_power,fourway_compare,sparse_fourway_compare}.py`, `abaca/*.oar`,
 `test_stable_reproduced_changes.py`, `test_abaca_tools.py`, docs. Awaiting the user's budget row and host split.
-### 2026-09-23 (e) FilCorr vs bf_incremental
+### 2026-09-23 (e) FilCorr vs BF_incremental
 Log entry (e): density degrades both exact arms' speedup (output cost), FilCorr beats plain BF by executing Parseval
-as BLAS matmuls rather than a per-pair kernel, and the FilCorr/bf_incremental ordering is machine-dependent (cluster
-has FilCorr ahead 13-16%, this laptop has bf_incremental ahead). Open: one cluster job on the sp500 m500 cell to
+as BLAS matmuls rather than a per-pair kernel, and the FilCorr/BF_incremental ordering is machine-dependent (cluster
+has FilCorr ahead 13-16%, this laptop has BF_incremental ahead). Open: one cluster job on the sp500 m500 cell to
 settle the ordering before the paper ranks them.
 ### 2026-09-23 (f) ranking tolerance and the FilCorr band sweep
 Log (f): speedup ratios repeat to about +-5% on one machine (three repeats, spread 7 to 9%), so single-run
@@ -2334,8 +2334,8 @@ builders above, and two `ssh -n sophia.g5k` status checks. No jobs submitted, no
 Results: generator validated in both spaces (effective/target 1.00 except the raw random walk,
 which overshoots by design); CorrTrack fastest on 120 of 179 real cells; synthetic curves in
 `docs/synthetic_scaling_2026-09-28.md`.
-Known issues: the four m=2000 cells and three dense-cell tuning repairs (jobs 3148956, 3148960,
-3148976, 3148980, 3148984, 3149001, 3149005) were running when the artifacts were built.
+Status 2026-09-28 22:00: the synthetic campaign is complete, 64 of 64 cells, validation clean, queue
+empty, tables and figures rebuilt on the full set.
 Next exact step, once `oarstat -u` is empty for those jobs:
 
     rsync -a --include='*/' --include='nway.json' --exclude='*' \
@@ -2345,5 +2345,9 @@ Next exact step, once `oarstat -u` is empty for those jobs:
     python3 abaca/build_synth_figures.py ~/results/synth_overnight docs/figures
 
 then update the m=2000 row of `docs/synthetic_scaling_2026-09-28.md` from the regenerated table.
+Naming convention now used by every builder: `BF_vect`, `BF_incr`, `CorrTrack-LSH`, `CorrTrack-Ham`,
+and figures carry a `real_` or `synth_` prefix. The three campaign docs were rebuilt under it.
+Naive-tier cost probe done (job 3151040): `docs/naive_baseline_cost_2026-09-28.md`, builder
+`abaca/naive_cost_table.py`, probe JSONs in `~/results/probes/`.
 Still open and unchanged: ASOS per-station fill (199 country files, pivot and degree screen done,
 raw density 0.219 and differenced 0.004), and the paper's results prose.

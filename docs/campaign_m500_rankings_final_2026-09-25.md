@@ -6,7 +6,7 @@ Speedups within 10% of each other count as tied, so `[f/s]` can exceed one arm p
 
 ## Every arm that ran
 
-| table | space | T | bf_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CorrTrack | ParCorr | CSZ | StatStream | CorrJoin | leader | margin | spread | range | ahead/tied/behind | verdict |
+| table | space | T | BF_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CorrTrack | ParCorr | CSZ | StatStream | CorrJoin | leader | margin | spread | range | ahead/tied/behind | verdict |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | L | differenced | 0.7 | 0/3 | 2/6 | 0/0 | 0/0 | 0/0 | 6/6 | 0/0 | 0/0 | 1/2 | 0/0 | **CorrTrack** | 1.13x | 1.19 | 0.97-1.54x | 3/3/0 | tied |
 | L | differenced | 0.8 | 0/1 | 0/4 | 0/0 | 0/0 | 0/0 | 6/6 | 0/0 | 0/0 | 0/4 | 0/0 | **CorrTrack** | 1.78x | 1.16 | 1.57-2.39x | 6/0/0 | clear |
@@ -41,7 +41,7 @@ Speedups within 10% of each other count as tied, so `[f/s]` can exceed one arm p
 
 ## Only arms reaching recall 0.95
 
-| table | space | T | bf_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CorrTrack | ParCorr | CSZ | StatStream | CorrJoin | leader | margin | spread | range | ahead/tied/behind | verdict |
+| table | space | T | BF_incr | FilCorr | TSUBASA | BRAID | ThinBRAID | CorrTrack | ParCorr | CSZ | StatStream | CorrJoin | leader | margin | spread | range | ahead/tied/behind | verdict |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | L | differenced | 0.7 | 0/3 | 2/6 | 0/0 | 0/0 | 0/0 | 6/6 | 0/0 | 0/0 | 1/2 | 0/0 | **CorrTrack** | 1.13x | 1.19 | 0.97-1.54x | 3/3/0 | tied |
 | L | differenced | 0.8 | 0/1 | 0/4 | 0/0 | 0/0 | 0/0 | 6/6 | 0/0 | 0/0 | 0/4 | 0/0 | **CorrTrack** | 1.63x | 1.09 | 1.39-1.79x | 6/0/0 | clear |

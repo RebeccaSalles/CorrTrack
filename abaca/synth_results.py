@@ -13,10 +13,9 @@ import os
 import re
 
 NAME = re.compile(r"^ovn_(?P<proc>[a-z0-9]+)_m(?P<m>\d+)_L(?P<L>\d+)_T(?P<T>[0-9p]+)_d(?P<d>[0-9p]+)(?P<diff>_diff)?_m\d+_W")
-# the arms, in the order the m=500 tables use (abaca/build_final_tables.py ORDER)
-ORDER = [("bf_incremental", "bf_incr"), ("filcorr", "FilCorr"), ("tsubasa", "TSUBASA"), ("braid", "BRAID"),
-         ("thinbraid", "ThinBRAID"), ("corrtrack", "CT-lsh"), ("corrtrack_hamming", "CT-ham"),
-         ("parcorr", "ParCorr"), ("csz", "CSZ"), ("statstream", "StatStream"), ("corrjoin", "CorrJoin")]
+import method_style as ms
+
+ORDER = ms.ARMS          # the arms and their labels, shared with the campaign figures
 AXES = ("m", "L", "T", "density")
 BASE = {"m": 500, "L": 6, "T": 0.9, "density": 0.01}
 

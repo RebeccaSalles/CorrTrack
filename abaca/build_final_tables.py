@@ -5,15 +5,16 @@ ratios against the brute force of that same job. Writes the per-cell tables, the
 table with the density column, and the per-threshold medians.
 """
 import json, glob, os, sys, statistics as st, collections
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import method_style as ms
 ROOT, OUT = sys.argv[1], sys.argv[2]
 DS = [("streamflow_m500_m500", "streamflow"), ("sp500_m500_m444", "sp500"), ("wikipedia_m500_m500", "wikipedia"),
       ("smartmeter_m500_m500", "smartmeter"), ("global_weather_m500_m500", "global_weather"), ("acwi_capweighted_m500_m500", "acwi")]
 THR = ["0.7", "0.8", "0.85", "0.9", "0.95"]
-TABLES = [("S", "synchronous, positive (n_lags=0, neg_corr=False)", "L0", "pos"),
-          ("L", "lagged, positive", "L15", "pos"), ("N", "lagged, negative", "L15", "neg")]
-ORDER = [("bf_incremental", "bf_incr"), ("filcorr", "FilCorr"), ("tsubasa", "TSUBASA"), ("braid", "BRAID"),
-         ("thinbraid", "ThinBRAID"), ("corrtrack", "CT-lsh"), ("corrtrack_hamming", "CT-ham"),
-         ("parcorr", "ParCorr"), ("csz", "CSZ"), ("statstream", "StatStream"), ("corrjoin", "CorrJoin")]
+TABLES = [("S", "synchronous, positive only (n_lags=0, neg_corr=False)", "L0", "pos"),
+          ("L", "lagged, positive only (neg_corr=False)", "L15", "pos"),
+          ("N", "lagged, both signs (neg_corr=True: negative correlation searched as well as positive)", "L15", "neg")]
+ORDER = ms.ARMS          # arm keys and labels, shared with the figure builders
 def elapsed(p):
     try:
         for l in open(p):
@@ -32,6 +33,10 @@ out = ["# m=500 capability tables (final campaign, 2026-09-25)", "",
        "arm evaluated on the whole stream while its parameters were chosen on the first 30%. CorrTrack is tuned by "
        "its own hyperopt (sketch width fixed at 64), the four pruning competitors by the CSZ protocol, "
        "BRAID/ThinBRAID at published defaults, and the exact arms have no recall knob.", "",
+       "**Naming.** `BF_vect` is the vectorised exact brute force, which is also the ground truth and the "
+       "timing anchor of its own cell; `BF_incr` is the exact incremental baseline; `CorrTrack-LSH` and "
+       "`CorrTrack-Ham` are CorrTrack's two tuned backends. Every speedup is that cell's `BF_vect` wall clock "
+       "divided by the arm's, measured in the same job.", "",
        "Cell entries are recall/precision/specificity/speedup. One arm is absent from one cell: ThinBRAID "
        "exhausted the node's 192 GB in acwi lagged negative at T=0.70, the densest cell of the study (17.9% of "
        "pair-windows correlated, 224 million of them), where its reported set plus the metrics temporaries do not "
@@ -49,7 +54,7 @@ summ, dens_by = [], {}
 for code, title, lag, tag in TABLES:
     for space, sp_tag in (("raw", ""), ("differenced", "_diff")):
         out += [f"## Table {code}, {space}: {title}", "",
-                "| dataset | T | density | BF s | " + " | ".join(n for _, n in ORDER) + " | tuning s (lsh/ham/CSZ) |",
+                "| dataset | T | density | BF_vect s | " + " | ".join(n for _, n in ORDER) + " | tuning s (lsh/ham/CSZ) |",
                 "|---|---|---|---|" + "---|"*len(ORDER) + "---|"]
         for stem_ds, label in DS:
             for T in THR:
@@ -74,7 +79,8 @@ for code, title, lag, tag in TABLES:
                            f" | {f(tw[0],0)}/{f(tw[1],0)}/{f(tw[2],0)} |")
         out.append("")
 out += ["## Overall medians: one row per table, space and threshold, one column per arm", "",
-        "Median speedup over brute force (median recall) across the six datasets.", "",
+        "Each entry is the MEDIAN over the six datasets of that row: median speedup over `BF_vect`, with the "
+        "median recall in brackets. The density column is the median effective density of the same six cells.", "",
         "| table | space | T | density | " + " | ".join(n for _, n in ORDER) + " |",
         "|---|---|---|---|" + "---|"*len(ORDER)]
 for code, _, _, _ in TABLES:

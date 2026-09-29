@@ -16,11 +16,11 @@ def thresholds(data):
     return sorted({r[1] for rows in data.values() for r in rows}, key=float)
 TIE = 0.10          # (2026-09-23, user) arms within 10% of the best count as tied for that place
 # (2026-09-25) the exact incremental arm is labelled bf_incr in the final tables (exact_stomp was renamed
-ARMS = ["bf_incr", "FilCorr", "TSUBASA", "BRAID", "ThinBRAID", "CorrTrack", "ParCorr", "CSZ", "StatStream", "CorrJoin"]
-# (2026-09-23, user) CT-lsh and CT-ham are two tuned backends of one method, so they are ranked as one
+ARMS = ["BF_incr", "FilCorr", "TSUBASA", "BRAID", "ThinBRAID", "CorrTrack", "ParCorr", "CSZ", "StatStream", "CorrJoin"]
+# (2026-09-23, user) the two backends are tuned variants of one method, so they are ranked as one
 # arm whose speedup on a dataset is the better of the two (the better QUALIFYING one under the recall
 # filter). Counting them separately would let one method occupy two places and split its own wins.
-COLLAPSE = {"CT-lsh": "CorrTrack", "CT-ham": "CorrTrack"}
+COLLAPSE = {"CorrTrack-LSH": "CorrTrack", "CorrTrack-Ham": "CorrTrack"}
 
 def parse(src):
     out, cls, space, header = collections.defaultdict(list), None, None, None
