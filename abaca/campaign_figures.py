@@ -58,7 +58,7 @@ def load(root):
     for p in sorted(glob.glob(os.path.join(root, "nway", "*", "nway.json"))):
         d = json.load(open(p))
         m = CELL.match(d["cell"])
-        if not m:
+        if not m or not ms.kept_T(m["T"]):
             continue
         bf = d["arms"].get("bruteforce") or {}
         if not bf.get("wall"):
@@ -80,6 +80,9 @@ def load(root):
                 cell["arms"][label] = None
                 continue
             tier = a.get("supports_neg_corr") if cls == "N" else (a.get("supports_lags") if lagged else "native")
+            if not ms.keeps(tier) or not ms.kept_arm(label):    # authors-only: our capability, or an arm that does not reproduce
+                cell["arms"][label] = None
+                continue
             cell["arms"][label] = dict(wall=a["wall"], speedup=bf["wall"] / a["wall"], recall=a.get("recall"),
                                        precision=a.get("precision"), specificity=specificity(a, bf), tier=tier)
         cells.append(cell)
@@ -97,7 +100,9 @@ def tier_of(cells, name):
 
 
 def speedup_vs_density(cells, path):
-    fig, axes = plt.subplots(len(SPACES), len(CLASSES), figsize=(16, 9), sharey=True)
+    # on a linear scale the classes cannot share an axis: class S tops out near 3x while the lagged
+    # classes reach 20x, and sharing would flatten exactly the panels the reader is there for
+    fig, axes = plt.subplots(len(SPACES), len(CLASSES), figsize=(16, 9), sharey=ms.LOG_SPEEDUP)
     for i, (space, sdesc) in enumerate(SPACES):
         for j, (cls, cdesc) in enumerate(CLASSES):
             ax = axes[i][j]
@@ -117,11 +122,16 @@ def speedup_vs_density(cells, path):
                 ct = name.startswith("CorrTrack")
                 ax.plot(xs, ys, color=COLOR[name], linewidth=2.4 if ct else 1.1, zorder=3 if ct else 2, label=name)
                 for x, y, r in zip(xs, ys, rc):
-                    ax.plot(x, y, marker=shape, markersize=9 if ct else 6, color=COLOR[name],
+                    ax.plot(x, y, marker="o" if ms.AUTHORS_ONLY else shape, markersize=9 if ct else 6, color=COLOR[name],
                             markerfacecolor=COLOR[name] if r >= RECALL_TARGET else "white",
                             markeredgecolor=COLOR[name], zorder=4 if ct else 2)
             ax.axhline(1.0, color="#999999", linewidth=0.8, linestyle="--", zorder=1)
-            ax.set_xscale("log"); ax.set_yscale("log"); ax.grid(alpha=0.25, linewidth=0.6)
+            ax.set_xscale("log")
+            if ms.LOG_SPEEDUP:
+                ax.set_yscale("log")
+            else:                      # a log speedup axis compresses the curves and flatters the flat ones
+                ax.set_ylim(bottom=0)
+            ax.grid(alpha=0.25, linewidth=0.6)
             thr = sorted({c["T"] for c in sl})
             if i == 0:
                 ax.set_title(cdesc, fontsize=11, pad=42)
@@ -135,10 +145,12 @@ def speedup_vs_density(cells, path):
                 ax.set_xlabel("effective correlation density")
             if j == 0:
                 ax.set_ylabel(f"{sdesc}\nmedian speedup over BF_vect")
-    handles = [Line2D([], [], color=COLOR[n], marker="o", label=n) for n in ms.lead(NAMES)]
-    handles += [Line2D([], [], color="none", label=" ")]
-    handles += [Line2D([], [], color="#555555", marker=SHAPE[t], linestyle="none", label=TIER_LABEL[t])
-                for t in ("native", "enabled_by_us", "specified")]
+    shown = [n for n in ms.lead(NAMES) if any(c["arms"].get(n) for c in cells)]
+    handles = [Line2D([], [], color=COLOR[n], marker="o", label=n) for n in shown]
+    if not ms.AUTHORS_ONLY:
+        handles += [Line2D([], [], color="none", label=" ")]
+        handles += [Line2D([], [], color="#555555", marker=SHAPE[t], linestyle="none", label=TIER_LABEL[t])
+                    for t in ("native", "enabled_by_us", "specified")]
     handles += [Line2D([], [], color="#555555", marker="o", linestyle="none", markerfacecolor="white",
                        label=f"hollow: median recall below {RECALL_TARGET}")]
     axes[0][-1].legend(handles=handles, fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0))
@@ -177,22 +189,26 @@ def performance_profile(cells, path, taus=None):
             # the marker sits where the curve passes half the cells: the typical factor from the best
             half = next((k for k, y in enumerate(ys) if y >= 0.5), None)
             if half is not None:
-                ax.plot(taus[half], ys[half], marker=SHAPE[tier_of(cells, name)], markersize=9 if ct else 7,
+                ax.plot(taus[half], ys[half], marker="o" if ms.AUTHORS_ONLY else SHAPE[tier_of(cells, name)],
+                        markersize=9 if ct else 7,
                         color=COLOR[name], markeredgecolor="white", markeredgewidth=0.8, zorder=4)
         ax.set_xscale("log")
         ax.grid(alpha=0.25, linewidth=0.6); ax.set_title(title, fontsize=11); ax.set_ylim(0, 1.02)
         if j == 0:
             ax.set_ylabel(f"fraction of the {n_cells} cells")
-    handles = [Line2D([], [], color=COLOR[n], label=n) for n in ms.lead(NAMES)]
-    handles += [Line2D([], [], color="none", label=" ")]
-    handles += [Line2D([], [], color="#555555", marker=SHAPE[t], linestyle="none", label=TIER_LABEL[t])
-                for t in ("native", "enabled_by_us", "specified")]
+    shown = [n for n in ms.lead(NAMES) if any(c["arms"].get(n) for c in cells)]
+    handles = [Line2D([], [], color=COLOR[n], label=n) for n in shown]
+    if not ms.AUTHORS_ONLY:
+        handles += [Line2D([], [], color="none", label=" ")]
+        handles += [Line2D([], [], color="#555555", marker=SHAPE[t], linestyle="none", label=TIER_LABEL[t])
+                    for t in ("native", "enabled_by_us", "specified")]
     axes[-1].legend(handles=handles, fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0))
     fig.suptitle("Performance profile over the 179 campaign cells (one dataset, one threshold, one capability class, "
                  "one space): how often\neach method runs within a factor tau of the fastest method on that same cell. "
                  "A cell the method does not solve under the\npanel's recall requirement never counts, at any tau; the "
                  "marker sits where a method reaches half the cells.", fontsize=11)
-    fig.supxlabel("tau: factor away from the fastest method on the same cell", fontsize=10, x=0.44)
+    fig.supxlabel("tau: factor away from the fastest method on the same cell. A cell an arm cannot run at all "
+                  "counts as unsolved, which is why arms missing a capability plateau below 1.", fontsize=9, x=0.44)
     fig.tight_layout(rect=(0, 0.03, 0.87, 0.90))
     fig.savefig(path, dpi=140); plt.close(fig)
 
@@ -258,16 +274,19 @@ def capability_markdown(cells):
                         "native": "authors"}[k]
         return "?"
 
-    out = ["| method | what it guarantees | lagged search | negative correlation | parameters here | recall: median (10th percentile) | precision median |",
-           "|---|---|---|---|---|---|---|"]
+    out = ["| method | what it guarantees | lagged search | negative correlation | parameters here | "
+           "recall: median (10th percentile) | precision median | cells |",
+           "|---|---|---|---|---|---|---|---|"]
     guarantee, params = DESIGN["BF_vect"]
-    out.append(f"| BF_vect | {guarantee} | authors | authors | {params} | 1.000 | 1.000 |")
+    out.append(f"| BF_vect | {guarantee} | authors | authors | {params} | 1.000 | 1.000 | {len(cells)} |")
     for name in ms.lead(NAMES):
         rec = sorted(c["arms"][name]["recall"] for c in cells if c["arms"][name] and c["arms"][name]["recall"] is not None)
         pre = [c["arms"][name]["precision"] for c in cells if c["arms"][name] and c["arms"][name]["precision"] is not None]
+        if not rec or not pre:          # dropped in this variant
+            continue
         guarantee, params = DESIGN[name]
         out.append(f"| {name} | {guarantee} | {tier_in(name, 'L')} | {tier_in(name, 'N')} | {params} | "
-                   f"{st.median(rec):.3f} ({rec[len(rec) // 10]:.3f}) | {st.median(pre):.3f} |")
+                   f"{st.median(rec):.3f} ({rec[len(rec) // 10]:.3f}) | {st.median(pre):.3f} | {len(rec)} |")
     return out
 
 
@@ -428,20 +447,27 @@ def leadership_markdown(cells):
     import statistics as st
     fa, ta, n = leadership(cells)
     fq, tq, nq = leadership(cells, qualify=True)
-    med = {n_: st.median([c["arms"][n_]["speedup"] for c in cells if c["arms"][n_]]) for n_ in NAMES}
-    out = [f"| method | leads | top two | leads (recall >= {RECALL_TARGET}) | top two (recall >= {RECALL_TARGET}) | median speedup |",
-           "|---|---|---|---|---|---|"]
-    for name in sorted(NAMES, key=lambda x: (-fa[x], -ta[x], -med[x])):
-        out.append(f"| {name} | {fa[name]} | {ta[name]} | {fq[name]} | {tq[name]} | {med[name]:.2f}x |")
-    return f"Over the {n} cells of the campaign, speedups within {int(TIE * 100)}% counting as tied.", out
+    med = {n_: st.median([c["arms"][n_]["speedup"] for c in cells if c["arms"][n_]] or [0.0]) for n_ in NAMES}
+    covered = {x: sum(1 for c in cells if c["arms"][x]) for x in NAMES}
+    out = [f"| method | cells covered | leads | leads per 100 covered | top two | "
+           f"leads (recall >= {RECALL_TARGET}) | top two (recall >= {RECALL_TARGET}) | median speedup |",
+           "|---|---|---|---|---|---|---|---|"]
+    for name in sorted([n for n in NAMES if covered[n]], key=lambda x: (-fa[x], -ta[x], -med[x])):
+        cov = covered[name]
+        out.append(f"| {name} | {cov} | {fa[name]} | {100 * fa[name] / cov:.0f} | {ta[name]} | "
+                   f"{fq[name]} | {tq[name]} | {med[name]:.2f}x |")
+    return (f"Over the {n} cells of the campaign, speedups within {int(TIE * 100)}% counting as tied. An arm can "
+            f"only lead a cell it runs in, so the count is read against the cells it covers: the share column is "
+            f"the one to compare when the coverage differs, and the median speedup is over that arm's own cells "
+            f"and is not cross-comparable (the per-class table in the cost document is).", out)
 
 
 def main(root, figdir, table_path=None):
     os.makedirs(figdir, exist_ok=True)
     cells = load(root)
     print(f"{len(cells)} cells")
-    p = os.path.join(figdir, "real_speedup_vs_density.png"); speedup_vs_density(cells, p); print("wrote", p)
-    p = os.path.join(figdir, "real_performance_profile.png"); performance_profile(cells, p); print("wrote", p)
+    p = os.path.join(figdir, f"real_speedup_vs_density{ms.SUFFIX}.png"); speedup_vs_density(cells, p); print("wrote", p)
+    p = os.path.join(figdir, f"real_performance_profile{ms.SUFFIX}.png"); performance_profile(cells, p); print("wrote", p)
     t3 = dataset_table_markdown(cells, "L", "differenced", root)
     print("\n" + "\n".join(t3))
     cap = capability_markdown(cells)
@@ -451,7 +477,8 @@ def main(root, figdir, table_path=None):
     if table_path:
         open(table_path, "w").write(
             "# Campaign capabilities and leadership (2026-09-28)\n\n"
-            "Generated by `abaca/campaign_figures.py` from the 179 cells of the final m=500 campaign. The "
+            + (ms.BANNER + "\n\n" if ms.AUTHORS_ONLY else "")
+            + "Generated by `abaca/campaign_figures.py` from the 179 cells of the final m=500 campaign. The "
             "capability columns are read from each run's own supports_lags / supports_neg_corr field and the "
             "recall and precision from the same runs; only the guarantee and parameter columns are design "
             "facts. Recall and precision are summarised over the cells where the method ran: the median, and "

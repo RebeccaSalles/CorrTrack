@@ -21,6 +21,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import campaign_figures as cf
+import method_style as ms
+NAMES = cf.NAMES
 
 TIERS = [("naive_python", "naive Python: np.corrcoef per pair, per window, per lag"),
          ("naive_numpy", "naive numpy: one correlation matrix per window (counts only)"),
@@ -112,13 +114,69 @@ def main() -> None:
             "arithmetic, not a baseline anyone could use, and the lagged rows show its count already diverging "
             "from the exact arms (147,152 against 156,969 at m=200) because it does not reproduce the harness's "
             "early-window lag truncation.", "",
-            "## The campaign's own cost, for scale", "",
-            "Median over the 179 cells of the final m=500 campaign, each arm's wall clock divided by the "
-            "pair-windows it covers:", "",
-            "| arm | ns per pair-window | cells |", "|---|---|---|"]
-    for k, (v, n) in camp.items():
-        out.append(f"| {k} | {v:.1f} | {n} |")
-    out.append("")
+            "## Every arm of the campaign on the same standard", "",
+            f"The same reading applied to every arm: its median rate over the cells it ran in, and the same "
+            f"median-size cell ({size:,.0f} pair-windows) priced at that rate. Median recall sits beside it, "
+            "because a rate only compares between arms that return the same answer.", "",
+            "| arm | ns per pair-window | median-size cell | against BF_vect | median recall | cells |",
+            "|---|---|---|---|---|---|",
+            f"| naive Python (probe) | {per_pair:,.0f} | {hms(size * per_pair * 1e-9)} | "
+            f"{per_pair / r_bf:,.0f}x slower | 1.000 | probe |",
+            f"| naive numpy (probe, counts only) | 11.0 | {hms(size * 11.0 * 1e-9)} | "
+            f"{r_bf / 11.0:.2f}x faster | n/a | probe |"]
+    for name in ["BF_vect"] + ms.lead(NAMES):
+        def wall(c, n=name):
+            return c["bf_wall"] if n == "BF_vect" else (c["arms"][n]["wall"] if c["arms"][n] else None)
+        rs = [1e9 * wall(c) / c["pair_windows"] for c in cells if c["pair_windows"] and wall(c)]
+        if not rs:          # dropped in this variant
+            continue
+        rec = [c["arms"][name]["recall"] for c in cells
+               if name != "BF_vect" and c["arms"][name] and c["arms"][name]["recall"] is not None]
+        r = st.median(rs)
+        ratio = "1x" if name == "BF_vect" else (f"{r / r_bf:.2f}x slower" if r > r_bf else f"{r_bf / r:.2f}x faster")
+        out.append(f"| {name} | {r:,.1f} | {hms(size * r * 1e-9)} | {ratio} | "
+                   f"{st.median(rec) if rec else 1.0:.3f} | {len(rs)} |")
+    # (2026-09-29, user) a pooled median compares arms over different cell sets, which is wrong as soon
+    # as an arm is missing from a class: the class an arm lacks is not a random sample of the campaign.
+    # Two fixes, both printed: the same rate per class and space, where every surviving arm covers the
+    # same cells, and one median over the cells where every displayed arm ran.
+    COLS = [(c, sp) for c in ("S", "L", "N") for sp in ("raw", "differenced")]
+    present = [n for n in [ms.BF] + ms.lead(NAMES)
+               if n == ms.BF or any(c["arms"].get(n) for c in cells)]
+    common = [c for c in cells if all(n == ms.BF or c["arms"].get(n) for n in present)]
+    out += ["", "### The same rates per class and space", "",
+            "A pooled median compares arms over different sets of cells as soon as one arm is missing from a "
+            "class, and a missing class is never a random sample: it is the hardest or the easiest part of the "
+            "campaign. Within one class and space every surviving arm covers the same cells, so these columns "
+            "are the comparable ones.", "",
+            "| arm | " + " | ".join(f"{c} {sp[:4]}" for c, sp in COLS) + " | common cells |",
+            "|---|" + "---|" * (len(COLS) + 1)]
+    for name in present:
+        vals = []
+        for cls, sp in COLS:
+            sl = [c for c in cells if c["cls"] == cls and c["space"] == sp
+                  and (name == ms.BF or c["arms"].get(name))]
+            r = [1e9 * (c["bf_wall"] if name == ms.BF else c["arms"][name]["wall"]) / c["pair_windows"]
+                 for c in sl if c["pair_windows"]]
+            vals.append(f"{st.median(r):,.0f}" if r else "")
+        rc = [1e9 * (c["bf_wall"] if name == ms.BF else c["arms"][name]["wall"]) / c["pair_windows"]
+              for c in common if c["pair_windows"] and (name == ms.BF or c["arms"].get(name))]
+        out.append(f"| {name} | " + " | ".join(vals) + f" | {st.median(rc):,.1f} |" if rc else
+                   f"| {name} | " + " | ".join(vals) + " |  |")
+    out += ["", f"The last column is the median over the {len(common)} cells where every arm in this table ran, "
+                f"which is the only column where all the numbers price the same work. Blank cells are classes "
+                f"the arm does not cover.", ""]
+    out += ["", "The two probe rows are not campaign runs: naive numpy is its best value, the m=200 lagged one, "
+                "and it counts matches without emitting pairs, so it has no recall to report. "
+                + ("An arm's cell count is the cells left after the authors-only filter: the synchronous class "
+                   "for ParCorr, CSZ and CorrJoin, everything but the negative class for FilCorr, everything but "
+                   "the lagged positive class for TSUBASA."
+                   if ms.AUTHORS_ONLY else
+                   "ParCorr, CSZ and CorrJoin cover 119 cells rather than 179 because class N has no such arm.")
+                + ("" if ms.AUTHORS_ONLY else
+                   " ThinBRAID's rate is not comparable with the rest: at median recall 0.815 and precision 0.046 "
+                   "it is pricing a different and much larger answer."), ""]
+    out = ms.banner(out)
     open(out_path, "w").write("\n".join(out) + "\n")
     print("\n".join(out))
 

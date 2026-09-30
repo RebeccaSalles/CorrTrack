@@ -15,12 +15,13 @@ import statistics as st
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import method_style as ms
 import synth_results as sr
 
 PROCS = [("ar1", "AR(1), stationary in raw levels"), ("rw", "random walk, nonstationary in raw levels")]
 AXIS_TITLE = {"m": "number of series m", "L": "lagged windows L", "T": "correlation threshold T",
               "density": "target correlation density"}
-NAMES = [n for _, n in sr.ORDER]
+NAMES = [n for _, n in sr.ORDER if ms.kept_arm(n)]
 
 
 def f(x, d=3):
@@ -109,6 +110,7 @@ def main() -> None:
                    f"{c['space']} | {c['bf_wall']:.0f} | " + " | ".join(row) + " |")
     out.append("")
 
+    out = ms.banner(out)
     open(out_path, "w").write("\n".join(out) + "\n")
     print(f"{len(cells)} cells -> {out_path}")
     for proc, _ in PROCS:

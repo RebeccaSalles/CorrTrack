@@ -6,7 +6,7 @@ carries how many of that row's datasets the method ranks first in, and how many 
 two of. Two rankings are produced: over every arm that ran, and over the arms that reach the
 tuned recall target (0.95), since an arm that buys speed by missing pairs otherwise "wins" rows.
 """
-import re, sys, statistics as st, collections
+import re, os, sys, statistics as st, collections
 
 SRC, OUT = sys.argv[1], sys.argv[2]
 TARGET = 0.95
@@ -14,7 +14,10 @@ TARGET = 0.95
 # first build and a hardcoded list silently dropped those rows instead of failing.
 def thresholds(data):
     return sorted({r[1] for rows in data.values() for r in rows}, key=float)
-ARMS_ORDER = ["BF_incr", "FilCorr", "TSUBASA", "BRAID", "ThinBRAID", "CorrTrack-LSH", "CorrTrack-Ham", "ParCorr", "CSZ", "StatStream", "CorrJoin"]
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import method_style as ms
+ARMS_ORDER = [a for a in ["BF_incr", "FilCorr", "TSUBASA", "BRAID", "ThinBRAID", "CorrTrack-LSH", "CorrTrack-Ham",
+                          "ParCorr", "CSZ", "StatStream", "CorrJoin"] if ms.kept_arm(a)]
 
 def parse(src):
     """(class, space) -> list of rows; each row = (dataset, T, density, bf_s, {arm: (rec, prec, spec, speedup)})"""
@@ -65,7 +68,7 @@ lines = ["# m=500 tables: medians with per-dataset rank counts", "",
          "most datasets, and a method that wins four of six can trail on the median because of one hard set.", "",
          "Two rankings are given. The first ranks every arm that ran. The second, marked `qualified`, ranks only "
          f"the arms whose recall reaches the tuned target of {TARGET:.2f} in that dataset, so an arm cannot win a "
-         "row by skipping the work: ThinBRAID and StatStream miss most true pairs in most cells, and the exact "
+         "row by skipping the work: " + ("StatStream misses true pairs in the sparsest cells" if ms.AUTHORS_ONLY else "ThinBRAID and StatStream miss most true pairs in most cells") + ", and the exact "
          "arms and CorrTrack are the ones that consistently qualify.", ""]
 
 for qualified in (False, True):
@@ -92,10 +95,14 @@ for qualified in (False, True):
             for arm in ARMS_ORDER:
                 n1, n2, n = ranks(rows, arm, T, qualified)
                 tot[arm] += n1; tot2[arm] += n2; seen[arm] += n
-    lines += [f"Totals over all {sum(seen.values()) // max(1, len(ARMS_ORDER))} dataset-cells of every row:", "",
-              "| arm | fastest | in the top two | cells ranked |", "|---|---|---|---|"]
+    lines += [f"Totals over all {sum(seen.values()) // max(1, len(ARMS_ORDER))} dataset-cells of every row. An arm "
+              "is only ranked in the cells it runs in, so compare the share, not the count: an arm that covers one "
+              "class has fewer chances to be fastest and the class it covers is not a random sample of the "
+              "campaign.", "",
+              "| arm | fastest | per 100 ranked | in the top two | cells ranked |", "|---|---|---|---|---|"]
     for arm in ARMS_ORDER:
-        if seen[arm]: lines.append(f"| {arm} | {tot[arm]} | {tot2[arm]} | {seen[arm]} |")
+        if seen[arm]:
+            lines.append(f"| {arm} | {tot[arm]} | {100 * tot[arm] / seen[arm]:.0f} | {tot2[arm]} | {seen[arm]} |")
     lines.append("")
 open(OUT, "w").write("\n".join(lines) + "\n")
 print("\n".join(lines[:14]))

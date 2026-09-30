@@ -41,11 +41,14 @@ def load(root):
         m = NAME.match(name)
         if not m:
             continue
+        if not ms.kept_T(_num(m["T"])):
+            continue
         d = json.load(open(p))
         prof, bf = d.get("dataset_profile") or {}, d["arms"].get("bruteforce") or {}
         if not bf.get("wall"):
             continue
-        cell = dict(run=name, proc=m["proc"], m=int(m["m"]), L=int(m["L"]), T=_num(m["T"]),
+        L = int(m["L"])
+        cell = dict(run=name, proc=m["proc"], m=int(m["m"]), L=L, T=_num(m["T"]),
                     density=_num(m["d"]), diff=bool(m["diff"]),
                     space="differenced" if m["diff"] else "raw",
                     effective=prof.get("density_at_threshold"),
@@ -54,6 +57,9 @@ def load(root):
         for key, label in ORDER:
             a = d["arms"].get(key)
             if not isinstance(a, dict) or a.get("status") != "ok" or not a.get("wall"):
+                cell["arms"][label] = None
+                continue
+            if not ms.keeps(a.get("supports_lags") if L > 1 else "native") or not ms.kept_arm(label):
                 cell["arms"][label] = None
                 continue
             cell["arms"][label] = dict(wall=a["wall"], speedup=bf["wall"] / a["wall"],

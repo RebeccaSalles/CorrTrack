@@ -69,11 +69,15 @@ def scaling_figure(cells, path):
                 # arm's recall in that cell misses the target: the same encoding as the campaign figures
                 for c in pt:
                     a = c["arms"][name]
-                    ax.plot(xof(c), a["speedup"], marker=ms.SHAPE[tier(c, name)], markersize=7 if ct else 5,
+                    ax.plot(xof(c), a["speedup"], marker="o" if ms.AUTHORS_ONLY else ms.SHAPE[tier(c, name)],
+                            markersize=7 if ct else 5,
                             color=ms.COLOR[name], markerfacecolor=ms.COLOR[name] if (a["recall"] or 1) >= RECALL_TARGET else "white",
                             markeredgecolor=ms.COLOR[name], zorder=4 if ct else 2)
             ax.axhline(1.0, color="#999999", linewidth=0.8, linestyle="--", zorder=1)
-            ax.set_yscale("log")
+            if ms.LOG_SPEEDUP:
+                ax.set_yscale("log")
+            else:                      # linear, so the gaps between the methods read at their real size
+                ax.set_ylim(bottom=0)
             if LOGX[axis]:
                 ax.set_xscale("log")
                 ax.set_xticks([xof(c) for c in pts])
@@ -85,10 +89,12 @@ def scaling_figure(cells, path):
                 ax.set_ylabel("speedup over BF_vect\n(1.0 = brute force)")
             if i == 0:
                 ax.set_title(pdesc, fontsize=11)
-    handles = [Line2D([], [], color=ms.COLOR[n], marker="o", label=n) for n in ms.lead(ms.NAMES)]
-    handles += [Line2D([], [], color="none", label=" ")]
-    handles += [Line2D([], [], color="#555555", marker=ms.SHAPE[t], linestyle="none", label=ms.TIER_LABEL[t])
-                for t in ("native", "enabled_by_us", "specified")]
+    shown = [n for n in ms.lead(ms.NAMES) if any(c["arms"].get(n) for c in cells)]
+    handles = [Line2D([], [], color=ms.COLOR[n], marker="o", label=n) for n in shown]
+    if not ms.AUTHORS_ONLY:
+        handles += [Line2D([], [], color="none", label=" ")]
+        handles += [Line2D([], [], color="#555555", marker=ms.SHAPE[t], linestyle="none", label=ms.TIER_LABEL[t])
+                    for t in ("native", "enabled_by_us", "specified")]
     handles += [Line2D([], [], color="#555555", marker="o", linestyle="none", markerfacecolor="white",
                        label=f"hollow: recall below {RECALL_TARGET}")]
     axes[0][1].legend(handles=handles, fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
@@ -113,7 +119,8 @@ def threshold_bars(cells, path):
         width = 0.92 / (len(ms.NAMES) + 1)
         for i, c in enumerate(pts):
             bars = [(ms.BF, c["bf_wall"], "")]
-            bars += [(n, c["arms"][n]["wall"], ms.HATCH.get(tier(c, n), "")) for n in ms.NAMES if c["arms"][n]]
+            bars += [(n, c["arms"][n]["wall"], "" if ms.AUTHORS_ONLY else ms.HATCH.get(tier(c, n), ""))
+                     for n in ms.NAMES if c["arms"][n]]
             bars.sort(key=lambda b: b[1])            # fastest first inside the group
             for k, (name, wall, hatch) in enumerate(bars):
                 lo.append(wall); hi.append(wall)
@@ -128,11 +135,13 @@ def threshold_bars(cells, path):
     for ax in axes:
         ax.set_ylim(min(lo) * 0.7, max(hi) * 1.3)
     handles = [Patch(facecolor=ms.COLOR[ms.BF], label=ms.BF + " (brute force)")]
-    handles += [Patch(facecolor=ms.COLOR[n], label=n) for n in ms.lead(ms.NAMES)]
-    handles += [Patch(facecolor="white", edgecolor="#555555", hatch=ms.HATCH["enabled_by_us"],
-                      label="lag capability added by us"),
-                Patch(facecolor="white", edgecolor="#555555", hatch=ms.HATCH["specified"],
-                      label="lag capability specified,\nnever evaluated by the authors")]
+    shown = [n for n in ms.lead(ms.NAMES) if any(c["arms"].get(n) for c in cells)]
+    handles += [Patch(facecolor=ms.COLOR[n], label=n) for n in shown]
+    if not ms.AUTHORS_ONLY:
+        handles += [Patch(facecolor="white", edgecolor="#555555", hatch=ms.HATCH["enabled_by_us"],
+                          label="lag capability added by us"),
+                    Patch(facecolor="white", edgecolor="#555555", hatch=ms.HATCH["specified"],
+                          label="lag capability specified,\nnever evaluated by the authors")]
     axes[-1].legend(handles=handles, fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
     fig.suptitle(f"Raw levels, m = {m}: wall-clock time per method by correlation threshold, one generated dataset "
                  f"per bar\nbars sorted fastest first inside each threshold group", fontsize=12)
@@ -145,8 +154,8 @@ def main() -> None:
     root, figdir = sys.argv[1], sys.argv[2]
     os.makedirs(figdir, exist_ok=True)
     cells = sr.load(root)
-    p = os.path.join(figdir, "synth_scaling.png"); scaling_figure(cells, p); print("wrote", p)
-    p = os.path.join(figdir, "synth_threshold_bars.png"); m = threshold_bars(cells, p); print("wrote", p, f"(m={m})")
+    p = os.path.join(figdir, f"synth_scaling{ms.SUFFIX}.png"); scaling_figure(cells, p); print("wrote", p)
+    p = os.path.join(figdir, f"synth_threshold_bars{ms.SUFFIX}.png"); m = threshold_bars(cells, p); print("wrote", p, f"(m={m})")
 
 
 if __name__ == "__main__":

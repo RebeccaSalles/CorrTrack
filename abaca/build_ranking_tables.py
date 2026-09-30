@@ -6,7 +6,7 @@ the best OTHER arm on each dataset separately, which is the comparison that deci
 is clear: margin is the geometric mean of those per-dataset ratios, spread is the geometric
 standard deviation of the same ratios, and speedups within 10% of each other are treated as ties.
 """
-import re, sys, math, statistics as st, collections
+import re, os, sys, math, statistics as st, collections
 
 SRC, OUT = sys.argv[1], sys.argv[2]
 TARGET = 0.95
@@ -16,7 +16,10 @@ def thresholds(data):
     return sorted({r[1] for rows in data.values() for r in rows}, key=float)
 TIE = 0.10          # (2026-09-23, user) arms within 10% of the best count as tied for that place
 # (2026-09-25) the exact incremental arm is labelled bf_incr in the final tables (exact_stomp was renamed
-ARMS = ["BF_incr", "FilCorr", "TSUBASA", "BRAID", "ThinBRAID", "CorrTrack", "ParCorr", "CSZ", "StatStream", "CorrJoin"]
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import method_style as ms
+ARMS = [a for a in ["BF_incr", "FilCorr", "TSUBASA", "BRAID", "ThinBRAID", "CorrTrack", "ParCorr", "CSZ",
+                    "StatStream", "CorrJoin"] if ms.kept_arm(a)]
 # (2026-09-23, user) the two backends are tuned variants of one method, so they are ranked as one
 # arm whose speedup on a dataset is the better of the two (the better QUALIFYING one under the recall
 # filter). Counting them separately would let one method occupy two places and split its own wins.

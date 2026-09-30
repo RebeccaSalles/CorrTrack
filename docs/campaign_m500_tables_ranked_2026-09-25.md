@@ -39,21 +39,21 @@ Two rankings are given. The first ranks every arm that ran. The second, marked `
 | S | raw | 0.9 | 2.3e-02 | 1.62x (1.000) [0/3] | 1.85x (1.000) [3/3] | 0.58x (1.000) [0/0] | 1.35x (1.000) [0/0] | 0.68x (0.845) [0/0] | 2.21x (0.978) [3/3] | 2.10x (0.994) [0/3] | 0.51x (0.963) [0/0] | 0.23x (0.982) [0/0] | 1.42x (0.978) [0/0] | 1.36x (1.000) [0/0] |
 | S | raw | 0.95 | 5.3e-03 | 1.65x (1.000) [0/0] | 1.89x (1.000) [1/2] | 0.59x (1.000) [0/0] | 1.40x (1.000) [0/0] | 0.68x (0.837) [0/0] | 2.72x (0.985) [3/4] | 2.82x (0.996) [2/5] | 0.61x (0.968) [0/0] | 0.24x (0.984) [0/0] | 2.02x (0.974) [0/1] | 1.55x (1.000) [0/0] |
 
-Totals over all 162 dataset-cells of every row:
+Totals over all 162 dataset-cells of every row. An arm is only ranked in the cells it runs in, so compare the share, not the count: an arm that covers one class has fewer chances to be fastest and the class it covers is not a random sample of the campaign.
 
-| arm | fastest | in the top two | cells ranked |
-|---|---|---|---|
-| BF_incr | 0 | 47 | 179 |
-| FilCorr | 54 | 64 | 179 |
-| TSUBASA | 0 | 0 | 179 |
-| BRAID | 0 | 0 | 179 |
-| ThinBRAID | 0 | 0 | 178 |
-| CorrTrack-LSH | 83 | 120 | 179 |
-| CorrTrack-Ham | 36 | 113 | 179 |
-| ParCorr | 0 | 0 | 119 |
-| CSZ | 0 | 0 | 119 |
-| StatStream | 1 | 5 | 179 |
-| CorrJoin | 5 | 9 | 119 |
+| arm | fastest | per 100 ranked | in the top two | cells ranked |
+|---|---|---|---|---|
+| BF_incr | 0 | 0 | 47 | 179 |
+| FilCorr | 54 | 30 | 64 | 179 |
+| TSUBASA | 0 | 0 | 0 | 179 |
+| BRAID | 0 | 0 | 0 | 179 |
+| ThinBRAID | 0 | 0 | 0 | 178 |
+| CorrTrack-LSH | 83 | 46 | 120 | 179 |
+| CorrTrack-Ham | 36 | 20 | 113 | 179 |
+| ParCorr | 0 | 0 | 0 | 119 |
+| CSZ | 0 | 0 | 0 | 119 |
+| StatStream | 1 | 1 | 5 | 179 |
+| CorrJoin | 5 | 4 | 9 | 119 |
 
 ## Qualified ranking (only arms reaching recall >= 0.95)
 
@@ -90,19 +90,19 @@ Totals over all 162 dataset-cells of every row:
 | S | raw | 0.9 | 2.3e-02 | 1.62x (1.000) [0/3] | 1.85x (1.000) [3/3] | 0.58x (1.000) [0/0] | 1.35x (1.000) [0/0] | 0.68x (0.845) [0/0] | 2.21x (0.978) [3/3] | 2.10x (0.994) [0/3] | 0.51x (0.963) [0/0] | 0.23x (0.982) [0/0] | 1.42x (0.978) [0/0] | 1.36x (1.000) [0/0] |
 | S | raw | 0.95 | 5.3e-03 | 1.65x (1.000) [0/0] | 1.89x (1.000) [1/2] | 0.59x (1.000) [0/0] | 1.40x (1.000) [0/0] | 0.68x (0.837) [0/0] | 2.72x (0.985) [3/4] | 2.82x (0.996) [2/5] | 0.61x (0.968) [0/0] | 0.24x (0.984) [0/0] | 2.02x (0.974) [0/1] | 1.55x (1.000) [0/0] |
 
-Totals over all 162 dataset-cells of every row:
+Totals over all 162 dataset-cells of every row. An arm is only ranked in the cells it runs in, so compare the share, not the count: an arm that covers one class has fewer chances to be fastest and the class it covers is not a random sample of the campaign.
 
-| arm | fastest | in the top two | cells ranked |
-|---|---|---|---|
-| BF_incr | 0 | 48 | 179 |
-| FilCorr | 55 | 75 | 179 |
-| TSUBASA | 0 | 0 | 179 |
-| BRAID | 0 | 0 | 179 |
-| ThinBRAID | 0 | 0 | 178 |
-| CorrTrack-LSH | 70 | 107 | 179 |
-| CorrTrack-Ham | 47 | 114 | 179 |
-| ParCorr | 0 | 0 | 119 |
-| CSZ | 0 | 0 | 119 |
-| StatStream | 1 | 5 | 179 |
-| CorrJoin | 6 | 9 | 119 |
+| arm | fastest | per 100 ranked | in the top two | cells ranked |
+|---|---|---|---|---|
+| BF_incr | 0 | 0 | 48 | 179 |
+| FilCorr | 55 | 31 | 75 | 179 |
+| TSUBASA | 0 | 0 | 0 | 179 |
+| BRAID | 0 | 0 | 0 | 179 |
+| ThinBRAID | 0 | 0 | 0 | 178 |
+| CorrTrack-LSH | 70 | 39 | 107 | 179 |
+| CorrTrack-Ham | 47 | 26 | 114 | 179 |
+| ParCorr | 0 | 0 | 0 | 119 |
+| CSZ | 0 | 0 | 0 | 119 |
+| StatStream | 1 | 1 | 5 | 179 |
+| CorrJoin | 6 | 5 | 9 | 119 |
 

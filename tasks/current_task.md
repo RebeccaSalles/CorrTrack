@@ -2347,14 +2347,18 @@ Next exact step, once `oarstat -u` is empty for those jobs:
 then update the m=2000 row of `docs/synthetic_scaling_2026-09-28.md` from the regenerated table.
 Naming convention now used by every builder: `BF_vect`, `BF_incr`, `CorrTrack-LSH`, `CorrTrack-Ham`,
 and figures carry a `real_` or `synth_` prefix. The three campaign docs were rebuilt under it.
+Memory and energy: `docs/resources_2026-09-29.md`, builder `abaca/resource_tables.py`, power series in
+`~/results/synth_overnight/power.json` (kwollect keeps only recent jobs, so the real campaign has none).
+Authors-only variants of every table and figure: `AUTHORS_ONLY=1 python3 abaca/<builder>.py ... <out>_authors.md`.
 Naive-tier cost probe done (job 3151040): `docs/naive_baseline_cost_2026-09-28.md`, builder
 `abaca/naive_cost_table.py`, probe JSONs in `~/results/probes/`.
 Still open and unchanged: ASOS per-station fill (199 country files, pivot and degree screen done,
 raw density 0.219 and differenced 0.004), and the paper's results prose.
 ### 2026-09-29 (a) work-normalized cost columns in the aggregator
 Log entry (a). `ns_per_problem_pw` (wall / the cell's pair-window universe, the same denominator for every
-arm) and `ns_per_validated_pw` (the shared validation kernel's cost per surviving pair-window, which must
-not depend on the arm) are derived per (cell, arm) and printed in every summary table; the per-emitted-
+arm) and `ns_per_validated_pw` (the validation stage per survivor, which the first run showed is dominated
+by a fixed per-step cost when few candidates survive, so it is read only between arms of similar candidate
+volume) are derived per (cell, arm) and printed in every summary table; the per-emitted-
 candidate figure stays in the CSV with a note that it is not cross-arm comparable. These answer "is one of
 your ports just a slower implementation" from the campaign's own output. Test added; 174 tests pass.
 **Uncommitted**: `abaca/aggregate_campaign.py`, `test_abaca_tools.py`, docs, this file.

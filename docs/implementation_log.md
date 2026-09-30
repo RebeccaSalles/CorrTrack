@@ -10499,21 +10499,138 @@ summary table:
 - `ns_per_problem_pw` = wall / the cell's pair-window universe (bruteforce's own total_candidates). The
   SAME denominator for every arm, because the task is identical, so it is the one throughput number that
   compares across arms. An arm that prunes well is low, which is the correct reading.
-- `ns_per_validated_pw` = val_time / tested. This is the parity check. Every arm hands its survivors to the
-  same Cython validation kernel, so this number must not depend on the arm; an outlier is an implementation
-  gap in that port rather than a property of its algorithm. It is reported per arm so a reader can see it
-  instead of taking our word for it.
+- `ns_per_validated_pw` = val_time / tested. Added as a parity check on the shared validation kernel, on the
+  reasoning that every arm calls the same Cython routine so the cost per survivor should not depend on the
+  arm. The first run refuted that: on one sp500 cell it ranges from 33 ns (bruteforce, 27.9M survivors) to
+  29,133 ns (StatStream, 4,148 survivors), because the stage carries a fixed per-step cost that dominates
+  once few candidates survive. It is kept, with its description corrected to what it measures: comparable
+  between arms of similar candidate volume, and a real parity check among the arms that enumerate the whole
+  universe, not across all of them. Recorded because the claim was written before it was checked.
 - `ns_per_candidate_emitted` = cand_time / total_candidates, kept in the CSV only. It is NOT comparable
   across arms on its own (a hard-pruning arm looks expensive per candidate precisely because it avoided
   work) and is there to be read beside the candidate counts.
 
 Test added: both derived columns on a synthetic two-arm cell, checking that the problem-normalized number
-uses the universe for both arms and that two arms whose validation costs the same per pair-window report
-the same `ns_per_validated_pw`, plus that a failed arm carries the columns as None rather than dropping out.
-174 tests pass.
+uses the universe for both arms, pinning the validation column's arithmetic, and checking that a failed arm
+carries the columns as None rather than dropping out. 174 tests pass.
+
+First real output, one sp500 cell (W = 30, m = 444, T = 0.95, differenced, CorrTrack untuned, so only the
+exact arms are quotable here), ns per pair-window: bruteforce 55.8, bf_incremental 55.8, corrjoin 44.1,
+parcorr 56.2, statstream 56.4, TSUBASA 192.6, CSZ 423.3. The three arms that enumerate the whole universe
+(bruteforce, bf_incremental, TSUBASA) are directly comparable there, and the reading is that no port is
+running a crippled loop: TSUBASA costs 3.4x our bruteforce per pair-window because it maintains segment
+sketches it cannot amortize in a synchronous cell, which is its own design rather than our implementation of
+it. That is the kind of statement the column exists to support.
 
 The context this belongs to, for the paper: our bruteforce is 63 to 99 ns per pair-window and a vectorized
 BLAS naive is 27 to 59, i.e. the same tier, while the interpreted naive the competitor papers measure
 against is about 30,000 ns, 300 to 500x slower (2026-09-23 (c)). So the large speedups in that literature
 are mostly a Python-overhead artefact, and the campaign declines that free win by using the stronger
 baseline. The two new columns let a reader check that we did not take the opposite free win either.
+
+### 2026-09-29 -- every arm priced on the one standard
+
+`abaca/naive_cost_table.py` now applies the same reading to all eleven campaign arms as to the naive
+tiers: median ns per pair-window over the cells the arm ran in, and one cell of the campaign's median
+size (1,251,083,598 pair-windows) priced at that rate, with median recall beside it. Reading:
+CorrTrack-LSH 32.7 ns, FilCorr 34.3, CorrTrack-Ham 35.5, BF_incr 39.3, StatStream 58.3, CorrJoin
+78.1, BRAID 87.4, TSUBASA 105.5, BF_vect 140.2, ParCorr 167.2, ThinBRAID 222.3, CSZ 418.5, against
+the probe's naive Python at 55,030 and naive numpy at 11.0. Three caveats printed with the table:
+ParCorr, CSZ and CorrJoin cover 119 cells because class N has no such arm; ThinBRAID prices a
+different answer (recall 0.815 at precision 0.046); and the naive numpy row emits nothing, so it has
+no recall. The old trailing "campaign's own cost" section was removed as redundant.
+
+### 2026-09-29 -- memory and energy measured; authors-only variants of every table and figure
+
+**Memory.** Every arm of every cell already ran as an isolated child with an RSS sampler around it,
+so nothing had to be rerun. `abaca/resource_tables.py` (new) reads those blocks and writes
+`docs/resources_2026-09-29.md` plus `docs/figures/resources_memory.png`. Campaign medians of peak
+RSS added by the arm: CorrTrack-Ham 61 MB and CorrTrack-LSH 66 MB, the lowest of the twelve, against
+BF_vect 161 MB, and ParCorr, CSZ and ThinBRAID in the hundreds. At m=2000 on generated data every
+arm peaks at 13 to 16 GB while BF_vect peaks at 8.9 GB, because the arms must hold their reported
+set while brute force streams it.
+
+**Energy.** The RAPL counters are root-only on these nodes, so `resources.energy_j` is null in every
+run, but the N-way jobs carry `-t monitor=prom_.*`, so Grid'5000's kwollect has the node power
+series. Two findings: the campaign's own jobs (2026-09-25/26) are past kwollect's retention window
+and return 0 samples, while the synthetic jobs still have theirs, 51 of 64 with data. Energy is
+therefore reported for the synthetic campaign only, integrated per arm over its own
+[t_start_epoch, t_end_epoch], and only on the 5 cells where every arm runs past 60 s, since the
+series has one sample per 15 s; a per-arm median over whatever qualifies would compare different
+subsets (the fast arms drop out). On those cells: CorrTrack-LSH 23.9 kJ against BF_vect 608.7 kJ and
+ThinBRAID 1,197 kJ. Mean power is 126 to 133 W for every arm, so on this hardware energy is wall
+clock times a near-constant and the energy ranking is the speed ranking; the honest claim is
+proportional saving, not a separate efficiency result. The mercantour nodes have no wattmeter.
+
+**Authors-only variants.** `AUTHORS_ONLY=1` in `abaca/method_style.py` now drops any arm whose
+capability in that cell is tagged `enabled_by_us`, which removes TSUBASA, ParCorr, CSZ and CorrJoin
+from the lagged classes and FilCorr from the negative class while leaving the synchronous class
+whole. In that mode the figures carry no provenance marks, no hatching and no tier legend, since
+nothing is left to disclose, and every document opens with a banner saying what was removed. Every
+builder honours it and writes to a `_authors` name: the capability tables, the ranked and ranking
+tables, the leadership and capability tables, the per pair-window cost table, the synthetic tables,
+the resource tables, and all six figures. Both variants are generated from the same runs.
+
+### 2026-09-30 -- pooled medians replaced by per-class medians and a common-cell column
+
+The user asked what to do with medians once several arms no longer cover all 179 cells, which the
+authors-only variant makes acute (ParCorr, CSZ and CorrJoin fall to the 59 synchronous cells). A
+pooled median silently compares arms over different cell sets, and a missing class is never a random
+sample: class S is the dense end of the campaign where every arm is slowest, so an arm that only
+survives there looks worse than it is, and an arm that loses only class S looks better.
+
+Both pooled tables now print the statistic per class and space, where every surviving arm covers the
+same cells, plus one column over the cells where every displayed arm ran (119 in the full variant,
+59 in the authors-only one). `abaca/naive_cost_table.py` does it for ns per pair-window and
+`abaca/resource_tables.py` for peak RSS delta. The pooled column is kept with its n, since it is the
+right number for a single arm's own summary, and is now labelled as not cross-comparable.
+
+What the split shows, which the pooled numbers hid: CorrTrack-LSH costs 66 ns per pair-window in the
+synchronous raw class and 12 ns in the lagged differenced one, a factor of five across classes;
+FilCorr sits at 66 to 68 in class S against 30 to 32 in classes L and N. Its pooled 34.3 ns was an
+average over a mix it does not cover evenly.
+
+### 2026-09-30 -- wattmeter availability on Abaca, checked against the Grid'5000 API
+
+- No Abaca cluster exposes `wattmetre_power_watt`. The true wattmeter clusters are Lyon's nova and
+  taurus (1 Hz, verified live), and both are `default` queue, i.e. the research infrastructure this
+  account cannot submit to.
+- **nancy/grele is the usable option**: 13 nodes, queues `abaca` / `production`, Xeon 24 cores,
+  137 GB, and it reports `pdu_outlet_power_watt` continuously at 1 Hz (two outlets, dual PSU),
+  verified against the API on 2026-09-30. That is external metering at the socket, 15 times finer
+  than the 15 s ACPI series we have, and it does not need the monitor job type since it is recorded
+  all the time. nancy/graffiti is also `abaca` but exposes only the coarse BMC reading.
+- Caveat to state if we use it: grele is different hardware from mercantour3, so its timings are not
+  poolable with the campaign. The energy experiment would be its own run, a subset of cells rerun on
+  grele with every arm, reported as an energy study rather than folded into the speed tables.
+
+- Coverage made explicit in every pooled table, not only the two rate tables. The leadership table
+  gained "cells covered" and "leads per 100 covered", since an arm cannot lead a cell it does not
+  run; the capability table gained the cell count behind its recall and precision medians; the
+  ranked totals gained a per-100 share and the same caveat; and the performance profile's axis now
+  states that a cell an arm cannot run counts as unsolved, which is why arms missing a capability
+  plateau below 1. In the authors-only variant the reading changes materially: FilCorr leads 39 of
+  the 119 cells it covers (33 per 100) against CorrTrack-LSH's 118 of 179 (66 per 100), where the
+  raw counts alone would flatter CorrTrack further.
+
+### 2026-09-30 -- three further exclusions in the authors-only variant only
+
+All three requested by the user, and all conditional on `AUTHORS_ONLY`; the default variant is
+untouched and still carries ThinBRAID, T=0.70 and log speedup axes.
+
+- **ThinBRAID removed outright.** Its published algorithm does not reproduce here (median recall
+  0.815 at precision 0.046), which is a gap between that paper and its implementation rather than a
+  measurement of it. `ms.DROP_ARMS` drops it from every loader, every column header and every
+  sentence of prose that named it; the banner states the reason, so the one remaining mention in each
+  authors-only document is the explanation itself.
+- **Thresholds below 0.8 dropped** (`ms.MIN_T`), which removes T=0.70 from both campaigns' tables
+  and figures: 179 campaign cells become 143, 64 synthetic cells become 60.
+- **Linear speedup axes** (`ms.LOG_SPEEDUP`). The supervisor's point is right: a log y compresses the
+  curves and flatters the flat ones, so FilCorr looked closer to CorrTrack than it is. On the linear
+  axis the class L differenced panel reads 23x against 4.5x at T=0.95, which is the real distance.
+  The facets can no longer share a y axis in that mode, since class S tops out near 3x while the
+  lagged classes reach 20x, so each facet autoscales; the log variant keeps the shared axis.
+- Two bugs found while doing it: the resource loader matched the first `_T` in a synthetic run name
+  (`ovn_..._T0p9_..._T0.9_pos`), so every synthetic cell was read as T=0 and dropped; and the
+  capability-table medians section kept its full arm list, which made it the same width as the
+  per-cell table and let the ranking parsers read one as the other. Both fixed.
