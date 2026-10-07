@@ -14,8 +14,8 @@ Peak resident set of the arm's process, and the delta over what it had already a
 | FilCorr | 285 | 163 | 13,330 | 179 |
 | BF_incr | 307 | 165 | 13,356 | 179 |
 | CorrJoin | 422 | 253 | 11,479 | 119 |
-| StatStream | 518 | 267 | 13,621 | 179 |
 | BRAID | 366 | 163 | 13,432 | 179 |
+| StatStream | 518 | 267 | 13,621 | 179 |
 | TSUBASA | 411 | 180 | 13,526 | 179 |
 | ParCorr | 874 | 570 | 11,781 | 119 |
 | ThinBRAID | 830 | 171 | 17,319 | 178 |
@@ -31,8 +31,8 @@ Same cells, the delta only:
 | FilCorr | 55 | 8 | 7,217 | 179 |
 | BF_incr | 73 | 14 | 7,239 | 179 |
 | CorrJoin | 225 | 91 | 7,402 | 119 |
-| StatStream | 286 | 13 | 7,824 | 179 |
 | BRAID | 131 | 8 | 7,304 | 179 |
+| StatStream | 286 | 13 | 7,824 | 179 |
 | TSUBASA | 197 | 8 | 7,399 | 179 |
 | ParCorr | 690 | 385 | 7,704 | 119 |
 | ThinBRAID | 491 | 13 | 14,451 | 178 |
@@ -50,8 +50,8 @@ Pooled medians compare arms over different cell sets whenever an arm is missing 
 | FilCorr | 115 | 22 | 157 | 24 | 165 | 27 | 52 |
 | BF_incr | 117 | 27 | 159 | 41 | 159 | 40 | 65 |
 | CorrJoin | 359 | 159 | 640 | 198 |  |  | 225 |
-| StatStream | 402 | 192 | 624 | 188 | 594 | 205 | 290 |
 | BRAID | 107 | 22 | 220 | 126 | 229 | 128 | 125 |
+| StatStream | 402 | 192 | 624 | 188 | 594 | 205 | 290 |
 | TSUBASA | 119 | 43 | 307 | 197 | 316 | 195 | 189 |
 | ParCorr | 693 | 604 | 1,103 | 645 |  |  | 690 |
 | ThinBRAID | 475 | 254 | 3,662 | 1,106 | 7,226 | 2,303 | 475 |
@@ -71,8 +71,8 @@ The same arms on generated data, where m is an axis rather than a constant:
 | FilCorr | 1,013 | 205 | 13,432 | 64 |
 | BF_incr | 1,025 | 208 | 13,774 | 64 |
 | CorrJoin | 1,208 | 261 | 14,004 | 64 |
-| StatStream | 1,200 | 281 | 14,376 | 64 |
 | BRAID | 1,142 | 211 | 15,288 | 64 |
+| StatStream | 1,200 | 281 | 14,376 | 64 |
 | TSUBASA | 1,185 | 221 | 16,319 | 64 |
 | ParCorr | 1,535 | 347 | 14,907 | 64 |
 | ThinBRAID | 1,097 | 212 | 14,384 | 64 |
@@ -88,8 +88,8 @@ Peak RSS at m=2000 only, the largest cells of the study:
 | FilCorr | 13,426 | 13,337 | 13,432 | 4 |
 | BF_incr | 13,722 | 13,662 | 13,774 | 4 |
 | CorrJoin | 13,892 | 13,749 | 14,004 | 4 |
-| StatStream | 14,361 | 14,326 | 14,376 | 4 |
 | BRAID | 15,241 | 15,167 | 15,288 | 4 |
+| StatStream | 14,361 | 14,326 | 14,376 | 4 |
 | TSUBASA | 16,281 | 16,257 | 16,319 | 4 |
 | ParCorr | 14,874 | 14,808 | 14,907 | 4 |
 | ThinBRAID | 14,349 | 14,217 | 14,384 | 4 |
@@ -109,8 +109,8 @@ Cells used: m=1000, m=2000.
 | FilCorr | 110.8 | 48.1 | 131 | 5.09 | 5 |
 | BF_incr | 118.6 | 51.8 | 132 | 5.46 | 5 |
 | CorrJoin | 131.4 | 64.0 | 128 | 6.04 | 5 |
-| StatStream | 246.9 | 104.4 | 128 | 11.36 | 5 |
 | BRAID | 575.9 | 251.4 | 132 | 26.49 | 5 |
+| StatStream | 246.9 | 104.4 | 128 | 11.36 | 5 |
 | TSUBASA | 402.4 | 180.1 | 133 | 18.51 | 5 |
 | ParCorr | 49.1 | 20.1 | 127 | 2.86 | 5 |
 | ThinBRAID | 1,197.1 | 505.2 | 128 | 55.06 | 5 |

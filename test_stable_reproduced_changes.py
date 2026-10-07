@@ -2667,6 +2667,7 @@ class StableReproducedChangesTest(unittest.TestCase):
         # under int32's ~2.147e9 range), and that the returned dtype is int32 (the
         # accumulator's own storage, not a copy).
         ct = CorrTrack.__new__(CorrTrack)
+        ct._correlated_blocks = []
         ct._correlated_rows = None
         ct._correlated_corrs = None
         ct._correlated_count = 0

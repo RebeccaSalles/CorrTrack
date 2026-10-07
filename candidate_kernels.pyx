@@ -7,7 +7,7 @@ cimport numpy as np
 from libc.math cimport sqrt, fabs, floor, ceil, log2, log, exp, lgamma, acos, atan2, cos, sin
 from libc.math cimport M_PI, NAN
 from libc.stdlib cimport malloc, calloc, realloc, free
-from libc.string cimport memset
+from libc.string cimport memset, memcpy
 from libc.stdint cimport int64_t, uint64_t, uint8_t, int32_t
 from cython.parallel cimport prange, threadid
 
@@ -8024,3 +8024,27 @@ def validate_corr_rows_nonlinear(double[:, :] data,
                 accepted_view[i] = <uint8_t>1
 
     return accepted, corrs, dists, valid, constants, spiked
+
+
+def append_correlated_block(int64_t[:, ::1] rows,
+                            double[::1] corrs,
+                            int32_t[:, ::1] block_rows,
+                            double[::1] block_corrs,
+                            Py_ssize_t src_offset,
+                            Py_ssize_t dst_offset,
+                            Py_ssize_t count):
+    """Copy `count` canonical rows into an accumulator block, narrowing int64 to int32.
+
+    (2026-10-05) The Python side keeps the list of blocks and decides where a batch goes; this
+    carries the batch itself, so a window costs one call instead of two numpy slice assignments
+    and their casting machinery. The narrowing is the one the storage has used since 2026-09-11
+    (series indices and window size are tiny; absolute times would need 2^31 steps to overflow),
+    and the loop is nogil, so nothing inside it touches the interpreter.
+    """
+    cdef Py_ssize_t i, n = count * 5
+    cdef const int64_t* src_ptr = &rows[src_offset, 0]
+    cdef int32_t* dst_ptr = &block_rows[dst_offset, 0]
+    with nogil:
+        for i in range(n):                      # flat and contiguous, so the compiler can vectorise
+            dst_ptr[i] = <int32_t>src_ptr[i]
+        memcpy(&block_corrs[dst_offset], &corrs[src_offset], <size_t>count * sizeof(double))

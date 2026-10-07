@@ -79,9 +79,14 @@ def banner(lines):
     return lines[:1] + ["", BANNER] + lines[1:]
 
 
-def keeps(tier):
-    """False when this result is ours rather than the authors' and we are in authors-only mode."""
-    return not (AUTHORS_ONLY and tier == "enabled_by_us")
+def keeps(*tiers):
+    """False when any capability the cell exercises is ours rather than the authors'.
+
+    (2026-10-01, user) Every tier the class needs has to be checked, not just the headline one: class
+    N is lagged AND negative, so an arm whose lag search is our extension cannot appear there either,
+    whatever its negative-correlation tier says. TSUBASA was slipping through on that, present in
+    class N while absent from class L, which is impossible."""
+    return not (AUTHORS_ONLY and any(t == "enabled_by_us" for t in tiers))
 
 
 def lead(names):

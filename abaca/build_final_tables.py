@@ -79,8 +79,9 @@ for code, title, lag, tag in TABLES:
                     r = arms.get(key) or arms.get("exact_stomp" if key == "bf_incremental" else key)
                     if not isinstance(r, dict): cells.append(""); continue
                     if r.get("status") != "ok": cells.append("N/A" if r.get("status") == "N/A" else "ERR"); continue
-                    tier = r.get("supports_neg_corr") if tag == "neg" else (r.get("supports_lags") if lag != "L0" else "native")
-                    if not ms.keeps(tier): cells.append(""); continue     # authors-only mode
+                    tiers = ((r.get("supports_lags"),) if lag != "L0" else ()) + \
+                            ((r.get("supports_neg_corr"),) if tag == "neg" else ())
+                    if not ms.keeps(*tiers): cells.append(""); continue     # authors-only mode
                     s = spec(r, bf); spd = bf["wall"]/r["wall"] if r.get("wall") else None
                     cells.append(f"{f(r.get('recall'))}/{f(r.get('precision'))}/{f(s)}/{f(spd,2)}x")
                     summ.append((code, space, T, label, name, r.get("recall"), r.get("precision"), s, spd))

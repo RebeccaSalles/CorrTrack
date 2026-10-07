@@ -1195,6 +1195,20 @@ def execute_corrtrack_pass(
         record.update({k: None for k in ("step_time_min", "step_time_q1", "step_time_median", "step_time_q3", "step_time_max",
                                          "step_time_whisker_lo", "step_time_whisker_hi", "step_time_outliers", "step_time_mean")})
 
+    # (2026-10-05) CORRTRACK_STEP_TIMES=<dir>: also keep the per-step series itself, not only its
+    # quantiles, so a probe can say WHERE the slow windows fall in the stream (warm-up or recurring).
+    # Off unless the variable is set, and it only writes a file; nothing else in the pass changes.
+    _step_dir = os.environ.get("CORRTRACK_STEP_TIMES")
+    if _step_dir and _st.size:
+        try:
+            os.makedirs(_step_dir, exist_ok=True)
+            _safe = "".join(ch if ch.isalnum() or ch in "_.-" else "_" for ch in f"{dataset_id}_{run_kind}")
+            with open(os.path.join(_step_dir, f"{_safe}_{os.getpid()}.json"), "w") as _fh:
+                json.dump({"dataset_id": dataset_id, "run_kind": run_kind,
+                           "step_seconds": [float(v) for v in _st]}, _fh)
+        except OSError:
+            pass
+
     if artifact_active and getattr(corrtrack, "_artifact_save_maxlag", True):
         _t0 = time.time()
         corrtrack._save_max_lag_correlated(f"{artifact_prefix}_max_lag_correlated.csv")
@@ -3306,6 +3320,28 @@ def _normalize_bf_key(pair):
     return (id1, id2, t1, t2, w)
 
 
+# (2026-10-05) the correlated accumulator's blocks: the first is small, so a sparse run never
+# allocates megabytes it will not use, and each next block doubles up to a cap, so a dense run makes
+# a few dozen allocations over a whole stream instead of one per window. Nothing is ever copied, which
+# is the point: the doubling array it replaces copied the entire set every time it grew.
+def _append_block(rows, corrs, block_rows, block_corrs, src_offset, dst_offset, count):
+    """One batch into one accumulator block: the Cython kernel when it is built, the numpy slice
+    assignment otherwise. The kernel copies flat and narrows int64 to int32 in a nogil loop, which
+    measures about 8% faster than the slice pair over a 1000-window stream and, more to the point,
+    keeps the per-window path free of interpreter work as m grows."""
+    kernel = getattr(_cand_kernels, "append_correlated_block", None) if _cand_kernels is not None else None
+    if kernel is not None:
+        kernel(np.ascontiguousarray(rows, dtype=np.int64), np.ascontiguousarray(corrs, dtype=np.float64),
+               block_rows, block_corrs, src_offset, dst_offset, count)
+        return
+    block_rows[dst_offset:dst_offset + count, :] = rows[src_offset:src_offset + count]
+    block_corrs[dst_offset:dst_offset + count] = corrs[src_offset:src_offset + count]
+
+
+_CORRELATED_BLOCK_MIN_ROWS = 1 << 16
+_CORRELATED_BLOCK_MAX_ROWS = 1 << 20
+
+
 def _canonicalize_rows(rows):
     """Vectorized replica of _normalize_bf_key for a batch of numeric candidate rows.
 
@@ -4740,8 +4776,14 @@ class CorrTrack:
         # accumulator -- see the `correlated` property below and _append_correlated_numeric.
         # The hot validation/monitor recording path appends canonical int rows here and never
         # builds a Python string-tuple key per pair.
-        self._correlated_rows = None            # (cap, 5) int32, canonical orientation
-        self._correlated_corrs = None           # (cap,) float64
+        # (2026-10-05) segmented storage: a list of fixed-size blocks, not one array that doubles.
+        # The doubling was visible in the per-window latency -- the windows where it reallocated and
+        # copied ran 2x, 2.7x, 4.9x and 7.9x the median window, growing as the array grew (probe job
+        # 3170213). Blocks never copy on append, so the per-window cost stays flat; the contiguous
+        # view every consumer wants is built once, lazily, and the blocks are collapsed into it.
+        self._correlated_blocks = []            # [[rows (B,5) int32, corrs (B,) float64, used]]
+        self._correlated_rows = None            # materialised contiguous view, built lazily
+        self._correlated_corrs = None           # materialised contiguous view, built lazily
         self._correlated_count = 0
         self._correlated_cap = 0
         self._correlated_legacy_dict = {}       # writes from the opt-in string paths only
@@ -5451,12 +5493,17 @@ class CorrTrack:
         return self.window_index[-1]+1
 
     def _map_series_to_nodes(self):
+        if not self.parallel_sketch:
+            # (2026-10-06) the shard list only changes when the series set does; rebuilding it every
+            # step also defeated the per-shard cache in _get_sketches, which keys on its identity
+            self.n_sketch_nodes = 1
+            key = (id(self.series_ids), len(self.series_ids))
+            if getattr(self, "_map_ids_key", None) != key or not self.map_ids:
+                self.map_ids = [list(self.series_ids.keys())]
+                self._map_ids_key = key
+            return
         ids = list(self.series_ids.keys())
         n_ids = len(ids)
-        if not self.parallel_sketch:
-            self.n_sketch_nodes = 1
-            self.map_ids = [ids]
-            return
 
         self.n_sketch_nodes = min(self.n_nodes, n_ids) if n_ids > 0 else 0
         if not getattr(self, "_parallel_warned", False):
@@ -6868,26 +6915,64 @@ class CorrTrack:
             if copy_n > 0:
                 fixed[:copy_n] = corr_values[:copy_n]
             corr_values = fixed
-        count = int(self._correlated_count)
-        capacity = int(self._correlated_cap)
-        need = count + n_rows
-        if capacity < need or self._correlated_rows is None:
-            new_capacity = max(1024, capacity if capacity > 0 else 0)
-            while new_capacity < need:
-                new_capacity *= 2
-            new_rows = np.empty((new_capacity, 5), dtype=np.int32)
-            new_corrs = np.empty((new_capacity,), dtype=np.float64)
-            if count > 0 and self._correlated_rows is not None:
-                new_rows[:count, :] = self._correlated_rows[:count, :]
-                new_corrs[:count] = self._correlated_corrs[:count]
-            self._correlated_rows = new_rows
-            self._correlated_corrs = new_corrs
-            self._correlated_cap = new_capacity
-        self._correlated_rows[count:need, :] = rows
-        self._correlated_corrs[count:need] = corr_values
-        self._correlated_count = need
+        blocks = getattr(self, "_correlated_blocks", None)
+        if blocks is None:                      # objects built with __new__ (tests, merges)
+            blocks = self._correlated_blocks = []
+        # fast path: the batch fits in the open block, which is the common case once the block size
+        # has grown past a window's output, so a window costs two slice assignments and nothing else
+        if blocks:
+            block = blocks[-1]
+            used = block[2]
+            if used + n_rows <= block[0].shape[0]:
+                _append_block(rows, corr_values, block[0], block[1], 0, used, n_rows)
+                block[2] = used + n_rows
+                written = n_rows
+            else:
+                written = 0
+        else:
+            written = 0
+        while written < n_rows:
+            if not blocks or blocks[-1][2] >= blocks[-1][0].shape[0]:
+                grown = (blocks[-1][0].shape[0] * 2) if blocks else _CORRELATED_BLOCK_MIN_ROWS
+                cap = max(min(grown, _CORRELATED_BLOCK_MAX_ROWS), n_rows - written)
+                blocks.append([np.empty((cap, 5), dtype=np.int32), np.empty((cap,), dtype=np.float64), 0])
+            block = blocks[-1]
+            used = block[2]
+            take = min(block[0].shape[0] - used, n_rows - written)
+            _append_block(rows, corr_values, block[0], block[1], written, used, take)
+            block[2] = used + take
+            written += take
+        self._correlated_count = int(self._correlated_count) + n_rows
+        self._correlated_rows = None            # the materialised view is stale now
+        self._correlated_corrs = None
         self._correlated_view_cache = None
         self.artifact_bookkeeping_time += time.perf_counter() - t0
+
+    def _materialise_correlated(self):
+        """The blocks as one contiguous (rows, corrs) pair, built at most once per append batch.
+
+        The blocks are then replaced by the materialised arrays, so a second read costs nothing and
+        the memory returns to one copy of the set; appends after that start a fresh block."""
+        n = int(self._correlated_count)
+        if self._correlated_rows is not None and self._correlated_corrs is not None:
+            return self._correlated_rows, self._correlated_corrs
+        if n <= 0:
+            return np.empty((0, 5), dtype=np.int32), np.empty((0,), dtype=np.float64)
+        blocks = getattr(self, "_correlated_blocks", None) or []
+        if len(blocks) == 1 and blocks[0][2] == n:
+            rows, corrs = blocks[0][0][:n], blocks[0][1][:n]
+        else:
+            rows = np.empty((n, 5), dtype=np.int32)
+            corrs = np.empty((n,), dtype=np.float64)
+            at = 0
+            for block_rows, block_corrs, used in blocks:
+                if used:
+                    rows[at:at + used, :] = block_rows[:used]
+                    corrs[at:at + used] = block_corrs[:used]
+                    at += used
+            self._correlated_blocks = [[rows, corrs, n]]
+        self._correlated_rows, self._correlated_corrs = rows, corrs
+        return rows, corrs
 
     def correlated_rows(self):
         """The persistent correlated set as (rows (N,5) canonical, corrs (N,) float64).
@@ -6908,12 +6993,8 @@ class CorrTrack:
         `_canonicalize_rows` use, were checked directly and are dtype-position-agnostic
         or route through `_canonicalize_rows` before anything dtype-sensitive) -- so this
         method returns the accumulator's own array as-is, no redundant copy."""
-        n = int(self._correlated_count)
+        acc_rows, acc_corrs = self._materialise_correlated()
         legacy = self._correlated_legacy_dict
-        acc_rows = (self._correlated_rows[:n] if n > 0 and self._correlated_rows is not None
-                    else np.empty((0, 5), dtype=np.int32))
-        acc_corrs = (self._correlated_corrs[:n] if n > 0 and self._correlated_corrs is not None
-                     else np.empty((0,), dtype=np.float64))
         if not legacy:
             return np.ascontiguousarray(acc_rows), np.ascontiguousarray(acc_corrs)
         ids_lookup = self.series_ids
@@ -6968,6 +7049,7 @@ class CorrTrack:
     def correlated(self, value):
         # `self.correlated = {}` (reset) and, defensively, assignment of a full dict
         # (e.g. an external merge). Anything falsy clears; a dict is absorbed as legacy.
+        self._correlated_blocks = []
         self._correlated_rows = None
         self._correlated_corrs = None
         self._correlated_count = 0
@@ -8366,13 +8448,27 @@ class CorrTrack:
 
         node_inputs_thread = []
         max_nodes = min(self.n_sketch_nodes, len(self.map_ids))
+        shard_cache = getattr(self, "_shard_cache", None)
+        if shard_cache is None:
+            shard_cache = self._shard_cache = {}
         for s in range(max_nodes):
             shard_ids = self.map_ids[s]
-            ids_subset = [id_ for id_ in shard_ids if id_ in self.series_ids]
+            # (2026-10-06) the id subset and its row indices depend only on the shard list and the series
+            # map, both of which keep their identity between steps; two O(m) Python comprehensions per step
+            # become one per series set. When the shard is every series in order (the sequential case) the
+            # step is used as it is, without the fancy-index copy.
+            cached = shard_cache.get(s)
+            if cached is None or cached[0] is not shard_ids or cached[1] is not self.series_ids:
+                ids_subset = [id_ for id_ in shard_ids if id_ in self.series_ids]
+                series_idx = np.asarray([self.series_ids[id_] for id_ in ids_subset], dtype=np.intp)
+                identity = (series_idx.size == new_data_step_series.shape[0]
+                            and bool(np.array_equal(series_idx, np.arange(series_idx.size))))
+                cached = (shard_ids, self.series_ids, ids_subset, series_idx, identity)
+                shard_cache[s] = cached
+            ids_subset, series_idx, identity = cached[2], cached[3], cached[4]
             if not ids_subset:
                 continue
-            series_idx = [self.series_ids[id_] for id_ in ids_subset]
-            node_series = new_data_step_series[series_idx, :]
+            node_series = new_data_step_series if identity else new_data_step_series[series_idx, :]
             node_new = np.vstack([new_data_step_index, node_series])
             node_inputs_thread.append((self, s, node_new, ids_subset, verbose, testing))
 
@@ -8409,7 +8505,10 @@ class CorrTrack:
         for entry in iter_results:
             s, node_obj, sks, parts = entry
             self.sketch_nodes[s] = node_obj
-            merged_sketches.update(sks)
+            if len(iter_results) == 1:
+                merged_sketches = sks           # one node (the sequential case): nothing to merge, no copy
+            else:
+                merged_sketches.update(sks)
             for g, partition in enumerate(parts):
                 if g >= self.n_grids:
                     break
@@ -8421,7 +8520,12 @@ class CorrTrack:
 
         curr_time = self._curr_startTime()
         t0 = time.perf_counter() if self.profile_enabled else None
-        sid_list = [sid for sid, idx in sorted(self.series_ids.items(), key=lambda item: item[1])]
+        sid_cached = getattr(self, "_sid_list_cache", None)
+        if sid_cached is None or sid_cached[0] is not self.series_ids or sid_cached[1] != len(self.series_ids):
+            sid_cached = (self.series_ids, len(self.series_ids),
+                          [sid for sid, idx in sorted(self.series_ids.items(), key=lambda item: item[1])])
+            self._sid_list_cache = sid_cached
+        sid_list = sid_cached[2]
         for g in range(self.n_grids):
             parts = per_grid_partition[g]
             if not parts:
@@ -9903,8 +10007,9 @@ class CorrTrack:
     def _update_curr_sketches(self,new_sketches):
         if len(self.sketches) > self.n_lagged_windows:
             del self.sketches[min(self.sketches.keys())]
-        self.sketches[self._curr_startTime()] = {}
-        self.sketches[self._curr_startTime()].update(new_sketches)
+        # (2026-10-06) the step's dict is fresh every step and nothing mutates it afterwards, so it is kept
+        # by reference rather than copied into a new one
+        self.sketches[self._curr_startTime()] = new_sketches if isinstance(new_sketches, dict) else dict(new_sketches)
 
     def _update_curr_sketches_multi(self, new_sketches, max_windows=None):
         """(2026-07-28) Ported from corrtrack_release_multiwinsizes for
@@ -10646,11 +10751,13 @@ class Sketches:
                 )
                 const_flags = np.asarray(const_flags, dtype=np.uint8)
                 self._const_flags = const_flags
-                self.is_constant = {}
-                for idx, series_id in enumerate(self.series_ids):
-                    if series_id is None:
-                        continue
-                    self.is_constant[series_id] = bool(self._const_flags[idx])
+                # (2026-10-06) the same {series: bool} dict, built in C by zip; a None id (never produced by
+                # the callers here) still takes the original filtered path
+                flags_list = const_flags.astype(bool).tolist()
+                if None in self.series_ids:
+                    self.is_constant = {sid: flags_list[i] for i, sid in enumerate(self.series_ids) if sid is not None}
+                else:
+                    self.is_constant = dict(zip(self.series_ids, flags_list))
             else:
                 const_flags = []
                 for idx, series_id in enumerate(self.series_ids):
@@ -11825,15 +11932,22 @@ class Sketches:
         window_size = self.window_size
         raw_matrix = np.empty((n_series, self.n_vectors), dtype=np.float64)
         apply_diff = False
+        base_skip = 0
         if same_start and len(self.basicDots) >= 2:
             base = np.ascontiguousarray(np.asarray(self.basicDots[-2], dtype=np.float64))
+            base_full = base
             diff_arg = np.empty((0, self.n_vectors), dtype=np.float64)
             if len(self.basicFeatureSums) >= 2:
                 base_feature_sums = np.asarray(self.basicFeatureSums[-2], dtype=np.float64)
             else:
                 base_feature_sums = np.zeros((n_series, 0), dtype=np.float64)
         else:
-            base = np.ascontiguousarray(np.asarray(self.basicDots[0], dtype=np.float64)[:, 1:, :])
+            # (2026-10-06) the kernel skips the oldest basic window itself (base_skip=1), so the cache
+            # is no longer sliced and copied contiguous on every step; the numpy fallback below still
+            # gets the sliced view it expects
+            base_full = np.asarray(self.basicDots[0], dtype=np.float64)
+            base_skip = 1
+            base = base_full[:, 1:, :]
             diff_arg = np.ascontiguousarray(np.asarray(self.diff_toggleVector, dtype=np.float64)[:base.shape[1], :])
             apply_diff = True
             if self.basicFeatureSums:
@@ -11867,7 +11981,7 @@ class Sketches:
                 try:
                     t0 = time.perf_counter() if getattr(self, "_profile_callback", None) is not None else None
                     updated, raw_matrix, norm_matrix = _cy_incremental_combine_and_normalize(
-                        np.ascontiguousarray(base, dtype=np.float64),
+                        np.ascontiguousarray(base_full, dtype=np.float64),
                         np.ascontiguousarray(diff_arg, dtype=np.float64),
                         np.ascontiguousarray(new_feature_blocks, dtype=np.float64),
                         np.ascontiguousarray(weights_subset, dtype=np.float64),
@@ -11875,6 +11989,7 @@ class Sketches:
                         random_sums,
                         int(norm_mode),
                         int(apply_diff),
+                        int(base_skip),
                     )
                     if t0 is not None:
                         self._profile_add("sketch.incremental_kernel", time.perf_counter() - t0)
@@ -12326,8 +12441,10 @@ class Sketches:
         if(testing and sketches):
             self._print_state()
 
-        # Return copies so the caller can safely merge
-        return dict(self.sketches), list(self.partitions)
+        # (2026-10-06) the dict itself, not a copy: every path here assigns a fresh dict to self.sketches
+        # instead of mutating the old one, so the caller's reference can never change underneath it. The
+        # copy made m dictionary insertions per step for nothing.
+        return self.sketches, list(self.partitions)
 
 def pearson_from_five_sums(n, sx, sy, sxx, syy, sxy, out_dtype=np.float64):
     """Pearson correlation from the five sufficient statistics, vectorized.

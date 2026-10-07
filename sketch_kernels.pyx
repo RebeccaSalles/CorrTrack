@@ -292,10 +292,19 @@ def incremental_combine_and_normalize(double[:, :, ::1] base_dots,
                                       double[:] mean_vec,
                                       double[:] random_sums,
                                       int norm_mode,
-                                      int apply_diff):
-    """Build the next incremental dot cache and normalized sketch in one pass."""
+                                      int apply_diff,
+                                      Py_ssize_t base_skip=0):
+    """Build the next incremental dot cache and normalized sketch in one pass.
+
+    (2026-10-06) `base_skip` leading basic windows of `base_dots` are ignored. The caller used to
+    drop the oldest basic window by slicing it off and making the result contiguous, which copied
+    the whole dot cache (m x basic windows x n_vectors doubles, 2.3 MB at m=500) on every step only
+    for this kernel to copy it again into `updated`; reading past the first window here removes the
+    first copy. Results are identical, since the same values are read in the same order."""
     cdef Py_ssize_t n_series = base_dots.shape[0]
-    cdef Py_ssize_t n_base = base_dots.shape[1]
+    if base_skip < 0 or base_skip > base_dots.shape[1]:
+        raise ValueError("base_skip out of range")
+    cdef Py_ssize_t n_base = base_dots.shape[1] - base_skip
     cdef Py_ssize_t n_vectors = base_dots.shape[2]
     cdef Py_ssize_t n_new = new_blocks.shape[1]
     cdef Py_ssize_t basic_window = new_blocks.shape[2] if new_blocks.ndim == 3 else 0
@@ -338,7 +347,7 @@ def incremental_combine_and_normalize(double[:, :, ::1] base_dots,
 
             for b in range(n_base):
                 for v in range(n_vectors):
-                    val = base_dots[s, b, v]
+                    val = base_dots[s, b + base_skip, v]
                     if apply_diff:
                         val = val * diff_toggle[b, v]
                     updated_mv[s, b, v] = val

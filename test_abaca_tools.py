@@ -141,11 +141,11 @@ def test_statstream_tuning_grid_respects_lemma_7_window_bound():
 
 
 def test_work_normalized_columns_use_the_same_denominator_for_every_arm():
-    # (2026-09-29) The question a reader asks about a paper that compares its own ports is whether one of
-    # them was implemented worse than the others. Two derived numbers answer it from the campaign's own
-    # output: ns_per_problem_pw divides each arm's wall by the SAME denominator, the cell's pair-window
-    # universe (bruteforce's total_candidates), so it compares across arms; ns_per_validated_pw is the
-    # shared validation kernel's cost per surviving pair-window, which must not depend on the arm.
+    # (2026-09-29) ns_per_problem_pw divides each arm's wall by the SAME denominator, the cell's pair-window
+    # universe (bruteforce's total_candidates), so it compares across arms: that is the number that answers
+    # whether one port is simply slower than the others. ns_per_validated_pw is the validation stage per
+    # surviving pair-window; this test only pins its arithmetic (it is comparable between arms of similar
+    # candidate volume, not across all of them -- see the note where it is computed).
     from abaca.aggregate_campaign import load
     import json as _json
     cell = {
@@ -167,7 +167,7 @@ def test_work_normalized_columns_use_the_same_denominator_for_every_arm():
     # same denominator for both ok arms: 1e9 * wall / 1000
     assert rows["bruteforce"]["ns_per_problem_pw"] == pytest.approx(1e7)
     assert rows["corrtrack"]["ns_per_problem_pw"] == pytest.approx(2e6)
-    # the shared validation kernel: 8 s over 1000 vs 0.4 s over 50, i.e. the same cost per pair-window
+    # arithmetic of the validation column: 8 s over 1000 and 0.4 s over 50 are the same cost per pair-window
     assert rows["bruteforce"]["ns_per_validated_pw"] == pytest.approx(8e6)
     assert rows["corrtrack"]["ns_per_validated_pw"] == pytest.approx(8e6)
     # a failed arm carries the columns as None rather than being absent

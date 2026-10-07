@@ -16,9 +16,9 @@ Peak resident set of the arm's process, and the delta over what it had already a
 | FilCorr | 264 | 163 | 5,663 | 95 |
 | BF_incr | 269 | 165 | 6,498 | 143 |
 | CorrJoin | 360 | 253 | 1,086 | 47 |
-| StatStream | 435 | 267 | 7,166 | 143 |
 | BRAID | 333 | 163 | 6,572 | 143 |
-| TSUBASA | 373 | 180 | 6,665 | 95 |
+| StatStream | 435 | 267 | 7,166 | 143 |
+| TSUBASA | 253 | 180 | 1,027 | 47 |
 | ParCorr | 821 | 570 | 2,444 | 47 |
 | CSZ | 792 | 467 | 2,413 | 47 |
 
@@ -32,9 +32,9 @@ Same cells, the delta only:
 | FilCorr | 27 | 8 | 3,627 | 95 |
 | BF_incr | 49 | 14 | 3,648 | 143 |
 | CorrJoin | 175 | 91 | 711 | 47 |
-| StatStream | 229 | 13 | 4,271 | 143 |
 | BRAID | 124 | 8 | 3,705 | 143 |
-| TSUBASA | 151 | 8 | 3,797 | 95 |
+| StatStream | 229 | 13 | 4,271 | 143 |
+| TSUBASA | 44 | 20 | 503 | 47 |
 | ParCorr | 637 | 385 | 2,092 | 47 |
 | CSZ | 596 | 310 | 2,073 | 47 |
 
@@ -50,9 +50,9 @@ Pooled medians compare arms over different cell sets whenever an arm is missing 
 | FilCorr | 85 | 14 | 87 | 19 |  |  | 25 |
 | BF_incr | 81 | 23 | 103 | 37 | 123 | 36 | 34 |
 | CorrJoin | 321 | 151 |  |  |  |  | 175 |
-| StatStream | 366 | 146 | 589 | 151 | 576 | 150 | 216 |
 | BRAID | 79 | 14 | 180 | 122 | 202 | 123 | 24 |
-| TSUBASA | 87 | 35 |  |  | 277 | 192 | 44 |
+| StatStream | 366 | 146 | 589 | 151 | 576 | 150 | 216 |
+| TSUBASA | 87 | 35 |  |  |  |  | 44 |
 | ParCorr | 689 | 556 |  |  |  |  | 637 |
 | CSZ | 692 | 557 |  |  |  |  | 596 |
 
@@ -70,8 +70,8 @@ The same arms on generated data, where m is an axis rather than a constant:
 | FilCorr | 1,026 | 205 | 13,432 | 60 |
 | BF_incr | 1,025 | 208 | 13,774 | 60 |
 | CorrJoin | 474 | 433 | 497 | 4 |
-| StatStream | 1,201 | 281 | 14,376 | 60 |
 | BRAID | 1,141 | 211 | 15,288 | 60 |
+| StatStream | 1,201 | 281 | 14,376 | 60 |
 | TSUBASA | 316 | 311 | 320 | 4 |
 | ParCorr | 791 | 657 | 859 | 4 |
 | CSZ | 711 | 590 | 885 | 4 |
@@ -85,8 +85,8 @@ Peak RSS at m=2000 only, the largest cells of the study:
 | CorrTrack-Ham | 13,439 | 13,402 | 13,443 | 4 |
 | FilCorr | 13,426 | 13,337 | 13,432 | 4 |
 | BF_incr | 13,722 | 13,662 | 13,774 | 4 |
-| StatStream | 14,361 | 14,326 | 14,376 | 4 |
 | BRAID | 15,241 | 15,167 | 15,288 | 4 |
+| StatStream | 14,361 | 14,326 | 14,376 | 4 |
 
 ## 3. Energy, synthetic campaign
 
@@ -101,8 +101,8 @@ Cells used: m=1000, m=2000.
 | CorrTrack-Ham | 31.3 | 13.4 | 127 | 1.45 | 5 |
 | FilCorr | 110.8 | 48.1 | 131 | 5.09 | 5 |
 | BF_incr | 118.6 | 51.8 | 132 | 5.46 | 5 |
-| StatStream | 246.9 | 104.4 | 128 | 11.36 | 5 |
 | BRAID | 575.9 | 251.4 | 132 | 26.49 | 5 |
+| StatStream | 246.9 | 104.4 | 128 | 11.36 | 5 |
 
 The mean power column is the reading to keep in mind: it is within a few watts for every arm, so on this hardware energy is wall clock multiplied by a near-constant. The energy ranking is therefore the speed ranking, and the honest claim is that CorrTrack saves energy in proportion to the time it saves, not that it is more efficient per unit of work in some further sense. A wattmeter node, which the mercantour cluster does not have, would be needed to say more.
 

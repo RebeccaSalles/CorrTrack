@@ -27,6 +27,17 @@ import matplotlib.pyplot as plt
 import method_style as ms
 
 ARM_KEY = {k: n for k, n in ms.ARMS}
+
+
+def order(names):
+    """The shared legend order, with BRAID ahead of StatStream (2026-10-01, user): in this document the
+    two sit side by side and BRAID, which reports the exact set here, reads better before the arm that
+    emits its own decision. Only the resource tables and figures use this; every other artifact keeps
+    the campaign ranking order untouched."""
+    out = [n for n in ms.lead(names)]
+    if "BRAID" in out and "StatStream" in out:
+        out.insert(out.index("StatStream"), out.pop(out.index("BRAID")))
+    return out
 MIN_WALL_FOR_ENERGY = 60.0      # 15 s sampling: shorter arms are not separable from their neighbours
 
 
@@ -52,8 +63,9 @@ def load(root, power_path=None):
             r = a.get("resources") or {}
             lagged = "_L0_" not in (d.get("cell") or "")
             neg = (d.get("cell") or "").endswith("_neg")
-            tier = a.get("supports_neg_corr") if neg else (a.get("supports_lags") if lagged else "native")
-            if label != ms.BF and (not ms.keeps(tier) or not ms.kept_arm(label)):     # authors-only mode
+            tiers = ((a.get("supports_lags"),) if lagged else ()) + \
+                    ((a.get("supports_neg_corr"),) if neg else ())
+            if label != ms.BF and (not ms.keeps(*tiers) or not ms.kept_arm(label)):     # authors-only mode
                 continue
             arms[label] = dict(wall=a.get("wall"), recall=a.get("recall"),
                                peak=r.get("peak_rss_mb"), peak_delta=r.get("peak_rss_delta_mb"),
@@ -102,7 +114,7 @@ def per_class_table(cells, field, label, unit):
     class, and a missing class is never a random sample of the campaign."""
     COLS = [(c, sp) for c in ("S", "L", "N") for sp in ("raw", "differenced")]
     tagged = [(cls_of(c[2] or c[0]), c) for c in cells]
-    present = [n for n in [ms.BF] + ms.lead(ms.NAMES) if any(n in c[3] for c in cells)]
+    present = [n for n in [ms.BF] + order(ms.NAMES) if any(n in c[3] for c in cells)]
     common = [c for c in cells if all(n in c[3] and c[3][n].get(field) for n in present)]
     out = ["| arm | " + " | ".join(f"{c} {sp[:4]}" for c, sp in COLS) + " | common cells |",
            "|---|" + "---|" * (len(COLS) + 1)]
@@ -120,7 +132,7 @@ def per_class_table(cells, field, label, unit):
 
 
 def median_table(cells, field, label, unit, arms=None):
-    names = arms or ([ms.BF] + ms.lead(ms.NAMES))
+    names = arms or ([ms.BF] + order(ms.NAMES))
     rows = []
     for n in names:
         v = [a[n][field] for _, _, _, a, _ in cells if n in a and a[n].get(field)]
@@ -131,26 +143,119 @@ def median_table(cells, field, label, unit, arms=None):
     return out
 
 
+def memory_matrix(camp, path):
+    """The same comparison in one panel: arms against the six (class, space) problems, each entry the
+    median ratio of the arm's peak memory to the BF_vect of the same cell.
+
+    Six dot-plot panels said this with twenty times the ink. A matrix keeps what matters, the number
+    and its direction against 1.0, and drops what the panels spent their space on, the spread, which
+    the tables in this document carry exactly."""
+    import numpy as np
+    from matplotlib.colors import TwoSlopeNorm
+
+    cols = [(c, sp) for c in ("S", "L", "N") for sp in ("raw", "differenced")]
+    names = [n for n in order(ms.NAMES) if any(n in a for _, _, _, a, _ in camp)]
+    tagged = [(cls_of(c[2] or c[0]), c) for c in camp]
+    M = np.full((len(names), len(cols)), np.nan)
+    anchor = {}
+    for j, (cls, sp) in enumerate(cols):
+        sl = [c for key, c in tagged if key == (cls, sp)]
+        bf = [c[3][ms.BF]["peak_delta"] for c in sl if c[3].get(ms.BF, {}).get("peak_delta")]
+        anchor[(cls, sp)] = st.median(bf) if bf else None
+        for i, n in enumerate(names):
+            r = [c[3][n]["peak_delta"] / c[3][ms.BF]["peak_delta"] for c in sl
+                 if n in c[3] and c[3][n].get("peak_delta") and c[3][ms.BF].get("peak_delta")]
+            if r:
+                M[i, j] = st.median(r)
+    # (2026-10-01, user) rearrange both axes so the missing classes end up together: columns by how
+    # many arms cover them, rows by what each arm covers. The unavailable cells then form one block in
+    # the corner, drawn once, instead of six labels scattered through the matrix.
+    corder = sorted(range(len(cols)), key=lambda j: (-int(np.sum(~np.isnan(M[:, j]))), j))
+    cols = [cols[j] for j in corder]
+    M = M[:, corder]
+    rorder = sorted(range(len(names)), key=lambda i: (-int(np.sum(~np.isnan(M[i]))),
+                                                      tuple(np.isnan(M[i]).astype(int)), i))
+    names = [names[i] for i in rorder]
+    M = M[rorder]
+    fig, ax = plt.subplots(figsize=(9.5, 0.46 * len(names) + 3.2))
+    lo, hi = np.nanmin(M), np.nanmax(M)
+    # colour on log10 of the ratio, grey at 1.0: below means less memory than brute force, above more
+    im = ax.imshow(np.log10(M), cmap="PuOr_r", aspect="auto",
+                   norm=TwoSlopeNorm(vcenter=0.0, vmin=np.log10(lo), vmax=np.log10(hi)))
+    from matplotlib.patches import Rectangle
+    for i in range(len(names)):
+        j = 0
+        while j < len(cols):
+            if np.isnan(M[i, j]):                    # one block per contiguous run of missing classes
+                k = j
+                while k + 1 < len(cols) and np.isnan(M[i, k + 1]):
+                    k += 1
+                ax.add_patch(Rectangle((j - 0.5, i - 0.5), k - j + 1, 1, facecolor="#f2f2f2",
+                                       edgecolor="white", linewidth=1.5, zorder=2))
+                ax.text((j + k) / 2, i, "capability not available", ha="center", va="center",
+                        fontsize=8, color="#8a8a8a", style="italic", zorder=3)
+                j = k + 1
+                continue
+            ax.text(j, i, f"{M[i, j]:.2f}", ha="center", va="center", fontsize=9, zorder=3,
+                    color="white" if abs(np.log10(M[i, j])) > 0.62 else "#222222")
+            j += 1
+    ax.set_xticks(range(len(cols)))
+    ax.set_xticklabels([f"{c}\n{sp}\nBF_vect {anchor[(c, sp)]:,.0f} MB" if anchor[(c, sp)] else f"{c}\n{sp}"
+                        for c, sp in cols], fontsize=8)
+    ax.set_yticks(range(len(names))); ax.set_yticklabels(names, fontsize=9)
+    ax.set_xticks([x - 0.5 for x in range(1, len(cols))], minor=True)
+    ax.set_yticks([y - 0.5 for y in range(1, len(names))], minor=True)
+    ax.grid(which="minor", color="white", linewidth=1.5); ax.tick_params(which="minor", length=0)
+    cb = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02,
+                      ticks=[np.log10(v) for v in (0.2, 0.5, 1, 2, 5, 10, 30) if lo <= v <= hi])
+    cb.ax.set_yticklabels([f"{v:g}x" for v in (0.2, 0.5, 1, 2, 5, 10, 30) if lo <= v <= hi], fontsize=8)
+    ax.set_title("Peak memory relative to BF_vect on the same cell, median per class and space\n"
+                 "Below 1.00 is less memory than brute force, above 1.00 more; the heading gives BF_vect's own\n"
+                 "footprint, so a ratio reads back into megabytes. Rows and columns are ordered by coverage",
+                 fontsize=10)
+    fig.tight_layout()
+    fig.savefig(path, dpi=140); plt.close(fig)
+
+
 def memory_figure(camp, synth, path):
     """Left: what each arm's process peaks at across the campaign. Right: how that grows with m."""
-    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
-    names = [n for n in [ms.BF] + ms.lead(ms.NAMES) if any(n in a for _, _, _, a, _ in camp)]
-    ax = axes[0]
-    for i, n in enumerate(names):
-        v = sorted(a[n]["peak_delta"] for _, _, _, a, _ in camp if n in a and a[n].get("peak_delta"))
-        if not v:
-            continue
-        y = len(names) - i
-        ax.plot([v[len(v) // 10], v[9 * len(v) // 10]], [y, y], color=ms.COLOR[n], linewidth=2.5, alpha=0.5)
-        ax.plot(st.median(v), y, marker="o", markersize=9, color=ms.COLOR[n])
-    ax.set_yticks(range(len(names), 0, -1)); ax.set_yticklabels(names)
-    ax.set_xscale("log"); ax.grid(axis="x", alpha=0.25, linewidth=0.6)
-    ax.set_xlabel("peak resident memory added by the arm (MB, log scale)")
-    ax.set_title("Final campaign, 179 cells: median and 10th to 90th percentile", fontsize=11)
-    ax = axes[1]
+    # (2026-10-01, user) three corrections to this panel, in order of discovery: the absolute medians
+    # pooled cells that are not the same problem, so the comparison is paired against the BF_vect of
+    # the SAME cell; coverage differs per arm, so it is read per capability class; and the two spaces
+    # are not comparable either (CorrTrack-LSH sits at 0.84 of BF_vect in class L raw and 0.24 in class
+    # L differenced), so raw and differenced get their own row. BF_vect itself is the dashed line at
+    # 1.0 rather than a row, since its ratio to itself is 1.0 in every cell by construction.
+    fig = plt.figure(figsize=(16, 13))
+    gs = fig.add_gridspec(3, 3, height_ratios=[1.0, 1.0, 0.95], hspace=0.45, wspace=0.2)
+    names = [n for n in order(ms.NAMES) if any(n in a for _, _, _, a, _ in camp)]
+    tagged = [(cls_of(c[2] or c[0]), c) for c in camp]
+    for i, space in enumerate(("raw", "differenced")):
+        for j, cls in enumerate(("S", "L", "N")):
+            ax = fig.add_subplot(gs[i, j])
+            sl = [c for key, c in tagged if key == (cls, space)]
+            here = [n for n in names if any(n in c[3] and c[3][n].get("peak_delta") for c in sl)]
+            common = [c for c in sl if all(n in c[3] and c[3][n].get("peak_delta") for n in here)
+                      and c[3][ms.BF].get("peak_delta")]
+            for k, n in enumerate(here):
+                r = sorted(c[3][n]["peak_delta"] / c[3][ms.BF]["peak_delta"] for c in common)
+                if not r:
+                    continue
+                y = len(here) - k
+                ax.plot([r[len(r) // 4], r[3 * len(r) // 4]], [y, y], color=ms.COLOR[n], linewidth=2.5, alpha=0.5)
+                ax.plot(st.median(r), y, marker="o", markersize=8, color=ms.COLOR[n])
+            ax.axvline(1.0, color="#999999", linewidth=0.9, linestyle="--")
+            ax.set_yticks(range(len(here), 0, -1)); ax.set_yticklabels(here, fontsize=8)
+            ax.set_xlim(left=0); ax.grid(axis="x", alpha=0.25, linewidth=0.6)
+            bfv = [c[3][ms.BF]["peak_delta"] for c in common if c[3][ms.BF].get("peak_delta")]
+            ax.set_title(f"class {cls}, {space}: {len(common)} cells"
+                         + (f", BF_vect {st.median(bfv):,.0f} MB" if bfv else ""), fontsize=10)
+            ax.set_xlabel("peak memory / BF_vect, same cell (dashed: BF_vect)", fontsize=8)
+    ax = fig.add_subplot(gs[2, :])
+
+
     for n in names:
         # raw levels only, so the curve is one series per m rather than two overlaid
-        pts = sorted([(prof.get("m"), a[n]["peak"]) for name, prof, _, a, _ in synth
+        pts = sorted([(prof.get("m"), a[n]["peak"] / 1024.0) for name, prof, _, a, _ in synth
                       if n in a and a[n].get("peak") and "_diff" not in name and prof.get("m")], key=lambda t: t[0])
         agg = {}
         for m, v in pts:
@@ -159,15 +264,17 @@ def memory_figure(camp, synth, path):
         if xs:
             ax.plot(xs, [st.median(agg[x]) for x in xs], marker="o", markersize=5, color=ms.COLOR[n],
                     linewidth=2.2 if n.startswith("CorrTrack") else 1.2, label=n)
-    ax.set_xscale("log"); ax.set_yscale("log"); ax.grid(alpha=0.25, linewidth=0.6)
+    ax.set_xscale("log"); ax.set_ylim(bottom=0); ax.grid(alpha=0.25, linewidth=0.6)
     ax.set_xticks([125, 250, 500, 1000, 2000]); ax.set_xticklabels(["125", "250", "500", "1000", "2000"])
     ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
-    ax.set_xlabel("number of series m"); ax.set_ylabel("peak resident memory (MB, log scale)")
+    ax.set_xlabel("number of series m (log spacing)"); ax.set_ylabel("peak resident memory (GB)")
     ax.set_title("Synthetic campaign: peak memory against m", fontsize=11)
     if ax.get_legend_handles_labels()[0]:
         ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
-    fig.suptitle("Memory per arm, measured around each arm's own isolated process", fontsize=12)
-    fig.tight_layout(rect=(0, 0, 0.88, 0.95))
+    fig.suptitle("Memory per arm, measured around each arm's own isolated process\n"
+                 "Each arm is paired against the BF_vect of the same cell (dashed line at 1.0), read per "
+                 "capability class and space,\nsince a footprint is only comparable within the same problem",
+                 fontsize=11)
     fig.savefig(path, dpi=140); plt.close(fig)
 
 
@@ -177,7 +284,7 @@ def energy_figure(eligible, power, path):
         return None
     fig, ax = plt.subplots(figsize=(12, 5.6))
     bars = []
-    for n in [ms.BF] + ms.lead(ms.NAMES):
+    for n in [ms.BF] + order(ms.NAMES):
         v = [a[n]["energy"] / 1000 for _, _, _, a, _ in eligible if n in a and a[n].get("energy")]
         if v:
             bars.append((n, st.median(v)))
@@ -236,7 +343,7 @@ def main() -> None:
         out += [f"Cells used: " + ", ".join(sorted({f"m={c[1].get('m')}" for c in eligible})) + ".", "",
                 "| arm | median energy (kJ) | dynamic (kJ) | mean power (W) | kJ per billion pair-windows | cells |",
                 "|---|---|---|---|---|---|"]
-        for n in [ms.BF] + ms.lead(ms.NAMES):
+        for n in [ms.BF] + order(ms.NAMES):
             v = []
             for name, prof, cell, arms, host in eligible:
                 a = arms.get(n)
@@ -261,6 +368,7 @@ def main() -> None:
     if figdir:
         os.makedirs(figdir, exist_ok=True)
         p = os.path.join(figdir, f"resources_memory{ms.SUFFIX}.png"); memory_figure(camp, synth, p); print("wrote", p)
+        p = os.path.join(figdir, f"resources_memory_matrix{ms.SUFFIX}.png"); memory_matrix(camp, p); print("wrote", p)
         p = os.path.join(figdir, f"resources_energy{ms.SUFFIX}.png")
         if energy_figure(eligible, power, p):
             print("wrote", p)

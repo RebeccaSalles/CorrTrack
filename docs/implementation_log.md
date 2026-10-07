@@ -10634,3 +10634,417 @@ untouched and still carries ThinBRAID, T=0.70 and log speedup axes.
   (`ovn_..._T0p9_..._T0.9_pos`), so every synthetic cell was read as T=0 and dropped; and the
   capability-table medians section kept its full arm list, which made it the same width as the
   per-cell table and let the ranking parsers read one as the other. Both fixed.
+
+### 2026-09-30 -- three further readings of the campaign speedups, authors-only
+
+All from the same 143 cells, added to `abaca/campaign_figures.py` and emitted only when
+`AUTHORS_ONLY` is set, so the default variant's figure set is unchanged:
+
+All three put the correlation threshold on the horizontal axis (2026-09-30, user), not density:
+
+- `real_speedup_by_threshold_mean_authors.png`: the MEAN of the six datasets with a
+  one-standard-deviation bar instead of the median alone. It shows what the median hid: in class L
+  raw at T=0.95 CorrTrack-LSH's mean is 13.8x with a standard deviation near 8, so the win is real
+  but dataset-dependent, while in class L differenced the same point is 22.7x with a deviation near
+  3, a uniform win.
+- `real_speedup_by_threshold_<dataset>_authors.png`, six files: one dataset each, no aggregation of
+  any kind, one point per cell.
+- `real_speedup_by_threshold_authors.png`: threshold on the axis, every dataset shown as its own dot,
+  methods clustered side by side within each threshold with a short line at each cluster's median.
+  This is the figure that answers "is the median hiding spread", since the reader sees all six
+  values per method and threshold.
+
+- (2026-09-30, user) The main speedup figure gained a threshold-axis version in BOTH variants,
+  `real_speedup_by_threshold_median{,_authors}.png`: the same median over the six datasets, plotted
+  against the correlation threshold instead of the effective density, with the hollow-marker recall
+  flag kept. The density version stays as `real_speedup_vs_density{,_authors}.png`, since it is the
+  figure that shows the mechanism rather than the knob; the threshold version is the one that reads
+  left to right for a reader who thinks in thresholds. The full variant keeps its log axis and its
+  T=0.70 column, the authors-only variant is linear and starts at 0.80.
+
+### 2026-10-01 -- memory figures on a linear scale, both variants
+
+`abaca/resource_tables.py` plots peak memory linearly now, in both variants: the dot plot's x axis
+and the m-scaling panel's y axis. The m axis keeps its log spacing, since the levels are 125 to 2000
+and the points would otherwise bunch at the right; only the memory axes changed.
+
+What this costs and what it buys, since it is not free. In the default variant ThinBRAID's 90th
+percentile at 7.3 GB sets the scale, so the ten arms between 52 and 290 MB are pressed against the
+left edge and their differences are no longer readable; the ordering survives, the detail does not.
+In the authors-only variant, where ThinBRAID is removed, the same panel is well scaled: the x axis
+ends near 1.3 GB and CorrTrack's 58 MB against ParCorr's 690 MB and CSZ's 661 MB reads at its true
+size, which is the point of the change. The per-class tables carry the numbers either way, so the
+figure no longer has to serve as the precise record.
+
+Also fixed while there: the dot-plot title said "179 cells" from a literal; it now reports the cells
+the variant actually loaded, which is 143 under the authors-only filters.
+
+### 2026-10-01 -- the memory figure's first panel was not comparable; rebuilt as a paired per-class view
+
+The user's challenge was right. The old panel pooled each arm's absolute peak RSS delta over every
+cell it ran, and the cells are not the same problem: BF_vect's own delta runs from 14 MB in class S
+differenced to 245 MB in class N raw, so a pooled median mostly reported which cells an arm covers,
+exactly the error the rate tables had.
+
+Rebuilt as three panels, one per capability class, each showing the ratio of the arm's peak delta to
+the BF_vect of the SAME cell, median with interquartile range, over the cells of that class where
+every arm ran. Pairing removes the cell from the comparison and the class split removes the coverage
+bias. What it now says, authors-only variant: in class L CorrTrack-LSH sits at 0.41x of BF_vect and
+CorrTrack-Ham at 0.33x, FilCorr at 0.28x, StatStream above 1, and in class N both CorrTrack backends
+are near 0.3 to 0.4x. Class S is the panel to read with care, since BF_vect allocates almost nothing
+there (14 MB in differenced), so the ratios of the heavy arms explode to 16x and 18x; that is a true
+statement about a small denominator, not about gigabytes.
+
+The old pooled absolute table stays in the document, now clearly labelled as per-arm summary rather
+than a comparison, beside the per-class absolute table.
+
+- Two more corrections to the same panel, both from the user's questions. BF_vect had no error bar
+  because it was its own denominator, so its ratio is 1.0 in every cell by construction; it is now
+  the dashed reference line rather than a row that invited a comparison it could not support. And
+  the spaces are not comparable either: CorrTrack-LSH sits at 0.84 of BF_vect in class L raw and
+  0.24 in class L differenced, ParCorr at 7.89 in class S raw and 39.12 in class S differenced, so
+  raw and differenced now have their own row of panels. The figure is six paired panels plus the
+  m-scaling panel, and every number in it prices the same problem as the number beside it.
+
+### 2026-10-01 -- a compact form of the memory comparison
+
+`resources_memory_matrix{,_authors}.png`: one panel, arms by the six (class, space) problems, each
+entry the median ratio of that arm's peak memory to the BF_vect of the same cell, printed and
+colour-coded on a diverging scale with grey at 1.0 and log spacing, since the ratios run from 0.16
+to 46. It carries the same comparison as the six dot panels in about a fifth of the space; what it
+drops is the spread, which the per-class tables in the document hold exactly, and the cells an arm
+cannot run are marked n/a rather than left blank.
+
+Reading it in the authors-only variant: CorrTrack is at or below brute force everywhere except the
+synchronous raw column, and reaches 0.21 and 0.16 of it in the differenced lagged classes, while
+ParCorr and CSZ are at 46x and 31x in synchronous differenced, where BF_vect's own footprint is
+smallest. Both figures are kept: the matrix for the paper, the panels for when the spread matters.
+
+### 2026-10-01 -- the memory figures now carry BF_vect's own footprint, and the synthetic panel is in GB
+
+Both requested by the user, both gaps in what the ratio view could say on its own.
+
+- Every column of `resources_memory_matrix{,_authors}.png` names BF_vect's median peak delta for that
+  (class, space), so a ratio reads back into megabytes: 71 MB in class S raw, 12 MB in class S
+  differenced, 210 and 160 MB in class L, 228 and 159 MB in class N (authors-only variant). That also
+  explains the column that looked alarming: ParCorr's 46x in class S differenced is 46 times a 12 MB
+  denominator, not gigabytes. The six paired panels carry the same anchor in their titles.
+- The m-scaling panel plots GB instead of MB, since it runs to 15 GB, and BF_vect is drawn in it
+  again: it had been dropped along with its ratio row, which removed the one absolute reference in
+  the figure. It is the lowest line there, 8.9 GB at m=2000 against 13.4 to 15.2 GB for the arms.
+
+- The matrix now orders both axes by coverage (columns by how many arms run them, rows by what each
+  arm covers), so the unavailable classes form one block in the corner, drawn as a single grey band
+  per run with one "capability not available" label instead of six scattered n/a cells. Column order
+  becomes S raw, S differenced, L raw, L differenced, N raw, N differenced, which also groups each
+  class's two spaces side by side.
+
+### 2026-10-01 -- authors-only filter was checking one capability where a class needs two
+
+The user caught it in the memory matrix: TSUBASA appeared in class N while absent from class L,
+which cannot be, since class N is lagged as well as negative. The filter was testing the tier of the
+headline capability only, `supports_neg_corr` for class N, so an arm whose lag search is our
+extension survived there on the strength of a native negative-correlation flag.
+
+`ms.keeps()` now takes every tier the cell exercises: nothing for class S, the lag tier for class L,
+both for class N. Applied in all four loaders (`campaign_figures`, `resource_tables`,
+`build_final_tables`, `synth_results`). Effect on the authors-only variant: class S keeps ten arms,
+class L six (BF_incr, FilCorr, BRAID, CorrTrack x2, StatStream), class N five, TSUBASA and FilCorr
+both correctly gone from N. Every authors-only table and figure rebuilt.
+
+- (2026-10-01, user) BRAID is placed ahead of StatStream in the resource tables and figures only, via
+  a local `order()` helper in `abaca/resource_tables.py`. The two sit side by side there and BRAID,
+  which reports the exact set on these lag grids, reads better before the arm that emits its own
+  decision. Every other artifact keeps the campaign ranking order untouched, so the legends of the
+  speed figures are unchanged.
+
+### 2026-10-05 -- a figure for the paper's headline claim
+
+`abaca/headline_figure.py` writes `docs/figures/headline_claim{,_authors}.png`, four panels, one per
+measurable clause of the headline: the fitted exponent in m (A), the recall distribution with
+precision 1.000 (B), the per-window cost against the run's own median, which is the online claim
+rather than a repeat of A (C), and the same cell under stationary and nonstationary processes in
+both spaces (D). Written up with the numbers in `docs/headline_claim_2026-10-05.md`.
+
+Two things recorded there rather than smoothed over, because both will be asked. FilCorr's fitted
+exponent is 1.84, also below 2, so "subquadratic" alone does not separate CorrTrack empirically; the
+claim holds as a conjunction, since no other arm is subquadratic and complete and lagged and signed
+and exact on the threshold at once. And CorrTrack's slowest window is 4 to 10 times its median,
+against 1.3 to 1.5 for brute force, with 4 to 8% of windows beyond the whisker: the quartiles are
+flat, the tail is not, which is a throughput claim rather than a latency guarantee.
+
+### 2026-10-05 -- FilCorr at the full band is an exact incremental baseline, not a filter
+
+The user noticed that the FilCorr and BF_incr curves lie on top of each other in the scaling figure
+(1.84 against 1.85). They do, and the reason is structural, not coincidental.
+
+Evidence from the campaign's own records. The arm runs with `filcorr_fs=0.0, filcorr_ft=0.5`, the
+whole one-sided spectrum, in all 179 cells. Its `tested` and `total_candidates` equal BF_incr's in
+179 of 179 cells, to the pair-window (113,895,752 against 113,895,752 in the first cell, where
+CorrTrack tests 9,155,548), and its candidate precision equals the cell's density exactly. So the
+band filter rejects nothing: FilCorr evaluates the same universe as the incremental baseline. Recall
+and precision are 1.000 for both, and the wall-clock ratio FilCorr/BF_incr is 0.868 median on the
+real campaign (p10 0.852, p90 0.904) and 0.936 on the synthetic one. The difference is a cheaper
+incremental update, not pruning.
+
+The 2026-09-19 band sweep shows what FilCorr looks like when it does filter: at 8 coefficients
+(ft=0.267) recall 0.997 but precision 0.853, at 4 coefficients precision 0.640, at 2 coefficients
+0.323. Truncating the band buys speed by reporting pairs that are not correlated, which is why the
+campaign ran it at the full band, where it is exact.
+
+Consequences recorded for the paper rather than smoothed over. Every row where "FilCorr wins" is a
+row where exact incremental computation beats filtering, which is a real and interesting finding
+about dense cells, but it is not a filter beating a filter. The capability table's FilCorr row now
+says so. If the paper wants FilCorr as an approximate competitor, it needs a tuned-band arm across
+the campaign, which is a new run of its own.
+
+### 2026-10-05 -- the slow windows identified: the correlated-array doubling, not warm-up
+
+The probe (job 3170213, one synthetic cell, m=500, AR(1) raw) wrote the per-window series through
+the new `CORRTRACK_STEP_TIMES` hook. CorrTrack has 7 windows above 1.5x its median out of 1000, at
+positions 9, 86, 163, 185, 316, 624 and 892. The cell keeps 13,524 correlated rows per window, so an
+array that doubles its capacity would reallocate at windows 78, 155, 310 and 620; the measured
+spikes sit at 86, 163, 316 and 624, and their magnitudes are 2.0x, 2.7x, 4.9x and 7.9x, doubling as
+the copied array doubles. The first five windows are the fastest of the run (0.04x to 0.17x of the
+median), which rules out warm-up.
+
+So the tail is the amortised growth of the persistent correlated-pairs accumulator, not index
+maintenance as I first guessed, and not the incremental statistics warming up. It is fixable:
+preallocate from the expected density, or chunk the accumulator so growth never copies. Recorded in
+`docs/headline_claim_2026-10-05.md` under panel C, since it is the honest answer to a latency
+question about the online claim.
+
+### 2026-10-05 -- tuning FilCorr's band would select the full band; no campaign needed
+
+The 2026-09-19 sweep already answers it, in both spaces and at every threshold: truncating the band
+makes FilCorr slower AND less accurate. sp500 prices at T=0.70, monitoring off: full band 26.5 s at
+recall 1.000 and precision 1.000; 8 coefficients 27.5 s at precision 0.853; 4 coefficients 32.8 s at
+0.640; 2 coefficients 51.6 s at 0.323. At T=0.95 the same ordering, 16.8 / 16.8 / 17.4 / 24.2 s. On
+returns (differenced) truncation also costs recall, 1.000 to 0.804 at 8 coefficients.
+
+The mechanism is the direction of the bound: with fewer coefficients the partial energy is a looser
+bound, so it rejects less, while the per-pair incremental update costs the same either way (the
+candidate phase is 1.2 to 1.4 s in every row). Truncation therefore buys nothing and pays for the
+false positives it creates. A CSZ-style tuner maximising speed subject to recall would pick the full
+band, which is what the campaign already runs.
+
+Condition to state with this, in fairness to the method: our windows are 30 to 60 points, where the
+DFT update dominates. FilCorr is designed for longer windows, where dropping coefficients removes
+real arithmetic. The honest sentence for the paper is that at these window sizes the band parameter
+is dominated by its exact setting, not that the method's idea fails in general.
+
+### 2026-10-05 -- segmented accumulator: latency fixed, throughput unchanged
+
+`_append_correlated_numeric` now fills a list of fixed 1M-row blocks instead of doubling one array,
+and `_materialise_correlated` builds the contiguous view once, lazily, collapsing the blocks into
+it. Public surface unchanged; the full suite passes (156 tests).
+
+Measured on the same cell before and after (probe jobs 3170213, 3170283): the slowest window falls
+from 7.9x the median to 1.7x and the remaining bumps are block allocations rather than copies of the
+whole set, while the total wall is 15.00 s against 15.21 s, that is unchanged within noise. The
+spikes were about 1.5% of the stream's time, so this is a latency fix and not a speed fix, and it
+applies to every arm, since they all record through the same accumulator.
+
+Rerun question answered in `docs/rerun_plan_2026-10-05.md`: not required for the tables, since 1.5%
+is far below the 10% tie band and would move no ranking; the recommendation is to keep the campaigns
+as they are and measure the latency panel separately on the fixed code, stating both states in the
+caption. Full rerun costed there as the fallback (972 jobs, about two days).
+
+### 2026-10-05 -- how much Python is left in the accumulator, measured
+
+User's question after the blocks fix: remove the Python bookkeeping. Measured first, 1000 batches of
+13,524 rows (the dense cell's shape), best of three on this machine:
+
+| design | total append | median batch | slowest batch |
+|---|---|---|---|
+| doubling array (campaign code) | 154 ms | 15.2 us | 54.8 ms |
+| fixed blocks (the fix) | 56 ms | 17.9 us | 0.76 ms |
+| arrays kept by reference, corrs copied | 62 ms | 49.7 us | 0.73 ms |
+
+So the whole accumulator costs 56 ms of a 15 s run, 0.4%. Of the 17.9 us per window, about 15 us is
+the copy itself (378 KB, with the int64 to int32 narrowing the storage decision requires) and about
+2.7 us is Python: a list index, a shape check and two slice assignments. Moving that to Cython would
+recover 2.7 us per window, 0.018% of the run.
+
+The third row is the version that would remove the copy rather than the Python: keep the
+canonicalised array by reference instead of copying it into a block. It is not faster, because the
+correlation buffer still has to be copied to be safe against reuse, and it would also force
+canonicalisation to emit int32 to avoid doubling the memory the September fix halved.
+
+Conclusion recorded rather than acted on: the accumulator is no longer on the critical path. The
+window's time is candidate search (53 to 83% depending on threshold), validation (9 to 25%) and
+sketching (8 to 20%); the accumulator is 0.4% and its latency tail is gone.
+
+### 2026-10-05 -- Cython append wired in, measured honestly
+
+`candidate_kernels.append_correlated_block`: one nogil call copies a batch into an accumulator
+block, narrowing int64 to int32 through a flat contiguous loop and memcpy-ing the correlations.
+`library_corrtrack_parallel._append_block` calls it when the extension is built and falls back to
+the numpy slice pair otherwise, so a source checkout without the kernels still runs.
+
+Measured by alternating the two implementations five times in one process, 1000 batches of 13,524
+rows: numpy best 66.2 ms, kernel best 61.1 ms, so about 8% off the accumulator path, while the
+best per-batch time is the same (35.4 against 35.6 us) because the copy itself is already
+memory-bound. On a 15 s stream that is 5 ms, 0.03%. The first measurement I took looked the other
+way round (53 against 41 ms) and was an artefact of a scalar loop over a strided memoryview plus
+run-to-run noise on this machine; the flat-pointer version is what is committed, and the kernel's
+output is verified identical to the slice assignment.
+
+Full suite green (156 tests) with the kernel in place.
+
+### 2026-10-05 -- where CorrTrack's time actually goes, campaign-wide
+
+Median phase shares of CorrTrack-LSH over the 179 cells, by threshold:
+
+| T | sketch | candidate search | validation | artifacts | other |
+|---|---|---|---|---|---|
+| 0.70 | 7.0% | 77.7% | 11.5% | 1.0% | 0.8% |
+| 0.80 | 11.4% | 76.5% | 7.4% | 0.8% | 1.1% |
+| 0.85 | 14.2% | 76.1% | 5.5% | 0.7% | 1.3% |
+| 0.90 | 18.7% | 70.5% | 4.4% | 0.6% | 1.7% |
+| 0.95 | 24.3% | 67.6% | 3.8% | 0.5% | 2.3% |
+
+Candidate search is 68 to 78% everywhere, sketching grows with the threshold to a quarter, and
+validation has fallen to 4 to 12% since the numeric-accumulator work. The accumulator sits inside
+the 1% artifact column, which is why the Cython append is worth 0.03% and no more.
+
+### 2026-10-06 -- the accumulator fix, paired A/B: faster and the tail gone
+
+Job 3172367, one process on one node, the two designs alternated three times on the synthetic
+baseline cell (9,420,392 correlated rows kept):
+
+| design | totals (s) | median | slowest window / median |
+|---|---|---|---|
+| fixed blocks + Cython append | 10.12, 10.29, 10.15 | 10.15 | 1.25 to 1.88 |
+| doubling array (campaign code) | 10.50, 10.31, 10.42 | 10.42 | 7.54 to 7.67 |
+
+So the fix is 2.6% faster end to end and removes the 7.6x latency tail. The earlier 15.00 against
+15.21 s came from two different nodes in two different jobs and was node variation, as suspected;
+paired on one node the new design wins every repetition but one. The temporary
+`CORRTRACK_ACC_LEGACY` switch used for this A/B is removed again; suite green (156 tests).
+
+(Two earlier attempts at this probe and the profile below crashed before running a window: the
+driver stripped row 0 of the data, which `CorrTrack.run` expects to be the time row. The second
+attempt kept the same mistake under a different condition and was submitted untested, which cost
+the overnight slot. The driver is now checked locally before any submission.)
+
+### 2026-10-06 -- candidate search broken into sub-phases (job 3172368, CORRTRACK_PROFILE=1)
+
+Three synthetic cells, CorrTrack-LSH with each cell's own tuned parameters, 700 windows each:
+
+| sub-phase | baseline m=500 d=0.01 | dense m=500 d=0.1 | scale m=2000 d=0.01 |
+|---|---|---|---|
+| wall | 10.0 s | 37.1 s | 122.3 s |
+| cand.lsh_numeric_rows (the LSH bucket scan) | 51.7% | 39.6% | 61.1% |
+| val.numeric_rows_kernel (exact Pearson) | 15.7% | 38.6% | 21.8% |
+| val.numeric_rows_postprocess | 5.9% | 14.1% | 7.9% |
+| sketch (all of it) | 16.3% | 4.8% | 5.5% |
+| cand.update_grid, input_tree, lsh_insert, clean_old, lsh_expire | 16.5% | 4.0% | 8.2% |
+| bookkeeping (accumulator) | 3.2% | 8.7% | 5.0% |
+
+The single hot spot is the LSH bucket scan, a Cython kernel that is 40 to 61% of the wall clock on
+its own and grows with m. Exact validation is the second, and the first at high density. Sketching
+is already incremental (`sketch.incremental_kernel`), but half of its time is the Python dispatch
+around the kernel (`get_sketches_total` 0.95 s against 0.44 s of kernel at m=500).
+
+### 2026-10-06 -- three optimisations measured together on one node (job 3172486)
+
+One job, Xeon Silver 4114 (mercantour3), the original code (git HEAD) against the new code, three
+alternations per setting, CorrTrack-LSH on a factor-model stream (W=60, step 6, L=6, T=0.9).
+Median of three, output fingerprint identical across every setting except the one noted:
+
+| cell | original | new code | new + scan prefetch | new + incremental validation |
+|---|---|---|---|---|
+| m=500, 240 windows | 2.359 s | 2.199 s (-6.8%) | 2.445 s (+11%) | 2.191 s (-0.4%) |
+| m=2000, 140 windows | 12.570 s | 12.315 s (-2.0%) | 13.196 s (+7%) | 12.578 s (+2.1%) |
+| m=500 dense, 240 windows | 2.891 s | 2.661 s (-8.0%) | 2.984 s (+12%) | 2.582 s (-3.0%) |
+
+**Sketch bookkeeping, kept.** The sketch phase falls 27% at both sizes (0.54 to 0.39 s at m=500,
+1.45 to 1.06 s at m=2000) from five output-identical changes: the incremental kernel skips the
+oldest basic window itself (`base_skip`) instead of the caller copying the whole dot cache contiguous
+every step; the shard id list and its row index are cached per series set, and the step array is
+used unindexed when the shard is every series in order; the sorted series list for distribution is
+cached; the constant-flags dict is built with `zip` in C; and three per-step copies of the sketch
+dict (in `Sketches.run`, the single-node merge, and CorrTrack's store) pass the reference instead,
+which is safe because every writer assigns a fresh dict rather than mutating the old one. End to
+end that is 2 to 8%, largest where the scan is cheapest.
+
+**Scan prefetch, reverted.** Slower on the cluster as on the laptop, 7 to 12% end to end, with the
+scan itself 8 to 18% slower and identical output. Measured per query: about 325 candidates touched,
+215 sketch dot products, 2 passing. The lists are short and the metadata arrays are small enough to
+sit in L2, so the prefetch instructions cost more than the misses they hide; and the sketch rows,
+the one large structure, are read in a pattern the hardware prefetcher already follows within a
+row. Recorded as tried and reverted; the kernel is back to its previous form, suite green.
+
+**Incremental validation, re-measured, left on "auto".** The September validator again only pays
+where candidates repeat: in the dense cell validation falls 18% (0.354 to 0.290 s) and the wall 3%,
+at m=500 sparse it is level, at m=2000 it costs 2%. The result set is identical (checked locally on
+the dense cell: same 971,143 rows, largest correlation difference 2.1e-15; the cluster fingerprint
+differed only because it rounds correlations to nine decimals, which a 1e-15 difference can tip at
+a rounding boundary). The auto rule (on for W >= 120) stands; a density- or repeat-rate trigger
+would capture the dense-cell gain and is the obvious next refinement.
+
+**Where the time is now.** At m=2000 the LSH scan is 10.0 of 12.3 s, 82%. Inside it, 99% of the dot
+products are computed for candidates that then fail the gate. That, not memory latency, is the
+lever, and it has an exact form: stop a dot product early once a Cauchy-Schwarz bound on the
+remaining dimensions shows it cannot reach gamma, which changes no decision.
+
+## 2026-10-06 (b) -- hybrid validation never ran in the campaigns; early-exit dot product measured (not implemented)
+
+**Branch:** main, uncommitted. Measurement only; no change to the repo code.
+
+**Hybrid validation in the campaigns: off everywhere.** The campaign grid passes `hybrid_validation="auto"`,
+which resolves on window length (`HYBRID_VALIDATION_AUTO_MIN_WINDOW = 120`); every campaign cell has W = 30 or 48
+(real) or W = 60 (synthetic), so it resolved to False. All 200 tuned `best_params_corrtrack.json` files checked
+record `"hybrid_validation": false`. The validator's own online repeat-rate switch (EMA, floor 0.25) lives inside
+the validator and is only reached when `hybrid_validation` is True (`library_corrtrack_parallel.py` ~7372), so it
+never ran either.
+
+**Early-exit (Cauchy-Schwarz) dot product in the LSH scan: would it fire?** Different from the two earlier tries
+(July: row/block bound in the removed sorted-array index; September option 6: cross-step score cache). Here the bound
+is applied inside one dot product: after k dims, |q.x| <= |q_I.x_I| + ||q_R|| ||x_R||, so a candidate is rejected
+once that falls below gamma. Exact (never rejects a passing candidate). Measured with counters in an instrumented
+scratch copy of `candidate_kernels.pyx` (the real dot and gate unchanged; repo kernel untouched), checking the bound
+every 4, 8 or 16 dims. Fraction of the dot-product dims still computed (8-dim chunks):
+- synthetic factor-model cells (gamma 0.9): 23% (m=500 sparse), 32% (dense), 23% (m=2000);
+- 18 real campaign cells (6 datasets x {T0.9 raw, T0.9 diff, T0.7 diff both signs}): 33% to 81%, median ~61%.
+  Differenced T0.9 cells 33-44% (failing scores far below gamma); raw T0.9 cells with ~42% of checks passing
+  (sp500, acwi, streamflow) 79-81%; T0.7 cells 59-79%.
+- Bound violations (a passing candidate that the bound would have cut): 0 across ~3.4e9 checks; sketch rows unit
+  norm to 9e-16.
+Chunk size matters little (4 vs 8 vs 16 within ~3 to 9 points).
+
+**Open:** this counts arithmetic, not time. The dot gate was found L2-bound on 512-byte rows (2026-09-24 note in
+the kernel); exiting after 1-2 of 8 cache lines may save more or less than the arithmetic share depending on the
+hardware prefetcher. Only a paired wall-clock A/B can tell. Scripts: scratchpad `es_tree/` (instrumented copy),
+`es_bench.py`, `es_real.py`, outputs `es_synth.jsonl`, `es_real.jsonl`.
+
+## 2026-10-07 -- early-exit dot product implemented, measured slower, reverted
+
+**Branch:** main, uncommitted. Net code change: none (`candidate_kernels.pyx` restored, kernels rebuilt, 156 tests pass).
+
+**What was built.** An exact early exit for the dot-gamma gate in all three gates (SignLSHBandIndex sequential and
+threaded scans, HammingExactIndex scan): every 8 dims, reject if |q_I.x_I| + sqrt((||q||^2 - ||q_I||^2)(max_norm2 -
+||x_I||^2)) < gamma - 1e-9, with max_norm2 the largest squared row norm ever inserted (exact for any input) and a
+module knob `set_scan_early_exit(chunk)`. Suite passed (156) and the correlated set was identical on/off (same
+fingerprint on the synthetic m=500 cell and on sp500 T0.9 differenced).
+
+**Why it was reverted.** Locally it was slower: scan 0.95-1.41 s off vs 1.12-1.52 s on (synthetic m=500, three
+alternations), and 4.76 s vs 6.60 s on sp500 T0.9 differenced. A standalone microbenchmark (same compile flags,
+candidate scores drawn from the measured real-cell histograms) explains it: a full 64-dim dot of a cached row costs
+~13 ns because gcc vectorises it; the early exit's extra accumulators, branch and sqrt cost more than the skipped
+dims. Cost relative to the full dot, four score distributions (sp500 T0.9 diff / sp500 T0.9 raw / weather T0.7 diff /
+synthetic m=2000):
+- check every 8 dims (as built): 3.20 / 3.79 / 4.68 / 2.47
+- every 16 dims, raw pointers, query prefix norms precomputed: 1.46 / 1.87 / 1.68 / 1.03
+- one checkpoint at 24 dims: 0.93 / 1.13 / 1.02 / 0.80 (best variant)
+
+**The more useful finding.** From the slowdown and the check count, the dot products are only ~20% of the LSH scan
+on the real sp500 cell (~1.0 of 4.8 s for 76.5M checks). The "99% of dot products are wasted" observation was true but
+not a lever: the remaining ~80% of the scan is band-bucket gathering, alive/validity checks, the Hamming popcount and
+the pair_seen hash. Any further scan optimisation has to target those, not the dot. No cluster A/B was submitted: the
+best possible variant is worth ~1-2% of the scan in favourable cells and loses in raw cells. Third "correct but not
+beneficial" Cauchy-Schwarz result (after July's row/block bound and September's option 6).
+
+Scripts (scratchpad): `ee_bench.py` (on/off A/B driver), `ee_micro/eem.pyx` + `run.py` (microbenchmark),
+`candidate_kernels.pre_es.pyx` (the restored file).

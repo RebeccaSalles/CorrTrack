@@ -59,7 +59,7 @@ def load(root):
             if not isinstance(a, dict) or a.get("status") != "ok" or not a.get("wall"):
                 cell["arms"][label] = None
                 continue
-            if not ms.keeps(a.get("supports_lags") if L > 1 else "native") or not ms.kept_arm(label):
+            if not ms.keeps(*((a.get("supports_lags"),) if L > 1 else ())) or not ms.kept_arm(label):
                 cell["arms"][label] = None
                 continue
             cell["arms"][label] = dict(wall=a["wall"], speedup=bf["wall"] / a["wall"],

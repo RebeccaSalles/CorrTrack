@@ -2365,3 +2365,27 @@ your ports just a slower implementation" from the campaign's own output. Test ad
 Next exact step: unchanged, the re-submit (cluster clone `git fetch && git reset --hard origin/dev`, fresh
 snapshot, re-generate and re-submit the arm updates). The new columns appear in the next aggregation of
 whatever results tree is passed, including the ones already collected.
+
+## 2026-10-05 to 2026-10-07 -- headline figure, accumulator fix, scan/sketch/validation optimisation round
+
+Branch: main, uncommitted (last commit 269129e6 is the working copy's parent; the user commits).
+Changed source files since that commit: `library_corrtrack_parallel.py` (segmented correlated-pair accumulator,
+`CORRTRACK_STEP_TIMES` hook, sketch bookkeeping cuts), `candidate_kernels.pyx` (`append_correlated_block`),
+`sketch_kernels.pyx` (`base_skip`), `test_stable_reproduced_changes.py`; figure/table builders under `abaca/`
+(`headline_figure.py` new); docs and figures listed in the log entries 2026-10-05 to 2026-10-07.
+
+Results (log entries 2026-10-06, 2026-10-06 (b), 2026-10-07):
+- Accumulator doubling spikes fixed (tail 7.6x -> 1.3-1.9x, median slightly faster). Kept.
+- Sketch bookkeeping: sketch phase -27%, wall -2 to -8%, output identical. Kept.
+- Scan prefetch: +7 to 12% slower. Reverted.
+- Hybrid (incremental) validation: never active in any campaign cell (auto resolves off for W < 120; all tuned
+  params say false). Forced on: -3% wall dense, level sparse, +2% at m=2000. Left as is.
+- Exact Cauchy-Schwarz early-exit dot product: implemented, output identical, but slower locally; microbenchmark
+  shows a vectorised 64-dim dot costs ~13 ns and the dot is only ~20% of the LSH scan. Reverted; no cluster job.
+Tests: 156 pass (`python3 -m pytest test_stable_reproduced_changes.py -q`).
+
+Known issues / open: the remaining ~80% of the LSH scan is bucket gathering, alive/validity checks, Hamming
+popcount and the pair_seen hash; no optimisation attempted there yet. The W/step sensitivity sweep (with step=1)
+is designed but not submitted. Rerun decision per `docs/rerun_plan_2026-10-05.md` (option A, no rerun) awaits the user.
+Next exact step: user commits the accumulated changes; then, if a rerun or sweep is wanted, build a fresh
+snapshot from that commit on the cluster before submitting anything.

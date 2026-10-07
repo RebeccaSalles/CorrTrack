@@ -57,7 +57,7 @@ The same reading applied to every arm: its median rate over the cells it ran in,
 | CorrJoin | 97.0 | 121 s | 1.44x faster | 1.000 | 47 |
 | StatStream | 55.0 | 69 s | 2.55x faster | 0.989 | 143 |
 | BRAID | 87.2 | 109 s | 1.61x faster | 1.000 | 143 |
-| TSUBASA | 114.4 | 143 s | 1.22x faster | 1.000 | 95 |
+| TSUBASA | 203.5 | 255 s | 1.45x slower | 1.000 | 47 |
 | ParCorr | 210.2 | 263 s | 1.50x slower | 0.965 | 47 |
 | CSZ | 588.4 | 736 s | 4.20x slower | 0.968 | 47 |
 
@@ -75,7 +75,7 @@ A pooled median compares arms over different sets of cells as soon as one arm is
 | CorrJoin | 89 | 98 |  |  |  |  | 97.0 |
 | StatStream | 83 | 72 | 36 | 26 | 62 | 47 | 77.8 |
 | BRAID | 91 | 89 | 84 | 85 | 86 | 85 | 89.9 |
-| TSUBASA | 204 | 204 |  |  | 106 | 104 | 203.5 |
+| TSUBASA | 204 | 204 |  |  |  |  | 203.5 |
 | ParCorr | 218 | 210 |  |  |  |  | 210.2 |
 | CSZ | 554 | 660 |  |  |  |  | 588.4 |
 

@@ -79,8 +79,11 @@ def load(root):
             if not isinstance(a, dict) or a.get("status") != "ok" or not a.get("wall"):
                 cell["arms"][label] = None
                 continue
+            # class S asks nothing, class L asks for the lag search, class N asks for both
+            tiers = ((a.get("supports_lags"),) if lagged else ()) + \
+                    ((a.get("supports_neg_corr"),) if cls == "N" else ())
             tier = a.get("supports_neg_corr") if cls == "N" else (a.get("supports_lags") if lagged else "native")
-            if not ms.keeps(tier) or not ms.kept_arm(label):    # authors-only: our capability, or an arm that does not reproduce
+            if not ms.keeps(*tiers) or not ms.kept_arm(label):    # authors-only: our capability, or an arm that does not reproduce
                 cell["arms"][label] = None
                 continue
             cell["arms"][label] = dict(wall=a["wall"], speedup=bf["wall"] / a["wall"], recall=a.get("recall"),
@@ -97,6 +100,36 @@ def tier_of(cells, name):
         if tier in t:
             return tier
     return "native"
+
+
+def speedup_median_by_threshold(cells, path):
+    """The main figure on the threshold axis: median over the six datasets, one point per threshold."""
+    fig, axes = _facets(cells)
+    for i, (space, _) in enumerate(SPACES):
+        for j, (cls, _) in enumerate(CLASSES):
+            ax = axes[i][j]
+            sl = [c for c in cells if c["space"] == space and c["cls"] == cls]
+            for name in ms.lead(NAMES):
+                by_T = {}
+                for c in sl:
+                    a = c["arms"][name]
+                    if a:
+                        by_T.setdefault(c["T"], []).append((a["speedup"], a["recall"]))
+                if not by_T:
+                    continue
+                Ts = sorted(by_T)
+                ys = [st.median([v[0] for v in by_T[T]]) for T in Ts]
+                rc = [st.median([v[1] for v in by_T[T] if v[1] is not None] or [1.0]) for T in Ts]
+                ct = name.startswith("CorrTrack")
+                ax.plot(Ts, ys, color=COLOR[name], linewidth=2.4 if ct else 1.1, zorder=3 if ct else 2)
+                for x, y, r in zip(Ts, ys, rc):
+                    ax.plot(x, y, marker="o", markersize=8 if ct else 6, color=COLOR[name],
+                            markerfacecolor=COLOR[name] if r >= RECALL_TARGET else "white",
+                            markeredgecolor=COLOR[name], zorder=4 if ct else 2)
+            ax.set_xticks(sorted({c["T"] for c in sl}))
+    _finish(fig, axes, cells, "correlation threshold",
+            "Speedup over BF_vect by correlation threshold: each point is the MEDIAN over the six datasets; "
+            f"a hollow marker means median recall below {RECALL_TARGET}", path, xlog=False)
 
 
 def speedup_vs_density(cells, path):
@@ -161,6 +194,118 @@ def speedup_vs_density(cells, path):
     fig.savefig(path, dpi=140); plt.close(fig)
 
 
+def _facets(cells, figsize=(16, 9)):
+    fig, axes = plt.subplots(len(SPACES), len(CLASSES), figsize=figsize, sharey=ms.LOG_SPEEDUP)
+    return fig, axes
+
+
+def _finish(fig, axes, cells, xlabel, title, path, xlog=True):
+    shown = [n for n in ms.lead(NAMES) if any(c["arms"].get(n) for c in cells)]
+    handles = [Line2D([], [], color=COLOR[n], marker="o", linestyle="none", label=n) for n in shown]
+    axes[0][-1].legend(handles=handles, fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0))
+    for i in range(len(SPACES)):
+        for j in range(len(CLASSES)):
+            ax = axes[i][j]
+            if xlog:
+                ax.set_xscale("log")
+            if not ms.LOG_SPEEDUP:
+                ax.set_ylim(bottom=0)
+            else:
+                ax.set_yscale("log")
+            ax.axhline(1.0, color="#999999", linewidth=0.8, linestyle="--", zorder=1)
+            ax.grid(alpha=0.25, linewidth=0.6)
+            if i == 0:
+                ax.set_title(CLASSES[j][1], fontsize=11)
+            if i == len(SPACES) - 1:
+                ax.set_xlabel(xlabel)
+            if j == 0:
+                ax.set_ylabel(f"{SPACES[i][1]}\nspeedup over BF_vect")
+    fig.suptitle(title, fontsize=11)
+    fig.tight_layout(rect=(0, 0, 0.85, 0.94))
+    fig.savefig(path, dpi=140); plt.close(fig)
+
+
+def speedup_mean_by_threshold(cells, path):
+    """Mean over the six datasets with a standard-deviation bar, against the correlation threshold."""
+    fig, axes = _facets(cells)
+    for i, (space, _) in enumerate(SPACES):
+        for j, (cls, _) in enumerate(CLASSES):
+            ax = axes[i][j]
+            sl = [c for c in cells if c["space"] == space and c["cls"] == cls and c["density"]]
+            for name in ms.lead(NAMES):
+                by_T = {}
+                for c in sl:
+                    a = c["arms"][name]
+                    if a:
+                        by_T.setdefault(c["T"], []).append((c["density"], a["speedup"]))
+                if not by_T:
+                    continue
+                Ts = sorted(by_T)
+                xs = Ts
+                ys = [st.mean([v[1] for v in by_T[T]]) for T in Ts]
+                es = [st.stdev([v[1] for v in by_T[T]]) if len(by_T[T]) > 1 else 0.0 for T in Ts]
+                ct = name.startswith("CorrTrack")
+                ax.errorbar(xs, ys, yerr=es, color=COLOR[name], marker="o", markersize=7 if ct else 5,
+                            linewidth=2.4 if ct else 1.1, elinewidth=1.4, capsize=3, zorder=3 if ct else 2)
+    for row in axes:
+        for ax in row:
+            ax.set_xticks(sorted({c["T"] for c in cells}))
+    _finish(fig, axes, cells, "correlation threshold",
+            "Speedup over BF_vect by correlation threshold: dot is the MEAN over the six datasets, bar is one "
+            "standard deviation of those six", path, xlog=False)
+
+
+def speedup_by_dataset(cells, dataset, path):
+    """One dataset on its own: no aggregation at all, one point per cell."""
+    sub = [c for c in cells if c["dataset"] == dataset]
+    fig, axes = _facets(sub, figsize=(15, 8.5))
+    for i, (space, _) in enumerate(SPACES):
+        for j, (cls, _) in enumerate(CLASSES):
+            ax = axes[i][j]
+            sl = sorted([c for c in sub if c["space"] == space and c["cls"] == cls], key=lambda c: c["T"])
+            for name in ms.lead(NAMES):
+                pt = [c for c in sl if c["arms"][name]]
+                if not pt:
+                    continue
+                ct = name.startswith("CorrTrack")
+                ax.plot([c["T"] for c in pt], [c["arms"][name]["speedup"] for c in pt],
+                        color=COLOR[name], marker="o", markersize=7 if ct else 5,
+                        linewidth=2.4 if ct else 1.1, zorder=3 if ct else 2)
+    for row in axes:
+        for ax in row:
+            ax.set_xticks(sorted({c["T"] for c in sub}))
+    _finish(fig, axes, sub, "correlation threshold",
+            f"{DATASET_LABEL.get(dataset, dataset)}: speedup over BF_vect by correlation threshold, one point "
+            f"per cell, no aggregation", path, xlog=False)
+
+
+def speedup_by_threshold(cells, path):
+    """Threshold on the axis, every dataset shown: one dot per dataset, methods clustered side by side."""
+    fig, axes = _facets(cells, figsize=(19, 10))
+    thr = sorted({c["T"] for c in cells})
+    for i, (space, _) in enumerate(SPACES):
+        for j, (cls, _) in enumerate(CLASSES):
+            ax = axes[i][j]
+            sl = [c for c in cells if c["space"] == space and c["cls"] == cls]
+            shown = [n for n in ms.lead(NAMES) if any(c["arms"].get(n) for c in sl)]
+            width = 0.84 / max(1, len(shown))
+            for k, name in enumerate(shown):
+                off = (k - len(shown) / 2 + 0.5) * width
+                for t_i, T in enumerate(thr):
+                    v = [c["arms"][name]["speedup"] for c in sl if c["T"] == T and c["arms"][name]]
+                    if not v:
+                        continue
+                    xs = [t_i + off + (q - (len(v) - 1) / 2) * width * 0.12 for q in range(len(v))]
+                    ax.plot(xs, v, marker="o", markersize=3.5, linestyle="none", color=COLOR[name],
+                            alpha=0.9, zorder=3 if name.startswith("CorrTrack") else 2)
+                    ax.plot([t_i + off - width * 0.42, t_i + off + width * 0.42], [st.median(v)] * 2,
+                            color=COLOR[name], linewidth=1.6, zorder=4)
+            ax.set_xticks(range(len(thr))); ax.set_xticklabels([f"{T:g}" for T in thr])
+    _finish(fig, axes, cells, "correlation threshold",
+            "Speedup over BF_vect by threshold: one dot per dataset (six per method and threshold), methods "
+            "clustered side by side, the short line marking each cluster's median", path, xlog=False)
+
+
 def performance_profile(cells, path, taus=None):
     """rho_m(tau): the fraction of cells where method m is within tau of that cell's best speedup."""
     import numpy as np
@@ -219,7 +364,8 @@ TIE = 0.10          # as in abaca/build_ranking_tables.py: speedups within 10% c
 DESIGN = {
     "BF_vect": ("exact: the ground truth and the timing anchor of every cell", "none"),
     "BF_incr": ("exact: same set as BF_vect, incremental statistics", "none"),
-    "FilCorr": ("exact at the full band used here, no recall knob", "full band, not tuned"),
+    "FilCorr": ("exact at the full band used here, and the full band prunes nothing: it tests the same "
+                "pair-window universe as BF_incr in every cell, 13% faster", "full band, not tuned"),
     "TSUBASA": ("exact, no recall knob", "none"),
     "BRAID": ("approximate by design, reported the exact set on these lag grids", "published defaults"),
     "ThinBRAID": ("approximate: emits its own decision, no validation pass", "published defaults"),
@@ -466,8 +612,18 @@ def main(root, figdir, table_path=None):
     os.makedirs(figdir, exist_ok=True)
     cells = load(root)
     print(f"{len(cells)} cells")
+    p = os.path.join(figdir, f"real_speedup_by_threshold_median{ms.SUFFIX}.png")
+    speedup_median_by_threshold(cells, p); print("wrote", p)
     p = os.path.join(figdir, f"real_speedup_vs_density{ms.SUFFIX}.png"); speedup_vs_density(cells, p); print("wrote", p)
     p = os.path.join(figdir, f"real_performance_profile{ms.SUFFIX}.png"); performance_profile(cells, p); print("wrote", p)
+    if ms.AUTHORS_ONLY:      # (2026-09-30, user) three further readings of the same cells
+        p = os.path.join(figdir, f"real_speedup_by_threshold_mean{ms.SUFFIX}.png")
+        speedup_mean_by_threshold(cells, p); print("wrote", p)
+        p = os.path.join(figdir, f"real_speedup_by_threshold{ms.SUFFIX}.png")
+        speedup_by_threshold(cells, p); print("wrote", p)
+        for ds in sorted({c["dataset"] for c in cells}):
+            p = os.path.join(figdir, f"real_speedup_by_threshold_{DATASET_LABEL.get(ds, ds)}{ms.SUFFIX}.png")
+            speedup_by_dataset(cells, ds, p); print("wrote", p)
     t3 = dataset_table_markdown(cells, "L", "differenced", root)
     print("\n" + "\n".join(t3))
     cap = capability_markdown(cells)
