@@ -91,8 +91,9 @@ PARAM_GRID = {
     # default rather than being pinned to one grid value here).
     #
     # SignLSHBandIndex's band_width auto-sizing target -- kept at the
-    # default here (not swept in this production grid).
-    "candidate_lsh_target_occupancy": [3.0],
+    # default here (not swept in this production grid). (2026-10-29) "auto":
+    # c rho / (1 - rho) with the default independent band bits, 3.0 with pooled bits.
+    "candidate_lsh_target_occupancy": ["auto"],
     # SignLSHBandIndex's cheap full-vector sign-Hamming pre-filter, gating
     # the real dot product. Default on (recall-safe, real ~9-36% cut in
     # dot-product work) -- not swept as a toggle. max_frac at its validated

@@ -1840,7 +1840,9 @@ class StableReproducedChangesTest(unittest.TestCase):
             return ct
 
         default_ct = run_once()
-        self.assertEqual(default_ct.candidate_lsh_target_occupancy, 3.0)
+        # (2026-10-29) default = independent band bits, occupancy from the cost model (was 3.0 with pooled bits)
+        from library_corrtrack_parallel import lsh_auto_occupancy
+        self.assertAlmostEqual(default_ct.candidate_lsh_target_occupancy, lsh_auto_occupancy(0.6))
         overridden_ct = run_once(target_occupancy=1.0)
         self.assertEqual(overridden_ct.candidate_lsh_target_occupancy, 1.0)
         found = any({p[0], p[1]} == {"s0", "s1"} for p in overridden_ct.correlated.keys())
@@ -1858,7 +1860,14 @@ class StableReproducedChangesTest(unittest.TestCase):
         ct_proj = CorrTrack(
             window_size=64, basic_window=16, window_step=16, n_vectors=16, n_lags=16, validation_metric="pearson", exec="sequential",
         )
-        self.assertEqual(ct_proj.candidate_lsh_target_occupancy, 3.0)
+        # (2026-10-29) default = independent band bits, occupancy from the cost model at the default T = 0.7
+        from library_corrtrack_parallel import lsh_auto_occupancy
+        self.assertAlmostEqual(ct_proj.candidate_lsh_target_occupancy, lsh_auto_occupancy(0.7))
+        ct_pooled = CorrTrack(
+            window_size=64, basic_window=16, window_step=16, n_vectors=16, n_lags=16, validation_metric="pearson", exec="sequential",
+            candidate_lsh_independent_bits=False,
+        )
+        self.assertEqual(ct_pooled.candidate_lsh_target_occupancy, 3.0)
 
         ct_concordance = CorrTrack(
             window_size=256, basic_window=16, window_step=16, n_vectors=32, n_lags=16, validation_metric="spearman", exec="sequential",

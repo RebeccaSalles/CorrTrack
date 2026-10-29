@@ -3342,13 +3342,41 @@ def compute_lsh_n_bands(Py_ssize_t band_width, double corr_threshold, Py_ssize_t
     return new_n_bands
 
 
+# (2026-10-19, experiment in corrtrack_release_indepbands) Independent band bits: each band bit is the
+# sign of its own random projection of the sketch, so the n_bands bands are independent given the pair's
+# sketch angle and the textbook formula applies: P(recall) = 1 - (1 - p^K)^n_bands with p = 1 - acos(T)/pi.
+# Same padded target (recall_safety_margin) as the pooled sizing, so the two modes chase the same recall.
+def compute_lsh_n_bands_independent(Py_ssize_t band_width, double corr_threshold, double target_recall,
+                                    double n_bands_tolerance, double recall_safety_margin=RECALL_SAFETY_MARGIN):
+    cdef double p_bit, p_band, padded_target
+    cdef Py_ssize_t b_min, new_n_bands
+    if n_bands_tolerance <= 0.0:
+        return None
+    p_bit = 1.0 - acos(min(max(corr_threshold, -1.0), 1.0)) / M_PI
+    padded_target = min(target_recall + recall_safety_margin, RECALL_SAFETY_MARGIN_CAP)
+    p_band = p_bit ** band_width
+    if p_band >= 1.0:
+        b_min = 1
+    else:
+        b_min = <Py_ssize_t>ceil(log(1.0 - padded_target) / log(1.0 - p_band))
+    new_n_bands = <Py_ssize_t>ceil(n_bands_tolerance * <double>b_min)
+    if new_n_bands < 3:
+        new_n_bands = 3
+    return new_n_bands
+
+
 def compute_lsh_sizing(Py_ssize_t n_series, Py_ssize_t n_lagged_windows, double target_occupancy,
                         double corr_threshold, Py_ssize_t n_vectors, double target_recall,
-                        double n_bands_tolerance, double recall_safety_margin=RECALL_SAFETY_MARGIN):
+                        double n_bands_tolerance, double recall_safety_margin=RECALL_SAFETY_MARGIN,
+                        bint independent_band_bits=False):
     """Convenience wrapper: (band_width, n_bands) together, n_bands possibly None (sizing
-    disabled). See compute_lsh_band_width/compute_lsh_n_bands for the pieces."""
+    disabled). See compute_lsh_band_width/compute_lsh_n_bands for the pieces. (2026-10-23)
+    independent_band_bits selects the independent-bands formula, as SignLSHBandIndex does."""
     band_width = compute_lsh_band_width(n_series, n_lagged_windows, target_occupancy, n_vectors)
-    n_bands = compute_lsh_n_bands(band_width, corr_threshold, n_vectors, target_recall, n_bands_tolerance, recall_safety_margin)
+    if independent_band_bits:
+        n_bands = compute_lsh_n_bands_independent(band_width, corr_threshold, target_recall, n_bands_tolerance, recall_safety_margin)
+    else:
+        n_bands = compute_lsh_n_bands(band_width, corr_threshold, n_vectors, target_recall, n_bands_tolerance, recall_safety_margin)
     return band_width, n_bands
 
 
@@ -3476,6 +3504,12 @@ cdef class SignLSHBandIndex:
     # memory pressure at large (m, L) can pass 0.0 to fall back to the un-padded (but still
     # overlap-corrected) minimum.
     cdef double _recall_safety_margin
+    cdef bint _independent_band_bits    # (2026-10-19) band bits = signs of fresh random projections of the sketch
+    cdef object _band_proj              # (n_bands * band_width, n_vectors) float64, independent mode only
+    cdef double[:, ::1] _band_proj_mv
+    cdef object _pre_proj               # (n, n_bands * band_width) float64 projections of the batch being inserted
+    cdef double[:, ::1] _pre_proj_mv
+    cdef bint _have_pre_keys
     # (2026-07-22) band_mode="grid" (candidate_backend="lsh_grid_dot") --
     # the human's original grid-bucketing idea (partition sketch dims into
     # bands, quantize raw coordinate values into cells per band) combined
@@ -3642,7 +3676,8 @@ cdef class SignLSHBandIndex:
                   str band_mode="sign", double cell_width=0.0,
                   double target_occupancy=3.0,
                   double n_bands_tolerance=0.0, double corr_threshold_for_sizing=0.7,
-                  double target_recall=0.95, double recall_safety_margin=-1.0):
+                  double target_recall=0.95, double recall_safety_margin=-1.0,
+                  bint independent_band_bits=False):
         if n_vectors <= 0:
             n_vectors = 1
         if initial_capacity < 16:
@@ -3671,6 +3706,10 @@ cdef class SignLSHBandIndex:
         # a real, disclosed value, not a silently-inert sentinel; 0.0 is a legitimate, explicit
         # choice (no margin at all) and must NOT be treated the same as "unset".
         self._recall_safety_margin = recall_safety_margin if recall_safety_margin >= 0.0 else RECALL_SAFETY_MARGIN
+        self._independent_band_bits = independent_band_bits
+        self._band_proj = None
+        self._pre_proj = None
+        self._have_pre_keys = False
         # (2026-07-22) Grid mode has no sign-bit/Hamming notion at all --
         # force the (sign-specific) Hamming pre-filter off regardless of
         # what was requested, rather than silently misbehave.
@@ -3865,10 +3904,16 @@ cdef class SignLSHBandIndex:
         # its own module-level definition for the derivation, and its docstring for the real,
         # disclosed memory cost this margin has at large (m, L).
         if self._n_bands_tolerance > 0.0:
-            _new_n_bands = compute_lsh_n_bands(
-                band_width, self._corr_threshold_for_sizing, self._n_vectors,
-                self._target_recall, self._n_bands_tolerance, self._recall_safety_margin,
-            )
+            if self._independent_band_bits:
+                _new_n_bands = compute_lsh_n_bands_independent(
+                    band_width, self._corr_threshold_for_sizing, self._target_recall,
+                    self._n_bands_tolerance, self._recall_safety_margin,
+                )
+            else:
+                _new_n_bands = compute_lsh_n_bands(
+                    band_width, self._corr_threshold_for_sizing, self._n_vectors,
+                    self._target_recall, self._n_bands_tolerance, self._recall_safety_margin,
+                )
             if _new_n_bands != self._n_bands:
                 # _band_keys/_neg_band_keys/_membership_pos were allocated in
                 # __cinit__ using the OLD (placeholder) n_bands, before
@@ -3892,6 +3937,12 @@ cdef class SignLSHBandIndex:
             for _ in range(self._n_bands)
         ]
         self._band_dims = np.asarray(band_dims_list, dtype=np.int64)
+        if self._independent_band_bits and self._band_mode == 0:
+            # one Gaussian hyperplane per band bit, in sketch space: sign(h . x) agrees for two sketches with
+            # probability 1 - angle/pi, independently across hyperplanes (sign random projection)
+            self._band_proj = np.ascontiguousarray(
+                np.random.default_rng(self._band_seed + 7919).standard_normal((self._n_bands * band_width, self._n_vectors)))
+            self._band_proj_mv = self._band_proj
         if self._band_mode == 1:
             # (2026-07-22) E2LSH-style per-band-per-dimension random cell
             # offset -- avoids every band sharing one hard grid boundary
@@ -4137,8 +4188,23 @@ cdef class SignLSHBandIndex:
         # original two-lookup (raw key + full complement) scheme has.
         # Measured: real recall on the validated dataset dropped from
         # ~0.85 to ~0.69 -- reverted back to raw (non-canonicalized) keys.
+        cdef double proj_acc
+        cdef Py_ssize_t proj_row
         for band_idx in range(self._n_bands):
-            if self._band_mode == 0:
+            if self._band_mode == 0 and self._independent_band_bits and self._have_pre_keys:
+                key = 0
+                proj_row = band_idx * self._band_width
+                for w in range(self._band_width):
+                    key = (key << 1) | (1 if self._pre_proj_mv[row, proj_row + w] >= 0 else 0)
+            elif self._band_mode == 0 and self._independent_band_bits:
+                key = 0
+                for w in range(self._band_width):
+                    proj_row = band_idx * self._band_width + w
+                    proj_acc = 0.0
+                    for d in range(self._n_vectors):
+                        proj_acc = proj_acc + self._band_proj_mv[proj_row, d] * all_vectors[row, d]
+                    key = (key << 1) | (1 if proj_acc >= 0 else 0)
+            elif self._band_mode == 0:
                 key = 0
                 for w in range(self._band_width):
                     dim = band_dims[band_idx, w]
@@ -4189,6 +4255,10 @@ cdef class SignLSHBandIndex:
             self._post_count[flat] = cnt + 1
 
         return new_id
+
+    @property
+    def independent_band_bits(self):
+        return bool(self._independent_band_bits)
 
     @property
     def n_bands(self):
@@ -4273,6 +4343,15 @@ cdef class SignLSHBandIndex:
 
         entry_ids = np.empty(n, dtype=np.int64)
         cdef double[:, ::1] vectors_mv = vectors_np
+        # (2026-10-20) independent band bits: project the whole batch at once (one float64 BLAS product, n x n_vectors
+        # times n_vectors x n_bands*band_width); _insert_one then packs each band's key from the signs of its slice
+        # instead of computing n_bands*band_width dot products itself. (First version packed the keys in numpy with
+        # a bool -> int64 cast and an integer matmul, which numpy does not hand to BLAS: slower than the scalar loop.)
+        self._have_pre_keys = False
+        if self._independent_band_bits and self._band_mode == 0 and self._band_proj is not None:
+            self._pre_proj = np.ascontiguousarray(vectors_np @ self._band_proj.T)
+            self._pre_proj_mv = self._pre_proj
+            self._have_pre_keys = True
         for i in range(n):
             wi = <int64_t>window_idx_np[i]
             entry_ids[i] = self._insert_one(
@@ -4284,6 +4363,7 @@ cdef class SignLSHBandIndex:
                 win_sid_rank[wi] = <int64_t>sid_rank_np[i]
                 win_time[wi] = <int64_t>time_np[i]
                 win_size[wi] = <int64_t>window_size_np[i]
+        self._have_pre_keys = False
         return entry_ids
 
     cpdef drop_before_time(self, long min_valid_time):

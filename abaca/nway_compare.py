@@ -50,6 +50,12 @@ from abaca.resource_probe import run_isolated, idle_power  # noqa: E402
 import socket  # noqa: E402
 
 ALL_ARMS = ("bruteforce", "bf_incremental", "filcorr", "tsubasa", "braid", "thinbraid", "corrtrack", "corrtrack_hamming", "parcorr", "csz", "statstream", "corrjoin")
+# (2026-10-29) arms run only when named in --arms, never by "all" (corrtrack_indep equals corrtrack on a fresh tuning)
+EXTRA_ARMS = ("corrtrack_indep",)
+# (2026-10-19) corrtrack_indep: the corrtrack arm's own tuned parameters with candidate_lsh_independent_bits on (band
+# bits from fresh random projections of the sketch, no shared bit pool), so the pooled and the independent banding
+# run in one job, on one node, against one brute-force truth. Since 2026-10-29 the independent bits are the default
+# and a fresh tuning file already selects them, so this arm only differs from corrtrack on a pooled tuning file
 # (2026-09-21, user) corrtrack_hamming: CorrTrack with the lsh_hamming_exact backend (hamming_exact + dot gate), tuned by its own
 # hyperopt on experiment_run_param_grid_campaign_hamming.py, so the tables carry both backends like the m=500 sweeps
 PATTERN_A = {"bruteforce": "bruteforce", "bf_incremental": "bf_incremental", "filcorr": "filcorr", "tsubasa": "tsubasa", "braid": "braid", "thinbraid": "braid"}
@@ -171,6 +177,7 @@ def main() -> None:
                          "or the whole stream; tuning always used the first TRAIN_RATIO, so 'full' includes the calibration span")
     ap.add_argument("--best-params", default=None, help="CorrTrack hyperopt best_params_corrtrack.json (required for the corrtrack arm unless --allow-untuned)")
     ap.add_argument("--best-params-hamming", default=None, help="hyperopt best_params_corrtrack.json of the lsh_hamming_exact grid (required for the corrtrack_hamming arm unless --allow-untuned)")
+    ap.add_argument("--skip-truth", action="store_true", help="do not run the bruteforce arm (recall computed later from a stored count)")
     ap.add_argument("--allow-untuned", action="store_true",
                     help="run the corrtrack arm with default parameters (plumbing smoke only; the output is labelled UNTUNED and is not quotable)")
     ap.add_argument("--n-vectors", type=int, default=32)
@@ -190,7 +197,10 @@ def main() -> None:
     _ARM_ALIASES = {"exact_stomp": "bf_incremental", "stomp": "bf_incremental", "incremental": "bf_incremental"}
     arms = (list(ALL_ARMS) if args.arms == "all"
             else [_ARM_ALIASES.get(a.strip(), a.strip()) for a in args.arms.split(",") if a.strip()])
-    if "bruteforce" not in arms:
+    # (2026-10-23) --skip-truth: no brute-force arm. For CorrTrack precision is 1 by
+    # construction (exact validation), so recall = correlated / brute-force correlated, computed afterwards from the
+    # brute-force count of an earlier run on the same seeded file
+    if "bruteforce" not in arms and not args.skip_truth:
         arms.insert(0, "bruteforce")
 
     cfg_dataset = bfmod._load_dataset_config(Path(args.dataset_config))
@@ -225,6 +235,9 @@ def main() -> None:
         ct_params = dict(n_vectors=args.n_vectors, seed=2468, seed_toggle=1357, preprocess=False)
         ct_source = "UNTUNED defaults (--allow-untuned: smoke, not quotable)"
     ct_params = dict(ct_params, preprocess=bool(args.preprocess))        # the cell's preprocess wins over the hyperopt file's
+    # (2026-10-29) independent band bits became CorrTrack's default; a tuning file without the key was tuned with the
+    # pooled bits (every hyperopt before 2026-10-29), so it keeps them instead of silently mixing the two modes
+    ct_params.setdefault("candidate_lsh_independent_bits", False)
     if args.best_params_hamming and os.path.exists(args.best_params_hamming):
         ct_params_h = json.load(open(args.best_params_hamming)); ct_source_h = args.best_params_hamming
     elif "corrtrack_hamming" in arms and not args.allow_untuned:
@@ -248,6 +261,7 @@ def main() -> None:
     pattern_b = {
         "corrtrack": ct_params,
         "corrtrack_hamming": ct_params_h,
+        "corrtrack_indep": dict(ct_params, candidate_lsh_independent_bits=True),
         "parcorr": dict(common, data_representation="sketch_proj", candidate_backend="parcorr_grid", parcorr_k=knobs.get("parcorr_k", 2),
                         parcorr_f=knobs.get("parcorr_f", 0.7), parcorr_c=knobs.get("parcorr_c", 0.7), parcorr_neighbor_probe=False),
         "csz": dict(common, data_representation="sketch_proj", candidate_backend="parcorr_grid", parcorr_k=knobs.get("parcorr_k", 2),
@@ -372,7 +386,7 @@ def main() -> None:
                   f"peak_rss={resources['peak_rss_mb']:.0f}MB (+{(resources['peak_rss_delta_mb'] or 0):.0f}) mean_rss={(resources['mean_rss_mb'] or 0):.0f}MB "
                   f"io_w={(resources['io_write_mb'] or 0):.1f}MB neg_corr_tag={r['supports_neg_corr']}", flush=True)
 
-    bf = results["bruteforce"]
+    bf = results.get("bruteforce", {"status": "skipped", "wall": None})
     try:
         meta = None
         loader = getattr(bfmod.DATA_LOADER, "keywords", {}) or {}
@@ -395,7 +409,7 @@ def main() -> None:
         if r["status"] != "ok":
             print(f"{arm:17s} {r['status']:>6s}  {r['reason']}")
             continue
-        sp = bf["wall"] / r["wall"] if r["wall"] else float("nan")
+        sp = bf["wall"] / r["wall"] if (r["wall"] and bf.get("wall")) else float("nan")
         rec = f"{r['recall']:.4f}" if r.get("recall") is not None else "   -  "
         prec = f"{r['candidate_precision']:.4f}" if r.get("candidate_precision") is not None else "    -    "
         spec = f"{r['candidate_specificity']:.4f}" if r.get("candidate_specificity") is not None else "    -    "

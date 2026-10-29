@@ -385,6 +385,7 @@ OPTIM_RESULT_COLUMNS: Sequence[str] = (
     # hyperopt winner's chosen target_occupancy (e.g. to reuse it for the final,
     # full-length run) needs this column to actually exist in the output.
     "candidate_lsh_target_occupancy",
+    "candidate_lsh_independent_bits",      # (2026-10-24, corrtrack_release_indepbands) mode of the LSH band bits
     "candidate_apply_dot_gamma_filter",
     "candidate_hamming_threshold",
     "candidate_apply_hamming_filter",
@@ -2470,6 +2471,15 @@ def _extract_feature_overrides(params):
         val = _to_float_safe(lsh_recall_safety_margin)
         if val is not None and val >= 0:
             overrides["candidate_lsh_recall_safety_margin"] = float(val)
+    # (2026-10-19, corrtrack_release_indepbands) independent band bits, see candidate_kernels.SignLSHBandIndex
+    lsh_cost_ratio = params.get("candidate_lsh_cost_ratio")
+    if lsh_cost_ratio is not None and not _is_missing_param_value(lsh_cost_ratio):
+        val = _to_float_safe(lsh_cost_ratio)
+        if val is not None and val > 0:
+            overrides["candidate_lsh_cost_ratio"] = float(val)
+    lsh_independent_bits = params.get("candidate_lsh_independent_bits")
+    if lsh_independent_bits is not None and not _is_missing_param_value(lsh_independent_bits):
+        overrides["candidate_lsh_independent_bits"] = _coerce_to_bool(lsh_independent_bits, default=False)
 
     # (2026-07-29) Part 3/4 validation-metric and representation params --
     # see docs/implementation_log.md's 2026-07-28/2026-07-29 entries.
@@ -3975,6 +3985,104 @@ _os_parallel_guard.environ.setdefault("MKL_CBWR", "COMPATIBLE")
 _os_parallel_guard.environ.setdefault("MKL_DEBUG_CPU_TYPE", "5")
 # ================================================================
 
+# (2026-10-26, corrtrack_release_indepbands) LSH occupancy rule for the independent-band-bits mode.
+# Query cost of the band index ~ n_bands x (c + occupancy): each band costs about c unrelated collisions (computing its
+# hash code, looking up its bucket and the bookkeeping around it) and finds about `occupancy` unrelated windows. With
+# independent bands n_bands ~ (m L / occupancy)^rho, so the cost is minimised at occupancy* = c rho / (1 - rho),
+# independent of m and L (the decomposition of the E2LSH 0.1 manual, Section 3.4, T_g + T_c). c is a property of the
+# implementation and the CPU, measured once and shipped as a default; calibrate_lsh_cost_ratio() measures it on the
+# current machine for users who want their own value. See docs/occupancy_sweep_2026-10-26.md.
+# (2026-10-27) calibrated on three CPU families, same cells (fixed degree, T 0.8 and 0.9, m 1000 and 4000, 48 runs each):
+# Xeon Silver 4114 (Skylake) 11.0, Xeon Gold 6240 (Cascade Lake) 10.8, AMD EPYC 7513 (Zen 3) 10.3; real campaign cells
+# (m ~ 500) 15. The optimum is flat, so a factor-2 error in c costs about 10% of speed at most.
+LSH_DEFAULT_COST_RATIO = 11.0
+# (2026-10-28) independent-mode tuning: configurations whose gate passes at most this much more than the fewest candidates
+# count as equally cheap, and the best recall among them is chosen (see the proxy-anchor selection)
+PROXY_VALIDATION_WORK_TOLERANCE = 0.10
+
+
+def lsh_auto_occupancy(corr_threshold, cost_ratio=None):
+    """Target occupancy minimising the band index's query cost for this threshold: c rho / (1 - rho), at least 1."""
+    c = LSH_DEFAULT_COST_RATIO if cost_ratio is None else float(cost_ratio)
+    t = min(max(float(corr_threshold), -1.0 + 1e-12), 1.0 - 1e-12)
+    p_bit = 1.0 - math.acos(t) / math.pi
+    rho = math.log2(1.0 / p_bit)
+    if rho >= 1.0:
+        return 1.0
+    return max(1.0, c * rho / (1.0 - rho))
+
+
+def _fit_lsh_cost_ratio(runs, grid=None):
+    """Shared c across cells for time = beta_cell * n_bands * (c + occupancy); beta per cell in closed form, c by grid
+    search on the summed squared relative error. `runs` is a list of dicts with keys cell, occupancy, n_bands, time."""
+    grid = np.arange(0.5, 100.0, 0.1) if grid is None else np.asarray(grid, dtype=float)
+    cells = {}
+    for r in runs:
+        cells.setdefault(r["cell"], []).append(r)
+    best_c, best_err = float("nan"), float("inf")
+    for c in grid:
+        err = 0.0
+        for rows in cells.values():
+            x = np.array([r["n_bands"] * (c + r["occupancy"]) for r in rows], dtype=float)
+            y = np.array([r["time"] for r in rows], dtype=float)
+            beta = float(x @ y) / float(x @ x)
+            err += float(np.sum(((y - beta * x) / y) ** 2))
+        if err < best_err:
+            best_c, best_err = float(c), err
+    return best_c, best_err
+
+
+def calibrate_lsh_cost_ratio(data=None, *, n_series=1000, n_obs=3000, group_size=56, thresholds=(0.8, 0.9),
+                             occupancies=(2, 3, 6, 12, 24, 48), repeats=2, window_size=60, window_step=6, n_lags=30,
+                             n_vectors=64, gate_offset=0.2, seed=7, verbose=True):
+    """Measure the LSH cost ratio c on this machine, for candidate_lsh_cost_ratio.
+
+    Runs CorrTrack with independent band bits at several target occupancies and fits candidate-phase time =
+    beta * n_bands * (c + occupancy) jointly over the thresholds (one beta per threshold, one shared c). Takes a few
+    minutes at the defaults. Run it in the environment CorrTrack will run in (same BLAS threading: the band hash
+    codes are one BLAS product per step). `data` is an optional (series x time) array of the user's own series; by
+    default a synthetic stream is used: groups of `group_size` series sharing an AR(1) driver (within-group
+    correlation about 0.97), so every series has group_size - 1 correlated partners. Returns a dict with the fitted
+    cost_ratio, the occupancy it implies per threshold, and the per-run measurements.
+    """
+    rng = np.random.default_rng(seed)
+    if data is None:
+        n_groups = -(-int(n_series) // int(group_size))
+        drivers = rng.standard_normal((n_groups, int(n_obs)))
+        for k in range(1, int(n_obs)):
+            drivers[:, k] = 0.6 * drivers[:, k - 1] + drivers[:, k]
+        series = np.repeat(drivers, int(group_size), axis=0)[: int(n_series)]
+        series = series + 0.17 * series.std(axis=1, keepdims=True) * rng.standard_normal(series.shape)
+    else:
+        series = np.asarray(data, dtype=np.float64)
+    m, n = series.shape
+    X = np.vstack([np.arange(n, dtype=np.float64), series])
+    ids = [f"s{i}" for i in range(m)]
+    runs = []
+    for rep in range(int(repeats)):
+        for T in thresholds:
+            for occ in occupancies:
+                ct = CorrTrack(window_size=window_size, basic_window=window_step, window_step=window_step, n_vectors=n_vectors,
+                               n_lags=n_lags, corr_threshold=float(T), exec="sequential", candidate_backend="lsh_sign_dot",
+                               candidate_lsh_independent_bits=True, candidate_lsh_target_occupancy=float(occ),
+                               candidate_lsh_n_bands_tolerance=1.0, candidate_cosine_threshold_offset=gate_offset,
+                               candidate_hamming_filter_max_frac=0.40, hybrid_validation=False)
+                for s in range(0, n - window_step + 1, window_step):
+                    ct.run(X[:, s:s + window_step], ids, verbose=False, testing=False, corr_val=True, monitor=False)
+                idx = getattr(ct.grid_nodes[0], "_lsh_index", None) if ct.grid_nodes else None
+                row = {"cell": float(T), "threshold": float(T), "occupancy": float(occ), "repeat": rep,
+                       "n_bands": int(idx.n_bands) if idx is not None else None, "time": float(ct.candidate_time)}
+                runs.append(row)
+                if verbose:
+                    print(f"[calibrate_lsh_cost_ratio] T={T} occupancy={occ} n_bands={row['n_bands']} "
+                          f"candidate time={row['time']:.2f}s", flush=True)
+    usable = [r for r in runs if r["n_bands"] and r["time"] > 0]
+    c, err = _fit_lsh_cost_ratio(usable)
+    return {"cost_ratio": c, "fit_error": err,
+            "occupancy_by_threshold": {float(T): lsh_auto_occupancy(T, c) for T in thresholds},
+            "n_series": m, "n_obs": n, "runs": runs}
+
+
 # (2026-07-31) candidate_lsh_target_occupancy's default for the concordance/
 # multichannel index wrappers (ConcordanceMultiGapIndex/DistanceCorrSketch
 # MultiChannelIndex) -- distinct from the general sketch_proj/Candidates
@@ -3990,7 +4098,7 @@ _MULTICHANNEL_DEFAULT_TARGET_OCCUPANCY = 10.0
 
 
 class CorrTrack:
-    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,exec="parallel",max_workers=0,data_representation="auto",candidate_backend="auto",candidate_cosine_threshold=None,candidate_cosine_threshold_offset=None,candidate_parallel_mode="recent_shards",candidate_lsh_radius=None,candidate_ann_m=None,candidate_ann_z=None,candidate_ann_ef=None,parallel_sketch=None,parallel_candidates=None,parallel_validation=None,track_min_dist=True,hybrid_validation=False,hybrid_validation_min_repeat_rate=0.25,hybrid_validation_disable_rate=None,hybrid_validation_ema_alpha=0.25,hybrid_validation_min_candidates=256,numeric_rows=True,validation_current_window_cache=False,candidate_lsh_n_bands=64,candidate_lsh_n_bands_tolerance=None,target_recall=0.95,candidate_lsh_target_occupancy=None,candidate_lsh_recall_safety_margin=None,candidate_apply_dot_gamma_filter=True,candidate_hamming_threshold=None,candidate_apply_hamming_filter=True,candidate_hamming_filter_max_frac=0.40,candidate_lsh_max_candidates_per_query=0,candidate_search_n_threads=1,validation_metric="pearson",validation_incremental_approx=False,validation_incremental_m1=None,validation_incremental_m2=None,validation_incremental_max_age_steps=64,validation_incremental_cutpoint_refresh_threshold=0.5,dist_corr_algorithm="naive",concordance_n_gaps=None,concordance_min_gap=8,concordance_min_capacity=16,concordance_target_dim=738,concordance_multichannel_gamma=None,concordance_multichannel_min_channel_capacity=None,distance_corr_sketch_k=8,distance_corr_sketch_freq_low=0.1,distance_corr_sketch_freq_high=10.0,distance_corr_sketch_freq_seed=42,distance_corr_sketch_gate_tau=None,distance_corr_sketch_multichannel_gamma=None,distance_corr_sketch_apply_tier2_gate=True,parcorr_k=2,parcorr_f=0.7,parcorr_c=0.7,parcorr_neighbor_probe=False,statstream_n_coeffs=16,statstream_index_dims=4,statstream_apply_dft_filter=True,statstream_report="approx",statstream_tolerance=0.0005,statstream_bw_coeffs=2,corrjoin_ks=15,corrjoin_ke=30,corrjoin_kb=3):
+    def __init__(self,window_size,basic_window,window_step,n_vectors,n_lags,seed=2468,seed_toggle=1357,freq_threshold=0.7,corr_threshold=0.7,neg_corr=False,preprocess=False,exec="parallel",max_workers=0,data_representation="auto",candidate_backend="auto",candidate_cosine_threshold=None,candidate_cosine_threshold_offset=None,candidate_parallel_mode="recent_shards",candidate_lsh_radius=None,candidate_ann_m=None,candidate_ann_z=None,candidate_ann_ef=None,parallel_sketch=None,parallel_candidates=None,parallel_validation=None,track_min_dist=True,hybrid_validation=False,hybrid_validation_min_repeat_rate=0.25,hybrid_validation_disable_rate=None,hybrid_validation_ema_alpha=0.25,hybrid_validation_min_candidates=256,numeric_rows=True,validation_current_window_cache=False,candidate_lsh_n_bands=64,candidate_lsh_n_bands_tolerance=None,target_recall=0.95,candidate_lsh_target_occupancy=None,candidate_lsh_recall_safety_margin=None,candidate_apply_dot_gamma_filter=True,candidate_hamming_threshold=None,candidate_apply_hamming_filter=True,candidate_hamming_filter_max_frac=0.40,candidate_lsh_max_candidates_per_query=0,candidate_search_n_threads=1,validation_metric="pearson",candidate_lsh_independent_bits=True,candidate_lsh_cost_ratio=None,validation_incremental_approx=False,validation_incremental_m1=None,validation_incremental_m2=None,validation_incremental_max_age_steps=64,validation_incremental_cutpoint_refresh_threshold=0.5,dist_corr_algorithm="naive",concordance_n_gaps=None,concordance_min_gap=8,concordance_min_capacity=16,concordance_target_dim=738,concordance_multichannel_gamma=None,concordance_multichannel_min_channel_capacity=None,distance_corr_sketch_k=8,distance_corr_sketch_freq_low=0.1,distance_corr_sketch_freq_high=10.0,distance_corr_sketch_freq_seed=42,distance_corr_sketch_gate_tau=None,distance_corr_sketch_multichannel_gamma=None,distance_corr_sketch_apply_tier2_gate=True,parcorr_k=2,parcorr_f=0.7,parcorr_c=0.7,parcorr_neighbor_probe=False,statstream_n_coeffs=16,statstream_index_dims=4,statstream_apply_dft_filter=True,statstream_report="approx",statstream_tolerance=0.0005,statstream_bw_coeffs=2,corrjoin_ks=15,corrjoin_ke=30,corrjoin_kb=3):
 
         if basic_window is not None and window_size % basic_window != 0:
             raise TypeError("Window size (",window_size,") is not divisable by basic window size (",basic_window,")")
@@ -4547,8 +4655,16 @@ class CorrTrack:
             self.candidate_lsh_target_occupancy = mc_target_occupancy
         elif _lsh_occ_val and _lsh_occ_val > 0:
             self.candidate_lsh_target_occupancy = float(_lsh_occ_val)
+        elif _coerce_to_bool(candidate_lsh_independent_bits, default=True):
+            # (2026-10-26) independent band bits, occupancy unset or "auto": the cost-model optimum for this threshold
+            # (2026-10-29, user) independent band bits are the default; candidate_lsh_independent_bits=False restores
+            # the pooled band bits (bits drawn from the 64 sketch-coordinate signs, occupancy default 3.0)
+            _cost_ratio = _to_float_safe(candidate_lsh_cost_ratio)
+            self.candidate_lsh_target_occupancy = lsh_auto_occupancy(
+                float(corr_threshold), _cost_ratio if _cost_ratio and _cost_ratio > 0 else None)
         else:
             self.candidate_lsh_target_occupancy = 3.0
+        self.candidate_lsh_cost_ratio = _to_float_safe(candidate_lsh_cost_ratio)
         # (2026-09-04) See Candidates.__init__'s identical block for the full derivation/cost --
         # None (default) means "use the calibrated value", 0.0 is a legitimate explicit choice
         # (no margin) and must not collapse to the same thing via a truthy `or` check.
@@ -4561,6 +4677,7 @@ class CorrTrack:
                 float(_margin_val) if _margin_val is not None and _margin_val >= 0.0
                 else _default_recall_safety_margin
             )
+        self.candidate_lsh_independent_bits = _coerce_to_bool(candidate_lsh_independent_bits, default=True)
         self.candidate_apply_dot_gamma_filter = _coerce_to_bool(candidate_apply_dot_gamma_filter, default=True)
         self.candidate_apply_hamming_filter = _coerce_to_bool(candidate_apply_hamming_filter, default=False)
         # (2026-07-21j) None is a real, meaningful value here (not "use the
@@ -4995,6 +5112,7 @@ class CorrTrack:
                 target_recall=self.target_recall,
                 candidate_lsh_target_occupancy=self.candidate_lsh_target_occupancy,
                 candidate_lsh_recall_safety_margin=self.candidate_lsh_recall_safety_margin,
+                candidate_lsh_independent_bits=self.candidate_lsh_independent_bits,
                 candidate_apply_dot_gamma_filter=self.candidate_apply_dot_gamma_filter,
                 candidate_apply_hamming_filter=self.candidate_apply_hamming_filter,
                 candidate_hamming_filter_max_frac=self.candidate_hamming_filter_max_frac,
@@ -14962,6 +15080,7 @@ class Candidates:
                  target_recall=0.95,
                  candidate_lsh_target_occupancy=3.0,
                  candidate_lsh_recall_safety_margin=None,
+                 candidate_lsh_independent_bits=False,
                  candidate_apply_dot_gamma_filter=True,
                  candidate_hamming_threshold=None,
                  candidate_apply_hamming_filter=True, candidate_hamming_filter_max_frac=0.40,
@@ -15044,6 +15163,7 @@ class Candidates:
                 float(_margin_val) if _margin_val is not None and _margin_val >= 0.0
                 else _default_recall_safety_margin
             )
+        self.candidate_lsh_independent_bits = _coerce_to_bool(candidate_lsh_independent_bits, default=False)
         self.candidate_apply_dot_gamma_filter = _coerce_to_bool(candidate_apply_dot_gamma_filter, default=True)
         # (2026-07-21) lsh_sign_dot cheap full-vector sign-Hamming
         # pre-filter -- see docs/implementation_log.md, "lsh_sign_dot
@@ -15242,6 +15362,7 @@ class Candidates:
                     else float(self.candidate_hamming_filter_max_frac)
                 ),
                 max_candidates_per_query=int(self.candidate_lsh_max_candidates_per_query),
+                independent_band_bits=bool(self.candidate_lsh_independent_bits),
             )
             self._candidate_backend = "lsh_sign_dot"
         elif hamming_exact_requested and self._vector_match_enabled and not self.return_distances:
@@ -20482,6 +20603,7 @@ class CorrTrack_optimize:
                     _band_width, real_n_bands = _cand_kernels.compute_lsh_sizing(
                         _n_series_for_sizing, corrtrack.n_lagged_windows, candidate_lsh_target_occupancy,
                         self.corr_threshold, n_vectors, corrtrack.target_recall, candidate_lsh_n_bands_tolerance,
+                        independent_band_bits=bool(getattr(corrtrack, "candidate_lsh_independent_bits", False)),
                     )
                 except Exception:
                     real_n_bands = None
@@ -20489,6 +20611,7 @@ class CorrTrack_optimize:
                 real_n_bands if real_n_bands is not None else getattr(corrtrack, "candidate_lsh_n_bands", None)
             )
             record["candidate_lsh_n_bands_tolerance"] = getattr(corrtrack, "candidate_lsh_n_bands_tolerance", None)
+            record["candidate_lsh_independent_bits"] = bool(getattr(corrtrack, "candidate_lsh_independent_bits", False))
             record["candidate_lsh_target_occupancy"] = candidate_lsh_target_occupancy
             record["candidate_apply_dot_gamma_filter"] = getattr(corrtrack, "candidate_apply_dot_gamma_filter", None)
             record["candidate_hamming_threshold"] = getattr(corrtrack, "candidate_hamming_threshold", None)
@@ -20751,6 +20874,13 @@ class CorrTrack_optimize:
         # stale constructor echo it used to be). candidate_rate_rank is kept below only as a
         # later tie-break, not the primary axis anymore.
         n_bands_rank = numeric_column("candidate_lsh_n_bands")
+        # (2026-10-24, corrtrack_release_indepbands) with independent band bits the cost signal is bands x occupancy:
+        # each probed bucket holds about `occupancy` unrelated windows, and fewest-bands-first alone always picks the
+        # largest occupancy (narrowest bands), which measured slower at every m. Pooled rows keep the band count.
+        if "candidate_lsh_independent_bits" in candidates.columns:
+            _indep = candidates["candidate_lsh_independent_bits"].astype(str).str.strip().str.lower().isin(["true", "1", "1.0"])
+            _occ = numeric_column("candidate_lsh_target_occupancy")
+            n_bands_rank = n_bands_rank.where(~_indep | _occ.isna(), n_bands_rank * _occ)
         recall_ci_width = numeric_column("proxy_recall_ub") - numeric_column("proxy_recall_lb")
         search_objective = numeric_column("proxy_search_objective_rate")
         search_similarity_work = numeric_column("proxy_search_similarity_work_rate")
@@ -20804,6 +20934,8 @@ class CorrTrack_optimize:
         ranking["_specificity_rank"] = specificity_rank
         ranking["_underpowered_rank"] = underpowered.astype(int)
         ranking["_time_rank"] = time_total_rank
+        ranking["_recall_score"] = recall_score
+        ranking["_validation_work"] = numeric_column("proxy_search_after_dot")
 
         feasible = ranking[feasible_mask.fillna(False)]
         if feasible.empty:
@@ -20845,6 +20977,34 @@ class CorrTrack_optimize:
         # tie, not a primary-tier signal -- the remaining search-work-based ranks (candidate
         # rate, similarity/dot/index work, precision, specificity, plain recall, output
         # candidate count) stay even later, for the rarer case all three of those also tie.
+        # (2026-10-28, corrtrack_release_indepbands, user) Independent band bits: occupancy is fixed by the cost model,
+        # so the configurations differ by the gate and the Hamming filter, whose cost is the validation work. Select by
+        # exact counts, not timings: among feasible configurations (recall lower bound >= target; adequately powered ones
+        # if any), keep those whose candidates passing the gate are within PROXY_VALIDATION_WORK_TOLERANCE of the
+        # fewest, then take the best recall (lower bound, then mean), so a configuration that only barely met the target
+        # on the tuning sample is not preferred to an equally cheap, safer one. Time breaks the remaining ties.
+        if "candidate_lsh_independent_bits" in feasible.columns:
+            _indep_rows = feasible["candidate_lsh_independent_bits"].astype(str).str.strip().str.lower().isin(["true", "1", "1.0"])
+            if len(feasible) > 0 and bool(_indep_rows.all()):
+                pool = feasible
+                if (pool["_underpowered_rank"] == 0).any():
+                    pool = pool[pool["_underpowered_rank"] == 0]
+                work = pool["_validation_work"]
+                if work.notna().any():
+                    w_min = float(work.min())
+                    pool = pool[work <= w_min * (1.0 + PROXY_VALIDATION_WORK_TOLERANCE)]
+                best = pool.sort_values(["_recall_score", "_recall_rank", "_time_rank", "_ci_width_rank"],
+                                        ascending=[False, False, True, True], na_position="last").head(1)
+                if best.empty:
+                    return metrics, None
+                best_idx = best.index[0]
+                metrics.loc[:, "proxy_selected"] = False
+                metrics.loc[best_idx, "proxy_selected"] = True
+                metrics.loc[best_idx, "proxy_sample_adequate"] = bool(
+                    metrics.loc[best_idx, "proxy_feasible"] and not metrics.loc[best_idx, "proxy_underpowered"]
+                )
+                return metrics, metrics.loc[[best_idx]]
+
         primary_sort_cols = ["_underpowered_rank", "_n_bands_rank", "_time_rank", "_ci_width_rank"]
         primary_ascending = [True, True, True, True]
         common_sort_cols = [

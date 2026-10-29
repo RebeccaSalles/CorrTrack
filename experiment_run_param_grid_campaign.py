@@ -1,4 +1,4 @@
-"""CorrTrack hyper-parameter grid for the competitor campaign (2026-09-19).
+"""CorrTrack hyper-parameter grid for the competitor campaign (2026-09-19; independent band bits since 2026-10-29).
 
 The default grid (experiment_run_param_grid.py) fixes the dot-gate offset at 0.20 and the LSH target
 occupancy at 3.0 and searches only n_vectors x hamming fraction (8 settings). The m = 500 calibrations
@@ -12,7 +12,8 @@ from experiment_run_param_grid import PARAM_GRID as _BASE
 
 PARAM_GRID = dict(_BASE)
 PARAM_GRID.update({
-    # 2 x 4 x 5 x 2 = 80 settings: 150 took 40 min locally at m = 492 (8 took 7 min), the pick was
+    # (2026-10-29) 4 offsets x 2 Hamming fractions = 8 settings (occupancy no longer searched).
+    # Before: 2 x 4 x 5 x 2 = 80 settings: 150 took 40 min locally at m = 492 (8 took 7 min), the pick was
     # n_vectors 64, offset 0.05, occupancy 8; n_vectors 16 and offset 0.15 never won in the pilots
     # (2026-09-24, user) the sketch width is fixed at 64 rather than tuned per cell. The 32-vector
     # option was selected in 7 cells (all smartmeter, lsh backend) and 6 of them then missed the 0.95
@@ -22,7 +23,11 @@ PARAM_GRID.update({
     # from our own method that the competitors keep.
     "n_vectors": [64],
     "candidate_cosine_threshold_offset": [0.0, 0.05, 0.10, 0.20],
-    "candidate_lsh_target_occupancy": [2.0, 3.0, 5.0, 8.0, 12.0],
+    # (2026-10-29, user) independent band bits by default; occupancy is not searched: "auto" sets it to
+    # lsh_auto_occupancy(T) = c rho / (1 - rho), the optimum of the calibrated query-cost model
+    # (docs/occupancy_sweep_2026-10-26.md). The pooled grid is experiment_run_param_grid_campaign_pooled.py.
+    "candidate_lsh_independent_bits": [True],
+    "candidate_lsh_target_occupancy": ["auto"],
     "candidate_hamming_filter_max_frac": [None, 0.40],
     # (2026-09-19) incremental validation of repeated candidate pairs, on when W >= 120 (see
     # HYBRID_VALIDATION_AUTO_MIN_WINDOW); exact, so not a searched axis

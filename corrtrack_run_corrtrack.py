@@ -315,7 +315,11 @@ def _load_loader(loader_spec: str) -> Callable[[str, str], tuple[np.ndarray, np.
 
 def load_best_params(path):
     with open(path, "r", encoding="utf-8") as fp:
-        return json.load(fp)
+        params = json.load(fp)
+    # (2026-10-29) a tuning file without the key predates the independent-bits default: it was tuned with pooled bits
+    if isinstance(params, dict):
+        params.setdefault("candidate_lsh_independent_bits", False)
+    return params
 
 
 def iter_datasets():

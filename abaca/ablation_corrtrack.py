@@ -88,6 +88,8 @@ def main() -> None:
         raise SystemExit("--best-params <optim>/best_params_corrtrack.json is required: the ablation uses the cell's tuned parameters")
     tuned = {k: v for k, v in json.load(open(args.best_params)).items() if not k.startswith("_")}
     tuned["preprocess"] = bool(args.preprocess)
+    # (2026-10-29) a tuning file without the key predates the independent-bits default: it was tuned with pooled bits
+    tuned.setdefault("candidate_lsh_independent_bits", False)
     src = args.best_params
     todo = variants(tuned)
     if args.variants != "all":

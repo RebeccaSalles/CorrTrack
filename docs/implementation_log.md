@@ -11048,3 +11048,411 @@ beneficial" Cauchy-Schwarz result (after July's row/block bound and September's 
 
 Scripts (scratchpad): `ee_bench.py` (on/off A/B driver), `ee_micro/eem.pyx` + `run.py` (microbenchmark),
 `candidate_kernels.pre_es.pyx` (the restored file).
+
+## 2026-10-07 (b) -- authors-only performance profile split by capability class
+
+**Branch:** main, uncommitted. User: the authors-only profile pooled 143 cells that are not comparable, since
+some methods are synchronous only. Pooled, TSUBASA/ParCorr/CSZ/CorrJoin (S only in the authors' code) and FilCorr
+(S and L) counted as unsolved on cells they cannot attempt, and each cell's fastest method came from a different
+method set per class. `abaca/campaign_figures.py`: `performance_profile(..., by_class=...)` with a shared
+`_profile_panel` helper; the authors-only build uses one row per class (only the methods that run it, denominator
+47/48/48, spaces pooled within a row since every row's methods cover both). The all-arms figure is unchanged
+(same code path as before). Figure regenerated; per-class headline numbers added to
+`docs/campaign_m500_figures_2026-09-28.md`. Open: the all-arms profile has the same, milder, issue in class N
+(ParCorr, CSZ, CorrJoin cannot run it); left alone per the rule that the original versions stay as they are.
+
+## 2026-10-07 (c) -- performance profile replaced by per-class stacked bars (both versions)
+
+**Branch:** main, uncommitted. User found the 3x3 curve grid hard to read and chose the stacked-bar draft for
+both the all-arms and the authors-only figure. `abaca/campaign_figures.py`: `performance_profile(cells, path)` now
+draws one panel per class, one bar per method that can run it, split into fastest (within the 10% tie band) /
+up to 2x / 2x to 5x / over 5x slower than the fastest method on the cell, plus grey segments for cells solved
+below recall 0.95 (0.90 to 0.95, below 0.90); `profile_shares()` computes the segments. All-arms labels carry a
+dagger (capability added by us) or double dagger (specified, never evaluated). The curve helper, the
+`by_class` switch and `RECALL_LEVELS` were removed (no other user). Both PNGs regenerated; the figure section of
+`docs/campaign_m500_figures_2026-09-28.md` rewritten with per-class tables for both versions (the old pooled
+"fastest on / median tau" table is gone). Note: "fastest" now counts the 10% tie band, like the leadership
+tables, not the single fastest method.
+Follow-up (user: white space): classes stacked vertically, each panel as tall as its number of methods (fixed
+inches per bar), titles left-aligned, x ticks only on the bottom panel, compact three-column legend. Both PNGs
+regenerated.
+
+## 2026-10-07 (d) -- naive-cost doc, authors-only: cell count in the prose
+
+**Branch:** main, uncommitted. User asked for the naive-baseline slide in its authors-only form. Rebuilding
+`docs/naive_baseline_cost_2026-09-28_authors.md` from the results gave an identical file (numbers current), but
+`abaca/naive_cost_table.py` hard-coded "179 cells" in the pricing paragraph; now `len(cells)` (143 in the
+authors-only build). Both docs rebuilt; the all-arms doc is byte-identical. The median-size cell
+(1,251,083,598 pair-windows) is the same in both builds because cell size does not depend on the threshold, so
+dropping T < 0.8 removes cells evenly. Authors-only slide figures: BF_vect 140 ns, BF_incr 37 ns, faster CorrTrack
+backend 27 ns; 393x / 1,486x / 2,045x against naive; 175 s / 46 s / 34 s on the median cell; 5.2x against BF_vect.
+
+## 2026-10-16 -- fixed-degree m-sweep designed (not submitted): measuring CorrTrack's search exponent
+
+**Branch:** main, uncommitted. Motivation: presentation question 3 (docs/presentation_questions_2026-10-15.md).
+The headline m-sweep holds density at 0.01, so the output is quadratic; per phase in its AR(1) levels cells:
+sketch m^0.96, candidate search m^1.73, validation m^1.81, candidates tested m^2.00 (217.6 M tested vs 217.5 M
+correlated at m=2000). The wall exponent 1.64 is therefore not the search exponent. Classical LSH sizing, which
+CorrTrack follows, predicts per-step search m (mL)^rho, rho = log2(1/(1 - arccos(gamma)/pi)): 0.42 / 0.33 / 0.22 /
+0.15 at gamma 0.7 / 0.8 / 0.9 / 0.95.
+
+New driver `abaca/campaign_synth_degree.py`: degree 55 (group size 56, every series grouped; matches the overnight
+m=500 baseline density), m in {125, 250, 500, 1000, 2000, 4000}, T in {0.7, 0.8, 0.9, 0.95}, ar1 raw, W 60, step 6,
+L 6, n 6000; one CorrTrack tuning per threshold at m=500 (both backends) reused at every m, so the gate is fixed
+along a curve while band width and n_bands still resize with m; arms bruteforce, bf_incremental, filcorr,
+corrtrack, corrtrack_hamming. 24 cells, 36 jobs (per threshold: one generate job, two hyperopt jobs, six N-way).
+
+Checked locally: generator with `--degree 55` at m=125 (T 0.9 and 0.7) and m=250 (T 0.95) gives effective degree
+55.00 and verified density 0.0361 / 0.0361 / 0.0180 (requested 0.0351 / 0.0351 / 0.0176); the `reachable_density`
+formula reproduces the generator's own reachability numbers. A local untuned N-way on the m=125 T=0.9 file ran all
+five arms (CorrTrack recall 0.997 / 0.998, precision 1). Test files deleted. Emitted script passes `bash -n`.
+
+Estimate: N-way about 10 node-hours per threshold (m=4000 about 7.5 h, brute force about 5.3 h of it), 40 in total;
+generation about 1.8 h per threshold; critical path about 10 to 11 h if 8 hosts are free near the end. Inputs about
+1.5 GB on the nearly full group storage, reproducible from the seed, to delete after the run.
+Next step: user decides snapshot (recommended: the frozen final112 snapshot, same code as every paper number) and
+submission; check storage and snapshot presence on the frontend first.
+Submitted 2026-10-16 21:45 (user: go ahead, final112 snapshot): 36 jobs, OAR 3197393 to 3197428, per threshold one
+generate job (core=10), two hyperopt jobs at m=500 (core=2) and six N-way jobs (host=1), dependencies by `-a`.
+Snapshot `snapshots/101ef2c09856_final112` (same code as every paper number; it has the generator's `--degree`).
+Results root `~/corrtrack_abaca_results/synth_degree/` (nway/, hyperopt/, hyperopt_hamming/), scripts in its
+`scripts/`. Home filesystem 46% used (26 TB free); results tree was 4.0 GB before the run.
+
+### 2026-10-17 -- fixed-degree sweep: first submission failed at tuning, resubmitted (OAR 3198069 onward)
+The four generate jobs succeeded: all 24 inputs at degree 55 (effective 55.00), verified density 0.0361 / 0.0180 /
+0.0090 / 0.0048 / 0.0024 / 0.0012 for m = 125 to 4000 at T = 0.9, the same at the other thresholds. Every tuning job
+then failed at once: `hyperopt_corrtrack.oar` reads `EXTRA_ARGS` under `set -u` with no default, and the new driver
+did not pass it (campaign_competitors always does, as `--n-series m --n-obs n`). The N-way jobs then refused to run
+without a tuning, as designed; no result was written. My bug: the local test exercised the generator and
+`nway_compare.py`, not the `.oar` wrapper of the tuning. Fixed in `abaca/campaign_synth_degree.py` (EXTRA_ARGS with
+`--n-series`/`--n-obs` on tuning and N-way jobs, as the overnight campaign passes them; new `--skip-generate`), checked
+that every other variable the tuning wrapper reads has a default, and resubmitted 32 jobs (8 tuning, 24 N-way)
+reusing the generated inputs. At 10:01 all 32 were waiting, the first tuning job scheduled for 10:02.
+
+## 2026-10-18 -- fixed-degree m-sweep results
+
+All 24 cells completed (resubmitted jobs from OAR 3198069), all 8 tunings present; results copied to
+`~/results/synth_degree/`; the 24 generated inputs (1.6 GB) and configs deleted on the cluster (reproducible from
+seed 7); cluster results tree 1.5 MB. Full write-up: `docs/synthetic_degree_sweep_2026-10-18.md`.
+CorrTrack-LSH wall exponent at fixed 55 partners per series: 1.84 / 1.66 / 1.44 / 1.30 at T 0.7 / 0.8 / 0.9 / 0.95
+(BF_vect 2.02, BF_incr 1.99, FilCorr 1.95 everywhere); recall >= 0.997 everywhere for both backends. Sketch and
+validation are linear; candidate search 2.00 / 1.85 / 1.64 / 1.49. CorrTrack's n_bands (sized at T from a 64-bit
+pool) grows as N^0.69 / 0.56 / 0.40 / 0.29, 1.6 to 1.9 times the textbook rho because overlapping bands from one
+pool need more bands as band width grows; 1 + that tracks the wall exponent (1.69 / 1.56 / 1.40 / 1.29). m=2000 to
+4000 steepens every memory-bound arm (BF_incr 2.7, FilCorr 2.6; BF_vect 1.97), a machine effect. Tuned gates: LSH
+0.5 / 0.6 / 0.85 / 0.75, Hamming 0.7 / 0.75 / 0.85 / 0.9. Untested lever: more sketch bits (128, 256) reduce
+rho_eff toward rho.
+
+## 2026-10-18 (b) -- fixed-degree figure; sketch-width ablation submitted
+
+Figure `docs/figures/synth_degree_scaling.png` (builder `abaca/synth_degree_figure.py`), see
+`docs/synthetic_degree_sweep_2026-10-18.md`. Ablation: `abaca/campaign_synth_degree.py --ablation` (T = 0.8, the
+tuned parameters with n_vectors 128 and 256, inputs regenerated, arms bruteforce and corrtrack), checked locally
+first (m = 125: nv 64 recall 0.9996, nv 128 recall 0.9999, n_vectors recorded as 128), submitted from the final112
+snapshot as 13 jobs, OAR 3200796 (generate) to 3200808. Next: copy `nway/*_nv128`, `*_nv256`, rerun the figure
+builder, fit exponents, delete the regenerated T = 0.8 inputs on the cluster.
+
+## 2026-10-19 -- sketch-width ablation results: band overlap confirmed
+
+T = 0.8, fixed degree 55, n_vectors 64 / 128 / 256 (tuning otherwise unchanged): wall exponent 1.66 / 1.51 / 1.44
+against the band-sizing prediction 1.56 / 1.45 / 1.39; candidate search 1.85 / 1.71 / 1.61; speedup over BF_vect
+at m = 4000 19.0x / 29.2x / 32.2x; recall >= 0.9998. Wider sketches cost more at small m (m=125 2.2 / 2.3 / 2.8 s).
+Results in `~/results/synth_degree/nway/*_nv128|_nv256`, figure rebuilt, cluster inputs deleted. Write-up appended
+to `docs/synthetic_degree_sweep_2026-10-18.md`. Candidate next step: independent per-band sign bits from fresh
+random projections of the 64-dim sketch (keeps the sketch, removes the pool overlap).
+
+## 2026-10-19 (b) -- independent band bits tested in a separate copy
+
+At the user's request the "independent band bits" idea (each band bit the sign of its own random projection of the
+sketch, removing the shared 64-bit pool) is developed in `/home/rsalles/corrtrack_release_indepbands`, not here; this
+tree is unchanged. See that copy's docs/implementation_log.md, 2026-10-19.
+
+## 2026-10-20 -- independent band bits (separate copy): results
+In `/home/rsalles/corrtrack_release_indepbands` (not this tree): independent per-band sign bits lower CorrTrack-LSH's
+exponent at fixed degree from 1.85 / 1.68 / 1.45 / 1.31 to 1.60 / 1.46 / 1.31 / 1.23 (T 0.7 / 0.8 / 0.9 / 0.95), close
+to textbook LSH up to m = 2000, and raise the speedup at m = 4000 from 9 / 19 / 47 / 81x to 21 / 38 / 72 / 105x with
+the same recall. See that copy's docs/indepbands_results_2026-10-20.md. Not merged; paper numbers are pooled.
+
+## Merged 2026-10-29 from corrtrack_release_indepbands: its log of the independent-band-bits work (2026-10-19 to 2026-10-28)
+
+## 2026-10-19 -- corrtrack_release_indepbands: independent band bits (separate working copy)
+
+**Working copy:** `/home/rsalles/corrtrack_release_indepbands`, copied from `corrtrack_release_dev` on 2026-10-19
+(its sources including the uncommitted changes, docs and .git; `datasets` and `tmp_artifacts` are symlinks to the dev
+tree, read-only by convention; generated test files deleted after use). Kept separate at the user's request so the
+experiment cannot interfere with dev.
+
+**Idea:** the fixed-degree sweep and the sketch-width ablation showed that CorrTrack's search exponent sits above
+textbook LSH because band bits are the signs of the 64 sketch coordinates and every band draws from that one pool,
+so bands overlap more as they widen with m (docs/synthetic_degree_sweep_2026-10-18.md). Here each band bit is the sign
+of its own Gaussian projection of the sketch (sign random projection on the sketch), so bands are independent given
+the pair's sketch angle; n_bands uses the textbook formula 1 - (1 - p^K)^b >= target, with the same padded target
+(0.95 + 0.028) as the pooled sizing. The sketch, the Hamming prefilter (still on the 64 coordinate signs), the dot gate,
+validation and the complement-key lookup for negative correlation are unchanged (sign(P(-x)) = -sign(Px)).
+
+**Changes (all opt-in, default off, so the copy behaves exactly like dev unless asked):**
+- `candidate_kernels.pyx`: `compute_lsh_n_bands_independent`; `SignLSHBandIndex(independent_band_bits=False)`;
+  projection matrix `(n_bands * band_width, n_vectors)` drawn after band_dims from seed band_seed + 7919 (the pooled
+  stream is untouched); keys from projected signs in `_insert_one`; `independent_band_bits` property.
+- `library_corrtrack_parallel.py`: `candidate_lsh_independent_bits` on CorrTrack and Candidates, forwarded to the
+  index, accepted from parameter dictionaries in `_extract_feature_overrides`.
+- `abaca/nway_compare.py`: arm `corrtrack_indep` = the corrtrack arm's tuned parameters plus the flag.
+- `abaca/campaign_synth_degree.py --indep`: cluster test (snapshot of this copy, 24 fixed-degree cells, arms
+  bruteforce, corrtrack, corrtrack_indep, the main run's tunings).
+
+**Verified locally:**
+- Tests: 173 of 174 pass; the failure checks that the directory is named corrtrack_release_dev (true on the cluster
+  snapshot, false in this copy).
+- Wiring on a live CorrTrack (m=300, T=0.8, occupancy 12): flag off gives a pooled index with 40 bands, flag on an
+  independent index with 22, matching compute_lsh_n_bands / compute_lsh_n_bands_independent at band width 8.
+- Fixed-degree cells at T = 0.8 with the tuned parameters (BF_vect truth): m = 125 / 250 / 500 candidate search
+  0.87 / 2.19 / 7.43 s pooled vs 0.69 / 1.90 / 5.28 s independent, recall 0.9996-0.9998 both, precision 1.
+- Both signs (corr-sign both, m = 250, --neg-corr): recall 0.9998 both modes, wall 4.33 s vs 3.78 s.
+- Paired arm smoke (m = 125): corrtrack recall 0.9996, corrtrack_indep 0.9997, one job.
+
+**Open:** the exponent at large m (cluster run, emitted, not submitted).
+
+### 2026-10-19 (b) -- cluster test submitted (OAR 3202627 to 3202655)
+Staged this copy on the frontend at `~/indepbands/corrtrack_release_dev` (13 MB of sources; datasets/competitor,
+examples, synth_outputs and tmp_artifacts symlinked to the main clone's). Jobs: 3202627 builds and tests the snapshot
+`~/corrtrack_abaca_results/snapshots/indepbands_20261019/corrtrack_release_dev`; 3202628 to 3202631 regenerate the
+fixed-degree inputs for T 0.7 / 0.8 / 0.9 / 0.95; 3202632 to 3202655 run bruteforce, corrtrack (pooled) and
+corrtrack_indep per cell (m 125 to 4000), tunings from `synth_degree/hyperopt/T*`, results in
+`~/corrtrack_abaca_results/synth_degree_indep/nway/`. First submission attempt rejected the 24 N-way jobs: `oarsub -S`
+reads the wrapper at submission time and the snapshot did not exist yet; resubmitted with `-S` on the staged copy's
+wrapper, which enters the snapshot at run time and refuses without SNAPSHOT_OK (driver fixed accordingly).
+Next: copy `nway/` back, fit exponents per arm and threshold, delete the regenerated inputs on the cluster
+(`deg_ar1_*_k55` in ~/corrtrack_release_dev/datasets/competitor).
+
+### 2026-10-20 -- cluster results: independent band bits confirmed
+All 24 cells completed; write-up `docs/indepbands_results_2026-10-20.md`. Wall exponent pooled vs independent:
+1.85 / 1.68 / 1.45 / 1.31 vs 1.60 / 1.46 / 1.31 / 1.23 at T 0.7 / 0.8 / 0.9 / 0.95 (predicted independent 1.43 /
+1.34 / 1.25 / 1.19; to m = 2000: 1.53 / 1.38 / 1.23 / 1.15). Speedup at m = 4000: 9.2 / 19.0 / 47.1 / 80.9x pooled vs
+20.7 / 37.7 / 71.8 / 104.6x independent. Recall >= 0.9982 everywhere, precision 1. Regenerated inputs deleted on the
+cluster; results tree 636 KB. Not merged into dev.
+
+### 2026-10-20 (b) -- correction: the projected bits are not free
+I wrote that the projected bits cost nothing because sketch time was identical; they are computed at insert, inside
+the candidate phase. Local profile (`cand.lsh_insert`): independent insert 2.3 / 7.0 / 3.9 / 12.5 s against pooled 0.5 /
+1.5 / 0.9 / 3.2 s (m 500 / 1000 at T 0.8, then T 0.7), about 21 to 24% of the independent wall; the scan saves 2 to
+2.5x, so the net gain stands. Table in docs/indepbands_results_2026-10-20.md. Candidate fix: batch the projection as
+one BLAS product per step instead of a scalar loop per window.
+
+### 2026-10-20 (c) -- batched projection: local result inconclusive (reference BLAS), cluster probe submitted
+`insert_many` now projects the whole batch with one float64 product (vectors_np @ band_proj.T) and `_insert_one` packs
+each band key from the signs of its slice (a first version that packed keys with a bool -> int64 cast and an integer
+matmul was slower and was replaced). End-to-end equivalence on a 400-series factor-model stream: same candidates tested
+(297,668) and same correlated set (fingerprint ae8ca994) as the per-window projection. Local three-way profile at
+m = 1000 (median of 3 alternating runs): insert pooled / per-window / batched 1.5 / 7.3 / 10.8 s at T = 0.8 and 3.0 /
+11.9 / 17.9 s at T = 0.7. Batched is slower locally because this laptop's numpy (Ubuntu python3-numpy) links the
+reference libblas3: 1.7 GFLOP/s on the (1000x64)@(64x510) product. The cluster env uses OpenBLAS 0.3.25.
+Cluster probe OAR 3207378 (`~/corrtrack_abaca_results/indep_insert_probe/`): batched kernels built on the node from
+the staged copy, per-window kernels from the indepbands_20261019 snapshot, same alternating profile, BLAS check.
+Probe 3207378 produced no timings: data generation failed ("requires the compiled candidate_kernels"), because
+gen_density_targeted.py resolves the repo through the datasets symlink, which from the job's tree points at the staged
+copy (no .so). It did report the node's BLAS: OpenBLAS via conda, 11.9 GFLOP/s on the (1000x64)@(64x510) product.
+Resubmitted as OAR 3208060 with generation from the snapshot (same generator, has kernels) and a guard that stops the
+job if an input is missing. Logs of the failed run in `indep_insert_probe/run1/`.
+Probe 3208060 results (m = 1000, median of 3): insert pooled / per-window / batched 2.2 / 10.8 / 3.2 s at T = 0.8,
+4.3 / 18.4 / 5.0 s at T = 0.7; wall 63.5 / 47.9 / 40.5 s and 108.1 / 73.0 / 59.7 s. Batching cuts insert 3.4x (23% ->
+8% of the wall); independent+batched is 1.57x / 1.81x faster than pooled. Same correlated rows per-window vs batched.
+Table in docs/indepbands_results_2026-10-20.md. Job deleted its tree and inputs.
+
+### 2026-10-23 -- updated exponent table (batched) and the independent-mode tuning, both submitted
+Part 1 (table with batched projection): `campaign_synth_degree.py --indep --arms corrtrack,corrtrack_indep
+--skip-truth`, snapshot indepbands_batched_20261023, OAR 3215158 to 3215186, results `synth_degree_batched/`. No
+brute force: nway_compare.py gained `--skip-truth`; recall = correlated / brute-force correlated from the earlier runs,
+valid because CorrTrack's precision is 1 and the 24 brute-force counts were identical across the final112 and
+indepbands_20261019 runs (same seeded files). Local check m=125, T=0.8: pooled 2,118,869 / 2,119,648 = 0.9996.
+Part 3 (tuning for the new mode): `experiment_run_param_grid_campaign_indep.py` (campaign grid plus
+candidate_lsh_independent_bits=True, occupancy 1 / 2 / 3 / 5 / 8 / 12 / 24 / 48); `compute_lsh_sizing` gained
+independent_band_bits and the hyperopt record passes it, so configurations are ranked by the n_bands the index really
+uses (before, the pooled formula). Local tuning at m=250, T=0.8 picked occupancy 24 (then the grid edge, hence 48
+added), offset 0.0, Hamming 0.40, 14 bands (= the independent formula at width 6; pooled would be 19), recall 0.997.
+The best_params file does not record candidate_lsh_independent_bits (not a recorded column); the corrtrack_indep arm
+sets it. Cluster: `--tune-indep`, separate staging `~/indepbands_tuned/` and snapshot indepbands_tuned_20261023, OAR
+3215199 to 3215227 (tunings 3215200 / 3215207 / 3215214 / 3215221 wait for part 1's generate jobs), results
+`synth_degree_tuned/`. Inputs in the main clone's datasets/competitor stay until both parts finish, then deleted.
+
+### 2026-10-24 -- results of both runs
+Batched table: exponent pooled 1.86 / 1.68 / 1.44 / 1.31, independent (pooled tuning) 1.56 / 1.42 / 1.27 / 1.19,
+independent (own tuning) 1.61 / 1.49 / 1.35 / 1.22. Speedup at m = 4000: 9.0 / 18.8 / 47.0 / 80.0x, 24.5 / 43.8 / 82.3 /
+114.5x, 19.7 / 31.6 / 56.1 / 95.9x. The own tuning is worse at every m: the hyperopt ranks by fewest bands first and so
+picks the largest occupancy (48), ignoring bucket load. Inputs deleted on the cluster. Details in
+docs/indepbands_results_2026-10-20.md.
+
+### 2026-10-24 (b) -- band keys moved to the sketch phase; ranking by bands x occupancy tested and rejected
+- Sketch phase: `SignLSHBandIndex.compute_band_keys(sketches)` (one BLAS product plus compiled `pack_sign_keys`) is
+  called when a step's ArrayBackedPartition is distributed; the keys ride on `partition.band_keys` and
+  `_input_tree_lsh_batch_from_arrays` passes the kept rows' keys as `insert_many(band_keys_in=...)`. Profile key
+  `sketch.band_keys`. Before the index is sized (first step) or without arrays, insert projects as before.
+  Equivalence: same candidates tested (297,668) and correlated set (fingerprint ae8ca994) as the insert-time
+  projection. Tests pass except the directory-name check.
+- Ranking: tuning records now carry candidate_lsh_independent_bits (new OPTIM column) and, in that mode, the cost rank
+  is bands x occupancy. Local tuning (m = 250, T = 0.8) then picked occupancy 1, the grid's other edge: with K =
+  log2(N / occupancy), n_bands ~ (N / occupancy)^rho, so bands x occupancy ~ occupancy^(1 - rho) is monotone and always
+  minimised at the smallest occupancy, as fewest-bands is always minimised at the largest. Local sweep (m = 1000,
+  T = 0.8, offset 0.2, Hamming 0.40, independent; quiet machine, two alternating rounds): occupancy 3 / 6 / 12 / 24
+  give 32.6 / 42.9 / 33.5 / 37.4 s then 31.4 / 29.3 / 29.9 / 28.9 s, i.e. flat; a first sweep under load (load average
+  2.3) gave 200+ s for occupancy 1 to 6 and is discarded. Consistent with cost ~ bands x (occupancy + c), c about 16.
+  Not submitted; options put to the user: fix occupancy 12, rank by bands x (occupancy + c), or by measured time.
+
+### 2026-10-24 (c) -- band keys back in the candidate search (user)
+User: the band keys are LSH hash codes, not sketches, so they belong to the candidate search, not the sketch phase.
+Restored candidate_kernels.pyx and library_corrtrack_parallel.py to their state before the move (the batched
+projection at insert measured on the cluster, OAR 3208060; the tuning-record column and the bands x occupancy rank are
+kept). Same candidates tested (297,668) and correlated set (ae8ca994). docs/indepbands_explained.md still describes
+the codes as computed per step from the sketches, which holds; its "sketching phase" bullet is superseded: they are
+computed at insertion into the index.
+
+### 2026-10-24 (d) -- occupancy sensitivity sweep submitted (OAR 3217473 to 3217484)
+To choose the independent mode's occupancy defensibly (user): calibrate cost = bands x (c + occupancy) as E2LSH chooses
+its parameters from measured operation costs (citation to verify before use), and show insensitivity. Same machine as
+the experiments (mercantour3), not the laptop. Snapshot reused: indepbands_batched_20261023 (hashing at insertion,
+batched). Per threshold T in 0.7 / 0.8 / 0.9 / 0.95: one generate job (m = 1000 and 4000, from the snapshot) and two
+whole-node sweep jobs (m = 1000, m = 4000), each running occupancy 2 / 3 / 6 / 12 / 24 / 48 in two alternating rounds,
+gate offset and Hamming filter from that threshold's pooled tuning. Scripts and outputs in
+`~/corrtrack_abaca_results/occ_sweep/` (occ_sweep_run.py, occ_gen.oar, occ_sweep.oar; sweep.<job>.out has one JSON
+line per run). Inputs `occ_ar1_*` in the main clone's datasets/competitor, to delete afterwards.
+
+### 2026-10-26 -- occupancy sweep results: calibrated rule occupancy* = c rho / (1 - rho), c about 12
+All 8 sweep jobs completed (rounds within 3.2%); inputs deleted on the cluster. Best occupancy 12 / 6 / 2 / 2 at
+T 0.7 / 0.8 / 0.9 / 0.95, flat within 10% over a factor 2 to 4; output varies by under 0.1%. Fit cost = bands x
+(c + occupancy) gives c = 10 to 12 (m = 4000), 13 to 17 (m = 1000); the rule with c = 12 gives 8.7 / 5.9 / 3.5 / 2.2,
+inside the measured near-optimal range everywhere. E2LSH manual checked (Section 3.4, T_g + T_c, minimised for the host
+machine): the same decomposition. Full tables in docs/occupancy_sweep_2026-10-26.md.
+
+### 2026-10-26 (b) -- shipped cost ratio, automatic occupancy, calibration function; cross-CPU runs submitted
+User: ship a constant c calibrated on several CPU families, fixed by default, settable by advanced users, with a
+library function that measures it. In library_corrtrack_parallel.py (this copy only):
+- `LSH_DEFAULT_COST_RATIO = 12.0` (provisional: mercantour3 joint fit 11.9; to be set from the cross-CPU results).
+- `lsh_auto_occupancy(corr_threshold, cost_ratio=None)` = c rho / (1 - rho), at least 1.
+- CorrTrack: new `candidate_lsh_cost_ratio=None`; in the independent mode an unset or "auto" occupancy becomes
+  lsh_auto_occupancy(T, c); an explicit occupancy still wins; the pooled mode keeps its default 3.0. Also accepted
+  from parameter dictionaries (`_extract_feature_overrides`).
+- `calibrate_lsh_cost_ratio(data=None, ...)`: runs the independent mode at occupancies 2 to 48 on a synthetic grouped
+  AR(1) stream (or the user's series) and fits candidate time = beta x n_bands x (c + occupancy), one beta per
+  threshold, shared c (`_fit_lsh_cost_ratio`, the joint fit used for the sweep). Returns c, the implied occupancy per
+  threshold and the per-run table.
+- experiment_run_param_grid_campaign_indep.py: occupancy ["auto"], so the tuning searches gate offset and Hamming only.
+- test_indepbands.py: rule values and shape, auto only in the independent mode and explicit wins, fit recovers a
+  known c (10.0 within 0.5), calibration smoke. 168 tests pass plus the directory-name check.
+Cross-CPU: mercantour6 (the only CPU-only AMD at Sophia) is Dead; every other AMD or Broadwell machine at Sophia is a
+GPU node (esterel*, default queue), not used without the user's agreement. Submitted: inputs T = 0.8 and 0.9, m = 1000
+and 4000 on mercantour3 (OAR 3222598, 3222599) and the sweep on mercantour5 (Xeon Gold 6240, kernels rebuilt on the
+node; OAR 3222600; `occ_xcpu.oar`). Real-data check OAR 3222466 still queued.
+AMD calibration (user: reserve CPU cores only on an AMD GPU node): esterel33 / 34 / 35 / 40 (EPYC 7282 / 7282 / 7413 /
+7313, A40) are besteffort-only for the zenith group (preemptible, unusable for timing); esterel38 (2x EPYC 7513, Zen 3,
+A100) accepted in queue p1: OAR 3222630, host=1/core=8, no GPU, same occ_xcpu.oar (kernels rebuilt on the node), T 0.8
+and 0.9 x m 1000 and 4000, waits for the input jobs 3222598 / 3222599. Shared node: other jobs may add timing noise;
+c is a ratio within the same runs, and the two rounds show the spread.
+
+### 2026-10-27 -- cross-CPU c and real-data check: default c = 11
+c = 11.0 / 10.8 / 10.3 on Skylake / Cascade Lake / Zen 3 (same cells); same best occupancy; real cells confirm the rule
+(optimum at T = 0.9, flat at T = 0.8), c = 15 there. LSH_DEFAULT_COST_RATIO set to 11.0. Inputs and node trees deleted
+on the cluster (occ_sweep dir 220 KB). Details in docs/occupancy_sweep_2026-10-26.md.
+
+### 2026-10-27 (b) -- version B submitted: independent mode, automatic occupancy, re-tuned gate and Hamming
+User chose B. Staging `~/indepbands_auto/` (this copy with LSH_DEFAULT_COST_RATIO = 11 and the "auto" grid), snapshot
+indepbands_auto_20261027 (OAR 3225822). Inputs regenerated from the indepbands_batched snapshot (generator unchanged):
+3225818 to 3225821. Tuning at m = 500 per threshold, occupancy from the rule, gate offset x Hamming searched:
+3225823 / 3225830 / 3225837 / 3225844. 24 cells, arm corrtrack_indep only, --skip-truth: 3225824 to 3225850 (results
+`synth_degree_auto/`). Pooled reference: the synth_degree_batched run (same pooled code). Recall from the stored
+brute-force counts. Inputs to delete afterwards.
+Extra (user): a second tuning of the same grid at m = 2000 for T = 0.9, to check that the gate offset and Hamming filter
+tuned at m = 500 do not depend on m (OUT_DIR synth_degree_auto/hyperopt_indep_m2000/T0p9). Evidence already in hand:
+the headline sweep's per-m hyperopt (T = 0.9, m = 125 to 2000) kept Hamming 0.40 everywhere and the CorrTrack-Ham gate
+at 0.05; the CorrTrack-LSH gate wandered 0.10 / 0.10 / 0.00 / 0.00 / 0.05 with no trend (near-ties, recall >= 0.998).
+
+### 2026-10-28 -- version B results and the m-dependence check
+Version B (automatic occupancy, own gate / Hamming tuning): exponent 1.56 / 1.40 / 1.21 / 1.13, speedup at m = 4000
+24.8 / 47.9 / 101.9 / 145.0x, recall >= 0.998. m = 2000 tuning at T = 0.9 chose offset 0.2 vs 0.0 at m = 500; all offsets
+are within timing noise at both sizes, so the difference is a noise-broken tie; offset 0.0 loses recall (0.998 vs
+0.9998) for no speed. Inputs deleted on the cluster. Tables in docs/indepbands_results_2026-10-20.md.
+
+### 2026-10-28 (b) -- independent-mode tuning selects by validation work, then recall (user)
+The user's rule (adopted earlier for the campaign in spirit): rank by exact work counts, not timings, and among the
+configurations within 10% of the fewest validated candidates take the best recall, so a configuration that only barely
+met the target on the tuning sample is not preferred to an equally cheap, safer one. Implemented in
+`CorrTrack_optimize._apply_proxy_anchor_selection`, independent-mode rows only (pooled selection unchanged): feasible
+(recall lower bound >= target; adequately powered if any; if none is feasible, the existing max-recall fallback), then
+candidates passing the gate (`proxy_search_after_dot`) <= (1 + PROXY_VALIDATION_WORK_TOLERANCE) x min, then recall lower
+bound, recall mean, time, CI width. PROXY_VALIDATION_WORK_TOLERANCE = 0.10.
+Evidence on the 24 real lagged T 0.8 / 0.9 cells' tuning trials (final_112ce48, pooled mode): offset 0.2 vs 0.0 sends a
+median 6.6x more candidates to validation (1.2x to 125x) for +0.07 recall (+0.01 to +0.25), estimated +44% runtime
+(median); so "prefer higher recall when timings tie" was withdrawn. Offline replay of the new rule on those trials:
+never more validated candidates than the time-based pick (ratio median 1.00, min 0.20), recall lower bound change
+median 0.000 (-0.013 to +0.006); 7 of 24 cells have no configuration feasible on the tuning sample (max-recall fallback).
+Tests: test_indepbands.py IndependentModeSelectionTest (safer recall among equally cheap wins; pooled keeps band count
+then time). 161 pass plus the directory-name check.
+
+### 2026-10-28 (c) -- independent-mode tuning on the hard real cells, submitted
+The 7 real cells whose pooled tuning had no feasible configuration on its tuning sample (acwi T 0.8 / 0.9 raw, sp500
+T 0.8 / 0.9 raw, streamflow T 0.9 raw, smartmeter T 0.8 / 0.9 differenced; campaign full-run pooled recall 0.985 / 0.969
+/ 0.985 / 0.969 / 0.984 / 0.931 / 0.930). Snapshot indepbands_sel_20261028 (staging `~/indepbands_sel/`, includes the
+work-then-recall selection), OAR 3226847. Per cell: independent-mode hyperopt with the indep grid, then the full run of
+corrtrack_indep with it, and the pooled corrtrack arm with its campaign tuning on the same snapshot, both --skip-truth;
+recall = correlated / campaign brute-force count. OAR 3226848 to 3226868, results `~/corrtrack_abaca_results/real_indep_tune/`.
+2026-10-27 23h: user widened the real-data test to 36 lagged positive cells (6 datasets x T 0.7 / 0.8 / 0.9 x raw /
+differenced) and asked for FilCorr / BF_incr comparisons at T = 0.7; deadline: supervisors' meeting 2026-10-28 13h.
+mercantour3 and mercantour5 were booked until about 11h (OAR predicted our chains at 11:11 / 11:19, tunings about noon),
+so both unstarted chains (3226847 to 3226868, 3226871 to 3226892) were cancelled and the 36 cells submitted on
+esterel38 (2x AMD EPYC 7513, queue p1, CPU cores only): snapshot indepbands_sel_e38_20261027 (3226904, core=8), per cell
+a core=2 tuning, a core=8 job running corrtrack_indep + filcorr + bf_incremental on the same cores, and a core=8 job
+running the pooled corrtrack with its campaign tuning (`real36_esterel38.sh`, results `~/corrtrack_abaca_results/real36/`).
+Caveat: shared node, timings noisier than whole-node runs; the indep / FilCorr / BF_incr ranking is within one job.
+2026-10-27 23:31: the 36-cell run completed (72 N-way + 36 tunings, no errors), but nway_compare.oar defaults to
+EVAL_SPAN=holdout (last 70% of the stream) while the campaign ran with EVAL_SPAN=full, so recall computed from the
+campaign's brute-force counts came out 0.35 to 0.76 for both modes: invalid. Speed ratios within a cell are valid (same
+span for every arm). Synthetic runs are unaffected (all on the holdout span, brute force included). Resubmitted the 72
+comparison jobs with EVAL_SPAN=full, reusing the tunings (which use the training span) and the snapshot: results
+`~/corrtrack_abaca_results/real36_full/`, script `real36_full.sh`.
+2026-10-28 00:10: full-span rerun of the 36 real cells done (72/72). Independent mode vs pooled: faster on 36/36, geometric
+mean 1.47x (1.42 / 1.48 / 1.51x at T 0.7 / 0.8 / 0.9); recall >= 0.95 on 36/36 (pooled 34/36, misses smartmeter diff T 0.8,
+0.9). Against FilCorr: 8/1/3, 9/0/3, 10/1/1 wins/ties/losses (10% tie). Pooled rerun reproduces campaign recall within 6e-5.
+Tables in docs/indepbands_results_2026-10-20.md (last section). Supervisor material: docs/supervisor_meeting_2026-10-28.md.
+Nothing merged into dev; decision on making the mode default awaits the user's meeting.
+Cleanup 2026-10-28: deleted superseded snapshots indepbands_20261019 and indepbands_tuned_20261023 and staging dirs
+~/indepbands, ~/indepbands_tuned on sophia; snapshots dir now 831 MB, corrtrack_abaca_results 3.3 GB. Queue empty.
+2026-10-28: how far the 1 + rho reference can be trusted (supervisor question). Sizing uses T itself
+(corr_threshold_for_sizing = corr_threshold), N = m x n_lagged_windows (6 here). Exact sizing with background at cos 0
+gives 1.43 / 1.35 / 1.25 / 1.16 for m >= 500 (T 0.7 / 0.8 / 0.9 / 0.95): the reference holds for the band count. But
+unrelated AR(1) (phi 0.6) windows of W = 60 have sketch-cosine std 0.21 (simulated, Gaussian 64-d projection), so the
+background collides 2.5x to 6.4x more than at cos 0, growing with K: model with c = 11 gives 1.56 / 1.45 / 1.35 / 1.24.
+Measured version B candidate phase, m >= 500: 1.81 / 1.67 / 1.46 / 1.29; wall 1.72 / 1.56 / 1.37 / 1.27 (all m: 1.56 /
+1.40 / 1.21 / 1.13; m <= 2000: 1.47 / 1.30 / 1.12 / 1.04). Local slopes rise with m at every T. Residual gap at low T
+unexplained (memory effects or single-run noise, +-0.2 per factor-2 step at 15% noise), not verified. Conclusion: present
+1 + rho as an idealized reference, state the fit range, rely on pooled vs independent comparisons. Limits slide updated.
+
+## 2026-10-29 -- independent band bits made the default in this tree (user), campaigns to be rerun
+
+User decision after the 2026-10-28 supervisor meeting: the independent mode becomes CorrTrack's default, with the
+automatic occupancy and the work-then-recall selection rule, and every experiment is rerun on it.
+
+Backup first: `git stash list` entry "pre-indep-default 2026-10-29" (stash created and stored, working tree
+untouched) and copies of the six touched files in `~/corrtrack_premerge_2026-10-29/`.
+
+Merged from corrtrack_release_indepbands (dev's copies were still at the common commit 78f8a2b, so a plain copy):
+`candidate_kernels.pyx`, `library_corrtrack_parallel.py`, `abaca/nway_compare.py`, `abaca/campaign_synth_degree.py`
+(a superset of dev's), `test_indepbands.py`, docs `indepbands_explained.md`, `indepbands_results_2026-10-20.md`,
+`occupancy_sweep_2026-10-26.md`, `supervisor_meeting_2026-10-28.md`.
+
+Default changes:
+- `CorrTrack(candidate_lsh_independent_bits=True)` by default; unset or "auto" occupancy then gives
+  `lsh_auto_occupancy(T)` = c rho / (1 - rho), c = `LSH_DEFAULT_COST_RATIO` = 11. `False` restores the pooled bits and
+  occupancy 3.0. `Candidates` (internal, always given explicit values by CorrTrack) and the kernel-level
+  `SignLSHBandIndex` / `compute_lsh_sizing` keep `False` as their own default.
+- `experiment_run_param_grid_campaign.py`: independent bits, occupancy "auto", searches offset {0, 0.05, 0.10, 0.20}
+  x Hamming {None, 0.40} = 8 settings (was 80). The old grid is kept as `experiment_run_param_grid_campaign_pooled.py`
+  (pooled pinned). `experiment_run_param_grid_campaign_hamming.py` pins the flag off (no bands; keeps its selection
+  rule). `experiment_run_param_grid.py`: occupancy "auto".
+- Legacy tuning files (no `candidate_lsh_independent_bits` key) are read as pooled in `nway_compare.py`,
+  `ablation_corrtrack.py`, `parallel_scaling.py` and `corrtrack_run_corrtrack.load_best_params`, so an old tuning never
+  runs as a mix of the two modes.
+- `campaign_synth_degree.py --tune-indep` uses the campaign grid (the `_indep` grid file was copy-only).
+
+Tests: built with `setup_cython.py build_ext --inplace -j 4` in the conda env; three tests asserted the old default
+occupancy 3.0 and were updated to the new default (plus an explicit pooled check); `pytest test_indepbands.py
+test_abaca_tools.py test_synth_density.py test_stable_reproduced_changes.py`: 180 passed. Wiring check: a default
+CorrTrack run builds SignLSHBandIndex with independent_band_bits True and occupancy 5.43 at T 0.8; with the flag False,
+pooled and 3.0.

@@ -57,6 +57,8 @@ def main() -> None:
     label = f"{bfmod._dataset_slug(country, var)}_{len(ids_n_var)}_{test_data.shape[1]}"
     tuned = {k: v for k, v in json.load(open(args.best_params)).items() if not k.startswith("_")}
     tuned["preprocess"] = bool(args.preprocess)
+    # (2026-10-29) a tuning file without the key predates the independent-bits default: it was tuned with pooled bits
+    tuned.setdefault("candidate_lsh_independent_bits", False)
     threads = [int(t) for t in args.threads.split(",")]
 
     def base_for(exec_mode, workers):

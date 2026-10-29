@@ -12,5 +12,7 @@ PARAM_GRID = dict(_CAMPAIGN)
 PARAM_GRID.update({
     "candidate_backend": ["lsh_hamming_exact"],
     "candidate_lsh_target_occupancy": [3.0],
+    # (2026-10-29) no bands in this backend; pinned off so its hyperopt keeps the pooled-mode selection rule
+    "candidate_lsh_independent_bits": [False],
     "candidate_hamming_filter_max_frac": [None],
 })
