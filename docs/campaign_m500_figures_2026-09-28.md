@@ -88,77 +88,96 @@ corner of the sparse-to-dense range rather than at a particular threshold. In fi
 where the competitors' energy-concentration assumptions weaken, the CorrTrack curves sit clearly
 above the rest across the whole range.
 
-## `docs/figures/real_performance_profile.png`
+## `docs/figures/real_performance_profile.png` and `real_performance_profile_authors.png`
 
-A Dolan-More performance profile over all 179 cells: the fraction of cells where a method is within
-a factor tau of the fastest method on that same cell. Three panels: speed alone, then a cell
-counted only when the method also reached recall 0.95, then the same at recall 0.90. The looser
-level separates a method that misses the target by a little from one that misses most of the
-correlated pairs, and the two are not the same story.
+(2026-10-07, user) Replaces the Dolan-More curves, which pooled the classes and were hard to read. One panel
+per capability class, one bar per method that can run that class. Each bar splits the class's cells by how far
+the method runs from the fastest method on the same cell (classes stacked, each panel as tall as its
+number of methods): fastest (within the 10% tie band of the ranking
+tables, so several methods can be "fastest" on one cell and the first segments add up to more than 100% across
+methods), up to 2x slower, 2x to 5x slower, over 5x slower. The two grey segments are the cells where the
+method solved the problem below recall 0.95 (0.90 to 0.95, then below 0.90), whatever its speed. Speed is
+always measured against the fastest method on the cell, whatever that method's recall. Methods are sorted by
+how much of their bar lies close to the fastest.
 
-Headline numbers from the same data:
+Why per class: the classes admit different sets of methods (TSUBASA, ParCorr, CSZ and CorrJoin cannot run
+class N in either version, and in the authors-only version they and FilCorr run fewer classes still). Pooled,
+a method was counted as failing cells it could never attempt, and each cell's fastest method came from a
+different field depending on the class. Raw and differenced cells are pooled inside a panel: every method in
+a panel covers both spaces and each cell is measured against its own fastest method.
 
-Each row below is over all 179 cells, not a median of medians: "fastest on" counts cells, "median
-tau" is the median over cells of that method's factor away from the fastest method on the same cell.
+All-arms version (179 cells): a dagger marks a method whose capability for that class was added by us, a
+double dagger one specified by its authors but never evaluated there. ThinBRAID's class N bar ends at 98%
+because it has no result in one of the 60 cells.
 
-| method | fastest on | median tau | cells at recall >= 0.95 | at recall >= 0.90 |
-|---|---|---|---|---|
-| CorrTrack-LSH | 83 of 179 | 1.02 | 92% | 98% |
-| FilCorr | 53 | 1.38 | 100% | 100% |
-| CorrTrack-Ham | 37 | 1.18 | 100% | 100% |
-| CorrJoin | 5 | 2.29 | 66% | 66% |
-| StatStream | 1 | 2.30 | 92% | 97% |
-| BF_incr | 0 | 1.59 | 100% | 100% |
-| BRAID | 0 | 2.87 | 100% | 100% |
-| TSUBASA | 0 | 4.26 | 100% | 100% |
-| ParCorr | 0 | 5.21 | 57% | 62% |
-| ThinBRAID | 0 | 7.67 | 7% | 20% |
-| CSZ | 0 | 12.79 | 49% | 59% |
+| class S: synchronous, positive only (59 cells) | fastest (within 10%) | up to 2x | 2x to 5x | over 5x | recall 0.90 to 0.95 | below 0.90 |
+|---|---|---|---|---|---|---|
+| CorrTrack-Ham | 66% | 34% | 0% | 0% | 0% | 0% |
+| CorrTrack-LSH | 61% | 34% | 0% | 0% | 3% | 2% |
+| FilCorr | 42% | 47% | 10% | 0% | 0% | 0% |
+| BF_incr | 8% | 69% | 22% | 0% | 0% | 0% |
+| BRAID | 0% | 68% | 32% | 0% | 0% | 0% |
+| StatStream | 0% | 59% | 25% | 3% | 3% | 8% |
+| CorrJoin | 0% | 41% | 56% | 3% | 0% | 0% |
+| TSUBASA | 0% | 0% | 80% | 20% | 0% | 0% |
+| ParCorr | 0% | 0% | 51% | 32% | 5% | 12% |
+| ThinBRAID | 0% | 0% | 3% | 5% | 14% | 78% |
+| CSZ | 0% | 0% | 0% | 71% | 15% | 14% |
 
-The two recall columns separate three different situations. CorrTrack-LSH and StatStream sit just
-under the strict target and recover almost entirely at 0.90 (92% to 98% and 92% to 97%). ThinBRAID
-and CSZ are far below it and stay below it (7% to 20%, 49% to 59%), so their speed is bought with
-pairs they never report. CorrJoin does not move at all (66% at both levels), because its shortfall
-is not recall but capability: class N has no CorrJoin arm.
+| class L: lagged, positive only (60 cells) | fastest (within 10%) | up to 2x | 2x to 5x | over 5x | recall 0.90 to 0.95 | below 0.90 |
+|---|---|---|---|---|---|---|
+| CorrTrack-LSH | 68% | 15% | 8% | 0% | 7% | 2% |
+| FilCorr | 23% | 28% | 43% | 5% | 0% | 0% |
+| CorrTrack-Ham | 20% | 70% | 10% | 0% | 0% | 0% |
+| CorrJoin † | 12% | 15% | 58% | 15% | 0% | 0% |
+| BF_incr | 2% | 40% | 47% | 12% | 0% | 0% |
+| StatStream ‡ | 2% | 33% | 55% | 5% | 5% | 0% |
+| BRAID | 0% | 0% | 40% | 60% | 0% | 0% |
+| TSUBASA † | 0% | 0% | 38% | 62% | 0% | 0% |
+| ParCorr † | 0% | 0% | 23% | 65% | 10% | 2% |
+| CSZ † | 0% | 0% | 3% | 73% | 15% | 8% |
+| ThinBRAID | 0% | 0% | 0% | 8% | 17% | 75% |
 
-CorrTrack is the fastest method on 120 of the 179 cells counting both backends, and its typical
-distance from the best method on a cell is 2% (CorrTrack-LSH). FilCorr is the fastest on 53, which is the
-honest other half of the story and is exactly the dense and synchronous corner.
+| class N: lagged, both signs (60 cells) | fastest (within 10%) | up to 2x | 2x to 5x | over 5x | recall 0.90 to 0.95 | below 0.90 |
+|---|---|---|---|---|---|---|
+| CorrTrack-LSH | 43% | 33% | 13% | 0% | 8% | 2% |
+| FilCorr † | 43% | 30% | 27% | 0% | 0% | 0% |
+| CorrTrack-Ham | 33% | 45% | 22% | 0% | 0% | 0% |
+| BF_incr | 5% | 63% | 32% | 0% | 0% | 0% |
+| StatStream ‡ | 2% | 15% | 65% | 10% | 8% | 0% |
+| TSUBASA | 0% | 0% | 63% | 37% | 0% | 0% |
+| BRAID ‡ | 0% | 0% | 63% | 37% | 0% | 0% |
+| ThinBRAID ‡ | 0% | 0% | 0% | 5% | 7% | 87% |
 
-### When CorrTrack misses the recall target, who takes its place
+Authors-only version (143 cells: ThinBRAID dropped, T below 0.8 dropped, and only capabilities the authors
+evaluated):
 
-The per-cell tables keep a column for any arm that beats CorrTrack in speed or reaches recall 0.95
-where CorrTrack cannot. The second half of that rule never fires, because CorrTrack always has one
-backend at or above the target, so the sharper question is the one a reviewer will ask: where
-CorrTrack's *faster* backend misses the target, which arm is then the fastest that reaches it?
+| class S: synchronous, positive only (47 cells) | fastest (within 10%) | up to 2x | 2x to 5x | over 5x | recall 0.90 to 0.95 | below 0.90 |
+|---|---|---|---|---|---|---|
+| CorrTrack-Ham | 72% | 28% | 0% | 0% | 0% | 0% |
+| CorrTrack-LSH | 64% | 30% | 0% | 0% | 4% | 2% |
+| FilCorr | 32% | 55% | 13% | 0% | 0% | 0% |
+| BF_incr | 6% | 66% | 28% | 0% | 0% | 0% |
+| StatStream | 0% | 66% | 19% | 0% | 4% | 11% |
+| BRAID | 0% | 60% | 40% | 0% | 0% | 0% |
+| CorrJoin | 0% | 47% | 53% | 0% | 0% | 0% |
+| TSUBASA | 0% | 0% | 74% | 26% | 0% | 0% |
+| ParCorr | 0% | 0% | 55% | 30% | 2% | 13% |
+| CSZ | 0% | 0% | 0% | 72% | 13% | 15% |
 
-Across the campaign that happens in 14 cells, 13 of them smartmeter. In 11 the answer is CorrTrack's
-own second backend; in 3 a competitor takes it, by a small margin: CorrJoin 9.71x against
-CorrTrack-Ham's 9.23x (smartmeter, class L raw, T=0.95), FilCorr 4.50x against 2.86x (wikipedia,
-class N raw, T=0.70) and FilCorr 4.29x against 3.55x (smartmeter, class N differenced, T=0.80). So
-the honest version of the claim is not that recall is never a reason to choose another method, but
-that it is a reason in 3 cells of 179, all of them at a margin under 1.6x. Counting every cell,
-the fastest arm that meets recall 0.95 is a CorrTrack backend in 118 of 179, FilCorr in 54, CorrJoin
-in 6 and StatStream in 1.
+| class L: lagged, positive only (48 cells) | fastest (within 10%) | up to 2x | 2x to 5x | over 5x | recall 0.90 to 0.95 | below 0.90 |
+|---|---|---|---|---|---|---|
+| CorrTrack-LSH | 69% | 15% | 6% | 0% | 8% | 2% |
+| CorrTrack-Ham | 19% | 75% | 6% | 0% | 0% | 0% |
+| FilCorr | 17% | 25% | 52% | 6% | 0% | 0% |
+| StatStream | 4% | 23% | 65% | 2% | 6% | 0% |
+| BF_incr | 0% | 31% | 54% | 15% | 0% | 0% |
+| BRAID | 0% | 0% | 33% | 67% | 0% | 0% |
 
-### Why CorrTrack-LSH stops at 0.92 in the recall-gated panel
-
-It is not a tau effect: the curve is flat after about tau=3, so those cells are never counted at any
-tau. They are the 14 cells of 179 where CorrTrack-LSH's own recall is below 0.95, and the profile
-counts a cell as unsolved when the recall requirement is not met, whatever the speed. 13 of the 14
-are smartmeter, the W=48 / step=8 dataset, where its recall lands between 0.868 and 0.948; the
-fourteenth is wikipedia, class N, raw, T=0.70 at recall 0.947. CorrTrack-Ham reaches 0.955 to 0.997
-on those same cells, which is why its curve does reach 1.0, and that difference is the point of
-carrying two backends: the LSH candidate search is probabilistic, and smartmeter's correlations sit
-at densities around 1e-6, where a probabilistic filter drops a handful of pairs that the exact
-Hamming search keeps.
-
-The third panel puts a size on the shortfall. At recall 0.90 CorrTrack-LSH reaches 98%: only three
-cells remain, all smartmeter differenced, at recall 0.868, 0.878 and 0.882. So the misses are a
-narrow band just under the target on one dataset, not a systematic loss, and they are covered by
-the other backend.
-
-One reading caveat that belongs in the caption: ParCorr, CSZ and CorrJoin plateau near 0.66 in both
-panels because class N has no such arm at all, their negative-correlation capability being
-`not_available`. That plateau is a missing capability, not slowness, and the profile counts it as
-unsolved by design.
+| class N: lagged, both signs (48 cells) | fastest (within 10%) | up to 2x | 2x to 5x | over 5x | recall 0.90 to 0.95 | below 0.90 |
+|---|---|---|---|---|---|---|
+| CorrTrack-LSH | 56% | 25% | 8% | 0% | 8% | 2% |
+| CorrTrack-Ham | 44% | 42% | 15% | 0% | 0% | 0% |
+| BF_incr | 21% | 40% | 40% | 0% | 0% | 0% |
+| StatStream | 2% | 21% | 60% | 6% | 10% | 0% |
+| BRAID | 0% | 0% | 56% | 44% | 0% | 0% |

@@ -39,9 +39,6 @@ CLASSES = [("S", "class S: synchronous, positive only"), ("L", "class L: lagged,
            ("N", "class N: lagged, both signs")]
 SPACES = [("raw", "raw levels"), ("differenced", "first differences")]
 RECALL_TARGET = 0.95
-# (2026-09-28, user) the profile is also read at the looser target, since a method that misses 0.95
-# by a little is a different case from one that misses most of the correlated pairs
-RECALL_LEVELS = (None, 0.95, 0.90)
 CELL = re.compile(r"^(?P<ds>.+?)_m\d+_W(?P<W>\d+)_s(?P<step>\d+)_L(?P<lags>\d+)_T(?P<T>[0-9.]+)(?P<diff>_diff)?_(?P<sign>pos|neg)$")
 
 
@@ -306,56 +303,112 @@ def speedup_by_threshold(cells, path):
             "clustered side by side, the short line marking each cluster's median", path, xlog=False)
 
 
-def performance_profile(cells, path, taus=None):
-    """rho_m(tau): the fraction of cells where method m is within tau of that cell's best speedup."""
+# (2026-10-07, user) the Dolan-More curves were replaced by per-class stacked bars: one bar per method,
+# splitting its class's cells by how far it runs from the fastest method on the same cell, with the
+# cells it solved below the recall target in grey. Per class because the classes admit different
+# method sets (a synchronous-only method cannot attempt a lagged cell, and each cell's fastest method
+# must come from the same set across a panel).
+PROFILE_BINS = [("fastest (within 10%)", None), ("up to 2x slower", 2.0), ("2x to 5x slower", 5.0),
+                ("over 5x slower", float("inf"))]
+PROFILE_BLUES = ["#08306b", "#2f6fae", "#7fb0d8", "#cfe1f2"]
+# (2026-09-28, user) the looser 0.90 level stays visible: missing 0.95 by a little is a different case
+# from missing most of the correlated pairs
+PROFILE_MISS = [("recall 0.90 to 0.95", "#b8b3ab"), ("recall below 0.90", "#77716a")]
+TIER_MARK = {"enabled_by_us": " \u2020", "specified": " \u2021"}
+
+
+def profile_shares(sl, name):
+    """Shares of the class's cells (sl) for one method: the four speed bands among the cells it solved
+    at RECALL_TARGET, then its cells at recall 0.90 to 0.95 and below 0.90. Speed is measured against
+    the fastest method on the cell whatever that method's recall, as in the leadership tables."""
+    out = [0] * (len(PROFILE_BINS) + len(PROFILE_MISS))
+    for c in sl:
+        a = c["arms"][name]
+        if not a:
+            continue
+        r = a["recall"]
+        if r is not None and r < RECALL_TARGET:
+            out[len(PROFILE_BINS) + (0 if r >= 0.90 else 1)] += 1
+            continue
+        tau = max(x["speedup"] for x in c["arms"].values() if x) / a["speedup"]
+        for k, (_, hi) in enumerate(PROFILE_BINS):
+            if tau <= (1 / (1 - TIE) if hi is None else hi):
+                out[k] += 1
+                break
+    return [v / len(sl) for v in out]
+
+
+def performance_profile(cells, path):
+    """Per capability class, how close each method runs to the fastest method on the same cell.
+    (2026-10-07, user) Classes are stacked vertically, each panel as tall as its number of methods, so
+    every bar has the same thickness and no panel carries empty rows."""
     import numpy as np
-    taus = taus if taus is not None else np.logspace(0, 2, 200)
-    fig, axes = plt.subplots(1, len(RECALL_LEVELS), figsize=(18, 5.8), sharey=True)
-    for j, gate in enumerate(RECALL_LEVELS):
-        title = "speed only, recall ignored" if gate is None else f"only cells where the method reached recall {gate}"
-        ax = axes[j]
-        ratios = {n: [] for n in NAMES}
-        n_cells = 0
-        for c in cells:
-            best = max((a["speedup"] for a in c["arms"].values() if a), default=None)
-            if not best:
-                continue
-            n_cells += 1
-            for name in NAMES:
-                a = c["arms"][name]
-                ok = a and (gate is None or (a["recall"] is not None and a["recall"] >= gate))
-                ratios[name].append(best / a["speedup"] if ok else float("inf"))
-        for name in ms.lead(NAMES):
-            r = np.array(ratios[name])
-            ys = [(r <= t).mean() for t in taus]
-            ct = name.startswith("CorrTrack")
-            ax.step(taus, ys, where="post", color=COLOR[name], linewidth=2.4 if ct else 1.2,
-                    zorder=3 if ct else 2, label=name)
-            # the marker sits where the curve passes half the cells: the typical factor from the best
-            half = next((k for k, y in enumerate(ys) if y >= 0.5), None)
-            if half is not None:
-                ax.plot(taus[half], ys[half], marker="o" if ms.AUTHORS_ONLY else SHAPE[tier_of(cells, name)],
-                        markersize=9 if ct else 7,
-                        color=COLOR[name], markeredgecolor="white", markeredgewidth=0.8, zorder=4)
-        ax.set_xscale("log")
-        ax.grid(alpha=0.25, linewidth=0.6); ax.set_title(title, fontsize=11); ax.set_ylim(0, 1.02)
-        if j == 0:
-            ax.set_ylabel(f"fraction of the {n_cells} cells")
-    shown = [n for n in ms.lead(NAMES) if any(c["arms"].get(n) for c in cells)]
-    handles = [Line2D([], [], color=COLOR[n], label=n) for n in shown]
-    if not ms.AUTHORS_ONLY:
-        handles += [Line2D([], [], color="none", label=" ")]
-        handles += [Line2D([], [], color="#555555", marker=SHAPE[t], linestyle="none", label=TIER_LABEL[t])
-                    for t in ("native", "enabled_by_us", "specified")]
-    axes[-1].legend(handles=handles, fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0))
-    fig.suptitle("Performance profile over the 179 campaign cells (one dataset, one threshold, one capability class, "
-                 "one space): how often\neach method runs within a factor tau of the fastest method on that same cell. "
-                 "A cell the method does not solve under the\npanel's recall requirement never counts, at any tau; the "
-                 "marker sits where a method reaches half the cells.", fontsize=11)
-    fig.supxlabel("tau: factor away from the fastest method on the same cell. A cell an arm cannot run at all "
-                  "counts as unsolved, which is why arms missing a capability plateau below 1.", fontsize=9, x=0.44)
-    fig.tight_layout(rect=(0, 0.03, 0.87, 0.90))
-    fig.savefig(path, dpi=140); plt.close(fig)
+    from matplotlib.patches import Patch
+    rows = [(cls, label, [c for c in cells if c["cls"] == cls]) for cls, label in CLASSES]
+    rows = [r for r in rows if r[2]]
+    per = [[n for n in NAMES if any(c["arms"].get(n) for c in sl)] for _, _, sl in rows]
+    # fixed sizes in inches; the figure height follows the number of bars
+    bar_in, title_in, gap_in, top_in, bottom_in, left_in, right_in, width_in = 0.30, 0.30, 0.08, 0.62, 0.78, 1.75, 0.40, 11.0
+    height_in = top_in + bottom_in + sum(len(p) * bar_in + title_in for p in per) + gap_in * (len(per) - 1)
+    fig = plt.figure(figsize=(width_in, height_in))
+    y_top = height_in - top_in
+    marks_used = set()
+    for idx, ((cls, label, sl), names) in enumerate(zip(rows, per)):
+        h = len(names) * bar_in
+        y_top -= title_in
+        ax = fig.add_axes([left_in / width_in, (y_top - h) / height_in,
+                           (width_in - left_in - right_in) / width_in, h / height_in])
+        y_top -= h + gap_in
+        shares = {n: profile_shares(sl, n) for n in names}
+        order = sorted(names, key=lambda n: tuple(-v for v in np.cumsum(shares[n][:len(PROFILE_BINS)])))
+        for y, n in enumerate(order):
+            left = 0.0
+            for k, v in enumerate(shares[n]):
+                col = PROFILE_BLUES[k] if k < len(PROFILE_BINS) else PROFILE_MISS[k - len(PROFILE_BINS)][1]
+                ax.barh(y, v, left=left, color=col, edgecolor="white", linewidth=1.0, height=0.78)
+                if v >= 0.05:
+                    ax.text(left + v / 2, y, f"{v * 100:.0f}", ha="center", va="center", fontsize=7.5,
+                            color="white" if k in (0, 1, 5) else "#1d1d1d")
+                left += v
+        labels = []
+        for n in order:
+            mark = "" if ms.AUTHORS_ONLY else TIER_MARK.get(tier_of(sl, n), "")
+            marks_used.add(mark)
+            labels.append(n + mark)
+        ax.set_yticks(range(len(order)))
+        ax.set_yticklabels(labels, fontsize=9)
+        for t in ax.get_yticklabels():
+            if t.get_text().startswith("CorrTrack"):
+                t.set_fontweight("bold")
+        ax.tick_params(axis="y", length=0)
+        ax.set_ylim(len(order) - 0.5, -0.5)
+        ax.set_xlim(0, 1)
+        ax.set_xticks([0, .25, .5, .75, 1])
+        last = idx == len(rows) - 1
+        ax.set_xticklabels(["0", "25", "50", "75", "100%"] if last else [], fontsize=9)
+        ax.tick_params(axis="x", length=3 if last else 0)
+        for side in ("top", "right", "left"):
+            ax.spines[side].set_visible(False)
+        if not last:
+            ax.spines["bottom"].set_visible(False)
+        ax.set_title(f"{label}: {len(sl)} cells, {len(names)} methods can run it", fontsize=10,
+                     loc="left", pad=4, fontweight="bold")
+        missing = [n for n in ms.lead(NAMES) if n not in names and any(c["arms"].get(n) for c in cells)]
+        if missing:
+            ax.text(1.0, 1.0, "cannot run it: " + ", ".join(missing), transform=ax.transAxes, fontsize=8,
+                    color="#555555", ha="right", va="bottom")
+    handles = [Patch(color=c, label=l) for (l, _), c in zip(PROFILE_BINS, PROFILE_BLUES)]
+    handles += [Patch(color=c, label=l) for l, c in PROFILE_MISS]
+    fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=8.5, frameon=False,
+               bbox_to_anchor=(0.5 + (left_in - right_in) / (2 * width_in), 0.0), columnspacing=1.5,
+               handlelength=1.2)
+    notes = [TIER_MARK[t].strip() + " " + TIER_LABEL[t] for t in ("enabled_by_us", "specified") if TIER_MARK[t] in marks_used]
+    fig.text(0.5, 1 - 0.12 / height_in, "How close each method runs to the fastest method on the same cell, per capability class",
+             ha="center", va="top", fontsize=11.5)
+    fig.text(0.5, 1 - 0.36 / height_in, "share of the class's cells; grey: cells solved below recall 0.95"
+             + ("; " + "; ".join(notes) if notes else ""), ha="center", va="top", fontsize=9, color="#444444")
+    fig.savefig(path, dpi=140)
+    plt.close(fig)
 
 
 TIE = 0.10          # as in abaca/build_ranking_tables.py: speedups within 10% count as tied

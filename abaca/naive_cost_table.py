@@ -92,7 +92,7 @@ def main() -> None:
             f"vectorisation amortises. The campaign's own arms fall with m instead, as the kernels fill, which is "
             f"why the gap widens exactly where the experiments live.", "",
             f"The table below prices one cell of the median size of the campaign, {size:,.0f} pair-windows, at "
-            f"each tier's median rate over the 179 cells, so every column divides exactly into the ratios beside "
+            f"each tier's median rate over the {len(cells)} cells, so every column divides exactly into the ratios beside "
             f"it. Quoting median wall clocks instead would not divide, because the cell with the median wall is "
             f"not the cell with the median size; for the record those measured medians are "
             f"{hms(st.median([c['bf_wall'] for c in cells]))} for BF_vect and "

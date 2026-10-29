@@ -28,7 +28,7 @@ Every speedup in this project is measured against `BF_vect`, the vectorised exac
 
 The naive per-pair loop costs 55,030 ns per pair-window and that number does not move: it is flat across m (25 to 100) and across lag depth, because it is per-pair work that no amount of vectorisation amortises. The campaign's own arms fall with m instead, as the kernels fill, which is why the gap widens exactly where the experiments live.
 
-The table below prices one cell of the median size of the campaign, 1,251,083,598 pair-windows, at each tier's median rate over the 179 cells, so every column divides exactly into the ratios beside it. Quoting median wall clocks instead would not divide, because the cell with the median wall is not the cell with the median size; for the record those measured medians are 167 s for BF_vect and 16 s for CorrTrack's faster backend.
+The table below prices one cell of the median size of the campaign, 1,251,083,598 pair-windows, at each tier's median rate over the 143 cells, so every column divides exactly into the ratios beside it. Quoting median wall clocks instead would not divide, because the cell with the median wall is not the cell with the median size; for the record those measured medians are 167 s for BF_vect and 16 s for CorrTrack's faster backend.
 
 | tier | ns per pair-window | that cell would take | against BF_vect |
 |---|---|---|---|
